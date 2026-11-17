@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
@@ -101,11 +102,14 @@ export function AgentThreadHeader({
   onRename,
   visibility,
   onVisibilityChange,
+  loading = false,
 }: {
   target: keyof typeof TARGET_ICONS
   panelCollapsed: boolean
   onRename?: (title: string) => Promise<unknown>
   thread?: AgentThread
+  /** The thread is open but its summary, title included, is still on its way. */
+  loading?: boolean
   /**
    * A thread whose first run is still being accepted. It is laid out as the
    * thread it is about to become, so nothing moves on arrival, but offers none
@@ -247,6 +251,7 @@ export function AgentThreadHeader({
           panelCollapsed && "pr-space-8"
         )}
       >
+        {!title && loading && <Skeleton className="ml-space-2 h-4 w-40" />}
         {title && (
           <div className="flex min-w-0 items-center gap-space-1 text-sm font-medium">
             {shownThread && <ThreadRepoIndicator thread={shownThread} />}

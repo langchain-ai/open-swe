@@ -8,7 +8,12 @@
  * (`GET /threads/:id/state`) that seeds the transcript, and `paint` the first
  * frame after the transcript rendered. A full page load starts the span at the
  * document's time origin so it includes bundle boot.
+ *
+ * Under the SDK useStream setting the state fetch starts with the summary, so
+ * `hydrate` and `paint` can come first and the span can end without `detail`.
  */
+
+import { useLayoutEffect, useRef } from "react"
 
 import { subscribeRequestTimings } from "./fetchTiming"
 import type { RequestTiming } from "./fetchTiming"
@@ -121,6 +126,11 @@ export function threadDetailResolved(
   current(threadId)?.mark("detail", { detail_cached: attributes.cached })
 }
 
+/** The page opened without the summary, which the transcript may now beat to the screen. */
+export function threadDetailPending(threadId: string): void {
+  current(threadId)?.set({ detail_cached: false })
+}
+
 export function threadDetailFailed(threadId: string): void {
   if (current(threadId)) abandonThreadLoad("detail_failed")
 }
@@ -162,6 +172,30 @@ export function threadTranscriptPainted(
     thread_source: attributes.threadSource,
   })
   active = null
+}
+
+/**
+ * Ends the span on the transcript's first frame: one rAF after the commit that
+ * put `shown` on screen. A commit before the frame fires cancels and
+ * reschedules it, so the frame recorded is the one that actually reached the
+ * screen. `shown` is null until there is a transcript to show.
+ */
+export function useThreadTranscriptPaint(
+  threadId: string,
+  shown: ReadonlyArray<{ chunks: ReadonlyArray<unknown> }> | null,
+  threadSource: PerfThreadSource
+): void {
+  const paintedThreadId = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (!shown || paintedThreadId.current === threadId) return
+    const messages = shown.length
+    const chunks = shown.reduce((sum, m) => sum + m.chunks.length, 0)
+    const frame = requestAnimationFrame(() => {
+      paintedThreadId.current = threadId
+      threadTranscriptPainted(threadId, { messages, chunks, threadSource })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [shown, threadId, threadSource])
 }
 
 /** Test hook. */

@@ -15,7 +15,6 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -97,7 +96,7 @@ import { ReplyOptionContext } from "@/features/agents/components/chat/ReplyCard"
 import {
   threadHydrated,
   threadHydrationFailed,
-  threadTranscriptPainted,
+  useThreadTranscriptPaint,
 } from "@/lib/perf/threadLoad"
 
 /**
@@ -115,6 +114,18 @@ interface AgentThreadViewProps {
 
 function plainSubmission(text: string): ComposerSubmission {
   return { text, images: [], replies: [] }
+}
+
+export function ConversationLoading() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading conversation"
+      className="flex flex-1 items-center justify-center px-space-5"
+    >
+      <LogoMark alt="" className="size-12 animate-pulse" />
+    </div>
+  )
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */
@@ -825,25 +836,11 @@ export function AgentThreadView({
     if (!source.isHydrating) threadHydrated(thread.id)
   }, [source.isHydrating, thread.id])
 
-  // The transcript's first frame: one rAF after the commit that replaced the
-  // hydration placeholder. A commit before the frame fires cancels and
-  // reschedules it, so the frame recorded is the one that actually reached the
-  // screen; the ref is only set once it has.
-  const paintedThreadId = useRef<string | null>(null)
-  useLayoutEffect(() => {
-    if (isHydrating || paintedThreadId.current === thread.id) return
-    const messages = visibleMessages.length
-    const chunks = visibleMessages.reduce((sum, m) => sum + m.chunks.length, 0)
-    const frame = requestAnimationFrame(() => {
-      paintedThreadId.current = thread.id
-      threadTranscriptPainted(thread.id, {
-        messages,
-        chunks,
-        threadSource: source.kind,
-      })
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [isHydrating, source.kind, thread.id, visibleMessages])
+  useThreadTranscriptPaint(
+    thread.id,
+    isHydrating ? null : visibleMessages,
+    source.kind
+  )
 
   return (
     <div className="flex min-w-0 flex-1">
@@ -985,13 +982,7 @@ export function AgentThreadView({
               }
             />
           ) : isHydrating ? (
-            <div
-              role="status"
-              aria-label="Loading conversation"
-              className="flex flex-1 items-center justify-center px-space-5"
-            >
-              <LogoMark alt="" className="size-12 animate-pulse" />
-            </div>
+            <ConversationLoading />
           ) : (
             <ReplyOptionContext.Provider
               value={canPost ? submitText : undefined}

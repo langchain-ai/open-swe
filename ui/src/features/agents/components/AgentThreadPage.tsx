@@ -1,22 +1,34 @@
-import { useEffect, useRef, useState } from "react"
+import { useContext, useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { CatchBoundary } from "@tanstack/react-router"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
-import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
+import {
+  AgentThreadView,
+  ConversationLoading,
+} from "@/features/agents/components/AgentThreadView"
 import { SubagentThreadView } from "@/features/agents/components/subagents/SubagentThreadView"
+import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
+import { readStoredPanelCollapsed } from "@/features/agents/lib/gitPanelPreferences"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
-import { ThreadSourceProvider } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
+import {
+  ThreadSourceProvider,
+  useThreadSource,
+} from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { agentThreadKeys, useAgentThread } from "@/features/agents/lib/queries"
 import type { ComposerDraft } from "@/features/agents/lib/types"
 import {
   ensureThreadLoad,
   threadDetailFailed,
+  threadDetailPending,
   threadDetailResolved,
+  threadHydrated,
+  useThreadTranscriptPaint,
 } from "@/lib/perf/threadLoad"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
+import { useStreamPreference } from "@/lib/streamPreference"
 import {
   pendingThreadStarts,
   usePendingThreadStarts,
@@ -120,6 +132,10 @@ function AgentThreadContent({
 }) {
   const queryClient = useQueryClient()
   const threadQuery = useAgentThread(threadId, active)
+  // The stream reads a thread by its id alone, so under the SDK setting it
+  // starts with the summary instead of after it. Otherwise the summary picks
+  // the source.
+  const streamFirst = useStreamPreference()
   const retryDetail = () => {
     void queryClient.resetQueries({
       queryKey: agentThreadKeys.detail(threadId),
@@ -143,6 +159,7 @@ function AgentThreadContent({
     if (hasDetail)
       threadDetailResolved(threadId, { cached: detailCachedOnMount.current })
     else if (threadQuery.isError) threadDetailFailed(threadId)
+    else threadDetailPending(threadId)
   }, [active, hasDetail, threadId, threadQuery.isError])
 
   useEffect(() => {
@@ -154,15 +171,15 @@ function AgentThreadContent({
     }
   }, [active, ownsTitle, title])
 
-  if (threadQuery.isPending && !timedOut) {
-    return (
-      <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
-        <Skeleton className="h-40 w-full max-w-md" />
-      </main>
-    )
-  }
+  const awaitingSummary = threadQuery.isPending && !timedOut
+  const skeleton = (
+    <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
+      <Skeleton className="h-40 w-full max-w-md" />
+    </main>
+  )
+  if (awaitingSummary && !streamFirst) return skeleton
 
-  if (!threadQuery.data) {
+  if (!awaitingSummary && !threadQuery.data) {
     return (
       <LoadError
         title="Unable to load thread"
@@ -179,7 +196,14 @@ function AgentThreadContent({
   return (
     <AgentThreadStreamBoundary active={active}>
       <ThreadSourceProvider threadId={threadId} transcript={transcript}>
-        {subagentId ? (
+        {!threadQuery.data ? (
+          // A subagent's view finds its task through the summary.
+          subagentId ? (
+            skeleton
+          ) : (
+            <AgentThreadAwaitingSummary threadId={threadId} />
+          )
+        ) : subagentId ? (
           <SubagentThreadView
             key={subagentId}
             thread={threadQuery.data}
@@ -194,5 +218,49 @@ function AgentThreadContent({
         )}
       </ThreadSourceProvider>
     </AgentThreadStreamBoundary>
+  )
+}
+
+/**
+ * The thread's transcript, read by the stream while the summary the rest of the
+ * page needs is still on its way. It shows only a thread with messages: a
+ * missing, forbidden, empty or failed read waits for the summary to say which.
+ */
+function AgentThreadAwaitingSummary({ threadId }: { threadId: string }) {
+  const embedded = useContext(EmbeddedThreadContext)
+  const source = useThreadSource()
+  const shown = source.messages.length > 0 ? source.messages : null
+
+  useEffect(() => {
+    if (!source.isHydrating) threadHydrated(threadId)
+  }, [source.isHydrating, threadId])
+  useThreadTranscriptPaint(threadId, shown, source.kind)
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {!embedded && (
+        <AgentThreadHeader
+          target="Cloud"
+          panelCollapsed={readStoredPanelCollapsed(threadId)}
+          loading
+        />
+      )}
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        {shown ? (
+          <Messages
+            messages={shown}
+            threadId={threadId}
+            scrollKey={threadId}
+            isStreaming={source.isRunning}
+            contentWidthClass="max-w-3xl"
+          />
+        ) : (
+          <ConversationLoading />
+        )}
+        <AgentComposerDock>
+          <AgentPromptBar compact disabled placeholder="Loading…" />
+        </AgentComposerDock>
+      </div>
+    </div>
   )
 }

@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import {
   QueryClient,
   QueryClientProvider,
@@ -12,10 +12,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AgentThreadPage } from "./AgentThreadPage"
 import { LoadError } from "@/components/LoadError"
 import { agentThreadKeys, useAgentThread } from "@/features/agents/lib/queries"
+import type { Message } from "@/features/agents/lib/types"
+import { setUseStreamPreference } from "@/lib/streamPreference"
 
 const messageLoad = vi.hoisted(() => ({ failed: false }))
+const stream = vi.hoisted(() => ({ messages: [] as Array<Message>, mounts: 0 }))
 
 vi.mock("@/features/agents/components/AgentThreadView", () => ({
+  ConversationLoading: () => (
+    <div role="status" aria-label="Loading conversation" />
+  ),
   AgentThreadView: ({
     thread,
     retry,
@@ -43,9 +49,35 @@ vi.mock("@/features/agents/lib/queries", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/agents/lib/queries")>()),
   useAgentThread: vi.fn(),
 }))
-vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", () => ({
-  ThreadSourceProvider: ({ children }: { children: React.ReactNode }) =>
-    children,
+vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", async () => {
+  const { useEffect } = await import("react")
+  return {
+    ThreadSourceProvider: ({ children }: { children: React.ReactNode }) => {
+      useEffect(() => {
+        stream.mounts += 1
+      }, [])
+      return <section aria-label="Thread stream">{children}</section>
+    },
+    useThreadSource: () => ({
+      kind: "stream",
+      messages: stream.messages,
+      isHydrating: false,
+      isRunning: false,
+    }),
+  }
+})
+vi.mock("@/features/agents/components/AgentPromptBar", () => ({
+  AgentPromptBar: ({ disabled }: { disabled?: boolean }) => (
+    <textarea aria-label="Message" disabled={disabled} />
+  ),
+}))
+vi.mock("@/features/agents/components/messages", () => ({
+  Messages: ({ messages }: { messages: Array<Message> }) =>
+    messages.flatMap((message) =>
+      message.chunks.flatMap((chunk) =>
+        chunk.kind === "text" ? [<p key={message.id}>{chunk.text}</p>] : []
+      )
+    ),
 }))
 
 let client: QueryClient
@@ -69,8 +101,24 @@ afterEach(() => {
   cleanup()
   client.clear()
   messageLoad.failed = false
+  stream.messages = []
+  stream.mounts = 0
+  window.localStorage.clear()
   document.title = "Robin"
 })
+
+const awaitingSummary = {
+  data: undefined,
+  isPending: true,
+  isError: false,
+}
+
+const answer: Message = {
+  id: "answer",
+  author: "agent",
+  timestamp: "2026-11-17T10:00:00Z",
+  chunks: [{ kind: "text", text: "The title now updates on rename." }],
+}
 
 describe("AgentThreadPage", () => {
   it("keeps failed loads visible with thread diagnostics and recovery", () => {
@@ -153,6 +201,57 @@ describe("AgentThreadPage", () => {
     expect(document.title).toBe("Fix web title · Robin")
     view.unmount()
     expect(document.title).toBe("Agents · Robin")
+  })
+
+  it("reads the thread through the stream while its summary loads, under the SDK setting", () => {
+    vi.mocked(useAgentThread).mockReturnValue(awaitingSummary as never)
+    stream.messages = [answer]
+
+    const view = render(<AgentThreadPage threadId="thread-1" />, { wrapper })
+    expect(screen.queryByRole("region", { name: "Thread stream" })).toBeNull()
+
+    act(() => setUseStreamPreference(true))
+    view.rerender(<AgentThreadPage threadId="thread-1" />)
+
+    expect(screen.getByText("The title now updates on rename.")).toBeTruthy()
+    expect(
+      (screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement)
+        .disabled
+    ).toBe(true)
+
+    vi.mocked(useAgentThread).mockReturnValue(threadQuery as never)
+    view.rerender(<AgentThreadPage threadId="thread-1" />)
+
+    expect(screen.getByText("Fix web title")).toBeTruthy()
+    expect(stream.mounts).toBe(1)
+  })
+
+  it("keeps reading the thread when a subagent opens before the summary arrives", () => {
+    setUseStreamPreference(true)
+    vi.mocked(useAgentThread).mockReturnValue(awaitingSummary as never)
+    const view = render(<AgentThreadPage threadId="thread-1" />, { wrapper })
+
+    view.rerender(<AgentThreadPage threadId="thread-1" subagentId="call-1" />)
+
+    expect(screen.getByRole("region", { name: "Thread stream" })).toBeTruthy()
+    expect(stream.mounts).toBe(1)
+  })
+
+  it("shows a thread it cannot load as before, under the SDK setting", () => {
+    setUseStreamPreference(true)
+    vi.mocked(useAgentThread).mockReturnValue({
+      ...awaitingSummary,
+      isPending: false,
+      isError: true,
+      error: new Error("thread not found"),
+    } as never)
+    stream.messages = [answer]
+
+    render(<AgentThreadPage threadId="thread-1" />, { wrapper })
+
+    expect(screen.getByRole("alert").textContent).toContain("thread not found")
+    expect(screen.queryByRole("region", { name: "Thread stream" })).toBeNull()
+    expect(screen.queryByText("The title now updates on rename.")).toBeNull()
   })
 
   it("does not update the title for an inactive cached thread", () => {
