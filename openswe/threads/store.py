@@ -308,6 +308,40 @@ class ThreadStore:
         await runtime.create(thread.thread_id, for_mda(thread.metadata))
         return await runtime.state(thread.thread_id, select=select)
 
+    async def with_latest_run(self, thread: IndexedThread) -> IndexedThread:
+        """The thread with its latest run's id and status in its metadata, as its runtime reports them.
+
+        A changed run is recorded in the index too. When the runtime can't be read, the
+        thread comes back as the index has it.
+        """
+        try:
+            run = await RUNTIMES.runs_on(thread.runtime).latest_run(thread.thread_id)
+        except Exception:
+            logger.warning(
+                "Could not read a thread's latest run",
+                extra={"thread_id": thread.thread_id},
+                exc_info=True,
+            )
+            return thread
+        if run is None:
+            return thread
+        latest: dict[str, JsonValue] = {
+            "latest_run_id": run.run_id,
+            "latest_run_status": run.status,
+        }
+        if all(thread.metadata.get(key) == value for key, value in latest.items()):
+            return thread
+        try:
+            await self.update(thread.thread_id, latest)
+        except Exception:
+            # The run read still decides how the thread reads.
+            logger.warning(
+                "Could not record a thread's latest run",
+                extra={"thread_id": thread.thread_id},
+                exc_info=True,
+            )
+        return thread.model_copy(update={"metadata": {**thread.metadata, **latest}})
+
     async def command(self, thread_id: str, body: bytes) -> CommandReply:
         """Answer one of protocol v2's other commands as the thread's runtime does: neither
         a run's start nor an answer, which :meth:`start_run` starts.

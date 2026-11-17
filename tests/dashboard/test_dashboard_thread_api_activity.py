@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from openswe.dashboard.oauth import require_session
 from openswe.database import postgres
 from openswe.threads import handlers as thread_api
-from openswe.threads import listing, routes
+from openswe.threads import listing, routes, store
 from openswe.threads.principals import Principal, require_principal
 from openswe.threads.runtimes import MdaRun
 from openswe.users.models import User, UserIdentity
@@ -72,6 +72,16 @@ class FakeClient:
         self.threads = FakeThreads(metadata, status=thread_status)
         self.runs = FakeRuns(run_status)
 
+    def serve(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Serve the dashboard's thread reads, its index and its runtime from this client."""
+        patch_thread_module(monkeypatch, "langgraph_client", lambda: self)
+        threads = ThreadStoreOverClient()
+        runtimes = SimpleNamespace(runs_on=lambda runtime: self.runs)
+        patch_thread_module(monkeypatch, "THREADS", threads)
+        monkeypatch.setattr(routes, "THREADS", threads)
+        for module in (store, routes):
+            monkeypatch.setattr(module, "RUNTIMES", runtimes)
+
 
 @pytest.mark.parametrize("run_status", ["running", "success", "error", "interrupted"])
 async def test_get_dashboard_thread_does_not_mark_thread_viewed(monkeypatch, run_status) -> None:
@@ -85,7 +95,7 @@ async def test_get_dashboard_thread_does_not_mark_thread_viewed(monkeypatch, run
         run_status,
         thread_status="busy" if run_status == "running" else "idle",
     )
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    client.serve(monkeypatch)
 
     result = await thread_api.get_dashboard_thread("tid", "octocat")
 
@@ -94,29 +104,23 @@ async def test_get_dashboard_thread_does_not_mark_thread_viewed(monkeypatch, run
     assert client.threads.updates == []
 
 
-async def test_follow_up_withdrawn_from_the_queue_leaves_the_thread_running(monkeypatch) -> None:
-    # Cancelling the queued run also leaves LangGraph reporting the thread idle.
+async def test_detail_records_a_run_that_finished_since_the_index_saw_it(monkeypatch) -> None:
     client = FakeClient(
         {
             "source": "dashboard",
             "github_login": "octocat",
-            "latest_run_id": "live",
+            "latest_run_id": "run-1",
             "latest_run_status": "running",
         },
-        "running",
+        "success",
     )
-    client.runs.runs = [
-        {"run_id": "withdrawn", "status": "interrupted"},
-        {"run_id": "live", "status": "running"},
-    ]
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    client.serve(monkeypatch)
 
     result = await thread_api.get_dashboard_thread("tid", "octocat")
 
-    assert result["status"] == "running"
-    # What the commands proxy reads to steer or queue the next follow-up.
-    metadata = client.threads.thread["metadata"]
-    assert (metadata["latest_run_status"], metadata["latest_run_id"]) == ("running", "live")
+    assert result["status"] == "finished"
+    # What the sidebar and the commands proxy read until the next refresh.
+    assert client.threads.updates == [{"latest_run_id": "run-1", "latest_run_status": "success"}]
 
 
 class TestThreadReadState:
@@ -140,11 +144,7 @@ class TestThreadReadState:
             },
             "success",
         )
-        patch_thread_module(monkeypatch, "langgraph_client", lambda: self.client)
-        monkeypatch.setattr(routes, "THREADS", ThreadStoreOverClient())
-        monkeypatch.setattr(
-            routes, "RUNTIMES", SimpleNamespace(runs_on=lambda runtime: self.client.runs)
-        )
+        self.client.serve(monkeypatch)
         self.session = {"sub": "octocat"}
         self.app = FastAPI()
         self.app.include_router(routes.router, prefix="/dashboard/api")

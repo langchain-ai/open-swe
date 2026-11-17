@@ -141,28 +141,18 @@ async def get_dashboard_thread(
     record = timings if timings is not None else {}
     client = langgraph_client()
     with phase(record, "thread_get"):
-        try:
-            thread = await client.threads.get(thread_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("Thread lookup failed for %s", thread_id, exc_info=True)
-            raise HTTPException(404, "thread not found") from exc
-
-    metadata = thread_metadata(thread)
-    assert_thread_readable(metadata, login, email)
+        indexed = await THREADS.get(thread_id)
+    if indexed is None:
+        raise HTTPException(404, "thread not found")
+    assert_thread_readable(indexed.metadata, login, email)
 
     # The transcript is hydrated client-side by the SDK (`StreamProvider` reads
     # `GET …/state` → `stream.messages`), so the detail endpoint returns
     # metadata only — no server-side message conversion.
-    thread, latest_run_status, latest_run_id = await _refresh_latest_run_metadata(
-        client, thread, timings=record
-    )
+    with phase(record, "runs_list"):
+        thread = await THREADS.with_latest_run(indexed)
     with phase(record, "summary"):
-        summary = await _thread_summary(
-            thread,
-            latest_run_status=latest_run_status,
-            latest_run_id=latest_run_id,
-            viewer_login=login,
-        )
+        summary = await _thread_summary(thread.as_langgraph(), viewer_login=login)
     with phase(record, "subagents"):
         await asyncio.gather(
             attach_subagents([summary]),
