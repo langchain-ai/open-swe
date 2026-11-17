@@ -388,17 +388,27 @@ export function PendingSidebarThreadRow({
   isActive,
   stopRequested,
   indent = false,
+  hidden = false,
+  onActive,
   onNavigate,
 }: {
   item: SidebarThreadItem
   isActive: boolean
   stopRequested: boolean
   indent?: boolean
+  hidden?: boolean
+  onActive?: () => void
   onNavigate: () => void
 }) {
   const activeRowRef = useRef<HTMLAnchorElement>(null)
-  useScrollIntoView(activeRowRef, isActive)
+  useScrollIntoView(activeRowRef, isActive && !hidden)
+  const notifiedActive = useRef(false)
+  useEffect(() => {
+    if (isActive && !notifiedActive.current) onActive?.()
+    notifiedActive.current = isActive
+  }, [isActive, onActive])
 
+  if (hidden) return null
   return (
     <div data-sidebar-thread-row className="group/row relative mb-0.5">
       <Link
@@ -432,6 +442,8 @@ export function SidebarThreadRow({
   archived,
   live,
   indent = false,
+  hidden = false,
+  onActive,
   onNavigate,
   onTogglePin,
   onToggleArchived,
@@ -444,6 +456,8 @@ export function SidebarThreadRow({
   live?: PullRequestSnapshot
   /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
+  hidden?: boolean
+  onActive?: () => void
   onNavigate?: () => void
   onTogglePin: () => void
   onToggleArchived: () => void
@@ -489,6 +503,12 @@ export function SidebarThreadRow({
     (worker) => worker.id === activeThreadId
   )?.id
   const openedThreadId = isActive ? item.id : activeWorkerId
+  const notifiedActive = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (openedThreadId && notifiedActive.current !== openedThreadId)
+      onActive?.()
+    notifiedActive.current = openedThreadId
+  }, [openedThreadId, onActive])
   const [children, setChildren] = useState({
     openedThreadId,
     collapsed: false,
@@ -510,7 +530,7 @@ export function SidebarThreadRow({
     (Boolean(activeWorkerId) && subagentsCollapsed)
 
   const activeRowRef = useRef<HTMLAnchorElement>(null)
-  useScrollIntoView(activeRowRef, rowIsActive)
+  useScrollIntoView(activeRowRef, rowIsActive && !hidden)
 
   const unread = !item.viewed
   const isDeleting =
@@ -689,6 +709,7 @@ export function SidebarThreadRow({
     />
   )
 
+  if (hidden) return null
   return (
     <>
       <ContextMenu onOpenChange={setContextMenuOpen}>

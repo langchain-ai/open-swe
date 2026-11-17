@@ -178,7 +178,10 @@ export function SidebarNav({
           )}
         </div>
       )}
-      <div className={cn("shrink-0 px-space-2", containerClassName)}>
+      <div
+        className={cn("shrink-0 px-space-2", containerClassName)}
+        data-sidebar-loading={plugins.isLoading ? "" : undefined}
+      >
         <nav className={cn("flex flex-col gap-0.5", className)}>
           {items
             .filter((item) => !hidden.includes(item))

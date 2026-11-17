@@ -30,6 +30,8 @@ const stub = vi.hoisted(() => {
       resolved: false,
       repoFullName: "langchain-ai/open-swe",
       repo: "open-swe",
+      projectId: null as string | null,
+      taskWorkers: [] as Array<AgentThread>,
       updatedAt: "2026-09-10T00:00:00Z",
     },
     pinned: { data: [] },
@@ -152,6 +154,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
   localStorage.clear()
   stub.emptyList.items = []
+  stub.activeThread.projectId = null
+  stub.activeThread.taskWorkers = []
   vi.clearAllMocks()
 })
 
@@ -193,10 +197,14 @@ it("registers the active thread's commands once and then stops", async () => {
   expect(probeRenders).toBeLessThanOrEqual(RENDER_BUDGET)
 })
 
-it("keeps a project thread out of No project even when the unscoped page is cached", () => {
+it("reveals a project worker without duplicating its coordinator in Recents", () => {
   localStorage.setItem(
     "open-swe.agents.sidebar-prefs",
-    JSON.stringify({ organize: "repo" })
+    JSON.stringify({
+      organize: "repo",
+      collapsedSectionKeys: ["repos"],
+      collapsedRepoKeys: ["project:project-1"],
+    })
   )
   const client = new QueryClient({
     defaultOptions: { queries: { enabled: false, retry: false } },
@@ -212,6 +220,18 @@ it("keeps a project thread out of No project even when the unscoped page is cach
     updatedAt: 2,
     messages: [],
   }
+  const worker: AgentThread = {
+    ...thread,
+    id: "project-worker",
+    title: "Project worker",
+    taskMembership: {
+      role: "worker",
+      taskId: "task-1",
+      coordinatorThreadId: thread.id,
+    },
+  }
+  stub.activeThread.projectId = thread.projectId ?? null
+  stub.activeThread.taskWorkers = [worker]
   stub.emptyList.items = [
     {
       ...thread,
@@ -241,7 +261,7 @@ it("keeps a project thread out of No project even when the unscoped page is cach
       resolved: false,
       scope: "interactive",
       owned: true,
-      sortBy: "created_at",
+      sortBy: "updated_at",
     }),
     {
       pages: [{ items: [thread], hasMore: false, limit: 25, offset: 0 }],
@@ -251,7 +271,7 @@ it("keeps a project thread out of No project even when the unscoped page is cach
   render(
     <QueryClientProvider client={client}>
       <AppCommandProvider>
-        <AgentsShell user={USER}>
+        <AgentsShell user={USER} activeThreadId={worker.id}>
           <div />
         </AgentsShell>
       </AppCommandProvider>
@@ -260,9 +280,26 @@ it("keeps a project thread out of No project even when the unscoped page is cach
 
   fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }))
   expect(screen.getByRole("button", { name: "Example project" })).toBeTruthy()
-  expect(screen.getByRole("button", { name: "No project" })).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Recents" })).toBeTruthy()
   expect(screen.getByRole("link", { name: /Unfiled chat/ })).toBeTruthy()
-  expect(screen.queryByRole("link", { name: /Thread/ })).toBeNull()
+  expect(
+    screen
+      .getByRole("link", { name: /^Project worker/ })
+      .getAttribute("aria-current")
+  ).toBe("page")
+  expect(
+    screen
+      .getByRole("button", { name: "Projects" })
+      .getAttribute("aria-expanded")
+  ).toBe("true")
+  expect(
+    screen
+      .getByRole("button", { name: "Example project" })
+      .getAttribute("aria-expanded")
+  ).toBe("true")
+  expect(screen.getAllByRole("link", { name: "Thread" })).toHaveLength(1)
+  fireEvent.click(screen.getByRole("button", { name: "Example project" }))
+  expect(screen.queryByRole("link", { name: /^Project worker/ })).toBeNull()
 })
 
 it("renames an unopened thread from its context menu and discards cancelled drafts", async () => {

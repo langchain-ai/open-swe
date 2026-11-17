@@ -227,11 +227,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     const sidebar = page.getByRole("complementary");
     await sidebar
       .getByRole("button", { name: /^(Projects|Recents) options$/ })
+      .first()
       .click();
     await page
       .getByRole("menuitemradio", { name: "Date", exact: true })
       .click();
     await page.keyboard.press("Escape");
+    await sidebar.getByRole("button", { name: "Today", exact: true }).click();
     await page.getByRole("link", { name: "New", exact: true }).click();
     await dismissOnboardingIfShown(page);
 
@@ -241,7 +243,10 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     });
     let threadId = "";
     const listedBeforeAcceptance = page.waitForResponse(async (response) => {
-      if (!new URL(response.url()).pathname.endsWith("/threads/page"))
+      if (
+        !threadId ||
+        !new URL(response.url()).pathname.endsWith("/threads/page")
+      )
         return false;
       const body = (await response.json()) as { items?: Array<{ id: string }> };
       return body.items?.some((thread) => thread.id === threadId) ?? false;
@@ -276,20 +281,14 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     let heldSidebarRequests = 0;
     const prompt = "Keep this new chat reachable during startup.";
     try {
-      const editor = page.getByTestId("composer-editor");
-      await expect(editor).toHaveAttribute("data-lexical-editor", "true");
-      await editor.click();
-      await editor.pressSequentially(prompt);
-      await page
-        .getByRole("button", { name: "Send message", exact: true })
-        .click();
+      await typeIntoComposer(page, prompt);
       await expect.poll(() => threadId).not.toBe("");
       const pendingChat = sidebar.locator(`a[href="/agents/${threadId}"]`);
-      const runningSection = sidebar.locator("section").filter({
-        has: page.getByRole("button", { name: "Running", exact: true }),
+      const recentSection = sidebar.locator("section").filter({
+        has: page.getByRole("button", { name: "Today", exact: true }),
       });
       await expect(
-        runningSection.locator(`a[href="/agents/${threadId}"]`),
+        recentSection.locator(`a[href="/agents/${threadId}"]`),
       ).toBeVisible();
       await existingChat.click();
       await expect(page).toHaveURL(new RegExp(`/agents/${existingThreadId}$`));
@@ -301,15 +300,11 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         0,
       );
       await expect(
-        runningSection.locator(`a[href="/agents/${threadId}"]`),
+        recentSection.locator(`a[href="/agents/${threadId}"]`),
       ).toBeVisible();
-      await sidebar
-        .getByRole("button", { name: "Running", exact: true })
-        .click();
+      await sidebar.getByRole("button", { name: "Today", exact: true }).click();
       await expect(pendingChat).toHaveCount(0);
-      await sidebar
-        .getByRole("button", { name: "Running", exact: true })
-        .click();
+      await sidebar.getByRole("button", { name: "Today", exact: true }).click();
       for (const [menu, grouping] of [
         ["Recents options", "Project"],
         ["Projects options", "Environment"],
@@ -324,7 +319,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         await expect(pendingChat).toBeVisible();
       }
       await expect(
-        runningSection.locator(`a[href="/agents/${threadId}"]`),
+        recentSection.locator(`a[href="/agents/${threadId}"]`),
       ).toBeVisible();
       await listedBeforeAcceptance;
       await expect(
@@ -1949,7 +1944,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     try {
       await page.goto("/agents", { waitUntil: "commit" });
       const skeleton = page.getByRole("status", {
-        name: "Loading chats in No project",
+        name: "Loading recent threads",
       });
       await expect(skeleton).toBeVisible({ timeout: 30_000 });
       release();

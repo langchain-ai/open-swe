@@ -146,7 +146,7 @@ describe("groupSidebarThreadsByDate", () => {
     ])
   })
 
-  it("dates errored threads while separating running and delegated work", () => {
+  it("groups running, delegated and finished threads by activity", () => {
     const now = new Date(2026, 5, 20, 15)
     const threads = [
       cloudThread({ id: "running", status: "running" }),
@@ -174,7 +174,7 @@ describe("groupSidebarThreadsByDate", () => {
       ])
     ).toEqual([
       ["Today", ["finished", "error"]],
-      ["Running", ["running", "delegating"]],
+      ["Older", ["delegating", "running"]],
     ])
   })
 
@@ -278,7 +278,7 @@ describe("groupSidebarThreadsByDate", () => {
 })
 
 describe("calendar date grouping", () => {
-  it("keeps running and delegated sessions in the sticky running group", () => {
+  it("keeps running and delegated sessions in their calendar days", () => {
     const now = new Date(2026, 5, 20, 15)
     const threads = [
       cloudThread({
@@ -290,6 +290,7 @@ describe("calendar date grouping", () => {
         id: "delegating",
         status: "idle",
         waitingForDelegatedWork: true,
+        updatedAt: new Date(2026, 5, 19, 12).getTime(),
       }),
       cloudThread({ id: "finished", status: "idle", updatedAt: now.getTime() }),
     ].map(cloudSidebarThread)
@@ -301,7 +302,8 @@ describe("calendar date grouping", () => {
       ])
     ).toEqual([
       ["today", ["finished"]],
-      ["status:running", ["running", "delegating"]],
+      ["yesterday", ["delegating"]],
+      ["2026-06-12", ["running"]],
     ])
     expect(groupSidebarThreadsByDay([], now)).toEqual([])
   })

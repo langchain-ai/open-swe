@@ -33,8 +33,8 @@
   visibility: hidden;
 }
 
-.sidebar-content > :is([data-sidebar-loading], :has([data-sidebar-loading])) ~ *,
-.sidebar-content .sidebar-groups > .sidebar-group:has([data-sidebar-loading]) ~ .sidebar-group {
+.sidebar-content > [data-sidebar-loading] ~ *,
+.sidebar-content .sidebar-groups > .sidebar-group[data-sidebar-loading] ~ .sidebar-group {
   visibility: hidden;
 }
 

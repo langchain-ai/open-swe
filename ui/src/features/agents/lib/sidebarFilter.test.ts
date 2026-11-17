@@ -154,7 +154,7 @@ describe("filterThreads", () => {
     )
   })
 
-  it("filters active automations before grouping Running and delegated work", () => {
+  it("filters active automations before grouping threads by activity", () => {
     const active = makeThread({ source: "schedule", status: "running" })
     const delegated = makeThread({
       threadCategory: "automation",
@@ -166,7 +166,7 @@ describe("filterThreads", () => {
       groupSidebarThreadsByRecency(
         filterThreads(items, filters(), active.id, "alice-id")
       ).map((group) => [group.label, group.threads.map((thread) => thread.id)])
-    ).toEqual([["Running", [ordinary.id]]])
+    ).toEqual([["Today", [ordinary.id]]])
     expect(
       filterThreads(
         items,

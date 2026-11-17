@@ -673,96 +673,143 @@ test.describe("threads workspace", () => {
     });
   });
 
-  test("groups repository-less chats in a pinnable No project folder", async ({
+  test("shows unfiled chats by activity in Recents below Projects", async ({
     page,
     request,
-  }, testInfo) => {
+  }) => {
     const now = Date.now();
     await seedThreads(request, [
       {
         id: THREAD_IDS.noRepo,
-        metadata: baseMetadata(now, TITLES.noRepo, 1_000, {
-          participant_logins: { [ADMIN_USER.login]: true },
-          owner_login: ADMIN_USER.login,
+        metadata: baseMetadata(now, TITLES.noRepo, 3_000, {
           repo_owner: "",
           repo_name: "",
+          created_at_ms: now - 1_000,
+          latest_run_status: "success",
+        }),
+      },
+      {
+        id: THREAD_IDS.shared,
+        metadata: baseMetadata(now, TITLES.shared, 1_000, {
+          repo_owner: "",
+          repo_name: "",
+          created_at_ms: now - 86_400_000,
+          latest_run_id: "e2e-resumed-chat",
+          latest_run_status: "running",
         }),
       },
       {
         id: THREAD_IDS.pinnedRepo,
         metadata: baseMetadata(now, TITLES.pinnedRepo, 2_000, {
-          participant_logins: { [ADMIN_USER.login]: true },
-          owner_login: ADMIN_USER.login,
+          latest_run_status: "success",
         }),
       },
+      ...Array.from({ length: 26 }, (_, index) => ({
+        id: `7a000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        metadata: baseMetadata(now, `Filed chat ${index + 1}`, index, {
+          repo_name: "beta",
+          latest_run_status: "success",
+        }),
+      })),
     ]);
-    const loginResponse = await page.request.post("/control/login", {
-      data: ADMIN_USER,
+    await loginAs(page);
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        "open-swe.agents.sidebar-prefs",
+        JSON.stringify({
+          organize: "repo",
+          pinnedRepoKeys: ["repo:no-repo"],
+          collapsedRepoKeys: ["repo:no-repo", "repo:acme/beta"],
+        }),
+      );
     });
-    expect(loginResponse.ok()).toBeTruthy();
-    await seedRepoSidebar(page);
     await page.setViewportSize({ width: 1280, height: 900 });
+    const recentsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.pathname === "/dashboard/api/threads/page" &&
+        url.searchParams.get("ownerless") === "true"
+      );
+    });
     await page.goto("/agents");
     await dismissOnboardingIfShown(page);
-
-    const sidebar = page.locator("[data-sidebar-frame]");
-    const noRepo = sidebar.getByRole("button", {
-      name: "No project",
-      exact: true,
+    const recentsPage = await (await recentsResponse).json();
+    expect(recentsPage).toMatchObject({
+      hasMore: false,
+      items: expect.arrayContaining([
+        expect.objectContaining({ id: THREAD_IDS.shared }),
+        expect.objectContaining({ id: THREAD_IDS.noRepo }),
+      ]),
     });
-    await expect(noRepo).toBeVisible();
-    await expect(sidebar).toContainText(TITLES.noRepo);
+    expect(recentsPage.items).toHaveLength(2);
 
-    await sidebar.getByRole("button", { name: "Projects options" }).click();
+    const sidebar = page.getByRole("complementary");
+    const projects = sidebarSection(sidebar, "Projects");
+    const recents = sidebarSection(sidebar, "Recents");
+    await expect(recents.getByRole("link")).toHaveText([
+      TITLES.shared,
+      TITLES.noRepo,
+    ]);
     await expect(
-      page.getByRole("menuitemcheckbox", {
-        name: "Only my threads",
-        exact: true,
-      }),
-    ).toBeChecked();
+      projects.getByRole("link", { name: TITLES.pinnedRepo }),
+    ).toBeVisible();
     await expect(
-      page.getByRole("menuitemradio", { name: "Created", exact: true }),
-    ).toHaveCount(0);
-    const viewScreenshotPath = testInfo.outputPath("project-view-options.png");
-    await page.screenshot({ path: viewScreenshotPath });
-    await testInfo.attach("project-view-options", {
-      path: viewScreenshotPath,
-      contentType: "image/png",
-    });
-    await page.keyboard.press("Escape");
-
-    const pinNoRepo = sidebar.getByRole("button", {
-      name: "Pin No project",
-      includeHidden: true,
-    });
-    // Rows seeded by earlier tests can still shift the folder after the hover lands.
-    await expect(async () => {
-      await pinNoRepo.locator("..").hover();
-      await pinNoRepo.click({ timeout: 2_000 });
-    }).toPass();
-    await expect(sidebar.getByText("Pinned", { exact: true })).toBeVisible();
+      sidebar.getByRole("link", { name: TITLES.pinnedRepo }),
+    ).toHaveCount(1);
+    await expect(
+      recents.getByRole("img", { name: "Thread running" }),
+    ).toBeVisible();
     await expect(
       sidebar.getByRole("button", { name: "No project", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      sidebar.getByRole("button", { name: "Running", exact: true }),
+    ).toHaveCount(0);
+    expect(
+      await projects.evaluate((node) => node.getBoundingClientRect().top),
+    ).toBeLessThan(
+      await recents.evaluate((node) => node.getBoundingClientRect().top),
+    );
+
+    await sidebar
+      .getByRole("button", { name: "Projects", exact: true })
+      .click();
+    await expect(projects.getByRole("link")).toHaveCount(0);
+    await expect(
+      recents.getByRole("link", { name: TITLES.shared }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(recents.getByRole("link")).toHaveText([
+      TITLES.shared,
+      TITLES.noRepo,
+    ]);
+    await page.addInitScript(() => {
+      const key = "open-swe.agents.sidebar-prefs";
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          ...JSON.parse(localStorage.getItem(key) ?? "{}"),
+          collapsedSectionKeys: ["repos"],
+          collapsedRepoKeys: ["repo:acme/alpha"],
+        }),
+      );
+    });
+    await page.goto(`/agents/${THREAD_IDS.pinnedRepo}`);
+    await expect(
+      projects.getByRole("link", { name: TITLES.pinnedRepo }),
     ).toBeVisible();
 
+    for (const id of [THREAD_IDS.shared, THREAD_IDS.noRepo]) {
+      const response = await request.delete(`/threads/${id}`);
+      expect(response.ok()).toBeTruthy();
+    }
     await page.reload();
-    await dismissOnboardingIfShown(page);
-    await expect(sidebar).toContainText(TITLES.noRepo);
-    const unpinNoRepo = sidebar.getByRole("button", {
-      name: "Unpin No project",
-      includeHidden: true,
-    });
-    await expect(async () => {
-      await unpinNoRepo.locator("..").hover();
-      await expect(unpinNoRepo).toBeVisible({ timeout: 2_000 });
-    }).toPass();
-
-    const screenshotPath = testInfo.outputPath("pinned-no-repository.png");
-    await sidebar.screenshot({ path: screenshotPath });
-    await testInfo.attach("pinned-no-repository", {
-      path: screenshotPath,
-      contentType: "image/png",
-    });
+    await expect(
+      projects.getByRole("link", { name: TITLES.pinnedRepo }),
+    ).toBeVisible();
+    await expect(
+      sidebar.getByRole("button", { name: "Recents", exact: true }),
+    ).toHaveCount(0);
   });
 });
 

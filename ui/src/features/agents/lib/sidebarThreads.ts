@@ -200,11 +200,7 @@ export function groupSidebarThreadsByRecency(
   threads: ReadonlyArray<SidebarThreadItem>,
   now: Date = new Date()
 ): Array<SidebarThreadGroup> {
-  let remaining = sortSidebarThreads(
-    threads.filter(
-      (item) => !item.waitingForDelegatedWork && item.status !== "running"
-    )
-  )
+  let remaining = sortSidebarThreads(threads)
 
   type Range = {
     key: string
@@ -303,16 +299,7 @@ export function groupSidebarThreadsByRecency(
   const onlyDateGroup = groups.length === 1 ? groups[0] : undefined
   if (onlyDateGroup?.key === "older") onlyDateGroup.label = "Recents"
 
-  return [
-    ...groups,
-    {
-      key: "status:running",
-      label: "Running",
-      threads: threads.filter(
-        (item) => item.status === "running" || item.waitingForDelegatedWork
-      ),
-    },
-  ].filter((group) => group.threads.length > 0)
+  return groups
 }
 
 /** Buckets threads by their local activity day, newest first. */
@@ -323,13 +310,8 @@ export function groupSidebarThreadsByDay(
   const today = new Date(now).setHours(0, 0, 0, 0)
   const yesterday = new Date(today).setDate(new Date(today).getDate() - 1)
   const days = new Map<number, Array<SidebarThreadItem>>()
-  const running: Array<SidebarThreadItem> = []
 
   for (const thread of threads) {
-    if (thread.status === "running" || thread.waitingForDelegatedWork) {
-      running.push(thread)
-      continue
-    }
     const day = new Date(thread.updatedAt).setHours(0, 0, 0, 0)
     const items = days.get(day) ?? []
     items.push(thread)
@@ -372,9 +354,6 @@ export function groupSidebarThreadsByDay(
       }
     })
 
-  if (running.length) {
-    groups.push({ key: "status:running", label: "Running", threads: running })
-  }
   return groups
 }
 
