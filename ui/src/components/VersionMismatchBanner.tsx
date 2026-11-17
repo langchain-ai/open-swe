@@ -47,9 +47,9 @@ export function VersionMismatchBanner() {
     <div role="status" className="shrink-0">
       <Banner
         flush
-        intent="warning"
+        intent="info"
         className={cn(
-          "h-10 border-b border-b-warning py-0 text-xs",
+          "h-10 border-b border-b-brand-subtle py-0 text-xs",
           // Clear the traffic lights, which share the banner's top row.
           window.openSweDesktop &&
             "pl-[90px] [.desktop-fullscreen_&]:pl-space-4"
