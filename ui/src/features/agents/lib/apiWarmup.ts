@@ -50,8 +50,8 @@ function warmApiRequests(
     } catch {
       // An unreadable preference just means the defaults.
     }
-    // Parameter order has to match the api client's, because the handoff below
-    // matches on the resolved URL.
+    // The parameters have to be the api client's, though not in its order: the
+    // handoff below sorts query keys before matching.
     const search = new URLSearchParams()
     search.set("hierarchy", "true")
     search.set("limit", String(pageSize))
@@ -64,6 +64,14 @@ function warmApiRequests(
     if (!includeSlack) search.append("exclude_source", "slack")
     search.set("sort_by", sortByActivity ? "updated_at" : "created_at")
     targets.push(sidebarPath + "?" + search.toString())
+  }
+
+  // A request matches a warmed one whatever order its query keys come in.
+  // `sort` is stable, so a repeated key's values keep their order.
+  function requestKey(url: string): string {
+    const resolved = new URL(url, location.href)
+    resolved.searchParams.sort()
+    return resolved.href
   }
 
   const pending = new Map<
@@ -92,7 +100,7 @@ function warmApiRequests(
         } catch {}
       }
     )
-    pending.set(href, { request, timing })
+    pending.set(requestKey(href), { request, timing })
   }
 
   const original = window.fetch
@@ -120,10 +128,10 @@ function warmApiRequests(
             ? input.href
             : input.url
       try {
-        const resolved = new URL(href, location.href).href
-        const warmed = pending.get(resolved)
+        const key = requestKey(href)
+        const warmed = pending.get(key)
         if (warmed) {
-          pending.delete(resolved)
+          pending.delete(key)
           if (pending.size === 0) release()
           try {
             return Object.assign(warmed.request, {
@@ -143,6 +151,26 @@ function warmApiRequests(
   window.fetch = patched
 }
 
+/**
+ * The fields the thread stream's state read selects: the SDK's own thread-state
+ * fields, then the messages it keeps under `stateKeys: []`.
+ */
+const THREAD_STATE_SELECT = [
+  "next",
+  "tasks",
+  "checkpoint",
+  "parent_checkpoint",
+  "created_at",
+  "metadata",
+  "values.messages",
+]
+
+function threadStateUrl(threadId: string): string {
+  const search = new URLSearchParams()
+  for (const field of THREAD_STATE_SELECT) search.append("select", field)
+  return `${agentsLangGraphApiUrl}/threads/${threadId}/state?${search}`
+}
+
 /** The sidebar page endpoint; the script appends the preference-dependent query. */
 function sidebarPageEndpoint(): string {
   return `${agentsLangGraphApiUrl}/threads/page`
@@ -159,9 +187,7 @@ export function apiWarmupScript(pathname: string): string | null {
   const isAgentsHome = AGENTS_HOME_RE.test(pathname)
   if (!threadId && !isAgentsHome) return null
 
-  const urls = threadId
-    ? [`${agentsLangGraphApiUrl}/threads/${threadId}/state`]
-    : []
+  const urls = threadId ? [threadStateUrl(threadId)] : []
   const args = [
     JSON.stringify(urls),
     JSON.stringify(sidebarPageEndpoint()),

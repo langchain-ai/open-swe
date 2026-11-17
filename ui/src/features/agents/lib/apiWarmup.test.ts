@@ -1,12 +1,17 @@
 /** @vitest-environment jsdom */
 
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { cleanup, renderHook, waitFor } from "@testing-library/react"
+import { createElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { clearPerfSpans, getPerfSpans } from "@/lib/perf/trace"
 import { agentsApi } from "./api"
 import { apiWarmupScript } from "./apiWarmup"
 import { SIDEBAR_PAGE_SIZE, sidebarRecentsParams } from "./queries"
+import { useAgentThreadStream } from "./stream/useAgentThreadStream"
 import type { ChatSort } from "./sidebarPrefs"
+import type { ReactNode } from "react"
 
 const THREAD_ID = "1dd69115-f4b9-507f-b4d5-9f355f9f5ba0"
 const STATE_PATH = `/dashboard/api/threads/${THREAD_ID}/state`
@@ -31,8 +36,43 @@ function stubFetch() {
   return original
 }
 
-/** What the app itself requests, captured through the real api client. */
-async function recordedSidebarUrl({
+function requestUrl(input: RequestInfo | URL): string {
+  return absolute(input instanceof Request ? input.url : String(input))
+}
+
+/** Answers each Agent Server read the thread stream makes on mount. */
+function stubAgentServer() {
+  const original = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
+    const body = new URL(requestUrl(input)).pathname.endsWith("/runs")
+      ? []
+      : { values: { messages: [] }, next: [], tasks: [], metadata: {} }
+    return Promise.resolve(
+      new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      })
+    )
+  })
+  vi.stubGlobal("fetch", original)
+  return original
+}
+
+/** Mounts the thread page's real SDK stream, which reads the thread state on open. */
+function mountThreadStream() {
+  const queryClient = new QueryClient()
+  return renderHook(() => useAgentThreadStream(THREAD_ID), {
+    wrapper: ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children),
+  })
+}
+
+function stateRequests(fetch: ReturnType<typeof stubAgentServer>) {
+  return fetch.mock.calls.filter(
+    ([input]) => new URL(requestUrl(input)).pathname === STATE_PATH
+  )
+}
+
+/** The sidebar's first page, requested the way the app does: through the real api client. */
+async function requestSidebarPage({
   includeAutomations = false,
   includeResolved = false,
   includeClaudeCode = true,
@@ -48,8 +88,7 @@ async function recordedSidebarUrl({
   owned?: boolean
   repoMode?: boolean
   sort?: ChatSort
-} = {}): Promise<string> {
-  const spy = stubFetch()
+} = {}): Promise<void> {
   await agentsApi
     .listThreadsPage({
       ...sidebarRecentsParams({
@@ -65,9 +104,6 @@ async function recordedSidebarUrl({
       offset: 0,
     })
     .catch(() => undefined)
-  const called = spy.mock.calls[0]?.[0]
-  vi.unstubAllGlobals()
-  return absolute(String(called))
 }
 
 // jsdom in this setup exposes no `localStorage`, so the preference the warmup
@@ -79,6 +115,7 @@ function stubPrefs(prefs: unknown) {
 }
 
 afterEach(() => {
+  cleanup()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   clearPerfSpans()
@@ -111,13 +148,10 @@ describe("apiWarmupScript", () => {
     run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
     expect(original).toHaveBeenCalledTimes(2)
 
-    const warmedState = await window.fetch(absolute(STATE_PATH))
-    const sidebarUrl = String(
-      original.mock.calls.find((c) =>
-        String(c[0]).includes("/threads/page")
-      )?.[0]
-    )
-    const warmedSidebar = await window.fetch(sidebarUrl)
+    const warmedUrl = (path: string) =>
+      String(original.mock.calls.find((c) => String(c[0]).includes(path))?.[0])
+    const warmedState = await window.fetch(warmedUrl(STATE_PATH))
+    const warmedSidebar = await window.fetch(warmedUrl("/threads/page"))
 
     expect(warmedState).toBeInstanceOf(Response)
     expect(warmedSidebar).toBeInstanceOf(Response)
@@ -125,6 +159,26 @@ describe("apiWarmupScript", () => {
     expect(original).toHaveBeenCalledTimes(2)
     // Pool drained → the patch removes itself.
     expect(window.fetch).toBe(original)
+  })
+
+  // The state URL comes from the SDK (its `select` list follows `stateKeys`), so
+  // only the real stream can say what the page will ask for.
+  it("hands the warmed thread state to the thread page's stream", async () => {
+    setReadyState("loading")
+    const original = stubAgentServer()
+    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+
+    mountThreadStream()
+    // The stream lists the thread's runs once it has read the state.
+    await waitFor(() =>
+      expect(
+        original.mock.calls.some(([input]) =>
+          new URL(requestUrl(input)).pathname.endsWith("/runs")
+        )
+      ).toBe(true)
+    )
+
+    expect(stateRequests(original)).toHaveLength(1)
   })
 
   it("times a completed warmup from its start to its response, not its later handoff", async () => {
@@ -221,6 +275,22 @@ describe("apiWarmupScript", () => {
     })
   })
 
+  it("hands over a warmed request whose query keys come in a different order", async () => {
+    setReadyState("loading")
+    const original = stubFetch()
+    run(apiWarmupScript("/agents")!)
+
+    const reordered = new URL(
+      String(original.mock.calls[0]?.[0]),
+      location.href
+    )
+    const entries = [...reordered.searchParams].reverse()
+    reordered.search = new URLSearchParams(entries).toString()
+    await window.fetch(reordered.href)
+
+    expect(original).toHaveBeenCalledTimes(1)
+  })
+
   it("passes unrelated requests through", async () => {
     setReadyState("loading")
     const original = stubFetch()
@@ -242,9 +312,9 @@ describe("apiWarmupScript", () => {
     expect(window.fetch).toBe(original)
   })
 
-  // The warmed URL is hand-built from the same params the query passes, so it
-  // has to be checked against the request the api client actually makes —
-  // a mismatch would silently fetch the sidebar twice.
+  // The warmed query is hand-built from the stored preferences, so it has to be
+  // checked against the request the api client actually makes: a mismatch
+  // would silently fetch the sidebar twice.
   it.each([
     { name: "defaults", expected: {}, prefs: undefined },
     {
@@ -298,29 +368,29 @@ describe("apiWarmupScript", () => {
       prefs: { filters: { includeSlack: false, includeClaudeCode: false } },
     },
   ])(
-    "warms the exact sidebar URL the app requests ($name)",
+    "hands the warmed sidebar page to the app's request ($name)",
     async ({ expected: params, prefs }) => {
-      const expected = await recordedSidebarUrl(params)
-
       setReadyState("loading")
       stubPrefs(prefs)
       const original = stubFetch()
       run(apiWarmupScript("/agents")!)
 
-      expect(String(original.mock.calls[0]?.[0])).toBe(expected)
+      await requestSidebarPage(params)
+
+      expect(original).toHaveBeenCalledTimes(1)
     }
   )
 
-  it("warms the exact sidebar URL the app requests on a thread route", async () => {
-    const expected = await recordedSidebarUrl()
-
+  it("hands the warmed sidebar page to the app's request on a thread route", async () => {
     setReadyState("loading")
     const original = stubFetch()
     run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
 
-    const sidebarCall = original.mock.calls.find((c) =>
+    await requestSidebarPage()
+
+    const sidebarRequests = original.mock.calls.filter((c) =>
       String(c[0]).includes("/threads/page")
     )
-    expect(String(sidebarCall?.[0])).toBe(expected)
+    expect(sidebarRequests).toHaveLength(1)
   })
 })
