@@ -144,7 +144,6 @@ def channel_of(metadata: Mapping[str, object] | None) -> str | None:
 # The modes ``@langchain/react`` 2.0's thread view starts its own runs in, which it
 # joins every run in, whoever started it: a join carries only the run's own modes.
 SERVER_STREAM_MODES: Final[tuple[str, ...]] = (
-    "values",
     "updates",
     "messages-tuple",
     "custom",

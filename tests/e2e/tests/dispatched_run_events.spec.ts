@@ -98,15 +98,18 @@ async function joinFirstRun(page: Page, threadId: string) {
   }, threadId);
 }
 
-/** The tool calls the agent's messages in a `values` event make. */
+/** The tool calls in the messages an `updates` event's nodes wrote. */
 function toolCalls(event: RunEvent): Array<ToolCall> {
-  const messages = (event.data as { messages?: unknown } | null)?.messages;
-  if (!Array.isArray(messages)) return [];
-  return messages.flatMap((message) =>
-    Array.isArray((message as { tool_calls?: unknown }).tool_calls)
-      ? ((message as { tool_calls: Array<ToolCall> }).tool_calls ?? [])
-      : [],
-  );
+  const updates = Object.values((event.data ?? {}) as Record<string, unknown>);
+  return updates.flatMap((update) => {
+    const messages = (update as { messages?: unknown } | null)?.messages;
+    if (!Array.isArray(messages)) return [];
+    return messages.flatMap((message) =>
+      Array.isArray((message as { tool_calls?: unknown }).tool_calls)
+        ? ((message as { tool_calls: Array<ToolCall> }).tool_calls ?? [])
+        : [],
+    );
+  });
 }
 
 test.describe("dispatched run events", () => {
@@ -127,13 +130,13 @@ test.describe("dispatched run events", () => {
     // lifecycle events that say which subagent is which.
     expect(kwargs.subgraphs).toBe(true);
     expect(kwargs.stream_mode).toEqual(
-      expect.arrayContaining(["values", "messages-tuple", "lifecycle"]),
+      expect.arrayContaining(["updates", "messages-tuple", "lifecycle"]),
     );
     const names = [...new Set(events.map((event) => event.name))];
 
     // The root agent's two `task` calls.
     const rootCalls = events
-      .filter((event) => event.name === "values")
+      .filter((event) => event.name === "updates")
       .flatMap(toolCalls);
     expect(
       [
@@ -148,7 +151,7 @@ test.describe("dispatched run events", () => {
 
     // Each subagent runs under its own namespace and reports its own shell
     // steps there: the events a subagent panel shows.
-    const nested = events.filter((event) => event.name.startsWith("values|"));
+    const nested = events.filter((event) => event.name.startsWith("updates|"));
     const subagents = new Set(nested.map((event) => event.name.split("|")[1]));
     expect(subagents.size, `events seen: ${names.join(", ")}`).toBe(2);
     for (const subagent of subagents) {

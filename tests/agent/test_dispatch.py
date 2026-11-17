@@ -116,7 +116,6 @@ async def test_create_durable_run_applies_defaults(
     # Old-format, in the modes a thread view joins any run in, kept for that join.
     assert created["config"]["configurable"]["__event_streaming_v2"] is False
     assert created["stream_mode"] == [
-        "values",
         "updates",
         "messages-tuple",
         "custom",
