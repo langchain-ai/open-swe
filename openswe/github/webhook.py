@@ -1014,7 +1014,7 @@ class PreviewReady:
         )
         checks = settings.review_app_preview_checks if settings.review_app_releases else frozenset()
         if named is not None:
-            checks &= {named}
+            checks &= {named, named.rsplit(" / ", 1)[-1]}
         if (
             not checks
             or not await repo_is_routable(repo_config["owner"], repo_config["name"])
@@ -1091,11 +1091,12 @@ class PreviewReady:
             or not isinstance(check_name, str)
             or not isinstance(head_sha, str)
             or not numbers
-            or not await cls.checks(repo_config, named=check_name)
         ):
             return
+        checks = await cls.checks(repo_config, named=check_name)
         for number in numbers:
-            await cls.enqueue(owner, name, number, head_sha, check_name, repo_id)
+            for check in checks:
+                await cls.enqueue(owner, name, number, head_sha, check, repo_id)
 
     @staticmethod
     def _key(owner: str, repo: str, number: int, head_sha: str, check: str) -> str:
@@ -1151,16 +1152,13 @@ class PreviewReady:
                     pr = await repository.pull_request(number).pull()
                     if pr.get("state") != "open" or (pr.get("head") or {}).get("sha") != head_sha:
                         return
-                    passed: set[str] = set()
-                    for check in checks:
-                        # By name, as a head has hundreds of checks; a rerun that replaced a
-                        # success is what counts (``check_runs``).
-                        runs = await repository.check_runs(head_sha, name=check)
-                        if any(
-                            run.get("name") == check and run.get("conclusion") == "success"
-                            for run in runs
-                        ):
-                            passed.add(check)
+                    runs = await repository.check_runs(head_sha)
+                    passed = {
+                        check
+                        for run in runs
+                        if run.get("conclusion") == "success" and isinstance(run.get("name"), str)
+                        for check in checks & {run["name"], run["name"].rsplit(" / ", 1)[-1]}
+                    }
                 again = passed != checks
                 for check in passed:
                     again |= await cls.enqueue(

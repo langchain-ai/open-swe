@@ -628,13 +628,16 @@ async def test_watching_the_head_finds_a_preview_whose_completion_never_came(
     checks.side_effect = RuntimeError("GitHub is down")
     await preview.work()
     checks.side_effect = None
-    checks.return_value = [{"name": _PREVIEW_CHECK, "conclusion": "success"}]
+    checks.return_value = [
+        {"name": f"advisory / frontend-preview / {_PREVIEW_CHECK}", "conclusion": "success"}
+    ]
     await preview.work()
     # The queue gives up on the job the watch queued, so the watch queues it again.
     preview.jobs = {key: job for key, job in preview.jobs.items() if job.kind != PreviewReady.JOB}
     await preview.work()
     await preview.work()
     preview.dispatch.assert_awaited_once()
+    await PreviewReady.run(_check_passed(name=f"advisory / frontend-preview / {_PREVIEW_CHECK}"))
 
     preview.settle("success")
     await preview.drain()
@@ -752,7 +755,8 @@ async def test_each_named_check_starts_its_own_run_once_its_preview_is_up(
 ) -> None:
     preview = _Preview(monkeypatch, checks=("wait-for-dns", "wait-for-api"))
 
-    await PreviewReady.run(_check_passed(name="wait-for-dns"))
+    # A job in a called workflow is named by its job.
+    await PreviewReady.run(_check_passed(name="advisory / frontend-preview / wait-for-dns"))
     await PreviewReady.run(_check_passed(name="wait-for-api"))
     await PreviewReady.run(_check_passed(name="wait-for-api"))
     await preview.work()

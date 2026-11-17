@@ -873,7 +873,11 @@ test.describe("Human review in Slack", () => {
         timeout: 30_000,
       })
       .toBe(true);
-    expect((await latestRequest(request)).state).toBe("merged");
+    await expect
+      .poll(async () => (await latestRequest(request)).state, {
+        timeout: 30_000,
+      })
+      .toBe("merged");
   });
 
   test("nobody signs up, so the thread's agent picks the code owner Open SWE suggests; they accept from their DM and their approval merges it", async ({
@@ -973,7 +977,11 @@ test.describe("Human review in Slack", () => {
         timeout: 30_000,
       })
       .toBe(true);
-    expect((await latestRequest(request)).state).toBe("merged");
+    await expect
+      .poll(async () => (await latestRequest(request)).state, {
+        timeout: 30_000,
+      })
+      .toBe("merged");
   });
 
   test("a picked reviewer declines with a reason; the thread's agent picks the other code owner", async ({
