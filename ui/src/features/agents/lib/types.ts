@@ -265,6 +265,8 @@ export interface Message {
   invocationIds?: Array<string>
   /** Timestamp of the first message in an agent turn; used to derive work duration. */
   startedAt?: string
+  runStartedAt?: string
+  completedAt?: string
   timestampIsFallback?: boolean
   chunks: Array<Chunk>
   hidden?: boolean

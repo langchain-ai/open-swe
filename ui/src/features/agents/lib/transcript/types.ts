@@ -71,6 +71,7 @@ export interface TranscriptTurnRow {
   state: TurnState
   requested_at: string
   started_at: string | null
+  completed_at?: string | null
   error: string | null
 }
 

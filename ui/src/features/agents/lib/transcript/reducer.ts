@@ -104,6 +104,7 @@ export interface TranscriptTurnState {
   runId: string | null
   requestedAt: string
   startedAt: string | null
+  completedAt: string | null
   error: string | null
   items: ReadonlyArray<TurnItem>
   /** Bumped whenever this turn or anything it holds changed; the memo key. */
@@ -257,6 +258,7 @@ function turnStates(
       runId: row.run_id ?? null,
       requestedAt: row.requested_at,
       startedAt: row.started_at ?? null,
+      completedAt: row.completed_at ?? null,
       error: row.error,
       items: orderItems(
         Object.values(messages).filter(
@@ -422,6 +424,7 @@ function ensureTurn(
     runId: null,
     requestedAt: occurredAt,
     startedAt: state === "running" ? occurredAt : null,
+    completedAt: null,
     error: null,
     items: [],
     revision: 0,
@@ -659,6 +662,7 @@ export function applyEvent(
     case "turn.started": {
       const payload = event.payload
       const turn = ensureTurn(draft, payload.turn_id, "running", at)
+      if (turn.state !== "requested" && turn.state !== "running") break
       patchTurn(draft, turn, {
         state: "running",
         startedAt: turn.startedAt ?? at,
@@ -676,8 +680,9 @@ export function applyEvent(
     case "turn.completed": {
       const payload = event.payload
       const turn = draft.state.turns[payload.turn_id]
-      if (!turn) break
-      patchTurn(draft, turn, { state: "completed" })
+      if (!turn || (turn.state !== "requested" && turn.state !== "running"))
+        break
+      patchTurn(draft, turn, { state: "completed", completedAt: at })
       dropTransientNotices(draft, payload.turn_id)
       draft.state = { ...draft.state, status: settledStatus(draft, "idle") }
       break
@@ -685,8 +690,13 @@ export function applyEvent(
     case "turn.failed": {
       const payload = event.payload
       const turn = draft.state.turns[payload.turn_id]
-      if (!turn) break
-      patchTurn(draft, turn, { state: "failed", error: payload.error })
+      if (!turn || (turn.state !== "requested" && turn.state !== "running"))
+        break
+      patchTurn(draft, turn, {
+        state: "failed",
+        error: payload.error,
+        completedAt: at,
+      })
       dropTransientNotices(draft, payload.turn_id)
       draft.state = { ...draft.state, status: settledStatus(draft, "error") }
       break
@@ -694,8 +704,9 @@ export function applyEvent(
     case "turn.interrupted": {
       const payload = event.payload
       const turn = draft.state.turns[payload.turn_id]
-      if (!turn) break
-      patchTurn(draft, turn, { state: "interrupted" })
+      if (!turn || (turn.state !== "requested" && turn.state !== "running"))
+        break
+      patchTurn(draft, turn, { state: "interrupted", completedAt: at })
       dropTransientNotices(draft, payload.turn_id)
       draft.state = { ...draft.state, status: settledStatus(draft, "idle") }
       break
@@ -1145,20 +1156,28 @@ function turnMessages(
   const out: Array<Message> = []
   let agent: AgentDraft | null = null
   let turnKey: string | undefined
+  let hasAgent = false
 
-  const flush = () => {
+  const flush = (last = false) => {
     if (!agent) return
     out.push({
       id: agent.id,
       author: "agent",
       timestamp: agent.timestamp,
       startedAt: agent.startedAt,
+      ...(namespace.length === 0 && !hasAgent && turn.startedAt
+        ? { runStartedAt: turn.startedAt }
+        : {}),
+      ...(last && namespace.length === 0 && turn.completedAt
+        ? { completedAt: turn.completedAt }
+        : {}),
       ...(agent.turnKey ? { turnKey: agent.turnKey } : {}),
       ...(agent.invocationIds.length
         ? { invocationIds: agent.invocationIds }
         : {}),
       chunks: agent.chunks,
     })
+    hasAgent = true
     agent = null
   }
 
@@ -1246,7 +1265,7 @@ function turnMessages(
     }
     append(call.toolCallId, call.startedAt, [chunk])
   }
-  flush()
+  flush(true)
 
   if (!perNamespace) {
     perNamespace = new Map()

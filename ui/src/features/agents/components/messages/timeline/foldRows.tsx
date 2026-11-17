@@ -15,6 +15,7 @@ export function TurnFoldRow({
   label,
   detail,
   active,
+  since,
   expanded,
   onToggle,
 }: {
@@ -22,6 +23,7 @@ export function TurnFoldRow({
   /** Quieter text after the label, such as what woke a stretch of runs. */
   detail?: string
   active: boolean
+  since?: number
   expanded: boolean
   onToggle: () => void
 }) {
@@ -49,7 +51,7 @@ export function TurnFoldRow({
         <span className={cn("min-w-0 truncate", active && "shimmer-text")}>
           {label}
         </span>
-        {active && <ElapsedSeconds />}
+        {active && <ElapsedSeconds key={since} since={since} />}
         {detail && (
           <span className="min-w-0 shrink-[2] truncate text-tertiary">
             · {detail}

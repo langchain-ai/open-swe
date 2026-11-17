@@ -832,6 +832,200 @@ describe("Messages", () => {
     )
   })
 
+  it("keeps work time when returning to a running thread and when it finishes", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-03T10:00:30Z"))
+    const messages: Message[] = [
+      {
+        id: "agent-turn",
+        author: "agent",
+        runStartedAt: "2026-09-03T10:00:00Z",
+        startedAt: "2026-09-03T10:00:05Z",
+        timestamp: "2026-09-03T10:00:12Z",
+        chunks: [
+          {
+            kind: "text",
+            text: "I'll investigate.",
+            timestamp: "2026-09-03T10:00:10Z",
+          },
+          {
+            kind: "tool-execution",
+            toolCallId: "search",
+            title: "Search",
+            toolKind: "search",
+            status: "in_progress",
+            timestamp: "2026-09-03T10:00:12Z",
+          },
+        ],
+      },
+    ]
+    const view = render(<Messages messages={messages} isStreaming />, {
+      wrapper,
+    })
+    view.unmount()
+    vi.setSystemTime(new Date("2026-09-03T10:00:35Z"))
+    const reopened = render(<Messages messages={messages} isStreaming />, {
+      wrapper,
+    })
+    expect(
+      screen.getByRole("button", { name: /1 action/ }).textContent
+    ).toContain("35s")
+    act(() => vi.advanceTimersByTime(5000))
+    reopened.rerender(<Messages messages={messages} isStreaming={false} />)
+    expect(
+      screen.getByRole("button", { name: "Worked for 40s · 1 action" })
+    ).toBeTruthy()
+    reopened.unmount()
+    render(
+      <Messages
+        messages={[{ ...messages[0]!, completedAt: "2026-09-03T10:00:40Z" }]}
+        isStreaming={false}
+      />,
+      { wrapper }
+    )
+    expect(
+      screen.getByRole("button", { name: "Worked for 40s · 1 action" })
+    ).toBeTruthy()
+    vi.useRealTimers()
+  })
+
+  it("times each live work stretch from its preceding reply", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-03T10:00:35Z"))
+    const message: Message = {
+      id: "agent-turn",
+      author: "agent",
+      runStartedAt: "2026-09-03T10:00:00Z",
+      startedAt: "2026-09-03T10:00:01Z",
+      timestamp: "2026-09-03T10:00:21Z",
+      chunks: [
+        {
+          kind: "tool-execution",
+          toolCallId: "first",
+          title: "Search",
+          toolKind: "search",
+          status: "completed",
+          timestamp: "2026-09-03T10:00:01Z",
+        },
+        {
+          kind: "text",
+          text: "Found the cause.",
+          timestamp: "2026-09-03T10:00:20Z",
+        },
+        {
+          kind: "tool-execution",
+          toolCallId: "second",
+          title: "Search",
+          toolKind: "search",
+          status: "in_progress",
+          timestamp: "2026-09-03T10:00:21Z",
+        },
+      ],
+    }
+    const view = render(<Messages messages={[message]} isStreaming />, {
+      wrapper,
+    })
+    expect(
+      screen.getByRole("button", { name: "Worked for 20s · 1 action" })
+    ).toBeTruthy()
+    expect(
+      screen.getAllByRole("button", { name: /1 action/ })[1]?.textContent
+    ).toContain("15s")
+    view.unmount()
+    const reopened = render(<Messages messages={[message]} isStreaming />, {
+      wrapper,
+    })
+    expect(
+      screen.getAllByRole("button", { name: /1 action/ })[1]?.textContent
+    ).toContain("15s")
+    act(() => vi.advanceTimersByTime(5000))
+    reopened.rerender(<Messages messages={[message]} isStreaming={false} />)
+    expect(
+      screen.getAllByRole("button", { name: "Worked for 20s · 1 action" })
+    ).toHaveLength(2)
+    reopened.unmount()
+    render(
+      <Messages
+        messages={[{ ...message, completedAt: "2026-09-03T10:00:40Z" }]}
+        isStreaming={false}
+      />,
+      { wrapper }
+    )
+    expect(
+      screen.getAllByRole("button", { name: "Worked for 20s · 1 action" })
+    ).toHaveLength(2)
+    vi.useRealTimers()
+  })
+
+  it("times work after an interjection from the new agent message", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-03T10:00:40Z"))
+    const messages: Message[] = [
+      {
+        id: "first",
+        author: "agent",
+        runStartedAt: "2026-09-03T10:00:00Z",
+        startedAt: "2026-09-03T10:00:01Z",
+        timestamp: "2026-09-03T10:00:20Z",
+        chunks: [
+          {
+            kind: "tool-execution",
+            toolCallId: "first",
+            title: "Search",
+            toolKind: "search",
+            status: "completed",
+          },
+        ],
+      },
+      {
+        id: "human",
+        author: "user",
+        timestamp: "2026-09-03T10:00:25Z",
+        chunks: [{ kind: "text", text: "Continue" }],
+      },
+      {
+        id: "second",
+        author: "agent",
+        startedAt: "2026-09-03T10:00:30Z",
+        timestamp: "2026-09-03T10:00:30Z",
+        chunks: [
+          {
+            kind: "tool-execution",
+            toolCallId: "second",
+            title: "Search",
+            toolKind: "search",
+            status: "in_progress",
+          },
+        ],
+      },
+    ]
+    const view = render(<Messages messages={messages} isStreaming />, {
+      wrapper,
+    })
+    expect(
+      screen.getByRole("button", { name: "Worked for 20s · 1 action" })
+    ).toBeTruthy()
+    expect(
+      screen.getAllByRole("button", { name: /1 action/ })[1]?.textContent
+    ).toContain("10s")
+    view.unmount()
+    render(
+      <Messages
+        messages={[
+          messages[0]!,
+          messages[1]!,
+          { ...messages[2]!, completedAt: "2026-09-03T10:00:50Z" },
+        ]}
+        isStreaming={false}
+      />,
+      { wrapper }
+    )
+    expect(
+      screen.getAllByRole("button", { name: "Worked for 20s · 1 action" })
+    ).toHaveLength(2)
+    vi.useRealTimers()
+  })
+
   it("renders a sent Slack reply before the work that follows it", () => {
     render(
       <Messages
@@ -1017,6 +1211,8 @@ describe("Messages", () => {
             id: "agent-turn",
             author: "agent",
             startedAt: "2026-09-03T10:00:00.000Z",
+            runStartedAt: "2026-09-03T10:00:00.000Z",
+            completedAt: "2026-09-03T10:10:00.000Z",
             timestamp: "2026-09-03T10:10:00.000Z",
             chunks: [
               {

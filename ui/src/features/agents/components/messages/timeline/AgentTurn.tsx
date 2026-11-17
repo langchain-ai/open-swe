@@ -211,11 +211,10 @@ export function AgentTurn({
     [message.chunks, message.id]
   )
 
-  // Measure wall-clock work time for live runs (most accurate); fall back to
-  // the turn's first→last message timestamps for transcripts loaded from state.
-  const [measuredDurationMs, setMeasuredDurationMs] = useState<number | null>(
-    null
-  )
+  const [measuredWork, setMeasuredWork] = useState<{
+    start: number
+    end: number
+  } | null>(null)
   const workStartRef = useRef<number | null>(null)
   const wasStreamingRef = useRef(false)
   useEffect(() => {
@@ -225,7 +224,7 @@ export function AgentTurn({
       return
     }
     if (wasStreamingRef.current && workStartRef.current !== null) {
-      setMeasuredDurationMs(Date.now() - workStartRef.current)
+      setMeasuredWork({ start: workStartRef.current, end: Date.now() })
       wasStreamingRef.current = false
     }
   }, [isStreaming])
@@ -246,7 +245,6 @@ export function AgentTurn({
         : settledSegments,
     [isStreaming, replyHeld, settledSegments]
   )
-  const workSegmentCount = segments.filter((s) => s.type === "work").length
   const liveItemKey = isStreaming ? renderItems.at(-1)?.key : undefined
 
   const [expandedFolds, setExpandedFolds] = useState<Record<string, boolean>>(
@@ -277,13 +275,31 @@ export function AgentTurn({
 
   const turnStart = message.timestampIsFallback ? undefined : message.startedAt
   const turnEnd = message.timestampIsFallback ? undefined : message.timestamp
+  const firstWork = segments.findIndex((s) => s.type === "work")
+  const lastWork = segments.findLastIndex((s) => s.type === "work")
+  const segmentStart = (index: number): string | undefined =>
+    index === firstWork
+      ? (message.runStartedAt ??
+        replyTimestamp(segments[index - 1]) ??
+        turnStart)
+      : replyTimestamp(segments[index - 1])
   const segmentDurationMs = (index: number): number | null => {
-    if (workSegmentCount === 1 && measuredDurationMs !== null) {
-      return measuredDurationMs
+    const start = segmentStart(index)
+    if (index === lastWork && !isStreaming && message.completedAt)
+      return elapsedMs(start, message.completedAt)
+    if (
+      index === segments.length - 1 &&
+      measuredWork &&
+      (start || index === 0)
+    ) {
+      const startedAt = start ? Date.parse(start) : measuredWork.start
+      if (Number.isFinite(startedAt))
+        return Math.max(0, measuredWork.end - startedAt)
     }
     return elapsedMs(
-      replyTimestamp(segments[index - 1]) ?? turnStart,
-      replyTimestamp(segments[index + 1]) ?? turnEnd
+      start,
+      replyTimestamp(segments[index + 1]) ??
+        (index === segments.length - 1 ? turnEnd : undefined)
     )
   }
 
@@ -433,6 +449,7 @@ export function AgentTurn({
         ? `Worked for ${formatElapsed(durationMs)}`
         : "Worked"
     const actionCount = countWorkActions(segment.items)
+    const startedAt = segmentStart(index)
     const visible = expanded
       ? segment.items
       : collapsedWorkItems(segment.items, !isStreaming)
@@ -446,6 +463,7 @@ export function AgentTurn({
               : label
           }
           active={live}
+          since={startedAt ? Date.parse(startedAt) : undefined}
           expanded={expanded}
           onToggle={() => toggleFold(segment.key)}
         />

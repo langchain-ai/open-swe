@@ -220,6 +220,84 @@ describe("transcript snapshot", () => {
     expect(messages[1]?.timestamp).toBe("2026-01-01T00:00:02Z")
   })
 
+  it("preserves completion time from live events and snapshots", () => {
+    const state = fromSnapshot(twoTurnSnapshot())
+    const settled = applyEvent(state, {
+      version: 11,
+      event_type: "turn.completed",
+      occurred_at: "2026-01-01T00:02:00Z",
+      payload: { turn_id: "turn-2" },
+    })
+    expect(toMessages(settled).at(-1)).toMatchObject({
+      runStartedAt: "2026-01-01T00:01:00Z",
+      completedAt: "2026-01-01T00:02:00Z",
+    })
+    const reloaded = fromSnapshot(
+      twoTurnSnapshot({
+        turns: [
+          turn("turn-1", "2026-01-01T00:00:00Z"),
+          {
+            ...turn("turn-2", "2026-01-01T00:01:00Z"),
+            completed_at: "2026-01-01T00:02:00Z",
+          },
+        ],
+      })
+    )
+    expect(toMessages(reloaded).at(-1)?.completedAt).toBe(
+      "2026-01-01T00:02:00Z"
+    )
+    const lateCompletion = applyEvent(settled, {
+      version: 12,
+      event_type: "turn.failed",
+      occurred_at: "2026-01-01T00:03:00Z",
+      payload: { turn_id: "turn-2", error: "late failure" },
+    })
+    expect(toMessages(lateCompletion).at(-1)?.completedAt).toBe(
+      "2026-01-01T00:02:00Z"
+    )
+  })
+
+  it("uses the run start only for the first agent message in a turn", () => {
+    const state = fromSnapshot(
+      twoTurnSnapshot({
+        messages: [
+          messageRow({
+            message_id: "human",
+            turn_id: "turn-2",
+            role: "human",
+            text: "Start",
+            created_at: "2026-01-01T00:01:00Z",
+          }),
+          messageRow({
+            message_id: "ai-1",
+            turn_id: "turn-2",
+            text: "Working",
+            created_at: "2026-01-01T00:01:01Z",
+          }),
+          messageRow({
+            message_id: "human-2",
+            turn_id: "turn-2",
+            role: "human",
+            text: "Continue",
+            created_at: "2026-01-01T00:01:30Z",
+          }),
+          messageRow({
+            message_id: "ai-2",
+            turn_id: "turn-2",
+            text: "Continuing",
+            created_at: "2026-01-01T00:01:35Z",
+          }),
+        ],
+        tool_calls: [],
+      })
+    )
+    const messages = toMessages(state).filter(
+      (message) => message.author === "agent"
+    )
+    expect(messages[0]?.runStartedAt).toBe("2026-01-01T00:01:00Z")
+    expect(messages[1]?.runStartedAt).toBeUndefined()
+  })
+
   it("hides the context Claude Code adds to a mirrored prompt", () => {
     const sender = { login: "octocat", kind: "claude_code" }
     const messages = toMessages(
