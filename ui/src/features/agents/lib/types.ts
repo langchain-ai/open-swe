@@ -259,6 +259,7 @@ export interface Message {
    * open page; the agent read the context itself, which the thread never shows.
    */
   contextLabel?: string
+  turnId?: string
   /** Id of the user message that opened this agent run and keys its diff artifact. */
   turnKey?: string
   /** Invocations an agent turn's model calls ran under; key their costs in `AgentThread.runCosts`. */

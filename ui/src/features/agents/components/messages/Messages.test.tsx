@@ -15,6 +15,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 
 import { Messages } from "./Messages"
+import { BackgroundEvent } from "@/features/agents/lib/backgroundEvent"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
@@ -635,7 +636,15 @@ describe("Messages", () => {
       structuredSenderKind: "system" as const,
       structuredSenderId: sender.id,
       structuredSenderName: sender.name,
-      chunks: [{ kind: "text" as const, text: `Wake ${id}` }],
+      chunks: [
+        {
+          kind: "text" as const,
+          text:
+            sender.id === "system:background-task"
+              ? "A sandbox background command finished.\nTask: cmd-123\nStatus: completed\nExit code: 0\nDuration: 33.27s\nOutput: /tmp/output.log\nUse background_task to continue."
+              : `Monitor \`${id}\` (CI) emitted, starting at raw line 1:\nsecret instruction`,
+        },
+      ],
     })
     const silentRun = (
       id: string,
@@ -762,12 +771,97 @@ describe("Messages", () => {
 
     fireEvent.click(fold)
     expect(fold.getAttribute("aria-expanded")).toBe("true")
-    expect(screen.queryByRole("button", { name: "Monitor" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Background task" })).toBeNull()
+    expect(screen.getAllByText("Monitor update").length).toBeGreaterThan(1)
+    const task = screen.getByRole("button", {
+      name: "Background task completed · 33s",
+    })
+    fireEvent.click(task)
+    expect(screen.getByText(/Task: cmd-123/)).toBeTruthy()
+    expect(screen.queryByText(/secret instruction/)).toBeNull()
+    expect(screen.queryByText(/Use background_task/)).toBeNull()
     fireEvent.click(
       screen.getByRole("button", { name: "Worked for 1m 0s · 2 actions" })
     )
     expect(screen.getByLabelText("Tool call failed")).toBeTruthy()
+  })
+
+  it("does not present a subscription deadline as a failure", () => {
+    const message: Message = {
+      id: "subscription-timeout",
+      author: "system",
+      timestamp: "2026-09-03T10:00:00Z",
+      structuredSenderKind: "system",
+      structuredSenderId: "system:event-subscription",
+      chunks: [
+        {
+          kind: "text",
+          text: "The bounded wait for subscription `sub-123` on GitHub has reached its deadline.",
+        },
+      ],
+    }
+    expect(BackgroundEvent.fromMessage(message)).toEqual({
+      heading: "Event subscription timed out",
+      failed: false,
+    })
+  })
+
+  it("distinguishes failed and timed-out background events without exposing model instructions", () => {
+    render(
+      <Messages
+        isStreaming={false}
+        messages={[
+          {
+            id: "failed",
+            author: "system",
+            timestamp: "2026-09-03T10:00:00Z",
+            structuredSenderKind: "system",
+            structuredSenderId: "system:background-task",
+            chunks: [
+              {
+                kind: "text",
+                text: "A sandbox background command finished.\nTask: cmd-123\nStatus: failed\nExit code: 1\nDuration: 3s\nOutput: /tmp/output.log\nUse background_task to continue.",
+              },
+            ],
+          },
+          {
+            id: "timeout",
+            author: "system",
+            timestamp: "2026-09-03T10:01:00Z",
+            structuredSenderKind: "system",
+            structuredSenderId: "system:background-task",
+            chunks: [
+              {
+                kind: "text",
+                text: "A sandbox background command finished.\nTask: cmd-456\nStatus: timed_out\nExit code: None\nDuration: 10s\nOutput: /tmp/output.log",
+              },
+            ],
+          },
+          {
+            id: "monitor",
+            author: "system",
+            timestamp: "2026-09-03T10:02:00Z",
+            structuredSenderKind: "system",
+            structuredSenderId: "system:monitor",
+            chunks: [
+              {
+                kind: "text",
+                text: "Monitor `mon-123` (CI) ended: it reached its 30s timeout.\nSECRET INSTRUCTIONS",
+              },
+            ],
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+    expect(
+      screen.getByRole("button", { name: "Background task failed · 3s" })
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Background task timed out · 10s" })
+    ).toBeTruthy()
+    expect(screen.getByText("Monitor timed out")).toBeTruthy()
+    expect(screen.queryByText(/SECRET INSTRUCTIONS/)).toBeNull()
+    expect(screen.queryByText(/Use background_task/)).toBeNull()
   })
 
   it("shows run activity while a stream is starting with no messages", () => {

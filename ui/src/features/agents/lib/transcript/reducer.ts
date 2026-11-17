@@ -21,6 +21,7 @@ import {
   toolTitle,
 } from "@/features/agents/lib/streamMessagesToUi"
 import { maybeDiffFromArgs } from "@/features/agents/lib/toolDisplay"
+import { BackgroundEvent } from "@/features/agents/lib/backgroundEvent"
 import {
   collectStructuredEntities,
   isSilentSender,
@@ -1162,6 +1163,7 @@ function turnMessages(
     if (!agent) return
     out.push({
       id: agent.id,
+      turnId: turn.turnId,
       author: "agent",
       timestamp: agent.timestamp,
       startedAt: agent.startedAt,
@@ -1216,6 +1218,7 @@ function turnMessages(
           agent &&
           message.structuredSenderKind === "system" &&
           !message.taskEvent &&
+          !BackgroundEvent.fromMessage(message) &&
           message.structuredSenderId !== "system:sandbox-handoff" &&
           !message.structuredSenderId?.startsWith("system:api_key/") &&
           !message.structuredSenderId?.startsWith("system:github_actions/")

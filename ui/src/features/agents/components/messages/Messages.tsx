@@ -24,6 +24,8 @@ import { SelectionReply } from "@/features/agents/components/SelectionReply"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
 import { useLiveMarkdownMessageId } from "@/features/agents/lib/provider/useLiveMarkdownMessageId"
+import { BackgroundEvent } from "@/features/agents/lib/backgroundEvent"
+import { WorkEntryRow } from "./timeline/WorkEntryRow"
 
 function QueuedMessages({
   queuedMessages,
@@ -175,6 +177,7 @@ export const Messages = memo(function MessagesComponent({
         (message) =>
           message.structuredSenderKind !== "system" ||
           message.taskEvent ||
+          BackgroundEvent.fromMessage(message) ||
           message.structuredSenderId === "system:sandbox-handoff" ||
           message.structuredSenderId?.startsWith("system:api_key/") ||
           message.structuredSenderId?.startsWith("system:github_actions/")
@@ -242,6 +245,31 @@ export const Messages = memo(function MessagesComponent({
     const isLastMessage = index === visibleMessages.length - 1
     const messageIsStreaming = isStreaming && isLastMessage
     const messageIsMarkdownLive = message.id === liveMarkdownMessageId
+    const event = BackgroundEvent.fromMessage(message)
+    if (event) {
+      return (
+        <div
+          key={message.id}
+          className="my-space-2"
+          data-message-id={message.id}
+        >
+          <WorkEntryRow
+            entry={{
+              icon: event.failed ? "circle-alert" : "zap",
+              heading: event.heading,
+              preview: null,
+              tone: event.failed ? "error" : "info",
+              status: "unknown",
+              expandedText: event.detail ?? null,
+              loadExpandedText: null,
+            }}
+            timestamp={
+              message.timestampIsFallback ? undefined : message.timestamp
+            }
+          />
+        </div>
+      )
+    }
 
     if (
       message.author === "user" ||

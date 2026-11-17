@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
+import { groupQuietRuns } from "@/features/agents/components/messages/quietRuns"
 import { fetchToolOutput } from "./api"
 import {
   applyEvent,
@@ -218,6 +219,98 @@ describe("transcript snapshot", () => {
     ])
     expect(messages[1]?.startedAt).toBe("2026-01-01T00:00:01Z")
     expect(messages[1]?.timestamp).toBe("2026-01-01T00:00:02Z")
+  })
+
+  it("keeps a background event arriving between work in the same turn", () => {
+    const messages = toMessages(
+      fromSnapshot(
+        snapshot({
+          turns: [turn("t1", "2026-01-01T00:00:00Z")],
+          messages: [
+            messageRow({
+              message_id: "first",
+              turn_id: "t1",
+              text: "Working",
+              created_at: "2026-01-01T00:00:00Z",
+            }),
+            messageRow({
+              message_id: "event",
+              turn_id: "t1",
+              role: "human",
+              text: '<input-message sender="system:background-task" kind="system">A sandbox background command finished.\nTask: cmd-123\nStatus: completed\nExit code: 0\nDuration: 3s</input-message>',
+              created_at: "2026-01-01T00:00:01Z",
+            }),
+            messageRow({
+              message_id: "second",
+              turn_id: "t1",
+              text: "Done",
+              created_at: "2026-01-01T00:00:02Z",
+            }),
+          ],
+        })
+      )
+    )
+    expect(messages.map((message) => message.id)).toEqual([
+      "first",
+      "event",
+      "second",
+    ])
+  })
+
+  it("counts split work as one quiet run, while still grouping separate runs", () => {
+    const state = fromSnapshot(
+      snapshot({
+        turns: [
+          turn("t1", "2026-01-01T00:00:00Z"),
+          turn("t2", "2026-01-01T00:01:00Z"),
+        ],
+        messages: [
+          messageRow({
+            message_id: "event",
+            turn_id: "t1",
+            role: "human",
+            text: '<input-message sender="system:monitor" kind="system">Monitor `mon-123` (CI) emitted, starting at raw line 1:</input-message>',
+            created_at: "2026-01-01T00:00:02Z",
+          }),
+        ],
+        tool_calls: [
+          toolCall({
+            tool_call_id: "before",
+            turn_id: "t1",
+            name: "check_pr",
+            started_at: "2026-01-01T00:00:01Z",
+          }),
+          toolCall({
+            tool_call_id: "after",
+            turn_id: "t1",
+            name: "check_pr",
+            started_at: "2026-01-01T00:00:03Z",
+          }),
+          toolCall({
+            tool_call_id: "next",
+            turn_id: "t2",
+            name: "check_pr",
+            started_at: "2026-01-01T00:01:01Z",
+          }),
+        ],
+      })
+    )
+    const messages = toMessages(state)
+    expect(messages.map((message) => message.id)).toEqual([
+      "before",
+      "event",
+      "after",
+      "next",
+    ])
+    expect(
+      groupQuietRuns(messages.slice(0, 3)).map((entry) => entry.type)
+    ).toEqual(["message", "message", "message"])
+    const grouped = groupQuietRuns(messages)
+    expect(grouped).toHaveLength(1)
+    expect(grouped[0]).toMatchObject({
+      type: "quiet",
+      stretch: { runCount: 2, actionCount: 3 },
+    })
   })
 
   it("preserves completion time from live events and snapshots", () => {

@@ -72,7 +72,7 @@ export function isSilentRun(message: Message): boolean {
 
 function summarize(first: Message, messages: Array<Message>): QuietStretch {
   let actionCount = 0
-  let runCount = 0
+  const runs = new Set<string>()
   let durationMs: number | null = 0
   const triggers = new Map<string, number>()
   for (const message of messages) {
@@ -81,7 +81,7 @@ function summarize(first: Message, messages: Array<Message>): QuietStretch {
       triggers.set(name, (triggers.get(name) ?? 0) + 1)
       continue
     }
-    runCount += 1
+    runs.add(message.turnId ?? message.id)
     actionCount += countWorkActions(
       buildRenderItems(message.chunks, message.id)
     )
@@ -99,7 +99,7 @@ function summarize(first: Message, messages: Array<Message>): QuietStretch {
   return {
     key: `quiet-${first.id}`,
     messages,
-    runCount,
+    runCount: runs.size,
     actionCount,
     durationMs,
     triggers: [...triggers].sort((a, b) => b[1] - a[1]),
@@ -120,9 +120,13 @@ export function groupQuietRuns(
   let stretch: Array<{ message: Message; index: number }> = []
 
   const flushStretch = () => {
-    const runs = stretch.filter(({ message }) => !isWake(message))
+    const runs = new Set(
+      stretch.flatMap(({ message }) =>
+        isWake(message) ? [] : [message.turnId ?? message.id]
+      )
+    )
     const first = stretch[0]?.message
-    if (first && runs.length >= MIN_QUIET_RUNS) {
+    if (first && runs.size >= MIN_QUIET_RUNS) {
       entries.push({
         type: "quiet",
         stretch: summarize(
