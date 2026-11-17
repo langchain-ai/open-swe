@@ -19,7 +19,7 @@ from openswe.tasks import presentation, service, store
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.presentation import TaskEventMetadata
 from openswe.tasks.schemas import ThreadMetadata
-from openswe.threads import access, handlers
+from openswe.threads import handlers
 from openswe.users import User
 from openswe.users.models import UserIdentity
 from openswe.utils.thread_participants import PARTICIPANT_IDENTITY_PREFIX, PARTICIPANT_LOGINS_KEY
@@ -27,6 +27,7 @@ from openswe.webhooks import event_matches
 from openswe.webhooks.event_matches import EventMatch
 from openswe.webhooks.event_subscriptions import EventSubscription
 from openswe.workspaces.rows import WorkspaceRow
+from tests.conftest import serve_threads_from
 
 MODEL = "openai:gpt-6-astra"
 COORDINATOR = str(uuid4())
@@ -505,8 +506,8 @@ async def test_desktop_worker_cannot_be_shared(
         model=MODEL,
         effort="low",
     )
-    for module in (access, handlers):
-        monkeypatch.setattr(module, "langgraph_client", lambda: client)
+    monkeypatch.setattr(handlers, "langgraph_client", lambda: client)
+    serve_threads_from(monkeypatch, client.threads.get)
 
     await service.index_worker(
         current_task, delegation, ThreadMetadata.model_validate(client.metadata[COORDINATOR])

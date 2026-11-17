@@ -888,11 +888,20 @@ async def api_thread_history(
     session: dict[str, Any] = SESSION_DEP,
 ) -> Response:
     body = await request.body()
+    timings: dict[str, float] = {}
+    started = perf_counter()
     status_code, content, media_type = await proxy_dashboard_thread_history(
         thread_id,
         session["sub"],
         body,
         email=session.get("email"),
         content_type=request.headers.get("content-type", "application/json"),
+        timings=timings,
     )
-    return Response(content=content, status_code=status_code, media_type=media_type)
+    timings["total"] = (perf_counter() - started) * 1000
+    return Response(
+        content=content,
+        status_code=status_code,
+        media_type=media_type,
+        headers={"Server-Timing": server_timing_header(timings)},
+    )

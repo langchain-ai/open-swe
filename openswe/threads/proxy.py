@@ -18,6 +18,7 @@ from openswe.plugins.records import PluginChat
 from openswe.threads.access import (
     _authorized_thread_metadata,
     _ensure_dashboard_github_token,
+    _readable_thread,
     _readable_thread_metadata,
     agent_version_metadata,
 )
@@ -39,6 +40,7 @@ from openswe.threads.runs import (
     queue_follow_up_run,
     steer_running_thread,
 )
+from openswe.threads.runtimes import RUNTIMES
 from openswe.threads.start_request import RunRefused, SentRun, StartRequest
 from openswe.threads.store import POSTING_COMMANDS, THREADS, CommandReply
 from openswe.threads.summary import (
@@ -54,6 +56,7 @@ from openswe.users import User
 from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.thread_ops import langgraph_client, langgraph_url
+from openswe.utils.timing import phase
 
 logger = logging.getLogger(__name__)
 
@@ -634,9 +637,12 @@ async def proxy_dashboard_thread_history(
     *,
     email: str | None = None,
     content_type: str = "application/json",
+    timings: dict[str, float] | None = None,
 ) -> tuple[int, bytes, str | None]:
+    record = timings if timings is not None else {}
     require_json_content_type(content_type)
-    await _readable_thread_metadata(thread_id, login=login, email=email)
+    with phase(record, "thread_get"):
+        thread = await _readable_thread(thread_id, login=login, email=email)
     try:
         payload = json.loads(body or b"{}")
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -648,12 +654,24 @@ async def proxy_dashboard_thread_history(
         raise HTTPException(400, "history limit must be a positive integer")
     if not any(payload.get(key) for key in ("before", "checkpoint", "metadata")):
         payload["limit"] = min(limit, _DISCOVERY_HISTORY_LIMIT)
-    url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
-    headers = langgraph_proxy_headers(content_type=content_type)
-    async with httpx2.AsyncClient(
-        transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
-    ) as client:
-        response = await client.post(url, json=payload, headers=headers)
+    with phase(record, "history"):
+        if thread.runtime == "mda":
+            mda = RUNTIMES.mda_runtime
+            if channel_of(thread.metadata) is None:
+                # The channel created its threads there; the backend's own may need it.
+                await mda.ensure_remote_thread(thread_id)
+            async with mda.read_http as client:
+                # MDA's read pool never times a read out, so this one gives up as the loopback did.
+                response = await client.post(
+                    f"/threads/{thread_id}/history", json=payload, timeout=_PROXY_REQUEST_TIMEOUT
+                )
+        else:
+            url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/history"
+            headers = langgraph_proxy_headers(content_type=content_type)
+            async with httpx2.AsyncClient(
+                transport=pooled_transport(), timeout=_PROXY_REQUEST_TIMEOUT
+            ) as client:
+                response = await client.post(url, json=payload, headers=headers)
     media_type = response.headers.get("content-type")
     return response.status_code, response.content, media_type
 

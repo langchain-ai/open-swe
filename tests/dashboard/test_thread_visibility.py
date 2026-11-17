@@ -50,7 +50,7 @@ def private_thread(monkeypatch, request):
         ),
         runs=SimpleNamespace(cancel_many=AsyncMock(), list=AsyncMock(return_value=[])),
     )
-    for module in (access, handlers, listing, tools):
+    for module in (handlers, listing, tools):
         monkeypatch.setattr(module, "langgraph_client", lambda: client)
     serve_threads_from(monkeypatch, client.threads.get)
     monkeypatch.setattr(

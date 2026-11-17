@@ -6,10 +6,11 @@ from fastapi import HTTPException
 
 from openswe.config import ENV
 from openswe.threads.identity import ThreadIdentity
+from openswe.threads.index import IndexedThread
+from openswe.threads.store import THREADS
 from openswe.threads.summary import assert_thread_readable
 from openswe.users import User
-from openswe.utils.json_types import ThreadLike, thread_metadata
-from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.json_types import ThreadLike
 
 
 def agent_version_metadata() -> dict[str, str]:
@@ -35,33 +36,26 @@ async def _ensure_dashboard_github_token(login: str) -> None:
 
 
 async def _authorized_thread(thread_id: str, login: str, *, email: str | None = None) -> ThreadLike:
-    try:
-        thread = await langgraph_client().threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
-    metadata = thread_metadata(thread)
-    assert_thread_readable(metadata, login, email)
-    return thread
+    """The thread as the Agent Server serves it, once the caller may read it."""
+    thread = await _readable_thread(thread_id, login=login, email=email)
+    return thread.as_langgraph()
 
 
 async def _authorized_thread_metadata(
     thread_id: str, login: str, *, email: str | None = None
 ) -> dict[str, Any]:
-    thread = await _authorized_thread(thread_id, login, email=email)
-    metadata = thread_metadata(thread)
-    return metadata
+    thread = await _readable_thread(thread_id, login=login, email=email)
+    return thread.metadata
 
 
 async def _readable_thread(
     thread_id: str, *, login: str | None = None, email: str | None = None
-) -> ThreadLike:
-    """Fetch a thread and authorize the authenticated caller."""
-    try:
-        thread = await langgraph_client().threads.get(thread_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(404, "thread not found") from exc
-    metadata = thread_metadata(thread)
-    assert_thread_readable(metadata, login, email)
+) -> IndexedThread:
+    """Read a thread from the index and authorize the authenticated caller."""
+    thread = await THREADS.get(thread_id)
+    if thread is None:
+        raise HTTPException(404, "thread not found")
+    assert_thread_readable(thread.metadata, login, email)
     return thread
 
 
@@ -69,5 +63,4 @@ async def _readable_thread_metadata(
     thread_id: str, *, login: str | None = None, email: str | None = None
 ) -> dict[str, Any]:
     thread = await _readable_thread(thread_id, login=login, email=email)
-    metadata = thread_metadata(thread)
-    return metadata
+    return thread.metadata

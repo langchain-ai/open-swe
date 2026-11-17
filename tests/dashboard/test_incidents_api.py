@@ -155,6 +155,7 @@ async def test_thread_stream_preflight_rejects_incidents_before_opening_stream(
         join_stream=AsyncMock(side_effect=AssertionError("stream must not be opened")),
     )
     patch_thread_module(monkeypatch, "langgraph_client", lambda: SimpleNamespace(threads=threads))
+    patch_thread_module(monkeypatch, "THREADS", ThreadStoreOverClient())
 
     with pytest.raises(HTTPException) as exc:
         await proxy.proxy_dashboard_thread_stream_events("i1", "admin", b"{}")

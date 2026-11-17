@@ -79,11 +79,17 @@ class ThreadStoreOverClient(ThreadStore):
             return None
         if raw is None:
             return None
+        return self.indexed(thread_id, raw)
+
+    @staticmethod
+    def indexed(thread_id: str, raw: Mapping[str, object]) -> IndexedThread:
+        """A fake client's thread as the index keeps it."""
         now = datetime.now(UTC)
+        metadata = raw.get("metadata")
         return IndexedThread(
             thread_id=thread_id,
             runtime="mda",
-            metadata=raw.get("metadata") or {},
+            metadata=dict(metadata) if isinstance(metadata, Mapping) else {},
             status=index.as_status(raw.get("status")) or "idle",
             created_at=now,
             updated_at=now,
@@ -266,19 +272,19 @@ def serve_threads_from(monkeypatch: pytest.MonkeyPatch, get: Any) -> None:
 
     The backend reads a thread's metadata from its index, as its own ``/threads`` routes
     do; a test that fakes a LangGraph client's ``threads.get`` keeps its threads, and its
-    errors, that way.
+    errors, that way, except a ``NotFoundError``: the index answers a missing thread with
+    ``None``.
     """
-    from types import SimpleNamespace  # noqa: PLC0415
-
     from openswe.threads.store import THREADS  # noqa: PLC0415 - imports the app
 
-    async def indexed(thread_id: str) -> SimpleNamespace | None:
-        thread = await get(thread_id)
+    async def indexed(thread_id: str) -> IndexedThread | None:
+        try:
+            thread = await get(thread_id)
+        except NotFoundError:
+            return None
         if not isinstance(thread, dict):
             return None
-        return SimpleNamespace(
-            thread_id=thread_id, runtime="mda", metadata=thread.get("metadata") or {}
-        )
+        return ThreadStoreOverClient.indexed(thread_id, thread)
 
     monkeypatch.setattr(THREADS, "get", indexed)
 
