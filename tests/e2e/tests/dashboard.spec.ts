@@ -840,6 +840,9 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         body: await page.screenshot(),
         contentType: "image/png",
       });
+      await page
+        .getByRole("button", { name: "Close toast", exact: true })
+        .click();
       await page.getByRole("button", { name: "Stop run" }).click();
       await expect.poll(() => cancellations).toBe(2);
       await expect(page.getByRole("button", { name: "Stop run" })).toHaveCount(

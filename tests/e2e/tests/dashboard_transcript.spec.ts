@@ -137,6 +137,76 @@ test.describe("finished transcript (shared fixture thread)", () => {
 });
 
 test.describe("transcript rendering", () => {
+  test("opens loaded branch changes after editing, but not after a chat reply", async ({
+    page,
+  }) => {
+    await loginAs(page, SAME_USER);
+    await page.request.post("/control/reset");
+    const sent = await page.request.post("/mock/slack/send", {
+      data: {
+        text: "<@U0BOT> E2E_BUSY_HOLD:30 please add a greet() helper and open a PR",
+      },
+    });
+    expect(sent.ok()).toBeTruthy();
+    const { thread_id: threadId } = (await sent.json()) as {
+      thread_id: string;
+    };
+    await page.addInitScript((id) => {
+      localStorage.setItem(`open-swe.gitpanel.collapsed.${id}`, "1");
+      localStorage.setItem(
+        "open-swe:diff-panel-state",
+        JSON.stringify({
+          state: { byThreadKey: { [`cloud:${id}`]: { kind: "working-tree" } } },
+          version: 2,
+        }),
+      );
+    }, threadId);
+
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let requested: () => void = () => {};
+    const branchRequested = new Promise<void>((resolve) => {
+      requested = resolve;
+    });
+    await page.route(
+      `**/dashboard/api/threads/${threadId}/branch-diff`,
+      async (route) => {
+        requested();
+        await released;
+        await route.continue();
+      },
+    );
+    await page.goto(`/agents/${threadId}`);
+    await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
+    await branchRequested;
+    await expect(
+      page.getByRole("button", { name: "Show panel" }),
+    ).toBeVisible();
+    release();
+    await expect(
+      page.getByRole("button", { name: "Diff scope: Branch changes" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /^greet\.py \+8 -0$/ }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Hide panel" }).click();
+    await waitForThreadNotBusy(page, threadId);
+    await typeIntoComposer(page, "Can you also add a docstring?");
+    await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop run" })).toBeHidden();
+    await waitForThreadIdle(page, threadId);
+    await expect(
+      page.getByRole("button", { name: "Show panel" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Show panel" }).click();
+    await expect(
+      page.getByRole("button", { name: "Diff scope: Branch changes" }),
+    ).toBeVisible();
+  });
+
   test("renders Slack mrkdwn and identifies the Slack sender", async ({
     page,
   }) => {

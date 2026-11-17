@@ -350,6 +350,7 @@ test.describe("optimistic thread edits", () => {
   });
 
   async function renameTo(page: Page, next: string) {
+    await expect(page.getByTestId("composer-editor")).toBeFocused();
     const titleButton = page.getByRole("button", { name: "Rename thread" });
     await expect(titleButton).toHaveText(THREAD_TITLE);
     await titleButton.click();

@@ -3,7 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"
 
-import type { AgentThread } from "@/features/agents/lib/types"
+import type {
+  AgentThread,
+  Message,
+  ToolExecutionChunk,
+} from "@/features/agents/lib/types"
+import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
+import { useSession } from "@/lib/session"
 import { agentsApi } from "@/features/agents/lib/api"
 import {
   useAgentThreadBranchDiff,
@@ -46,6 +52,25 @@ interface AgentGitPanelProps {
   revealChangesKey?: number
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
+}
+
+/** Completed file edits in a thread, including those an `eval` call's code made. */
+function completedEdits(messages: Array<Message>): number {
+  const count = (calls: Array<ToolExecutionChunk>): number =>
+    calls.reduce(
+      (total, call) =>
+        total +
+        (call.toolKind === "edit" && call.status === "completed" ? 1 : 0) +
+        count(call.calls ?? []),
+      0
+    )
+  return count(
+    messages.flatMap((message) =>
+      message.chunks.filter(
+        (chunk): chunk is ToolExecutionChunk => chunk.kind === "tool-execution"
+      )
+    )
+  )
 }
 
 export function AgentGitPanel({
@@ -156,6 +181,81 @@ export function AgentGitPanel({
     thread.id,
     !localThread && diffVisible && scope === "branch"
   )
+  const source = useThreadSource()
+  const session = useSession()
+  const autoShowChanges = session.data?.auto_show_changes ?? true
+  const running = isRunning || source.isRunning
+  const hydrating = source.isHydrating
+  const edits = completedEdits(source.messages)
+  const lastSeenRun = useRef({ running, hydrating: true, editsAtStart: 0 })
+  const isLocal = Boolean(localThread)
+  const refetchBranch = (isLocal ? localBranchDiff : branchDiff).refetch
+  const refetchWorkingTree = turnDiff.refetch
+  const refetchLocalWorkingTree = localCheckpointDiff.refetch
+  useEffect(() => {
+    const previous = lastSeenRun.current
+    const tracking = previous.running && !previous.hydrating
+    lastSeenRun.current = {
+      running,
+      hydrating,
+      editsAtStart: tracking ? previous.editsAtStart : edits,
+    }
+    if (
+      !tracking ||
+      running ||
+      !autoShowChanges ||
+      !collapsed ||
+      edits <= previous.editsAtStart
+    )
+      return
+
+    let cancelled = false
+    void (async () => {
+      const localTree = isLocal ? await refetchLocalWorkingTree() : null
+      const branchResult =
+        !isLocal || (localTree?.isSuccess && localTree.data.repository?.pr)
+          ? await refetchBranch()
+          : null
+      let nextScope: "branch" | "working-tree" = "branch"
+      if (
+        !branchResult?.isSuccess ||
+        !branchResult.data.files.length ||
+        ("status" in branchResult.data && branchResult.data.status !== "ready")
+      ) {
+        const treeResult = localTree ?? (await refetchWorkingTree())
+        if (
+          !treeResult.isSuccess ||
+          treeResult.data.status !== "ready" ||
+          !treeResult.data.files.length
+        )
+          return
+        nextScope = "working-tree"
+      }
+      if (cancelled) return
+      selectScope(threadRef, nextScope)
+      openSurface(threadRef, "diff")
+      onCollapsedChange(false)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeSurfaceId,
+    autoShowChanges,
+    collapsed,
+    edits,
+    hydrating,
+    isLocal,
+    onCollapsedChange,
+    openSurface,
+    refetchBranch,
+    refetchLocalWorkingTree,
+    refetchWorkingTree,
+    running,
+    selectScope,
+    threadRef,
+  ])
+
   const localDiff = scope === "branch" ? localBranchDiff : localCheckpointDiff
   const diff = localThread
     ? {
