@@ -5,7 +5,7 @@ import json
 import threading
 import weakref
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Final, Literal, cast
@@ -23,6 +23,7 @@ from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import (
     AIMessage,
+    AnyMessage,
     BaseMessage,
     HumanMessage,
     SystemMessage,
@@ -33,10 +34,12 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool, tool
 from langchain_quickjs._repl import EvalOutcome, _Registry, _ThreadREPL
+from langchain_quickjs.middleware import REPLState
 from langgraph.config import get_config
 from langgraph.errors import NodeCancelledError
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt.tool_node import ToolRuntime
+from langgraph.runtime import Runtime
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.auth.types import AuthContext, BaseUser, ThreadsCreate, ThreadsRead
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
@@ -62,7 +65,7 @@ from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_a
 from managed_deepagents.sandbox import SandboxDefinition, SandboxReplacement
 from pydantic import BaseModel, JsonValue
 from rt import backend as rt_backend
-from rt import search_tools
+from rt import run_tools, search_tools
 from rt.backend import Run, current_run
 from rt.managed_sandbox import PROXY_WRITE_BACKOFF_SECONDS, definition, opened_sandbox
 from rt.outbox import Outbox
@@ -1381,6 +1384,15 @@ async def test_code_tools_list_each_runs_schema_in_a_message_not_the_system_prom
 ) -> None:
     prompts: list[str] = []
     systems: list[str] = []
+    rendered: list[list[str]] = []
+    render = run_tools.render_ptc_prompt
+
+    def render_listing(tools: Sequence[BaseTool], *, tool_name: str) -> str:
+        rendered.append([tool.description for tool in tools])
+        return render(tools, tool_name=tool_name)
+
+    monkeypatch.setattr(run_tools, "render_ptc_prompt", render_listing)
+    original = GenericFakeChatModel._agenerate
 
     async def generate(
         model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
@@ -1389,18 +1401,54 @@ async def test_code_tools_list_each_runs_schema_in_a_message_not_the_system_prom
             "\n".join(message.text for message in messages if isinstance(message, SystemMessage))
         )
         prompts.append(
-            "\n".join(
+            next(
                 message.text
-                for message in messages
+                for message in reversed(messages)
                 if isinstance(message, HumanMessage)
                 and isinstance(message.id, str)
                 and message.id.startswith("code-tools:")
             )
         )
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+        interpreter = next(
+            middleware
+            for middleware in agent._parts("agent").middleware
+            if isinstance(middleware, RunCodeInterpreter)
+        )
+        state: REPLState = {"messages": cast(list[AnyMessage], messages)}
+        assert await interpreter.abefore_model(state, Runtime()) is None
+        state["_summarization_event"] = {"cutoff_index": len(messages)}
+        restored = await interpreter.abefore_model(state, Runtime())
+        assert restored is not None
+        assert isinstance(restored["messages"], list)
+        assert len(restored["messages"]) == 1
+        message = restored["messages"][0]
+        assert isinstance(message, HumanMessage)
+        assert message.text == prompts[-1]
+        state["messages"] = [*messages, message]
+        assert await interpreter.abefore_model(state, Runtime()) is None
+        if len(prompts) % 2:
+            run = current_run()
+            run.adopted = run.catalog.model_copy(
+                update={
+                    "operations": [
+                        spec.model_copy(update={"description": f"Updated {spec.description}"})
+                        for spec in run.catalog.operations
+                    ]
+                }
+            )
+        return await original(model, messages)
 
     monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
-    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
+    monkeypatch.setattr(
+        agent,
+        "_DEFAULT_MODEL",
+        _calling(
+            *[
+                ToolCall(name="eval", args={"code": "1 + 1"}, id=f"eval-{index}")
+                for index in range(2)
+            ]
+        ),
+    )
     store = InMemoryStore()
     for parameter in ("first_parameter", "second_parameter"):
         catalog = _catalog("lookup", "grant").model_copy(
@@ -1422,9 +1470,18 @@ async def test_code_tools_list_each_runs_schema_in_a_message_not_the_system_prom
         )
         await _run(store, parameter, _context("agent", parameter, catalog))
 
+    assert len(prompts) == 4
+    assert "Updated Uses first_parameter" in prompts[1]
+    assert "Updated Uses second_parameter" in prompts[3]
     assert "first_parameter" in prompts[0] and "second_parameter" not in prompts[0]
-    assert "second_parameter" in prompts[1] and "first_parameter" not in prompts[1]
-    assert systems[0] == systems[1]
+    assert "second_parameter" in prompts[2] and "first_parameter" not in prompts[2]
+    assert len(set(systems)) == 1
+    assert rendered == [
+        ["Uses first_parameter"],
+        ["Updated Uses first_parameter"],
+        ["Uses second_parameter"],
+        ["Updated Uses second_parameter"],
+    ]
 
 
 async def test_code_only_search_and_files_are_hidden_but_callable(

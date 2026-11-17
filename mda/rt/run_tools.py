@@ -12,6 +12,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from functools import partial
 from typing import Final
 
@@ -355,6 +356,12 @@ class RunSubagentMiddleware(AgentMiddleware):
         return await RUN_GATEWAY.call(request, handler, run=current_run(), routed_model=model)
 
 
+@dataclass
+class _CodeToolsListing:
+    tools: tuple[BaseTool, ...] = ()
+    text: str = ""
+
+
 class RunCodeInterpreter(CodeInterpreterMiddleware):
     """Code mode over the run's tools: the graph's own it names, and those the run offers from code.
 
@@ -382,6 +389,7 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         self._named = list(named)
         self._active = active
         self._listed_in_messages = listed_in_messages
+        self._listings = RunLocal(_CodeToolsListing)
         self._slots: dict[str, asyncio.Lock] = {}
         super().__init__(
             ptc=[],
@@ -451,14 +459,21 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
 
     def _listing(self) -> str:
         """The tools code mode calls, as the message that lists them."""
-        exposed = filter_tools_for_ptc([], self._ptc, self_tool_name=self._tool_name)
+        exposed = tuple(filter_tools_for_ptc([], self._ptc, self_tool_name=self._tool_name))
+        cached = self._listings.get(current_run())
+        if len(cached.tools) == len(exposed) and all(
+            previous is tool for previous, tool in zip(cached.tools, exposed, strict=True)
+        ):
+            return cached.text
         reference = render_ptc_prompt(exposed, tool_name=self._tool_name).strip()
-        if not reference:
-            return ""
         body = reference.replace("]]>", "]]]]><![CDATA[>")
-        return (
+        text = (
             f'<dynamic-context kind="run" id="code-tools"><![CDATA[\n{body}\n]]></dynamic-context>'
+            if reference
+            else ""
         )
+        cached.tools, cached.text = exposed, text
+        return text
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
         if not await self._runs_code():
