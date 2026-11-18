@@ -9,7 +9,7 @@ dependencies = [
     "langchain>=1.4.10",
     "langchain-openai>=1.7.4,<2.0.0",
     # Jev, the gateway's classifier, which both sides ask (classifier.py).
-    "langchain-typesafe==0.0.2",
+    "langchain-typesafe==0.1.0",
     "httpx2>=2.12.0",
 ]
 
