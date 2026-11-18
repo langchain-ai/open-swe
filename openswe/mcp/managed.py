@@ -60,6 +60,11 @@ KITS_PATH = "/v1/managed-tools/kits"
 ME_KIT = "me"
 KIT_CONNECTION = "lmt"
 CONSENT_SESSIONS_PATH = "/v1/agent-auth/oauth-authorization-sessions"
+# LMT built-ins a person's kit leaves out, by key. Slack's runs on LangSmith's Slack bot
+# and reads public channels only, as Robin's own Slack tools already do; a person's own
+# Slack access is the workspace server slack_user. LMT names a built-in's kit tools
+# langsmith_<key>_<tool>, and lists the built-in itself under its key.
+PERSONAL_HIDDEN_BUILTINS = ("slack",)
 _TIMEOUT_SECONDS = 30
 _MAX_PAGES = 5
 _LISTING_FRESH_FOR = timedelta(minutes=1)
@@ -260,12 +265,14 @@ class _KitConnection(MCPConnection):
     connected_only: bool = False
     """Leave out the tools of services the caller has no credential for, which nobody
     running as the caller could connect."""
+    hidden_builtins: tuple[str, ...] = ()
+    """Keys of LMT built-ins whose tools the kit's runs never load."""
 
     def connection_headers(self) -> dict[str, str]:
         return self.headers
 
     def allows_tool(self, name: str) -> bool:
-        return True
+        return not any(name.startswith(f"langsmith_{key}_") for key in self.hidden_builtins)
 
     @property
     def offers_tools(self) -> bool:
@@ -338,6 +345,9 @@ class ManagedTools(ABC):
         """The kit this caller's runs load."""
 
     connected_only: bool = False
+    hidden_builtins: tuple[str, ...] = ()
+    """Keys of LMT built-ins left out of this caller's kit: neither their tools nor an
+    offer to connect them."""
 
     def _tenant(self) -> dict[str, str]:
         # Without a pin, LangSmith uses the workspace the credential carries.
@@ -419,11 +429,15 @@ class ManagedTools(ABC):
 
     async def kit_servers(self) -> list[ManagedServer]:
         """The servers whose tools the kit offers, with the caller's state of each."""
-        if self.built_per_caller:
-            return await self.servers()
-        cached = await self._cached("kit")
-        linked = set(cached) if isinstance(cached, list) else set()
-        return [server for server in await self.servers() if server.id in linked]
+        linked: set[str] | None = None
+        if not self.built_per_caller:
+            cached = await self._cached("kit")
+            linked = set(cached) if isinstance(cached, list) else set()
+        return [
+            server
+            for server in await self.servers()
+            if server.id not in self.hidden_builtins and (linked is None or server.id in linked)
+        ]
 
     async def _swr(self, listing: str) -> SWRResult[object]:
         from langgraph_api.cache import swr
@@ -508,6 +522,7 @@ class ManagedTools(ABC):
                 revision=revision,
                 headers=headers,
                 connected_only=self.connected_only,
+                hidden_builtins=self.hidden_builtins,
             )
         ]
 
@@ -600,6 +615,7 @@ class PersonalTools(ManagedTools):
     """
 
     scope: MCPScope = "managed"
+    hidden_builtins = PERSONAL_HIDDEN_BUILTINS
 
     def __init__(self, login: str) -> None:
         self.login = login.strip().lower()
@@ -768,6 +784,9 @@ class BotKitViewer(PersonalTools):
     own listing, as its profile, so it is what the bot can use and asks nothing of the
     admin's LangSmith grants.
     """
+
+    # The bot kit as it is, whatever a person's own kit leaves out.
+    hidden_builtins = ()
 
     def __init__(self, login: str) -> None:
         super().__init__(login)

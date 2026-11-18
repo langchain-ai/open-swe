@@ -157,6 +157,36 @@ async def test_a_private_owner_loads_the_whole_kit_as_themselves(monkeypatch, re
     assert await runtime.load_mcp_tools(managed.PersonalTools("bob").source()) == []
 
 
+async def test_a_private_owner_never_sees_the_slack_bot_built_in(monkeypatch, lmt):
+    """LMT's Slack built-in runs on LangSmith's Slack bot and reads public channels only,
+    which Robin's own Slack tools already do; a person's own Slack is the slack_user
+    server. So private threads neither load its tools nor offer to connect it."""
+    lmt.servers["alice"].append(server("slack", "Slack", connected=False))
+
+    async def discover(record):
+        return [
+            Tool(name=name, input_schema={"type": "object"})
+            for name in (
+                "langsmith_slack_read_channel_history",
+                "langsmith_slack_send_channel_message",
+                "langsmith_gmail_send_email",
+                "slack_user_slack_search_public",
+            )
+        ]
+
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
+    private_thread(monkeypatch, "alice")
+    alice = managed.PersonalTools("alice")
+    tools = await runtime.load_mcp_tools(alice.source())
+
+    assert sorted(tool.name for tool in tools) == [
+        "mcp_lmt_langsmith_gmail_send_email",
+        "mcp_lmt_slack_user_slack_search_public",
+    ]
+    assert "Slack" not in await alice.connectable()
+    assert await alice.unconnected(["slack"]) == []
+
+
 async def test_a_change_to_the_kit_relists_only_when_robin_refreshes_it(monkeypatch, lmt):
     """A run never waits on the kit's slow listing because a service changed: its cached
     list stays under the same key, and Robin lists it again when it makes the change."""
