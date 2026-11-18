@@ -229,6 +229,34 @@ class TestRecentFileAuthors:
         assert len(self.requests) == 3
 
 
+@pytest.mark.parametrize(
+    ("status", "headers", "message", "reason"),
+    [
+        (403, {"x-ratelimit-remaining": "0"}, "private details", "primary_rate_limit"),
+        (403, {"retry-after": "60"}, "private details", "rate_limit"),
+        (403, {}, "You have exceeded a secondary rate limit.", "rate_limit"),
+        (429, {}, "private details", "rate_limit"),
+        (403, {}, "Resource not accessible by integration", "permission_denied"),
+        (403, {}, "Resource not accessible by personal access token", "permission_denied"),
+        (403, {}, "private details", "unknown"),
+        (500, {}, "private details", "unknown"),
+    ],
+)
+def test_github_error_reports_only_safe_failure_reasons(
+    status: int, headers: dict[str, str], message: str, reason: str
+) -> None:
+    response = httpx2.Response(
+        status,
+        headers=headers,
+        json={"message": message},
+        request=httpx2.Request("GET", "https://api.github.com/orgs/acme/memberships/ada"),
+    )
+    error = github_http.GitHubError(response)
+    assert str(error) == f"GitHub answered {status} ({reason})"
+    assert error.response is response
+    assert error.message == message
+
+
 class TestComputeBackoff:
     def test_caps_retry_after_at_max(self) -> None:
         resp = _make_response(429, {"Retry-After": "120"})

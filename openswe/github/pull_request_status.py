@@ -19,6 +19,7 @@ from openswe.github.branch_config import BranchConfig
 from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
 from openswe.github.ci import unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
+from openswe.github.metering import MeteredTransport
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.queue import QueuePull, Review, ReviewPage
 
@@ -1022,7 +1023,10 @@ class PullRequestClient:
             {"repo_full_name": self.repo.full_name, "number": self.number}
         )
         result["url"] = f"https://github.com/{self.repo.full_name}/pull/{self.number}"
-        pull, review_threads = await asyncio.gather(or_none(self.pull()), self.unresolved_threads())
+        with MeteredTransport.attributed():
+            pull, review_threads = await asyncio.gather(
+                or_none(self.pull()), self.unresolved_threads()
+            )
         if review_threads is not None:
             result.update(
                 {
@@ -1047,9 +1051,10 @@ class PullRequestClient:
         )
         if not isinstance(sha, str) or not _SHA_PATTERN.fullmatch(sha):
             return result
-        runs, statuses = await asyncio.gather(
-            or_none(self.repo.check_runs(sha)), or_none(self.repo.commit_statuses(sha))
-        )
+        with MeteredTransport.attributed():
+            runs, statuses = await asyncio.gather(
+                or_none(self.repo.check_runs(sha)), or_none(self.repo.commit_statuses(sha))
+            )
         if runs is not None and statuses is not None:
             failing, pending, inconclusive = _normalize_checks(runs, statuses)
             result.update(
@@ -1109,12 +1114,13 @@ class PullRequestClient:
         if sha is None or not _SHA_PATTERN.fullmatch(sha):
             return result
         result.head_sha = sha
-        runs, statuses, reviewers, review_state = await asyncio.gather(
-            or_none(self.repo.check_runs(sha)),
-            or_none(self.repo.commit_statuses(sha)),
-            self.reviewers(),
-            self.review_state(),
-        )
+        with MeteredTransport.attributed():
+            runs, statuses, reviewers, review_state = await asyncio.gather(
+                or_none(self.repo.check_runs(sha)),
+                or_none(self.repo.commit_statuses(sha)),
+                self.reviewers(),
+                self.review_state(),
+            )
         result.reviewers = reviewers
         result.review_decision = (
             None if reviewers is None else PullRequestReviewer.decision(reviewers)
@@ -1278,7 +1284,8 @@ async def list_open_pull_requests(
         async with semaphore:
             return await client.load(details=not lightweight, listed=item, wanted={"open"})
 
-    items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
+    with MeteredTransport.attributed():
+        items = await asyncio.gather(*(load(item) for item in payload["items"][:_SEARCH_PAGE_SIZE]))
     total = payload.get("total_count")
     has_more = (
         isinstance(total, int) and page * _SEARCH_PAGE_SIZE < total and page < _SEARCH_MAX_PAGES

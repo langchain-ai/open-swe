@@ -2,11 +2,9 @@ import asyncio
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from functools import partial
 
 import httpx2
 import pytest
-from githubkit import GitHub
 from langgraph.runtime import Runtime
 
 from openswe.agent_api.runs import in_graph_context
@@ -242,9 +240,7 @@ async def test_forced_refresh_keeps_a_concurrently_minted_token(
         return httpx2.Response(201, json={"token": f"token-{number}", "expires_at": expiry})
 
     mock_github_sdk(monkeypatch, lambda request: httpx2.Response(500))
-    monkeypatch.setattr(
-        sdk, "GitHub", partial(GitHub, async_transport=httpx2.MockTransport(handle))
-    )
+    monkeypatch.setattr(sdk, "pooled_transport", lambda: httpx2.MockTransport(handle))
     assert await github_app.get_github_app_installation_token() == "token-1"
     refreshing = asyncio.create_task(
         github_app.get_github_app_installation_token_with_expiry(force_refresh=True)

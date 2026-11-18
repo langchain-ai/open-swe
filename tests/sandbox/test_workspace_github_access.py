@@ -20,6 +20,7 @@ from openswe.agent_api.runs import run_config
 from openswe.agent_api.server import RefusedCallError
 from openswe.agent_api.tokens import RemoteRun
 from openswe.github import app, proxy, sandbox_access
+from openswe.github.metering import MeteredTransport
 from openswe.github.repositories import Repository
 from openswe.sandboxes import lifecycle
 from openswe.sandboxes.providers.langsmith import LangSmithProvider
@@ -94,7 +95,8 @@ def github(
         transport = kwargs.get("transport")
         return client(
             transport=transport
-            if isinstance(transport, httpx2.MockTransport)
+            # The GitHub SDK's mock, under its metering.
+            if isinstance(transport, (httpx2.MockTransport, MeteredTransport))
             else httpx2.MockTransport(handle_proxy)
         )
 

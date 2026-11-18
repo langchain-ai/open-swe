@@ -1,11 +1,9 @@
 """Run the real GitHub SDK against a deterministic HTTP transport."""
 
 from collections.abc import Callable
-from functools import partial
 
 import httpx2
 import pytest
-from githubkit import GitHub
 
 from openswe.github import sdk
 
@@ -14,9 +12,8 @@ def mock_github_sdk(
     monkeypatch: pytest.MonkeyPatch,
     handler: Callable[[httpx2.Request], httpx2.Response],
 ) -> None:
-    monkeypatch.setattr(
-        sdk, "GitHub", partial(GitHub, async_transport=httpx2.MockTransport(handler))
-    )
+    # Under the SDK's metering, so requests are logged as they are in production.
+    monkeypatch.setattr(sdk, "pooled_transport", lambda: httpx2.MockTransport(handler))
 
     def sign(*args: object, **kwargs: object) -> str:
         return "test-app-jwt"

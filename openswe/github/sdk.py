@@ -8,6 +8,9 @@ import httpx2
 from githubkit import GitHub
 from githubkit.auth import BaseAuthStrategy
 
+from openswe.github.metering import MeteredTransport
+from openswe.utils.http_pool import pooled_transport
+
 GITHUB_API_VERSION: Literal["2022-11-28"] = "2022-11-28"
 
 
@@ -22,5 +25,7 @@ async def github_sdk[A: BaseAuthStrategy](
         # scoped by repository and permission in openswe.github.app.
         http_cache=False,
         auto_retry=False,
+        # Logged like every other GitHub request, so installation lookups are counted too.
+        async_transport=MeteredTransport(pooled_transport()),
     ) as client:
         yield client

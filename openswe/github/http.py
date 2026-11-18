@@ -38,6 +38,7 @@ from urllib.parse import quote, unquote, urlparse
 import httpx2
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
+from openswe.github.metering import MeteredTransport
 from openswe.github.queue import (
     Artifact,
     CommitComparison,
@@ -606,17 +607,19 @@ class GitHubClient:
             return count if max_pages is None else min(count, max_pages)
 
         if total:
-            batches = await asyncio.gather(
-                *(bounded(page) for page in range(1, page_count(total) + 1))
-            )
+            with MeteredTransport.attributed():
+                batches = await asyncio.gather(
+                    *(bounded(page) for page in range(1, page_count(total) + 1))
+                )
         else:
             first = await read(1)
             batches = [first]
             reported = first[1]
             if reported is not None and first[2]:
-                batches += await asyncio.gather(
-                    *(bounded(page) for page in range(2, page_count(reported) + 1))
-                )
+                with MeteredTransport.attributed():
+                    batches += await asyncio.gather(
+                        *(bounded(page) for page in range(2, page_count(reported) + 1))
+                    )
         page = len(batches)
         while batches[-1][2] and page != max_pages:
             page += 1
@@ -1710,6 +1713,23 @@ class GitHubError(httpx2.HTTPStatusError):
             request=response.request,
             response=response,
         )
+
+    def __str__(self) -> str:
+        return f"{super().__str__()} ({self.failure_reason})"
+
+    @property
+    def failure_reason(self) -> str:
+        if self.response.status_code in {403, 429}:
+            if self.response.headers.get("x-ratelimit-remaining") == "0":
+                return "primary_rate_limit"
+            if self.rate_limited:
+                return "rate_limit"
+            if self.message in {
+                "Resource not accessible by integration",
+                "Resource not accessible by personal access token",
+            }:
+                return "permission_denied"
+        return "unknown"
 
     @property
     def rate_limited(self) -> bool:
