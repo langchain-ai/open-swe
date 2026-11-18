@@ -20,6 +20,7 @@ from openswe.prompts import prompt
 from openswe.source_context import SourceContext
 from openswe.threads.summary import (
     _is_automation_thread,
+    _is_thread_resolved,
     _metadata_repo,
     _thread_id,
     _thread_metadata,
@@ -54,7 +55,7 @@ class RecentThreadContext:
         title: str,
         repo: str | None,
         source: str,
-        resolved: bool | None,
+        resolved: bool,
         updated_at_ms: int | None,
     ) -> None:
         self.thread_id = thread_id
@@ -78,11 +79,6 @@ def _clean_title(raw: object, repo: str | None, source: str) -> str:
             return f"{repo} ({source})"[:RECENT_CONTEXT_TITLE_MAX_CHARS]
         return _UNTITLED
     return collapsed[:RECENT_CONTEXT_TITLE_MAX_CHARS]
-
-
-def _thread_resolved(metadata: Mapping[str, object]) -> bool | None:
-    value = metadata.get("resolved")
-    return value if isinstance(value, bool) else None
 
 
 def _eligible_for_private_or_dm(metadata: Mapping[str, object], login: str | None) -> bool:
@@ -208,7 +204,7 @@ class RecentContextSelector:
             title=_clean_title(metadata.get("title"), full_name or None, thread_source(metadata)),
             repo=full_name or None,
             source=thread_source(metadata),
-            resolved=_thread_resolved(metadata),
+            resolved=_is_thread_resolved(metadata),
             updated_at_ms=updated_at,
         )
 
@@ -242,7 +238,7 @@ def _format_day(updated_at_ms: int | None) -> str:
 def _render_entries(entries: list[RecentThreadContext]) -> str:
     lines: list[str] = []
     for index, entry in enumerate(entries, 1):
-        state = {True: "resolved", False: "unresolved", None: "unknown"}[entry.resolved]
+        state = "resolved" if entry.resolved else "unresolved"
         body = "\n".join(
             [
                 f"{index}. Topic: {entry.title}",

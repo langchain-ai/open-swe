@@ -122,6 +122,13 @@ async def test_deduplicates_identity_matches_and_ties_are_deterministic() -> Non
     assert [context.thread_id for context in selected] == ["tie-b", "tie-a"]
 
 
+@pytest.mark.parametrize("resolved", [None, False, True])
+async def test_resolution_matches_thread_listing(resolved: bool | None) -> None:
+    selected = await selector([[thread("t", updated_at=2_000, resolved=resolved)]]).select()
+    assert len(selected) == 1
+    assert selected[0].resolved is (resolved is True)
+
+
 async def test_admin_never_receives_another_users_private_thread() -> None:
     private = thread("private", updated_at=9_999, visibility="private", owner_login="bob")
     assert await selector([[private]]).select() == []
