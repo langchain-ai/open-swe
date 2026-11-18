@@ -110,9 +110,8 @@ scope (see "Reuse what earlier evals left in scope" below).
 
 #### Fan out with bounded concurrency
 
-Dispatch independent work in parallel with `Promise.all`. Batches around 10 are
-a conservative recommendation, not a required limit; use larger batches when
-appropriate for the workload and its admission controls. The bridge enforces
+Dispatch independent work in parallel with `Promise.allSettled`. Start with
+batches and adjust to the workload and its admission controls. The bridge enforces
 a per-REPL cap of {max_subagent_concurrency} concurrent subagent calls; excess
 calls wait for capacity.
 
@@ -122,7 +121,7 @@ const batchSize = 10;
 const reviewed = [];
 for (let i = 0; i < files.length; i += batchSize) {
   const batch = files.slice(i, i + batchSize);
-  reviewed.push(...(await Promise.all(batch.map(async (file) => {
+  const outcomes = await Promise.allSettled(batch.map(async (file) => {
     const result = await task({
       description: "Read " + file + " and review it for SQL injection. " +
         "Cite line numbers.",
@@ -147,8 +146,14 @@ for (let i = 0; i < files.length; i += batchSize) {
       },
     });
     return { file, ...result };
-  }))));
+  }));
+  for (const [index, outcome] of outcomes.entries()) {
+    reviewed.push(outcome.status === "fulfilled"
+      ? outcome.value
+      : { file: batch[index], error: String(outcome.reason) });
+  }
 }
+reviewed;
 ```
 
 #### Explore with your own tools first, then distribute
@@ -187,12 +192,12 @@ path if it is large). Assemble the results in JS.
 
 #### Compose multiple stages
 
-Filter the array in JS between passes. For example: first ask subagents for a
-cheap classification, filter to the risky items, then dispatch deeper reviews
-only for those items.
+Filter the fulfilled values between passes. First classify the files, then
+dispatch deeper reviews for the risky handlers. Keep failed dispatches
+associated with their inputs so they can be reported or retried.
 
 ```javascript
-const tagged = await Promise.all(files.map((file) =>
+const classifications = await Promise.allSettled(files.map((file) =>
   task({
     description: "Read " + file + " and classify it as handler, util, " +
       "test, or config.",
@@ -202,16 +207,37 @@ const tagged = await Promise.all(files.map((file) =>
       properties: { kind: { type: "string" }, risky: { type: "boolean" } },
       required: ["kind", "risky"],
     },
-  }).then((tag) => ({ file, ...tag }))
+  })
 ));
 
-const riskyHandlers = tagged.filter((it) => it.kind === "handler" && it.risky);
-const deepReviews = await Promise.all(riskyHandlers.map((it) =>
+const failures = [];
+const riskyHandlers = [];
+for (const [index, outcome] of classifications.entries()) {
+  const file = files[index];
+  if (outcome.status === "rejected") {
+    failures.push({ file, stage: "classification", error: String(outcome.reason) });
+  } else if (outcome.value.kind === "handler" && outcome.value.risky) {
+    riskyHandlers.push(file);
+  }
+}
+
+const reviews = await Promise.allSettled(riskyHandlers.map((file) =>
   task({
-    description: "Deep security review of " + it.file + ". Cite line numbers.",
+    description: "Deep security review of " + file + ". Cite line numbers.",
     subagentType: "reviewer",
-  }).then((review) => ({ ...it, review }))
+  })
 ));
+
+const deepReviews = [];
+for (const [index, outcome] of reviews.entries()) {
+  const file = riskyHandlers[index];
+  if (outcome.status === "fulfilled") {
+    deepReviews.push({ file, review: outcome.value });
+  } else {
+    failures.push({ file, stage: "review", error: String(outcome.reason) });
+  }
+}
+({ deepReviews, failures });
 ```
 
 #### Return results via the last expression, not `console.log`
@@ -243,19 +269,35 @@ Re-typing prior results as a fresh literal wastes tokens and drifts from what
 actually ran.
 
 ```javascript
-// An earlier eval bound this:
-//   const auditResults = await Promise.all(files.map(/* ...audit... */));
+// An earlier eval left these in scope:
+//   const auditFiles = ...;
+//   const auditOutcomes = await Promise.allSettled(auditFiles.map(auditFile));
 
-// A later eval — reference it; do NOT paste the findings back in as a literal:
-const findings = auditResults.flatMap((r) =>
-  r.findings.map((f) => ({ ...f, file: r.file }))
-);
-const verified = await Promise.all(findings.map((f) =>
+// Reuse the earlier outcomes to verify findings from successful audits.
+const auditFailures = [];
+const findings = auditOutcomes.flatMap((outcome, index) => {
+  const file = auditFiles[index];
+  if (outcome.status === "rejected") {
+    auditFailures.push({ file, error: String(outcome.reason) });
+    return [];
+  }
+  return outcome.value.findings.map((finding) => ({ ...finding, file }));
+});
+
+const verificationOutcomes = await Promise.allSettled(findings.map((finding) =>
   task({
-    description: "Verify this finding: " + f.evidence,
+    description: "Verify this finding in " + finding.file + ": " + finding.evidence,
     subagentType: "verifier",
-  }).then((v) => ({ ...f, ...v }))
+  })
 ));
+
+const verifications = verificationOutcomes.map((outcome, index) => ({
+  finding: findings[index],
+  ...(outcome.status === "fulfilled"
+    ? { verification: outcome.value }
+    : { error: String(outcome.reason) }),
+}));
+({ verifications, auditFailures });
 ```
 
 #### When the user asks for a "workflow"
@@ -422,9 +464,12 @@ def render_ptc_prompt(tools: Sequence[BaseTool], *, tool_name: str = "eval") -> 
         "native value: strings as strings, numbers as numbers, lists as "
         "arrays, dicts as objects, and `None` as `null`. You do NOT need to "
         "`JSON.parse` results — they are already typed.\n\n"
-        "Invocation pattern: `await tools.<name>({ ... })`.\n\n"
-        "- Use `await` to get tool results; combine with `Promise.all` for "
-        "independent calls so they run concurrently.\n"
+        "- For independent calls, start them together with "
+        "`Promise.allSettled`. For a list of inputs, map the inputs to tool "
+        "promises and await the batch. Use bounded batches for long lists.\n"
+        "- Keep the input alongside each outcome. Report rejected promises "
+        "and check fulfilled values for tool-reported errors. If a tool "
+        "returns JSON as text, handle parsing errors per result.\n"
         f"- If the task needs multiple tool calls, prefer one `{tool_name}` "
         "invocation that performs all of them rather than splitting the work "
         f"across multiple `{tool_name}` calls — each round-trip costs a model "
@@ -443,13 +488,39 @@ def render_ptc_prompt(tools: Sequence[BaseTool], *, tool_name: str = "eval") -> 
         "model reasoning or user input.\n\n"
         "Example shape — substitute real tool names:\n\n"
         "```typescript\n"
+        '// Chain the dependent lookup, then run independent calls together.\n'
         'const users = await tools.findUsers({ name: "Ada" });\n'
         "const userId = users[0].id;\n"
-        "const [city, normalized] = await Promise.all([\n"
+        "const [cityOutcome, normalizedOutcome] = await Promise.allSettled([\n"
         "  tools.cityForUser({ user_id: userId }),\n"
         '  tools.normalize({ name: "Ada" }),\n'
         "]);\n"
-        "console.log({ city, normalized });\n"
+        "({\n"
+        '  city: cityOutcome.status === "fulfilled"\n'
+        "    ? { value: cityOutcome.value } : { error: String(cityOutcome.reason) },\n"
+        '  normalized: normalizedOutcome.status === "fulfilled"\n'
+        "    ? { value: normalizedOutcome.value } : { error: String(normalizedOutcome.reason) },\n"
+        "});\n"
+        "```\n\n"
+        "```typescript\n"
+        "// For a long list of thread IDs, bound the concurrent lookups.\n"
+        "const results = [];\n"
+        "const batchSize = 8;\n"
+        "for (let offset = 0; offset < ids.length; offset += batchSize) {\n"
+        "  const batch = ids.slice(offset, offset + batchSize);\n"
+        "  const outcomes = await Promise.allSettled(\n"
+        "    batch.map((id) => tools.getThread({ thread_id: id })),\n"
+        "  );\n"
+        "  for (const [index, outcome] of outcomes.entries()) {\n"
+        "    const id = batch[index];\n"
+        "    if (outcome.status === 'rejected') {\n"
+        "      results.push({ id, error: String(outcome.reason) });\n"
+        "    } else {\n"
+        "      results.push({ id, value: outcome.value });\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+        "results;\n"
         "```\n\n"
         "```typescript\n"
         f"{body}\n"
