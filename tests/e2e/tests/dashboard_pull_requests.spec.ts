@@ -114,6 +114,22 @@ test.describe("thread pull requests", () => {
       "href",
       /\/fakeorg\/demo\/pull\/1$/,
     );
+    const threadUrl = page.url();
+    for (const link of [
+      chip.getByRole("link", { name: "the greet() PR" }),
+      card.getByRole("link", {
+        name: "Review fakeorg/demo pull request #1 in Robin",
+      }),
+    ]) {
+      const newTab = page.context().waitForEvent("page");
+      await link.click({ modifiers: ["ControlOrMeta"] });
+      const reviewPage = await newTab;
+      await expect(reviewPage).toHaveURL(
+        /\/agents\/reviews\/fakeorg\/demo\/1$/,
+      );
+      await expect(page).toHaveURL(threadUrl);
+      await reviewPage.close();
+    }
     await page.emulateMedia({ colorScheme: "dark" });
     await card.scrollIntoViewIfNeeded();
     await page.screenshot({ path: test.info().outputPath("pr-link-card.png") });
