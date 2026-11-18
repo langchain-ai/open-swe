@@ -19,6 +19,7 @@ from openswe.dashboard import workspace_settings_cache
 from openswe.dashboard.workspace_settings import WorkspaceSettings, WorkspaceSettingsUpdate
 from openswe.github import webhook as github_webhook
 from openswe.github.http import GitHubClient
+from openswe.github.pull_request_status import HeadChecks, PullRequestClient
 from openswe.github.webhook import PreviewReady
 from openswe.jobs import queue as job_queue
 from openswe.jobs.queue import Job
@@ -488,10 +489,18 @@ class _Preview:
         clock = Mock(wraps=datetime)
         clock.now.side_effect = lambda _tz: self.now
         monkeypatch.setattr(github_webhook, "datetime", clock)
-        # The checks GitHub lists on the head, for the watch.
+        # The checks GitHub lists on the head and the workflow behind each suite, for the
+        # watch; ``overflow`` when a suite holds too many to read over GraphQL.
+        self.head_runs: list[dict[str, object]] = []
+        self.workflows: dict[int, int] = {}
+        self.overflow = False
         self.repository = Mock(
-            check_runs=AsyncMock(return_value=[]), workflow_ids=AsyncMock(return_value={})
+            full_name="acme/widgets",
+            check_runs=AsyncMock(side_effect=lambda *_args, **_kwargs: self.head_runs),
+            workflow_ids=AsyncMock(side_effect=lambda _sha: self.workflows),
         )
+        self.head_checks = AsyncMock(side_effect=self._head_checks)
+        self.repository.pull_request.return_value.head_checks = self.head_checks
         self.repository.pull_request.return_value.pull = AsyncMock(side_effect=lambda: self.pull)
         github = MagicMock()
         github.__aenter__.return_value = Mock(repo=Mock(return_value=self.repository))
@@ -506,6 +515,16 @@ class _Preview:
                 "repository": repository,
                 "pull_request": {"number": 7, **self.pull},
             }
+        )
+
+    async def _head_checks(self) -> HeadChecks:
+        head = self.pull["head"]
+        assert isinstance(head, dict)
+        return HeadChecks(
+            state=str(self.pull["state"]),
+            sha=head["sha"],
+            runs=None if self.overflow else list(self.head_runs),
+            workflows={} if self.overflow else self.workflows,
         )
 
     async def _load(self, _workspace: str) -> WorkspaceSettings:
@@ -655,11 +674,13 @@ async def test_watching_the_head_finds_a_preview_whose_completion_never_came(
     await preview.open()
     await preview.work()
     preview.settings = configured
-    checks = preview.repository.check_runs
-    checks.side_effect = RuntimeError("GitHub is down")
+    read, preview.head_checks.side_effect = (
+        preview.head_checks.side_effect,
+        RuntimeError("GitHub is down"),
+    )
     await preview.work()
-    checks.side_effect = None
-    checks.return_value = [
+    preview.head_checks.side_effect = read
+    preview.head_runs = [
         {"name": f"advisory / frontend-preview / {_PREVIEW_CHECK}", "conclusion": "success"}
     ]
     await preview.work()
@@ -708,7 +729,7 @@ async def test_the_watch_judges_a_preview_by_each_workflows_latest_deploy_that_r
 ) -> None:
     preview = _Preview(monkeypatch)
     app = {"id": 15368, "slug": "github-actions"}
-    preview.repository.check_runs.return_value = [
+    preview.head_runs = [
         {
             "id": 2,
             "name": check_name,
@@ -724,8 +745,11 @@ async def test_the_watch_judges_a_preview_by_each_workflows_latest_deploy_that_r
             "check_suite": {"id": 10},
         },
     ]
-    preview.repository.workflow_ids.return_value = {10: 1, 20: workflow}
-    preview.repository.workflow_ids.side_effect = workflow_error
+    preview.workflows = {10: 1, 20: workflow}
+    if workflow_error is not None:
+        # Only the REST read, for a suite too large for GraphQL, reads workflows apart.
+        preview.overflow = True
+        preview.repository.workflow_ids.side_effect = workflow_error
     await preview.open()
 
     await preview.work()
@@ -741,11 +765,12 @@ async def test_the_watch_judges_a_preview_by_each_workflows_latest_deploy_that_r
 async def test_the_watch_reads_workflows_only_once_a_preview_check_passed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Each look spends the GitHub App's hourly quota, so one that finds no passing preview
-    check reads nothing more."""
+    """A look that falls back to REST spends the GitHub App's hourly quota, so one that finds
+    no passing preview check reads nothing more."""
     preview = _Preview(monkeypatch)
+    preview.overflow = True
     app = {"id": 15368, "slug": "github-actions"}
-    preview.repository.check_runs.return_value = [
+    preview.head_runs = [
         {"id": 1, "name": _PREVIEW_CHECK, "conclusion": None, "app": app, "check_suite": {"id": 10}}
     ]
     await preview.open()
@@ -758,12 +783,71 @@ async def test_the_watch_reads_workflows_only_once_a_preview_check_passed(
     assert watch.kind == PreviewReady.RECONCILE
     assert watch.due_at == preview.now + PreviewReady.LOOK
 
-    preview.repository.check_runs.return_value = [
-        {**preview.repository.check_runs.return_value[0], "conclusion": "success"}
-    ]
+    preview.head_runs = [{**preview.head_runs[0], "conclusion": "success"}]
     await preview.work()
 
     preview.repository.workflow_ids.assert_awaited_once_with(_HEAD)
+
+
+@pytest.mark.parametrize("overflow", [False, True])
+async def test_a_pull_requests_head_checks_read_every_suite_or_none(overflow: bool) -> None:
+    """Every page of check suites is read; a suite with more runs than one page holds
+    gives no runs at all rather than some, since a dropped run could hide a failed deploy."""
+
+    def suite(suite_id: int, workflow: int | None, *runs: tuple[int, str | None]) -> object:
+        return {
+            "databaseId": suite_id,
+            "app": {"databaseId": 15368, "slug": "github-actions"},
+            "workflowRun": None if workflow is None else {"workflow": {"databaseId": workflow}},
+            "checkRuns": {
+                "pageInfo": {"hasNextPage": overflow and suite_id == 20},
+                "nodes": [
+                    {"databaseId": run_id, "name": _PREVIEW_CHECK, "conclusion": conclusion}
+                    for run_id, conclusion in runs
+                ],
+            },
+        }
+
+    def page(cursor: str | None, *suites: object) -> dict[str, object]:
+        commit = {
+            "oid": _HEAD,
+            "checkSuites": {
+                "pageInfo": {"hasNextPage": cursor is not None, "endCursor": cursor},
+                "nodes": list(suites),
+            },
+        }
+        return {
+            "repository": {
+                "pullRequest": {
+                    "state": "OPEN",
+                    "headRefOid": _HEAD,
+                    "commits": {"nodes": [{"commit": commit}]},
+                }
+            }
+        }
+
+    repo = Mock(
+        graphql=AsyncMock(
+            side_effect=[
+                page("next", suite(10, 1, (1, "SUCCESS"))),
+                page(None, suite(20, None, (2, "SKIPPED"), (3, None))),
+            ]
+        )
+    )
+
+    head = await PullRequestClient(repo, 7).head_checks()
+
+    assert (head.state, head.sha) == ("open", _HEAD)
+    if overflow:
+        assert head.runs is None
+        return
+    assert head.runs is not None
+    assert [(run["id"], run["conclusion"], run["check_suite"]) for run in head.runs] == [
+        (1, "success", {"id": 10}),
+        (2, "skipped", {"id": 20}),
+        (3, None, {"id": 20}),
+    ]
+    assert head.workflows == {10: 1}
 
 
 @pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
@@ -885,8 +969,10 @@ async def test_each_named_check_starts_its_own_run_once_its_preview_is_up(
     preview = _Preview(monkeypatch, checks=("wait-for-dns", "wait-for-api"))
 
     if watch:
-        preview.repository.workflow_ids.side_effect = workflow_error
-        preview.repository.check_runs.return_value = [
+        if workflow_error is not None:
+            preview.overflow = True
+            preview.repository.workflow_ids.side_effect = workflow_error
+        preview.head_runs = [
             {
                 "id": index,
                 "name": name,
@@ -900,7 +986,8 @@ async def test_each_named_check_starts_its_own_run_once_its_preview_is_up(
         ]
         await preview.open()
         await preview.work()
-        preview.repository.workflow_ids.assert_awaited_once_with(_HEAD)
+        if workflow_error is not None:
+            preview.repository.workflow_ids.assert_awaited_once_with(_HEAD)
     else:
         await PreviewReady.run(_check_passed(name="advisory / frontend-preview / wait-for-dns"))
         await PreviewReady.run(_check_passed(name="wait-for-api"))

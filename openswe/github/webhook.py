@@ -19,7 +19,7 @@ from openswe.baby_sit import handle_ci_webhook
 from openswe.dispatch import channel_of
 from openswe.expedited_review.reviews import REVIEW_BODY_PREFIX
 from openswe.github.comments import GitHubAuthError
-from openswe.github.http import GitHubClient
+from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.notifications import notify_slack_review
 from openswe.github.pull_requests import PullRequest, PullRequestEvent, PullRequestPayload
 from openswe.human_review.lifecycle import close_for_pull_request
@@ -1005,8 +1005,7 @@ class PreviewReady:
     WAIT: Final = timedelta(minutes=5)
     MOST_WAITS: Final = 12
     RECONCILE: Final = "review_apps_preview_reconcile"
-    # How often the watch looks. Each look reads a commit's checks, often several pages, from
-    # the GitHub App's hourly quota; the watch only recovers a completion GitHub never sent.
+    # How often the watch looks; it only recovers a completion GitHub never sent.
     LOOK: Final = timedelta(minutes=10)
     WINDOW: Final = timedelta(hours=1)
 
@@ -1175,6 +1174,33 @@ class PreviewReady:
         return True
 
     @classmethod
+    async def _passed_over_rest(
+        cls, repository: RepoClient, head_sha: str, checks: frozenset[str]
+    ) -> set[str]:
+        """The ``checks`` whose previews are up on ``head_sha``, read over REST for a commit
+        whose check suites hold too many runs to read over GraphQL."""
+        # Called workflows prefix job names, so an exact-name query misses them.
+        runs = await repository.check_runs(head_sha, include_superseded=True)
+        # Telling workflows apart can only hide a pass, never make one, so their identities
+        # are read only once some check has passed.
+        candidates = {check for check in checks if cls.deployed(runs, check, {})}
+        if not candidates:
+            return set()
+        try:
+            workflows = await repository.workflow_ids(head_sha)
+        except httpx2.HTTPError, ValueError:
+            common.logger.warning(
+                "Could not identify preview check workflows",
+                extra={"repository": repository.full_name, "sha": head_sha},
+                exc_info=True,
+            )
+            # Actions reruns can span suites; without workflow identities, an older success
+            # could hide a failed redeploy.
+            runs = [run for run in runs if (run.get("app") or {}).get("slug") != "github-actions"]
+            workflows = {}
+        return {check for check in candidates if cls.deployed(runs, check, workflows)}
+
+    @classmethod
     async def reconcile(cls, job: Job) -> None:
         """The watch on a pull request's head. A look that fails waits for the next one
         instead of raising: the queue's retries would give up well inside ``WINDOW``."""
@@ -1196,36 +1222,18 @@ class PreviewReady:
             if checks:
                 async with GitHubClient.as_app(owner, repo) as github:
                     repository = github.repo(owner, repo)
-                    pr = await repository.pull_request(number).pull()
-                    if pr.get("state") != "open" or (pr.get("head") or {}).get("sha") != head_sha:
+                    head = await repository.pull_request(number).head_checks()
+                    if head.state != "open" or head.sha != head_sha:
                         return
-                    # Called workflows prefix job names, so an exact-name query misses them.
-                    runs = await repository.check_runs(head_sha, include_superseded=True)
-                    # Telling workflows apart can only hide a pass, never make one, so their
-                    # identities are read only once some check has passed.
-                    candidates = {check for check in checks if cls.deployed(runs, check, {})}
-                    workflows: dict[int, int] | None = {}
-                    if candidates:
-                        try:
-                            workflows = await repository.workflow_ids(head_sha)
-                        except httpx2.HTTPError, ValueError:
-                            common.logger.warning(
-                                "Could not identify preview check workflows",
-                                extra={"repository": f"{owner}/{repo}", "sha": head_sha},
-                                exc_info=True,
-                            )
-                            workflows = None
-                    if workflows is None:
-                        # Actions reruns can span suites; without workflow identities,
-                        # an older success could hide a failed redeploy.
-                        runs = [
-                            run
-                            for run in runs
-                            if (run.get("app") or {}).get("slug") != "github-actions"
-                        ]
-                    passed = {
-                        check for check in candidates if cls.deployed(runs, check, workflows or {})
-                    }
+                    passed = (
+                        {
+                            check
+                            for check in checks
+                            if cls.deployed(head.runs, check, head.workflows)
+                        }
+                        if head.runs is not None
+                        else await cls._passed_over_rest(repository, head_sha, checks)
+                    )
                 again = passed != checks
                 for check in passed:
                     again |= await cls.enqueue(

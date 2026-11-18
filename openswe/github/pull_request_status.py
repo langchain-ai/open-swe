@@ -132,6 +132,37 @@ mutation($input: UpdatePullRequestReviewCommentInput!) {
   updatePullRequestReviewComment(input: $input) { pullRequestReviewComment { id } }
 }
 """
+# Each suite's runs come in one page: a suite with more falls back to REST
+# (``HeadChecks.runs``), since dropping a run could hide a failed redeploy.
+_HEAD_CHECKS_QUERY = """
+query PullRequestHeadChecks($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      state
+      headRefOid
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            checkSuites(first: 100, after: $cursor) {
+              pageInfo { hasNextPage endCursor }
+              nodes {
+                databaseId
+                app { databaseId slug }
+                workflowRun { workflow { databaseId } }
+                checkRuns(first: 100, filterBy: { checkType: ALL }) {
+                  pageInfo { hasNextPage }
+                  nodes { databaseId name conclusion }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
 _THREAD_COUNT_QUERY = """
 query PullRequestThreadCount($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -421,6 +452,100 @@ class ReviewState:
     review_required: bool = False
 
 
+class _GraphqlNode(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel)
+
+
+class _PageInfo(_GraphqlNode):
+    has_next_page: bool
+    end_cursor: str | None = None
+
+
+class _HeadCheckRun(_GraphqlNode):
+    database_id: int
+    name: str
+    conclusion: str | None
+
+
+class _HeadCheckRuns(_GraphqlNode):
+    page_info: _PageInfo
+    nodes: list[_HeadCheckRun]
+
+
+class _HeadCheckApp(_GraphqlNode):
+    database_id: int | None
+    slug: str
+
+
+class _HeadWorkflow(_GraphqlNode):
+    database_id: int | None
+
+
+class _HeadWorkflowRun(_GraphqlNode):
+    workflow: _HeadWorkflow
+
+
+class _HeadCheckSuite(_GraphqlNode):
+    database_id: int
+    app: _HeadCheckApp | None
+    workflow_run: _HeadWorkflowRun | None
+    check_runs: _HeadCheckRuns
+
+    def runs(self) -> list[dict[str, object]]:
+        """The suite's runs as REST lists a commit's check runs, in the fields read here."""
+        app = {"id": self.app.database_id, "slug": self.app.slug} if self.app else None
+        return [
+            {
+                "id": run.database_id,
+                "name": run.name,
+                "conclusion": run.conclusion.lower() if run.conclusion else None,
+                "app": app,
+                "check_suite": {"id": self.database_id},
+            }
+            for run in self.check_runs.nodes
+        ]
+
+
+class _HeadCheckSuites(_GraphqlNode):
+    page_info: _PageInfo
+    nodes: list[_HeadCheckSuite]
+
+
+class _HeadCommit(_GraphqlNode):
+    oid: str
+    check_suites: _HeadCheckSuites
+
+
+class _HeadCommitNode(_GraphqlNode):
+    commit: _HeadCommit
+
+
+class _HeadCommits(_GraphqlNode):
+    nodes: list[_HeadCommitNode]
+
+
+class _HeadPull(_GraphqlNode):
+    state: str
+    head_ref_oid: str
+    commits: _HeadCommits
+
+
+@dataclass(frozen=True, slots=True)
+class HeadChecks:
+    """A pull request's state (``open``, ``closed`` or ``merged``) and head commit, with
+    every check run on that commit, superseded attempts included.
+
+    ``runs`` take REST's shape (``id``, ``name``, lower-case ``conclusion``, ``app``,
+    ``check_suite``); ``workflows`` names the Actions workflow behind each check suite, by
+    suite id. ``runs`` is ``None`` when a suite holds more runs than one read returns.
+    """
+
+    state: str
+    sha: str
+    runs: list[dict[str, object]] | None
+    workflows: dict[int, int]
+
+
 class _CursorLoop(ValueError):
     """GitHub handed back a page cursor it had already given."""
 
@@ -507,6 +632,39 @@ class PullRequestClient:
         if not isinstance(payload, dict):
             raise ValueError("GitHub answered the pull request without an object")
         return payload
+
+    async def head_checks(self) -> HeadChecks:
+        """The pull request's state and the check runs on its head, read over GraphQL so
+        they spend none of the REST quota. Raises like ``RepoClient``; ``ValueError`` when
+        the head moves between pages."""
+        runs: list[dict[str, object]] = []
+        workflows: dict[int, int] = {}
+        cursor: str | None = None
+        seen: set[str] = set()
+        sha: str | None = None
+        while True:
+            data = await self.repo.graphql(
+                _HEAD_CHECKS_QUERY, {"number": self.number, "cursor": cursor}
+            )
+            pull = _HeadPull.model_validate(_graphql_pull(data))
+            commit = pull.commits.nodes[-1].commit if pull.commits.nodes else None
+            if commit is None or commit.oid != pull.head_ref_oid or sha not in {None, commit.oid}:
+                raise ValueError("The pull request's head moved while its checks were read")
+            sha = commit.oid
+            suites = commit.check_suites
+            for suite in suites.nodes:
+                if suite.check_runs.page_info.has_next_page:
+                    return HeadChecks(pull.state.lower(), sha, None, {})
+                runs += suite.runs()
+                workflow = suite.workflow_run.workflow.database_id if suite.workflow_run else None
+                if workflow is not None:
+                    workflows[suite.database_id] = workflow
+            if not suites.page_info.has_next_page:
+                return HeadChecks(pull.state.lower(), sha, runs, workflows)
+            cursor = suites.page_info.end_cursor
+            if not cursor or cursor in seen:
+                raise _CursorLoop
+            seen.add(cursor)
 
     async def update_title(self, title: str) -> None:
         await self.repo.patch(f"pulls/{self.number}", {"title": title})
