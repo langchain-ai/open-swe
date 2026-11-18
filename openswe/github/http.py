@@ -37,7 +37,8 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 from urllib.parse import quote, unquote, urlparse
 
 import httpx2
-from pydantic import BaseModel, JsonValue, TypeAdapter
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
+from pydantic.alias_generators import to_camel
 
 from openswe.github.metering import MeteredTransport
 from openswe.github.queue import (
@@ -129,66 +130,77 @@ _STATUS_STATES = {
 }
 
 
-class _CIPage(BaseModel):
-    hasNextPage: bool
+class GraphqlNode(BaseModel):
+    """A node of a GitHub GraphQL answer, its camelCase fields read into snake_case."""
+
+    model_config = ConfigDict(alias_generator=to_camel)
 
 
-class _CICheckRun(BaseModel):
-    databaseId: int
+class GraphqlPageInfo(GraphqlNode):
+    has_next_page: bool
+    end_cursor: str | None = None
+
+
+class _CICheckRun(GraphqlNode):
+    database_id: int
     name: str
     status: str
     conclusion: str | None = None
-    detailsUrl: str | None = None
+    details_url: str | None = None
     url: str | None = None
-    completedAt: datetime | None = None
+    completed_at: datetime | None = None
 
 
-class _CICheckRuns(BaseModel):
-    pageInfo: _CIPage
+class _CICheckRuns(GraphqlNode):
+    page_info: GraphqlPageInfo
     nodes: list[_CICheckRun]
 
 
-class _CIApp(BaseModel):
-    databaseId: int | None = None
+class GraphqlCheckApp(GraphqlNode):
+    database_id: int | None = None
     slug: str | None = None
 
+    def rest(self) -> dict[str, object]:
+        """The app as REST names it on a check run."""
+        return {"id": self.database_id, "slug": self.slug}
 
-class _CIWorkflow(BaseModel):
-    databaseId: int
+
+class _CIWorkflow(GraphqlNode):
+    database_id: int
 
 
-class _CIWorkflowRun(BaseModel):
+class _CIWorkflowRun(GraphqlNode):
     event: str
     workflow: _CIWorkflow
 
 
-class _CICheckSuite(BaseModel):
-    databaseId: int
-    app: _CIApp | None = None
-    workflowRun: _CIWorkflowRun | None = None
-    checkRuns: _CICheckRuns
+class _CICheckSuite(GraphqlNode):
+    database_id: int
+    app: GraphqlCheckApp | None = None
+    workflow_run: _CIWorkflowRun | None = None
+    check_runs: _CICheckRuns
 
 
-class _CICheckSuites(BaseModel):
-    pageInfo: _CIPage
+class _CICheckSuites(GraphqlNode):
+    page_info: GraphqlPageInfo
     nodes: list[_CICheckSuite]
 
 
-class _CIStatusContext(BaseModel):
+class _CIStatusContext(GraphqlNode):
     context: str
     state: str
-    targetUrl: str | None = None
-    createdAt: datetime | None = None
+    target_url: str | None = None
+    created_at: datetime | None = None
 
 
-class _CIStatus(BaseModel):
+class _CIStatus(GraphqlNode):
     contexts: list[_CIStatusContext]
 
 
-class _CICommit(BaseModel):
+class _CICommit(GraphqlNode):
     oid: str
     status: _CIStatus | None = None
-    checkSuites: _CICheckSuites
+    check_suites: _CICheckSuites
 
 
 _THREAD_PARTICIPANT_MAX_REQUESTS = 100
@@ -758,9 +770,9 @@ class GitHubClient:
         ).json()
         if not isinstance(payload, Mapping):
             raise ValueError("GitHub answered GraphQL without an object")
-        if payload.get("errors") and not partial:
-            raise GraphQLError(payload["errors"])
         data = payload.get("data")
+        if payload.get("errors") and not partial:
+            raise GraphQLError(payload["errors"], data if isinstance(data, Mapping) else None)
         if not isinstance(data, Mapping):
             raise ValueError("GitHub answered GraphQL without data")
         return data
@@ -790,41 +802,41 @@ class CommitCI:
     def from_graphql(cls, commit: object) -> Self | None:
         """``COMMIT_CI_FRAGMENT``'s answer; ``None`` when it held more than one page."""
         parsed = _CICommit.model_validate(commit)
-        suites = parsed.checkSuites
-        if suites.pageInfo.hasNextPage or any(
-            suite.checkRuns.pageInfo.hasNextPage for suite in suites.nodes
+        suites = parsed.check_suites
+        if suites.page_info.has_next_page or any(
+            suite.check_runs.page_info.has_next_page for suite in suites.nodes
         ):
             return None
         runs: list[dict[str, Any]] = []
         workflows: dict[int, tuple[int, str]] = {}
         for suite in suites.nodes:
-            app = suite.app or _CIApp()
-            if suite.workflowRun is not None:
-                workflows[suite.databaseId] = (
-                    suite.workflowRun.workflow.databaseId,
-                    suite.workflowRun.event,
+            app = suite.app or GraphqlCheckApp()
+            if suite.workflow_run is not None:
+                workflows[suite.database_id] = (
+                    suite.workflow_run.workflow.database_id,
+                    suite.workflow_run.event,
                 )
             runs.extend(
                 {
-                    "id": run.databaseId,
+                    "id": run.database_id,
                     "name": run.name,
                     "status": run.status.lower(),
                     "conclusion": run.conclusion.lower() if run.conclusion else None,
-                    "details_url": run.detailsUrl,
-                    **({"completed_at": run.completedAt.isoformat()} if run.completedAt else {}),
+                    "details_url": run.details_url,
+                    **({"completed_at": run.completed_at.isoformat()} if run.completed_at else {}),
                     # REST links an Actions run to its job page and any other app's run to ``url``.
-                    "html_url": run.detailsUrl if app.slug == "github-actions" else run.url,
-                    "app": {"id": app.databaseId, "slug": app.slug},
-                    "check_suite": {"id": suite.databaseId},
+                    "html_url": run.details_url if app.slug == "github-actions" else run.url,
+                    "app": app.rest(),
+                    "check_suite": {"id": suite.database_id},
                 }
-                for run in suite.checkRuns.nodes
+                for run in suite.check_runs.nodes
             )
         statuses = [
             {
                 "context": status.context,
                 "state": _STATUS_STATES.get(status.state, status.state.lower()),
-                "target_url": status.targetUrl,
-                **({"updated_at": status.createdAt.isoformat()} if status.createdAt else {}),
+                "target_url": status.target_url,
+                **({"updated_at": status.created_at.isoformat()} if status.created_at else {}),
             }
             for status in (parsed.status.contexts if parsed.status else [])
         ]
@@ -958,6 +970,22 @@ class RepoClient:
         return await self.github.graphql(
             query, {"owner": self.owner, "repo": self.name, **(variables or {})}
         )
+
+    async def ci_graphql(
+        self, query: str, variables: Mapping[str, object] | None = None
+    ) -> Mapping[str, object]:
+        """``graphql`` for a query of check suites, keeping the answer when GitHub withheld
+        only their ``workflowRun``s, which leaves those suites' workflows unknown."""
+        try:
+            return await self.graphql(query, variables)
+        except GraphQLError as exc:
+            if exc.data is None or not exc.only_at_workflow_runs:
+                raise
+            logger.warning(
+                "GitHub withheld check suites' workflows; reading them as unknown",
+                extra={"repo_full_name": self.full_name, "graphql_errors": str(exc)},
+            )
+            return exc.data
 
     async def open_pull_heads(self, numbers: Collection[int]) -> dict[int, str]:
         """The head commit of each of ``numbers`` that is open, read in one GraphQL query.
@@ -1597,7 +1625,7 @@ class RepoClient:
 
     async def commit_ci(self, sha: str) -> CommitCI:
         """``sha``'s latest check runs and commit statuses, in one GraphQL query when they fit."""
-        data = await self.graphql(_COMMIT_CI_QUERY, {"oid": self.inside(sha)})
+        data = await self.ci_graphql(_COMMIT_CI_QUERY, {"oid": self.inside(sha)})
         repository = data.get("repository")
         commit = repository.get("object") if isinstance(repository, Mapping) else None
         if not isinstance(commit, Mapping):
@@ -2008,11 +2036,28 @@ class GitHubError(httpx2.HTTPStatusError):
 
 
 class GraphQLError(ValueError):
-    """GitHub answered a GraphQL query with errors."""
+    """GitHub answered a GraphQL query with errors, and ``data`` with what it could resolve."""
 
-    def __init__(self, errors: object) -> None:
+    def __init__(self, errors: object, data: Mapping[str, object] | None = None) -> None:
         super().__init__(f"GitHub GraphQL errors: {errors}")
         self.errors = errors
+        self.data = data
+
+    @staticmethod
+    def at_workflow_run(error: object) -> bool:
+        """Whether ``error`` is at or under a check suite's ``workflowRun``.
+
+        A suite's workflow run needs Actions access, which a token may lack beside
+        Checks access; GitHub then nulls only that suite's ``workflowRun``.
+        """
+        path = error.get("path") if isinstance(error, Mapping) else None
+        return isinstance(path, list) and "workflowRun" in path
+
+    @property
+    def only_at_workflow_runs(self) -> bool:
+        """Whether every error is ``at_workflow_run``, so the rest of ``data`` holds."""
+        errors = self.errors if isinstance(self.errors, list) else [self.errors]
+        return bool(errors) and all(self.at_workflow_run(error) for error in errors)
 
     @property
     def types(self) -> set[str]:

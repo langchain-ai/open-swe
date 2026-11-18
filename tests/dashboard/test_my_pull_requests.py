@@ -57,12 +57,12 @@ def status_answer(
         conclusion = run.get("conclusion")
         node["checkRuns"]["nodes"].append(
             {
-                "databaseId": run.get("id"),
+                "databaseId": run.get("id", index + 1),
                 "name": run.get("name"),
                 "status": str(run.get("status")).upper(),
                 "conclusion": conclusion.upper() if isinstance(conclusion, str) else None,
                 "detailsUrl": run.get("details_url"),
-                "permalink": run.get("html_url"),
+                "url": run.get("html_url"),
             }
         )
     pull: dict[str, object] = {

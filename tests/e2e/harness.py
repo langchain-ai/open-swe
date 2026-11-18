@@ -1876,17 +1876,6 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
                     },
                 }
             )
-        runs: list[dict[str, object]] = []
-        for check in pr["check_runs"]:
-            conclusion = check.get("conclusion")
-            runs.append(
-                {
-                    **fakes.check_graphql(check),
-                    "databaseId": check.get("id"),
-                    "permalink": check.get("html_url"),
-                    "conclusion": conclusion.upper() if isinstance(conclusion, str) else None,
-                }
-            )
         pull_request.update(
             {
                 "title": pr["title"],
@@ -1914,33 +1903,7 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
                     "nodes": reviews,
                     "pageInfo": {"hasNextPage": False, "endCursor": None},
                 },
-                "commits": {
-                    "nodes": [
-                        {
-                            "commit": {
-                                "oid": pr["head_sha"],
-                                "status": {
-                                    "contexts": [
-                                        fakes.status_graphql(status) for status in pr["statuses"]
-                                    ]
-                                },
-                                "checkSuites": {
-                                    "pageInfo": {"hasNextPage": False},
-                                    "nodes": [
-                                        {
-                                            "app": None,
-                                            "workflowRun": None,
-                                            "checkRuns": {
-                                                "pageInfo": {"hasNextPage": False},
-                                                "nodes": runs,
-                                            },
-                                        }
-                                    ],
-                                },
-                            }
-                        }
-                    ]
-                },
+                "commits": {"nodes": [{"commit": fakes.commit_ci_graphql(pr)}]},
             }
         )
     if "PullRequestFixReviews" in query:

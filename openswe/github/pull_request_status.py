@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 import httpx2
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
 from pydantic.alias_generators import to_camel
 
 from openswe.github.branch_config import BranchConfig
@@ -26,7 +26,10 @@ from openswe.github.http import (
     GITHUB_GRAPHQL,
     CommitCI,
     GitHubClient,
+    GraphqlCheckApp,
     GraphQLError,
+    GraphqlNode,
+    GraphqlPageInfo,
     RepoClient,
     or_none,
 )
@@ -244,31 +247,13 @@ query PullRequestStatus(
           }
         }
       }
-      commits(last: 1) {
-        nodes {
-          commit {
-            oid
-            status { contexts { context state targetUrl } }
-            checkSuites(first: 100) {
-              pageInfo { hasNextPage }
-              nodes {
-                databaseId
-                app { databaseId slug }
-                workflowRun { event workflow { databaseId } }
-                checkRuns(first: 100, filterBy: {checkType: LATEST}) {
-                  pageInfo { hasNextPage }
-                  nodes { databaseId name status conclusion detailsUrl permalink }
-                }
-              }
-            }
-          }
-        }
-      }
+      commits(last: 1) { nodes { commit { ...CommitCI } } }
     }
   }
 }
 """
     + _STATUS_REVIEW_FRAGMENT
+    + COMMIT_CI_FRAGMENT
 )
 _REVIEWS_QUERY = (
     """
@@ -664,19 +649,27 @@ class Mergeability:
         return "unknown"
 
 
-class _CIPullCommit(BaseModel):
+_GraphqlPullState = Literal["OPEN", "CLOSED", "MERGED"]
+_PULL_REQUEST_STATES: Mapping[_GraphqlPullState, PullRequestState] = {
+    "OPEN": "open",
+    "CLOSED": "closed",
+    "MERGED": "merged",
+}
+
+
+class _CIPullCommit(GraphqlNode):
     commit: dict[str, object]
 
 
-class _CIPullCommits(BaseModel):
+class _CIPullCommits(GraphqlNode):
     nodes: list[_CIPullCommit]
 
 
-class _CIPull(BaseModel):
-    state: Literal["OPEN", "CLOSED", "MERGED"]
-    headRefOid: str
-    headRefName: str
-    baseRefName: str
+class _CIPull(GraphqlNode):
+    state: _GraphqlPullState
+    head_ref_oid: str
+    head_ref_name: str
+    base_ref_name: str
     commits: _CIPullCommits
 
 
@@ -707,48 +700,34 @@ class StandingApprovals:
         return any(approved is None or approved != commit for approved in self.open_swe_commits)
 
 
-class _GraphqlNode(BaseModel):
-    model_config = ConfigDict(alias_generator=to_camel)
-
-
-class _PageInfo(_GraphqlNode):
-    has_next_page: bool
-    end_cursor: str | None = None
-
-
-class _HeadCheckRun(_GraphqlNode):
+class _HeadCheckRun(GraphqlNode):
     database_id: int
     name: str
     conclusion: str | None
 
 
-class _HeadCheckRuns(_GraphqlNode):
-    page_info: _PageInfo
+class _HeadCheckRuns(GraphqlNode):
+    page_info: GraphqlPageInfo
     nodes: list[_HeadCheckRun]
 
 
-class _HeadCheckApp(_GraphqlNode):
-    database_id: int | None
-    slug: str
-
-
-class _HeadWorkflow(_GraphqlNode):
+class _HeadWorkflow(GraphqlNode):
     database_id: int | None
 
 
-class _HeadWorkflowRun(_GraphqlNode):
+class _HeadWorkflowRun(GraphqlNode):
     workflow: _HeadWorkflow
 
 
-class _HeadCheckSuite(_GraphqlNode):
+class _HeadCheckSuite(GraphqlNode):
     database_id: int
-    app: _HeadCheckApp | None
+    app: GraphqlCheckApp | None
     workflow_run: _HeadWorkflowRun | None
     check_runs: _HeadCheckRuns
 
     def runs(self) -> list[dict[str, object]]:
         """The suite's runs as REST lists a commit's check runs, in the fields read here."""
-        app = {"id": self.app.database_id, "slug": self.app.slug} if self.app else None
+        app = self.app.rest() if self.app else None
         return [
             {
                 "id": run.database_id,
@@ -761,41 +740,41 @@ class _HeadCheckSuite(_GraphqlNode):
         ]
 
 
-class _HeadCheckSuites(_GraphqlNode):
-    page_info: _PageInfo
+class _HeadCheckSuites(GraphqlNode):
+    page_info: GraphqlPageInfo
     nodes: list[_HeadCheckSuite]
 
 
-class _HeadCommit(_GraphqlNode):
+class _HeadCommit(GraphqlNode):
     oid: str
     check_suites: _HeadCheckSuites
 
 
-class _HeadCommitNode(_GraphqlNode):
+class _HeadCommitNode(GraphqlNode):
     commit: _HeadCommit
 
 
-class _HeadCommits(_GraphqlNode):
+class _HeadCommits(GraphqlNode):
     nodes: list[_HeadCommitNode]
 
 
-class _HeadPull(_GraphqlNode):
-    state: str
+class _HeadPull(GraphqlNode):
+    state: _GraphqlPullState
     head_ref_oid: str
     commits: _HeadCommits
 
 
 @dataclass(frozen=True, slots=True)
 class HeadChecks:
-    """A pull request's state (``open``, ``closed`` or ``merged``) and head commit, with
-    every check run on that commit, superseded attempts included.
+    """A pull request's state and head commit, with every check run on that commit,
+    superseded attempts included.
 
     ``runs`` take REST's shape (``id``, ``name``, lower-case ``conclusion``, ``app``,
     ``check_suite``); ``workflows`` names the Actions workflow behind each check suite, by
     suite id. ``runs`` is ``None`` when a suite holds more runs than one read returns.
     """
 
-    state: str
+    state: PullRequestState
     sha: str
     runs: list[dict[str, object]] | None
     workflows: dict[int, int]
@@ -823,13 +802,6 @@ def _next_cursor(connection: Mapping[str, object], seen: set[str]) -> str | None
     return cursor
 
 
-_PULL_REQUEST_STATES: Mapping[str, PullRequestState] = {
-    "OPEN": "open",
-    "CLOSED": "closed",
-    "MERGED": "merged",
-}
-
-
 @dataclass(frozen=True, slots=True)
 class _StatusRead:
     """One answer to ``_STATUS_QUERY``, in the shapes the REST reads it replaces gave.
@@ -848,29 +820,19 @@ class _StatusRead:
         errors = payload.get("errors") or []
         unreadable: set[str] = set()
         for error in errors if isinstance(errors, list) else [errors]:
+            # A suite whose workflow GitHub withheld keeps its runs, as of an unknown
+            # workflow, as when REST could not list Actions runs.
+            if GraphQLError.at_workflow_run(error):
+                continue
             path = error.get("path") if isinstance(error, Mapping) else None
             if not isinstance(path, list) or len(path) < 3:
                 raise GraphQLError(errors)
-            # A suite's workflow needs Actions access a token may lack beside Checks
-            # access; GitHub nulls only that suite's ``workflowRun``, so its runs are
-            # kept as of an unknown workflow, as when REST could not list Actions runs.
-            if "workflowRun" in path:
-                continue
             unreadable.add(str(path[2]))
         data = payload.get("data")
         pull = _graphql_pull(data) if isinstance(data, Mapping) else None
         if pull is None:
             raise GraphQLError(errors) if errors else ValueError("GitHub answered no pull request")
         return cls(pull, frozenset(unreadable))
-
-    @staticmethod
-    def _lower(value: object) -> str | None:
-        return value.lower() if isinstance(value, str) else None
-
-    @staticmethod
-    def _has_next(connection: Mapping[str, object]) -> bool:
-        page_info = connection.get("pageInfo")
-        return isinstance(page_info, Mapping) and page_info.get("hasNextPage") is True
 
     @staticmethod
     def login(actor: object) -> str | None:
@@ -947,8 +909,8 @@ class _StatusRead:
             return None
         return PullRequestClient.unresolved_in(nodes), cursor
 
-    def checks(self, sha: str) -> tuple[list[dict[str, object]], list[dict[str, object]]] | None:
-        """The latest check runs and statuses on ``sha``, shaped as REST's.
+    def checks(self, sha: str) -> CommitCI | None:
+        """The latest check runs and statuses on ``sha``.
 
         ``None`` when they were unreadable, not ``sha``'s, or ran past one page.
         """
@@ -959,71 +921,20 @@ class _StatusRead:
         commit = nodes[-1].get("commit") if nodes and isinstance(nodes[-1], Mapping) else None
         if not isinstance(commit, Mapping) or commit.get("oid") != sha:
             return None
-        suites = commit.get("checkSuites")
-        if (
-            not isinstance(suites, Mapping)
-            or not isinstance(suites.get("nodes"), list)
-            or self._has_next(suites)
-        ):
+        try:
+            return CommitCI.from_graphql(commit)
+        except ValidationError:
+            logger.warning("Unreadable head commit checks", extra={"sha": sha}, exc_info=True)
             return None
-        runs: list[dict[str, object]] = []
-        workflows: dict[int, tuple[int, str]] = {}
-        for suite in suites["nodes"]:
-            if not isinstance(suite, Mapping):
-                continue
-            suite_id = suite.get("databaseId")
-            app = suite.get("app") if isinstance(suite.get("app"), Mapping) else {}
-            workflow_run = suite.get("workflowRun")
-            workflow = workflow_run.get("workflow") if isinstance(workflow_run, Mapping) else None
-            if (
-                isinstance(suite_id, int)
-                and isinstance(workflow, Mapping)
-                and isinstance(workflow_id := workflow.get("databaseId"), int)
-                and isinstance(event := workflow_run.get("event"), str)
-            ):
-                workflows[suite_id] = (workflow_id, event)
-            suite_runs = suite.get("checkRuns")
-            if (
-                not isinstance(suite_runs, Mapping)
-                or not isinstance(suite_runs.get("nodes"), list)
-                or self._has_next(suite_runs)
-            ):
-                return None
-            runs.extend(
-                {
-                    "id": run.get("databaseId"),
-                    "name": run.get("name"),
-                    "status": self._lower(run.get("status")),
-                    "conclusion": self._lower(run.get("conclusion")),
-                    "details_url": run.get("detailsUrl"),
-                    "html_url": run.get("permalink"),
-                    "app": {"id": app.get("databaseId"), "slug": app.get("slug")},
-                    "check_suite": {"id": suite_id},
-                }
-                for run in suite_runs["nodes"]
-                if isinstance(run, Mapping)
-            )
-        status = commit.get("status")
-        contexts = status.get("contexts") if isinstance(status, Mapping) else None
-        statuses = [
-            {
-                "context": context.get("context"),
-                "state": self._lower(context.get("state")),
-                "target_url": context.get("targetUrl"),
-            }
-            for context in (contexts if isinstance(contexts, list) else [])
-            if isinstance(context, Mapping)
-        ]
-        return CommitCI.latest_runs(runs, workflows), statuses
 
 
 @dataclass(frozen=True, slots=True)
 class PullRequestClient:
     """One pull request's calls on GitHub; plain reads and writes raise like ``RepoClient``.
 
-    The status reads (``mergeability``, ``unresolved_threads``, ``reviewers``) and the statuses built from them answer ``None`` or an
-    unknown instead, so one failed read degrades its part of a status rather than
-    the whole of it.
+    The status reads (``mergeability``, ``unresolved_threads``, ``tips``) and the statuses
+    built from them answer ``None`` or an unknown instead, so one failed read degrades its
+    part of a status rather than the whole of it.
     """
 
     repo: RepoClient
@@ -1102,13 +1013,13 @@ class PullRequestClient:
             suites = commit.check_suites
             for suite in suites.nodes:
                 if suite.check_runs.page_info.has_next_page:
-                    return HeadChecks(pull.state.lower(), sha, None, {})
+                    return HeadChecks(_PULL_REQUEST_STATES[pull.state], sha, None, {})
                 runs += suite.runs()
                 workflow = suite.workflow_run.workflow.database_id if suite.workflow_run else None
                 if workflow is not None:
                     workflows[suite.database_id] = workflow
             if not suites.page_info.has_next_page:
-                return HeadChecks(pull.state.lower(), sha, runs, workflows)
+                return HeadChecks(_PULL_REQUEST_STATES[pull.state], sha, runs, workflows)
             cursor = suites.page_info.end_cursor
             if not cursor or cursor in seen:
                 raise _CursorLoop
@@ -1129,23 +1040,23 @@ class PullRequestClient:
 
     async def ci(self) -> PullRequestCI:
         """The pull's state, branches and head commit CI, in one GraphQL query when they fit."""
-        pull = _graphql_pull(await self.repo.graphql(_PULL_CI_QUERY, {"number": self.number}))
+        pull = _graphql_pull(await self.repo.ci_graphql(_PULL_CI_QUERY, {"number": self.number}))
         if pull is None:
             raise ValueError("GitHub answered without the pull request")
         parsed = _CIPull.model_validate(pull)
         head = parsed.commits.nodes[-1].commit if parsed.commits.nodes else None
-        if head is not None and head.get("oid") == parsed.headRefOid:
+        if head is not None and head.get("oid") == parsed.head_ref_oid:
             checks = CommitCI.from_graphql(head) or await self.repo.commit_ci_over_rest(
-                parsed.headRefOid
+                parsed.head_ref_oid
             )
         else:
-            checks = await self.repo.commit_ci(parsed.headRefOid)
+            checks = await self.repo.commit_ci(parsed.head_ref_oid)
         return PullRequestCI(
             state="open" if parsed.state == "OPEN" else "closed",
             merged=parsed.state == "MERGED",
-            head_sha=parsed.headRefOid,
-            head_ref=parsed.headRefName,
-            base_ref=parsed.baseRefName,
+            head_sha=parsed.head_ref_oid,
+            head_ref=parsed.head_ref_name,
+            base_ref=parsed.base_ref_name,
             checks=checks,
         )
 
@@ -1689,18 +1600,11 @@ class PullRequestClient:
             mergeability = await self.mergeability() or mergeability
         return mergeability
 
-    async def _head_checks(
-        self, read: _StatusRead, sha: str | None
-    ) -> tuple[list[dict[str, object]], list[dict[str, object]]] | None:
+    async def _head_checks(self, read: _StatusRead, sha: str | None) -> CommitCI | None:
         """``sha``'s check runs and statuses, falling back to REST for incomplete GraphQL reads."""
         if sha is None:
             return None
-        if (checks := read.checks(sha)) is not None:
-            return checks
-        runs, statuses = await asyncio.gather(
-            or_none(self.repo.check_runs(sha)), or_none(self.repo.commit_statuses(sha))
-        )
-        return None if runs is None or statuses is None else (runs, statuses)
+        return read.checks(sha) or await or_none(self.repo.commit_ci_over_rest(sha))
 
     async def _reviewers(self, read: _StatusRead) -> list[PullRequestReviewer] | None:
         """``read``'s reviewers, counting the reviews on the pages after it."""
@@ -1769,7 +1673,7 @@ class PullRequestClient:
                 }
             )
         if checks is not None:
-            failing, pending, inconclusive = _normalize_checks(*checks)
+            failing, pending, inconclusive = _normalize_checks(checks.runs, checks.statuses)
             result.update(
                 {
                     "checksAvailable": True,
@@ -1832,7 +1736,7 @@ class PullRequestClient:
             checks, reviewers, review_threads = await asyncio.gather(
                 self._head_checks(read, sha), self._reviewers(read), self._unresolved_threads(read)
             )
-        runs, statuses = checks if checks is not None else (None, None)
+        runs, statuses = (checks.runs, checks.statuses) if checks is not None else (None, None)
         result.reviewers = reviewers
         result.review_decision = (
             None if reviewers is None else PullRequestReviewer.decision(reviewers)

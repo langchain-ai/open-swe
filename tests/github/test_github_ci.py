@@ -229,3 +229,101 @@ def test_commit_ci_reads_graphql_in_rest_terms_without_superseded_reruns() -> No
 
     suites.append(_suite(4, [], more=True))
     assert github_http.CommitCI.from_graphql(commit) is None
+
+
+def _withheld_workflows(path: list[object]) -> list[dict[str, object]]:
+    """GitHub's errors for a token that reads Checks but not Actions."""
+    return [
+        {
+            "type": "FORBIDDEN",
+            "message": "Resource not accessible by integration",
+            "path": [*path, "checkSuites", "nodes", index, "workflowRun"],
+        }
+        for index in (0, 1)
+    ]
+
+
+def _withheld_commit(sha: str) -> dict[str, object]:
+    suites = [
+        _suite(1, [_graphql_run(10, "COMPLETED", "FAILURE")]),
+        _suite(2, [_graphql_run(20, "COMPLETED", "SUCCESS")]),
+    ]
+    for suite in suites:
+        suite["workflowRun"] = None
+    return {
+        "oid": sha,
+        "status": {"contexts": [{"context": "deploy", "state": "SUCCESS", "targetUrl": None}]},
+        "checkSuites": {"pageInfo": {"hasNextPage": False}, "nodes": suites},
+    }
+
+
+async def test_ci_reads_keep_checks_when_github_withholds_workflow_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sha = "a" * 40
+    commit = _withheld_commit(sha)
+    answers = {
+        "query CommitCI(": {
+            "data": {"repository": {"object": commit}},
+            "errors": _withheld_workflows(["repository", "object"]),
+        },
+        "query PullRequestCI(": {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "state": "OPEN",
+                        "headRefOid": sha,
+                        "headRefName": "feature",
+                        "baseRefName": "main",
+                        "commits": {"nodes": [{"commit": commit}]},
+                    }
+                }
+            },
+            "errors": _withheld_workflows(
+                ["repository", "pullRequest", "commits", "nodes", 0, "commit"]
+            ),
+        },
+    }
+    urls: list[str] = []
+
+    async def request(
+        _client: object, _method: str, url: str, json: dict[str, str], **_: object
+    ) -> httpx2.Response:
+        urls.append(url)
+        answer = next(body for name, body in answers.items() if name in json["query"])
+        return _response(url, answer)
+
+    monkeypatch.setattr(github_http, "github_request", request)
+    repo = _repo()
+
+    commit_ci = await repo.commit_ci(sha)
+    pull_ci = await repo.pull_request(1).ci()
+
+    for ci in (commit_ci, pull_ci.checks):
+        assert [(run["id"], run["conclusion"]) for run in ci.runs] == [
+            (10, "failure"),
+            (20, "success"),
+        ]
+        assert [status["context"] for status in ci.statuses] == ["deploy"]
+    assert urls == [github_http.GITHUB_GRAPHQL] * 2
+
+
+async def test_commit_ci_raises_graphql_errors_outside_workflow_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sha = "a" * 40
+    errors = [
+        *_withheld_workflows(["repository", "object"]),
+        {"type": "FORBIDDEN", "message": "denied", "path": ["repository", "object", "status"]},
+    ]
+
+    async def request(_client: object, _method: str, url: str, **_: object) -> httpx2.Response:
+        return _response(
+            url, {"data": {"repository": {"object": _withheld_commit(sha)}}, "errors": errors}
+        )
+
+    monkeypatch.setattr(github_http, "github_request", request)
+
+    with pytest.raises(github_http.GraphQLError) as raised:
+        await _repo().commit_ci(sha)
+    assert raised.value.errors == errors
