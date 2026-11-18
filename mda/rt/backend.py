@@ -503,6 +503,7 @@ class OpenSweBackend:
                     "Backend call timed out",
                     extra={
                         "endpoint": label,
+                        "error_type": type(exc).__name__,
                         "elapsed_seconds": asyncio.get_running_loop().time() - started,
                     },
                 )
@@ -533,6 +534,15 @@ class OpenSweBackend:
                     error = BackendUnavailableError
                 elif status == 403:
                     error = BackendRefusedError
+                logger.warning(
+                    "Backend call failed",
+                    extra={
+                        "endpoint": label,
+                        "error_type": type(exc).__name__,
+                        "status_code": status,
+                        "elapsed_seconds": asyncio.get_running_loop().time() - started,
+                    },
+                )
                 raise error(f"{label} failed ({type(exc).__name__})") from exc
         return _json.validate_python(response.json())
 

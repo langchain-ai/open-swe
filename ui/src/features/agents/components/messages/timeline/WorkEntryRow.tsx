@@ -128,8 +128,9 @@ export function WorkEntryLine({
         <div className="min-w-0 flex-1 overflow-hidden">
           <p className="flex w-full min-w-0 items-baseline gap-space-2 text-xs leading-5">
             <span
+              title={entry.heading}
               className={cn(
-                "shrink-0 truncate font-medium",
+                "min-w-0 truncate font-medium",
                 isError
                   ? "text-error-secondary"
                   : entry.status === "pending" || entry.status === "in_progress"

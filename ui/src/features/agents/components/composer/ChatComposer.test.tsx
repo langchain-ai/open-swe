@@ -91,6 +91,49 @@ function renderComposer(
   )
 }
 
+describe("ChatComposer focus", () => {
+  it("autofocuses on initial load", async () => {
+    renderComposer(false, { autoFocus: true })
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("textbox", { name: "Message" })
+      )
+    )
+  })
+
+  it("autofocuses after navigating from a focused link", async () => {
+    render(<a href="/agents/thread-1">Thread</a>)
+    screen.getByRole("link", { name: "Thread" }).focus()
+    renderComposer(false, { autoFocus: true })
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("textbox", { name: "Message" })
+      )
+    )
+  })
+
+  it("preserves focus in file search", () => {
+    render(<input aria-label="Search files" autoFocus />)
+    const search = screen.getByRole("textbox", { name: "Search files" })
+    renderComposer(false, { autoFocus: true })
+
+    expect(document.activeElement).toBe(search)
+  })
+
+  it("preserves focus inside a dialog", () => {
+    render(
+      <div role="dialog" aria-label="Settings">
+        <button autoFocus>Close</button>
+      </div>
+    )
+    const close = screen.getByRole("button", { name: "Close" })
+    renderComposer(false, { autoFocus: true })
+
+    expect(document.activeElement).toBe(close)
+  })
+})
+
 describe("ChatComposer model selection", () => {
   it("hides the picker and model command when selection is disabled", async () => {
     Object.defineProperty(Range.prototype, "getBoundingClientRect", {

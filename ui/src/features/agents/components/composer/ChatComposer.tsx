@@ -533,7 +533,12 @@ export const ChatComposer = memo(function ChatComposer({
   const didAutoFocus = useRef(false)
   useEffect(() => {
     if (autoFocus && !didAutoFocus.current) {
-      editorRef.current?.focus()
+      if (
+        !document.activeElement?.closest(
+          'input, textarea, select, [contenteditable]:not([contenteditable="false"]), dialog, [role="dialog"], [role="alertdialog"]'
+        )
+      )
+        editorRef.current?.focus()
       didAutoFocus.current = true
     }
   }, [autoFocus])
