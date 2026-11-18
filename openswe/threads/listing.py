@@ -611,6 +611,7 @@ async def attach_task_workers(
 ) -> None:
     """Attach independently readable task children without recursively expanding them."""
     semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
+    worker_reads = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
 
     async def attach_waiting(summary: JsonObject) -> None:
         summary["waitingForDelegatedWork"] = False
@@ -621,7 +622,7 @@ async def attach_task_workers(
         async with semaphore:
             try:
                 summary["waitingForDelegatedWork"] = await RoutedWork(thread_id).delegated_active(
-                    prune=False
+                    prune=False, reads=worker_reads
                 )
             except Exception:
                 logger.exception(

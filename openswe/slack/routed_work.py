@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 DESTINATIONS_KEY = "routed_work_destinations"
 ORIGINS_KEY = "routed_work_origins"
 ANSWERED_RUN_KEY = "routed_work_answered_run"
+_WORKER_READS = 8
 
 
 class RoutedWork:
@@ -76,23 +78,52 @@ class RoutedWork:
         visited: frozenset[str] = frozenset(),
         prune: bool = True,
         metadata: Mapping[str, object] | None = None,
+        reads: asyncio.Semaphore | None = None,
     ) -> bool:
+        """Whether work this thread handed off is still going.
+
+        ``reads`` bounds how many of its workers are checked at once. A caller
+        checking several threads passes one, so the bound covers them all.
+        """
         if self.thread_id in visited:
             return False
         visited = visited | {self.thread_id}
         if await TaskMessage.pending_threads([self.thread_id]):
             return True
-        workers = await sidebar_memberships([self.thread_id], workers_of=True)
-        pending = await TaskMessage.pending_threads(list(workers))
-        for worker in workers.values():
-            if worker.cancelled or worker.launch_error:
-                continue
-            if worker.thread_id in pending:
-                return True
-            work = RoutedWork(worker.thread_id)
-            if await work.active() or await work.delegated_active(visited=visited, prune=prune):
-                return True
+        workers = [
+            worker.thread_id
+            for worker in (await sidebar_memberships([self.thread_id], workers_of=True)).values()
+            if not worker.cancelled and not worker.launch_error
+        ]
+        if await TaskMessage.pending_threads(workers):
+            return True
+        reads = reads or asyncio.Semaphore(_WORKER_READS)
+        checks = await asyncio.gather(
+            *(RoutedWork(worker).busy(reads, visited=visited, prune=prune) for worker in workers),
+            return_exceptions=True,
+        )
+        errors = [
+            (worker, check)
+            for worker, check in zip(workers, checks, strict=True)
+            if isinstance(check, BaseException)
+        ]
+        if any(check is True for check in checks):
+            for worker, error in errors:
+                logger.warning(
+                    "Could not check a delegated worker",
+                    exc_info=error,
+                    extra={"thread_id": self.thread_id, "worker_thread_id": worker},
+                )
+            return True
+        if errors:
+            raise errors[0][1]
         return await self.routed_active(visited=visited, prune=prune, metadata=metadata)
+
+    async def busy(self, reads: asyncio.Semaphore, *, visited: frozenset[str], prune: bool) -> bool:
+        # Its own workers get a bound of their own: under ``reads`` they would
+        # wait for permits this check holds.
+        async with reads:
+            return await self.active() or await self.delegated_active(visited=visited, prune=prune)
 
     async def routed_active(
         self,
