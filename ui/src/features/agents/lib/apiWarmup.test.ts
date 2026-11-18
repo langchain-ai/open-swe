@@ -6,16 +6,19 @@ import { createElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { clearPerfSpans, getPerfSpans } from "@/lib/perf/trace"
+import { STREAM_PREFERENCE_STORAGE_KEY } from "@/lib/streamPreference"
 import { agentsApi } from "./api"
 import { apiWarmupScript } from "./apiWarmup"
 import { SIDEBAR_PAGE_SIZE, sidebarRecentsParams } from "./queries"
 import { useAgentThreadStream } from "./stream/useAgentThreadStream"
+import { fetchTranscript } from "./transcript/api"
 import type { ChatSort } from "./sidebarPrefs"
 import type { ReactNode } from "react"
 
 const THREAD_ID = "1dd69115-f4b9-507f-b4d5-9f355f9f5ba0"
 const SUMMARY_PATH = `/dashboard/api/threads/${THREAD_ID}`
 const STATE_PATH = `${SUMMARY_PATH}/state`
+const TRANSCRIPT_PATH = `${SUMMARY_PATH}/transcript`
 const SIDEBAR_PATH = "/dashboard/api/threads/page"
 
 function setReadyState(value: DocumentReadyState) {
@@ -131,6 +134,13 @@ function stubPrefs(prefs: unknown) {
   })
 }
 
+function stubStreamPreference() {
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) =>
+      key === STREAM_PREFERENCE_STORAGE_KEY ? "true" : null,
+  })
+}
+
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
@@ -158,14 +168,15 @@ describe("apiWarmupScript", () => {
     expect(String(original.mock.calls[0]?.[0])).toContain("/threads/page")
   })
 
-  it("warms the state, the summary and the sidebar on a thread route, and hands each over once", async () => {
+  it("warms the transcript, the summary and the sidebar on a thread route, and hands each over once", async () => {
     setReadyState("loading")
     const original = stubFetch()
 
     run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
     expect(original).toHaveBeenCalledTimes(3)
+    expect(requestsTo(original, STATE_PATH)).toHaveLength(0)
 
-    for (const path of [STATE_PATH, SUMMARY_PATH, SIDEBAR_PATH]) {
+    for (const path of [TRANSCRIPT_PATH, SUMMARY_PATH, SIDEBAR_PATH]) {
       const [warmed] = requestsTo(original, path)
       expect(await window.fetch(requestUrl(warmed![0]))).toBeInstanceOf(
         Response
@@ -191,12 +202,45 @@ describe("apiWarmupScript", () => {
     expect(asSent(warmed[0]!)).toEqual(asSent(own.mock.calls[0]!))
   })
 
+  it("warms the transcript as the transcript view requests it, and hands it to that request", async () => {
+    const own = stubFetch()
+    await fetchTranscript(THREAD_ID)
+
+    setReadyState("loading")
+    const network = stubFetch()
+    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+    const warmed = requestsTo(network, TRANSCRIPT_PATH)
+    expect(warmed).toHaveLength(1)
+    await fetchTranscript(THREAD_ID)
+
+    expect(requestsTo(network, TRANSCRIPT_PATH)).toEqual(warmed)
+    expect(asSent(warmed[0]!)).toEqual(asSent(own.mock.calls[0]!))
+  })
+
   // The state URL comes from the SDK (its `select` list follows `stateKeys`), so
   // only the real stream can say what the page will ask for.
-  it("hands the warmed thread state to the thread page's stream", async () => {
+  it("sends the app's own request once a warmed one has failed", async () => {
+    setReadyState("loading")
+    let status = 404
+    const original = vi.fn(() =>
+      Promise.resolve(new Response("{}", { status }))
+    )
+    vi.stubGlobal("fetch", original)
+    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+    await new Promise((resolve) => setTimeout(resolve))
+    status = 200
+
+    await expect(fetchTranscript(THREAD_ID)).resolves.toEqual({})
+    expect(requestsTo(original, TRANSCRIPT_PATH)).toHaveLength(2)
+    expect(window.fetch).toBe(original)
+  })
+
+  it("hands the warmed thread state to the thread page's stream under the SDK useStream setting", async () => {
+    stubStreamPreference()
     setReadyState("loading")
     const original = stubAgentServer()
     run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+    expect(requestsTo(original, TRANSCRIPT_PATH)).toHaveLength(0)
 
     mountThreadStream()
     // The stream lists the thread's runs once it has read the state.

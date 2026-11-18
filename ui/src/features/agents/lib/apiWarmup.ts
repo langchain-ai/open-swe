@@ -1,3 +1,4 @@
+import { STREAM_PREFERENCE_STORAGE_KEY } from "@/lib/streamPreference"
 import { agentsLangGraphApiUrl } from "./api"
 import { SIDEBAR_PREFS_STORAGE_KEY } from "./sidebarPrefs"
 import { SIDEBAR_PAGE_SIZE } from "./queries"
@@ -15,16 +16,33 @@ const AGENTS_HOME_RE = /^\/agents\/?$/
  * wrong parameter costs a whole duplicate request.
  */
 function warmApiRequests(
-  sdkUrls: Array<string>,
-  dashboardUrls: Array<string>,
+  thread: { state: string; transcript: string; summary: string } | null,
   sidebarPath: string | null,
   prefsKey: string,
+  streamPreferenceKey: string,
   pageSize: number
 ) {
   if (document.readyState !== "loading") return
 
-  const targets = sdkUrls.map((url) => ({ url, dashboard: false }))
-  for (const url of dashboardUrls) targets.push({ url, dashboard: true })
+  const targets: Array<{ url: string; dashboard: boolean }> = []
+  if (thread) {
+    let prefersStream = false
+    try {
+      prefersStream = localStorage.getItem(streamPreferenceKey) === "true"
+    } catch {
+      // An unreadable preference just means the default, the transcript view.
+    }
+    // For a thread the transcript log records, the setting picks the view, and
+    // each view reads only its own source. A thread the log doesn't record opens
+    // in the stream view either way, and its state read waits for the summary.
+    // That is on purpose: warming the state too would waste it on every other thread.
+    targets.push(
+      prefersStream
+        ? { url: thread.state, dashboard: false }
+        : { url: thread.transcript, dashboard: true },
+      { url: thread.summary, dashboard: true }
+    )
+  }
   if (sidebarPath) {
     let includeAutomations = false
     let includeResolved = false
@@ -101,19 +119,23 @@ function warmApiRequests(
       init.headers = headers
     }
     const request = fetch(href, init)
+    const key = requestKey(href)
+    const warmed = { request, timing }
+    // A failure that settles before the app asks may be stale by then, such as
+    // a new thread's transcript before its first run records it, so the app asks again.
+    const settle = (ok: boolean) => {
+      try {
+        timing.endedAt = performance.now()
+      } catch {}
+      if (ok || pending.get(key) !== warmed) return
+      pending.delete(key)
+      if (pending.size === 0) release()
+    }
     request.then(
-      () => {
-        try {
-          timing.endedAt = performance.now()
-        } catch {}
-      },
-      () => {
-        try {
-          timing.endedAt = performance.now()
-        } catch {}
-      }
+      (response) => settle(response.ok),
+      () => settle(false)
     )
-    pending.set(requestKey(href), { request, timing })
+    pending.set(key, warmed)
   }
 
   const original = window.fetch
@@ -189,6 +211,11 @@ function threadSummaryUrl(threadId: string): string {
   return `${agentsLangGraphApiUrl}/threads/${threadId}`
 }
 
+/** What `fetchTranscript` requests: the transcript view's whole thread. */
+function threadTranscriptUrl(threadId: string): string {
+  return `${agentsLangGraphApiUrl}/threads/${threadId}/transcript`
+}
+
 /** The sidebar page endpoint; the script appends the preference-dependent query. */
 function sidebarPageEndpoint(): string {
   return `${agentsLangGraphApiUrl}/threads/page`
@@ -206,10 +233,18 @@ export function apiWarmupScript(pathname: string): string | null {
   if (!threadId && !isAgentsHome) return null
 
   const args = [
-    JSON.stringify(threadId ? [threadStateUrl(threadId)] : []),
-    JSON.stringify(threadId ? [threadSummaryUrl(threadId)] : []),
+    JSON.stringify(
+      threadId
+        ? {
+            state: threadStateUrl(threadId),
+            transcript: threadTranscriptUrl(threadId),
+            summary: threadSummaryUrl(threadId),
+          }
+        : null
+    ),
     JSON.stringify(sidebarPageEndpoint()),
     JSON.stringify(SIDEBAR_PREFS_STORAGE_KEY),
+    JSON.stringify(STREAM_PREFERENCE_STORAGE_KEY),
     JSON.stringify(SIDEBAR_PAGE_SIZE),
   ].join(",")
   return `(${warmApiRequests.toString()})(${args});`

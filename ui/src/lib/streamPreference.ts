@@ -1,12 +1,12 @@
 import { useSyncExternalStore } from "react"
 
-const STORAGE_KEY = "open-swe.streaming.use-stream"
+export const STREAM_PREFERENCE_STORAGE_KEY = "open-swe.streaming.use-stream"
 const CHANGE_EVENT = "open-swe-stream-preference"
 
 export function readPreference(): boolean {
   return (
     typeof window !== "undefined" &&
-    window.localStorage.getItem(STORAGE_KEY) === "true"
+    window.localStorage.getItem(STREAM_PREFERENCE_STORAGE_KEY) === "true"
   )
 }
 
@@ -20,7 +20,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function setUseStreamPreference(enabled: boolean): void {
-  window.localStorage.setItem(STORAGE_KEY, String(enabled))
+  window.localStorage.setItem(STREAM_PREFERENCE_STORAGE_KEY, String(enabled))
   window.dispatchEvent(new Event(CHANGE_EVENT))
 }
 
