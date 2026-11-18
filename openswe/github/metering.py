@@ -8,11 +8,15 @@ quota incident can name what spent it instead of guessing.
 Each line carries GitHub's own accounting for the request (``x-ratelimit-resource``
 and ``x-ratelimit-used``) and the kind of token sent, read from its prefix alone:
 an installation token spends the shared quota, a person's token spends their own.
+They also carry how long GitHub took, the installation an installation token belongs
+to, and the graph run that sent the request, so a burst can be traced to its thread.
+A request that fails before GitHub answers is logged with its error type instead.
 """
 
 import inspect
 import logging
 import re
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -20,11 +24,15 @@ from typing import Final
 
 import httpx2
 
+from openswe.run_config import RunConfig
+
 logger = logging.getLogger(__name__)
 
 _GITHUB_API_HOST: Final = "api.github.com"
 # Set on a response replayed from a 304: GitHub spent no quota on it.
 REVALIDATED: Final = "openswe_github_revalidated"
+# Set on a request sent with an App installation's token: the installation it belongs to.
+INSTALLATION: Final = "openswe_github_installation_id"
 # Modules between a caller and the wire; the caller is the first frame outside them.
 # ``http`` and ``pull_request_status`` hold the named client methods (``RepoClient``,
 # ``PullRequestClient``) that all other code must call GitHub through, so a frame in
@@ -71,13 +79,29 @@ class MeteredTransport(httpx2.AsyncBaseTransport):
         if request.url.host != _GITHUB_API_HOST:
             return await self.inner.handle_async_request(request)
         sender = self.caller()
-        response = await self.inner.handle_async_request(request)
+        started = time.monotonic()
         try:
-            self._log(request, response, sender)
+            response = await self.inner.handle_async_request(request)
+        except Exception as exc:
+            self._meter(request, None, sender, started, type(exc).__name__)
+            raise
+        self._meter(request, response, sender, started)
+        return response
+
+    @classmethod
+    def _meter(
+        cls,
+        request: httpx2.Request,
+        response: httpx2.Response | None,
+        sender: str,
+        started: float,
+        error: str | None = None,
+    ) -> None:
+        try:
+            cls._log(request, response, sender, time.monotonic() - started, error)
         except Exception:
             # Metering must never break the request it describes.
             logger.debug("Could not meter GitHub request", exc_info=True)
-        return response
 
     async def aclose(self) -> None:
         await self.inner.aclose()
@@ -132,6 +156,26 @@ class MeteredTransport(httpx2.AsyncBaseTransport):
         return "other"
 
     @staticmethod
+    async def tag_installation(installation_id: int, request: httpx2.Request) -> None:
+        """A request hook naming the App installation whose token the client sends."""
+        request.extensions[INSTALLATION] = installation_id
+
+    @staticmethod
+    def _run_ids() -> dict[str, str]:
+        """The graph thread, run and invocation sending the request, when there is one."""
+        try:
+            config = RunConfig.from_runtime()
+        except RuntimeError:
+            logger.debug("GitHub request has no graph runtime context")
+            return {}
+        ids = {
+            "thread_id": config.thread_id,
+            "run_id": config.run_id,
+            "invocation_id": config.invocation_id,
+        }
+        return {name: value for name, value in ids.items() if value is not None}
+
+    @staticmethod
     def _header_int(headers: httpx2.Headers, name: str) -> int | None:
         try:
             return int(headers[name])
@@ -139,18 +183,39 @@ class MeteredTransport(httpx2.AsyncBaseTransport):
             return None
 
     @classmethod
-    def _log(cls, request: httpx2.Request, response: httpx2.Response, sender: str) -> None:
+    def _log(
+        cls,
+        request: httpx2.Request,
+        response: httpx2.Response | None,
+        sender: str,
+        duration: float,
+        error: str | None,
+    ) -> None:
+        token_kind = cls.token_kind(request.headers.get("Authorization"))
+        fields: dict[str, object] = {
+            "github_caller": sender,
+            "github_method": request.method,
+            "github_route": cls.route(request.url),
+            "github_token_kind": token_kind,
+            "github_duration_ms": round(duration * 1000, 1),
+            **cls._run_ids(),
+        }
+        # Only an installation token spends an installation's quota; a local ``gh`` token
+        # standing in for an unconfigured App is a person's, whatever the client was opened as.
+        installation = request.extensions.get(INSTALLATION)
+        if token_kind == "installation" and isinstance(installation, int):
+            fields["github_installation_id"] = installation
+        if response is None:
+            logger.info("GitHub API request", extra={**fields, "github_error_type": error})
+            return
         headers = response.headers
         revalidated = response.status_code == 304 or bool(response.extensions.get(REVALIDATED))
         logger.info(
             "GitHub API request",
             extra={
-                "github_caller": sender,
-                "github_method": request.method,
-                "github_route": cls.route(request.url),
+                **fields,
                 "github_status": response.status_code,
                 "github_revalidated": revalidated,
-                "github_token_kind": cls.token_kind(request.headers.get("Authorization")),
                 "github_quota_resource": headers.get("x-ratelimit-resource"),
                 "github_quota_used": cls._header_int(headers, "x-ratelimit-used"),
                 "github_quota_remaining": cls._header_int(headers, "x-ratelimit-remaining"),

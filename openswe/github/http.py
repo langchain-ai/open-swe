@@ -27,10 +27,11 @@ import random
 import re
 import time
 import zipfile
-from collections.abc import AsyncIterator, Awaitable, Collection, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, Self
 from urllib.parse import quote, unquote, urlparse
@@ -339,6 +340,7 @@ async def github_client(
     token: str | None = None,
     timeout: httpx2.Timeout | float | None = None,
     headers: dict[str, str] | None = None,
+    installation_id: int | None = None,
 ) -> AsyncIterator[httpx2.AsyncClient]:
     """Yield an ``httpx2.AsyncClient`` with sane GitHub defaults.
 
@@ -351,10 +353,16 @@ async def github_client(
         merged_headers.update(github_headers(token))
     if headers:
         merged_headers.update(headers)
+    hooks: dict[str, list[Callable[[httpx2.Request], Awaitable[None]]]] | None = (
+        {"request": [partial(MeteredTransport.tag_installation, installation_id)]}
+        if installation_id is not None
+        else None
+    )
     async with httpx2.AsyncClient(
         headers=merged_headers or None,
         timeout=timeout or DEFAULT_TIMEOUT,
         transport=GITHUB_TRANSPORT,
+        event_hooks=hooks,
     ) as client:
         yield client
 
@@ -557,6 +565,7 @@ class GitHubClient:
         explicit_installation = installation_id is not None
         # app imports this module.
         from openswe.github.app import (
+            GITHUB_APP_INSTALLATION_ID,
             INSTALLATIONS,
             get_github_app_installation_id_for_org,
             get_github_app_installation_id_for_repo,
@@ -589,7 +598,15 @@ class GitHubClient:
                 await INSTALLATIONS.forget(owner, repo)
         if not token:
             raise GitHubAppUnavailable("GitHub App token unavailable")
-        async with github_client(token=token, timeout=timeout) as http:
+        # Metering names this installation only on requests whose token is an installation's.
+        resolved_installation = str(installation_id or GITHUB_APP_INSTALLATION_ID).strip()
+        async with github_client(
+            token=token,
+            timeout=timeout,
+            installation_id=int(resolved_installation)
+            if resolved_installation.isdecimal()
+            else None,
+        ) as http:
             yield cls(http)
 
     def repo(self, owner: str, name: str) -> RepoClient:

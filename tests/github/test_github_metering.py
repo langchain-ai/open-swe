@@ -122,3 +122,66 @@ async def test_a_logging_failure_still_returns_the_response(
         response = await http.get("https://api.github.com/rate_limit")
 
     assert response.status_code == 204
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("token", "kind", "installation"),
+    [("ghs_app", "installation", 456), ("gho_local_gh", "user", None)],
+)
+async def test_as_app_names_the_installation_only_for_an_installation_token(
+    token: str,
+    kind: str,
+    installation: int | None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Under ``langgraph dev`` the App falls back to the person's ``gh`` token."""
+    from openswe.github import app as github_app
+    from openswe.github import http as github_http
+    from openswe.run_config import RunConfig
+
+    async def mint(**_kwargs: object) -> str:
+        return token
+
+    monkeypatch.setattr(github_app, "get_github_app_installation_token", mint)
+    monkeypatch.setattr(
+        RunConfig,
+        "from_runtime",
+        lambda: RunConfig(thread_id="thread-id", run_id="run-id", invocation_id="invocation-id"),
+    )
+    monkeypatch.setattr(
+        github_http,
+        "GITHUB_TRANSPORT",
+        MeteredTransport(httpx2.MockTransport(lambda _request: httpx2.Response(200))),
+    )
+    caplog.set_level(logging.INFO, logger="openswe.github.metering")
+    async with github_http.GitHubClient.as_app(installation_id=456) as github:
+        await github.http.get("https://api.github.com/rate_limit")
+
+    (record,) = _records(caplog)
+    assert record.github_token_kind == kind
+    assert getattr(record, "github_installation_id", None) == installation
+    assert record.github_duration_ms >= 0
+    assert (record.thread_id, record.run_id, record.invocation_id) == (
+        "thread-id",
+        "run-id",
+        "invocation-id",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_transport_error_is_logged_and_raised(caplog: pytest.LogCaptureFixture) -> None:
+    def fail(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("private-detail", request=request)
+
+    transport = MeteredTransport(httpx2.MockTransport(fail))
+    caplog.set_level(logging.INFO, logger="openswe.github.metering")
+    async with httpx2.AsyncClient(transport=transport) as http:
+        with pytest.raises(httpx2.ConnectError):
+            await http.get("https://api.github.com/rate_limit")
+
+    (record,) = _records(caplog)
+    assert record.github_error_type == "ConnectError"
+    assert not hasattr(record, "github_status")
+    assert "private-detail" not in str(record.__dict__)
