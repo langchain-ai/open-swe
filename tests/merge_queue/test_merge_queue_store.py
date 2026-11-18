@@ -2320,6 +2320,105 @@ class TestNativeRecovery:
         assert "superseded_attempts" not in history.batch.policy
 
     @pytest.mark.parametrize(
+        "outcome", ["removed", "lost_response", "publication_timeout", "rejected"]
+    )
+    async def test_deferral_through_gateway_requires_fresh_survivor_validation(
+        self, queue, outcome
+    ):
+        policy, lease, _, snapshot, work, proposal = await self.failed(queue)
+        proposal = proposal.model_copy(
+            update={
+                "action": "defer",
+                "member": RecoveryMember(entry_id="entry-2", number=2, head_sha=f"{2:040x}"),
+            }
+        )
+        await queue.decide_native_recovery(
+            proposal, "recovery-thread", snapshot, lease, trust="trusted-policy"
+        )
+        after = native_snapshot((1, 3, 4, 5, 6))
+        repo = Mock(spec=RepoClient)
+        repo.native_queue = AsyncMock(
+            side_effect=[snapshot, snapshot if outcome == "publication_timeout" else after]
+        )
+        repo.merge_base = AsyncMock(return_value=snapshot.main_sha)
+        repo.branch_rules = AsyncMock(
+            return_value=[
+                {
+                    "type": "merge_queue",
+                    "parameters": {
+                        "merge_method": "MERGE",
+                        "grouping_strategy": "HEADGREEN",
+                        "max_entries_to_build": 3,
+                        "max_entries_to_merge": 3,
+                        "min_entries_to_merge": 1,
+                        "check_response_timeout_minutes": 10,
+                    },
+                },
+                {
+                    "type": "required_status_checks",
+                    "parameters": {
+                        "required_status_checks": [
+                            {"context": "merge-queue", "integration_id": 456}
+                        ],
+                    },
+                },
+            ]
+        )
+        gateway = Mock(spec=DispatchGateway)
+        gateway.defer = AsyncMock(
+            side_effect={
+                "lost_response": httpx2.ReadTimeout("Response lost"),
+                "publication_timeout": TimeoutError("Publication deadline expired"),
+            }.get(outcome)
+        )
+        if outcome == "rejected":
+            request = httpx2.Request("POST", "https://dispatcher.example/deferrals")
+            gateway.defer.side_effect = httpx2.HTTPStatusError(
+                "Changed PR head",
+                request=request,
+                response=httpx2.Response(409, request=request),
+            )
+        runner = NativeQueueRuntime(
+            queue.id,
+            42,
+            Mock(),
+            config=Mock(spec=QueueConfiguration, native_trust="trusted-policy", check_app_id=456),
+            dispatcher=gateway,
+        )
+
+        assert await runner._recover(queue, repo, snapshot, lease)
+
+        gateway.defer.assert_awaited_once()
+        args, kwargs = gateway.defer.call_args
+        assert args[0].contract == work.request
+        assert args[0].expires_at == work.attempt.deadline
+        assert args[1:] == (proposal.request_key, proposal.member)
+        assert kwargs == {"expires_at": work.batch.deadline}
+        history = await queue.history(work.batch.id)
+        if outcome == "rejected":
+            assert history.decisions[0].plan["status"] == "escalated"
+            assert "HTTPStatusError" in history.decisions[0].plan["detail"]
+            assert (await queue.snapshot(limit=1))[0]
+            assert await queue.pending_native_recovery(lease) is None
+            return
+        if outcome == "publication_timeout":
+            assert history.decisions[0].plan["status"] == "applying"
+            assert not (await queue.snapshot(limit=1))[0]
+            assert await runner._recover(queue, repo, after, lease)
+            gateway.defer.assert_awaited_once()
+            history = await queue.history(work.batch.id)
+        assert history.decisions[0].plan["status"] == "applied"
+        assert not (await queue.snapshot(limit=1))[0]
+        assert await queue.pending_native_recovery(lease) is None
+        replacement = await queue.prepare_native_validation(
+            after, 600, lease, policy=policy, trust="trusted-policy"
+        )
+        assert replacement is not None and replacement.dispatch
+        assert replacement.request.attempt_id != work.request.attempt_id
+        assert replacement.request.candidate_sha != work.request.candidate_sha
+        assert replacement.batch.deadline == work.batch.deadline
+
+    @pytest.mark.parametrize(
         "outcome",
         ["removed", "still_present", "deadline", "requeued", "survivor_changed", "timeout"],
     )
@@ -2368,7 +2467,7 @@ class TestNativeRecovery:
         writer = Mock(
             side_effect=AssertionError("Must never repeat removal after an applying intent")
         )
-        runner = NativeQueueRuntime(queue.id, 42, writer, open_recovery_repo=writer)
+        runner = NativeQueueRuntime(queue.id, 42, writer)
         if outcome in {"removed", "still_present", "deadline"}:
             assert await runner._recover(restarted, repo, snapshot, lease)
             pending = await restarted.pending_native_recovery(lease)

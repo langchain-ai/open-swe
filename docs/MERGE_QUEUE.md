@@ -122,14 +122,13 @@ Native validation can opt into a continuing Robin investigation by adding `recov
 ```json
 {
   "recovery": {
-    "channel_id": "C0CJM2ZGB9C",
+    "channel_id": "<recovery-slack-channel-id>",
     "operator_id": "<linked Robin users.id UUID>"
   }
 }
 ```
 
-`C0CJM2ZGB9C` is `#alerts-merge-queue`.
-Invite Robin before enabling this setting.
+Invite Robin to the configured recovery-notification channel before enabling this setting.
 The channel must allow internal operations, have Robin as a member, and be readable with the existing Slack integration.
 Choose a linked GitHub/Slack user whose verified email is in `operator_emails` and who can access the queue repository.
 Apply the additive pause-ownership migration before deploying.
@@ -139,8 +138,19 @@ A failed validation binds one durable MDA/Slack thread to its sequence.
 The dashboard investigation is private to its configured operator; outcome notices are posted to the configured Slack channel.
 The minute reconciler recovers missed job deliveries; keyed jobs deliver changes and scheduled investigations to the same owner.
 The `merge-queue-recovery` skill uses read tools for diagnosis and guarded tools for full retry, exact-PR deferral, outage pause/resume, and rare escalation.
-Homebase continues to dispatch validation and independently verify passing checks.
-Robin's controller uses its narrowly scoped GitHub App token to dequeue.
+The dispatch gateway owns GitHub writes: workflow dispatch, passing-check publication, and native queue removal.
+Robin's controller retains diagnosis, pause/resume state, dependency checks, and outcome reconciliation; its native-queue GitHub token is read-only.
+
+Deferral sends a `POST` to the sibling `deferrals` endpoint of the configured `dispatch_url`.
+The request includes the exact original dispatch body, recovery request key, queue entry ID, PR number/head SHA, and persisted batch deadline.
+Its signature is HMAC-SHA256 over `b"deferral:" + body` with the existing dispatch secret.
+The gateway verifies the original dispatch receipt and current workflow policy, repository, candidate lineage, and selected member before recording a single durable deferral intent for that attempt.
+The recovery deadline remains bounded to one day after the original attempt deadline, allowing a timed-out attempt to be diagnosed within the batch's remaining budget.
+The gateway uses its configured App with repository-scoped `merge_queues: write`, plus read-only contents, metadata, and pull requests.
+Neither the gateway nor Robin repeats an uncertain removal: Robin reads GitHub to confirm the outcome and requires a fresh validation attempt for the surviving candidate.
+
+Deploy the gateway's deferral endpoint and durable receipt support before deploying Robin's caller.
+Verify actual removal in a canary queue after both sides are deployed before broader rollout.
 
 Only confirmed removals generate author-tagged notices.
 Missing author mappings route to the configured operator.

@@ -8,8 +8,9 @@ from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid7
 
 import httpx2
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr
 
+from openswe.merge_queue.recovery import RecoveryMember
 from openswe.merge_queue.validation_contract import ValidationRequest
 from openswe.utils.http_pool import pooled_transport
 
@@ -92,6 +93,38 @@ class DispatchGateway:
         if policy.nonce != nonce:
             raise ValueError("Workflow policy response belongs to a different request")
         return policy
+
+    async def defer(
+        self,
+        envelope: DispatchEnvelope,
+        request_key: UUID,
+        member: RecoveryMember,
+        *,
+        expires_at: datetime,
+    ) -> None:
+        request = DeferralRequest(
+            dispatch_body=envelope.model_dump_json(exclude_none=True),
+            expires_at=expires_at,
+            request_key=request_key,
+            entry_id=member.entry_id,
+            number=member.number,
+            head_sha=member.head_sha,
+        )
+        body = request.model_dump_json().encode()
+        async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30) as client:
+            response = await client.post(
+                self._sibling_url("deferrals"),
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Merge-Queue-Signature": self._signature(body, b"deferral:"),
+                },
+                follow_redirects=False,
+            )
+            self._check_policy_mismatch(response, body)
+            response.raise_for_status()
+            if response.status_code != 204:
+                raise ValueError("Queue deferral was not acknowledged")
 
     async def report(
         self,
@@ -183,3 +216,9 @@ class CheckReport(BaseModel):
     dispatch_body: str
     state: Literal["in_progress", "recovering", "cancelled", "success"]
     run_id: int | None = None
+
+
+class DeferralRequest(RecoveryMember):
+    dispatch_body: str
+    expires_at: AwareDatetime
+    request_key: UUID

@@ -4,7 +4,6 @@ import hashlib
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from functools import partial
 
 from pydantic import SecretStr
 
@@ -34,9 +33,7 @@ class QueueController:
         )
 
     @asynccontextmanager
-    async def open_repo(
-        self, queue: MergeQueue, *, recovery: bool = False
-    ) -> AsyncIterator[RepoClient]:
+    async def open_repo(self, queue: MergeQueue) -> AsyncIterator[RepoClient]:
         if (
             queue.workspace_id != self.config.workspace_id
             or queue.target_branch != "main"
@@ -61,10 +58,6 @@ class QueueController:
         )
         if self.config.mode == "native" and self.dispatcher is not None:
             permissions.update({"actions": "read", "checks": "read"})
-        if recovery:
-            if self.config.mode != "native" or self.dispatcher is None:
-                raise ValueError("Recovery requires native validation to be enabled")
-            permissions = {"contents": "read", "metadata": "read", "pull_requests": "write"}
         async with GitHubClient.as_app(owner, name, permissions=permissions) as github:
             repo = github.repo(*self.config.repository.split("/", 1))
             if (await repo.info()).get("id") != self.config.repository_id:
@@ -116,7 +109,6 @@ class QueueController:
             self.queue.id,
             self.config.repository_id,
             current.open_repo,
-            open_recovery_repo=partial(current.open_repo, recovery=True),
             config=config,
             dispatcher=current.dispatcher if config is not None else None,
         ).reconcile(payload)

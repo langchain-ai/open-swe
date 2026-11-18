@@ -15,7 +15,12 @@ from openswe.github.http import RepoClient
 from openswe.github.queue import NativeQueueSnapshot
 from openswe.merge_queue.admission import QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
-from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected, WorkflowPolicyMismatch
+from openswe.merge_queue.dispatch import (
+    DispatchEnvelope,
+    DispatchGateway,
+    DispatchRejected,
+    WorkflowPolicyMismatch,
+)
 from openswe.merge_queue.models import Lease
 from openswe.merge_queue.runtime import QueueJob
 from openswe.merge_queue.store import LeaseLost, MergeQueue
@@ -41,14 +46,11 @@ class NativeQueueRuntime:
         repository_id: int,
         open_repo: Callable[[MergeQueue], AbstractAsyncContextManager[RepoClient]],
         *,
-        open_recovery_repo: Callable[[MergeQueue], AbstractAsyncContextManager[RepoClient]]
-        | None = None,
         config: QueueConfiguration | None = None,
         dispatcher: DispatchGateway | None = None,
     ):
         self.queue_id, self.repository_id, self.open_repo = queue_id, repository_id, open_repo
         self.config, self.dispatcher = config, dispatcher
-        self.open_recovery_repo = open_recovery_repo
 
     async def _timeout(self, repo: RepoClient, policy: QueuePolicy | None = None) -> int:
         config = self.config
@@ -219,7 +221,7 @@ class NativeQueueRuntime:
             await queue.settle_native_deferral(decision, snapshot, lease)
             return True
         try:
-            if self.open_recovery_repo is None:
+            if self.dispatcher is None:
                 raise ValueError("Native deferral transport is unavailable")
             history = await queue.history(decision.proposal.batch_id)
             if self.config is None or history.batch.policy.get("trust") != self.config.native_trust:
@@ -232,35 +234,52 @@ class NativeQueueRuntime:
             if await self._timeout(repo, policy) != history.batch.policy.get("timeout_seconds"):
                 raise ValueError("Native queue deadline changed")
             await decision.check_dependencies(repo, snapshot)
-            async with self.open_recovery_repo(queue) as writer:
-                current = await writer.native_queue(queue.target_branch)
-                if current.repository_id != self.repository_id:
-                    raise ValueError("Native queue repository identity changed")
-                if current != snapshot:
-                    raise ValueError(
-                        "Queue changed during dependency checks; operator review required"
+            attempt = next(
+                attempt
+                for attempt in history.attempts
+                if attempt.id == decision.proposal.attempt_id
+            )
+            references = {
+                evidence.key: evidence.reference
+                for evidence in history.evidence
+                if evidence.attempt_id == attempt.id
+            }
+            workflow_policy = references.get("workflow-policy", {})
+            envelope = DispatchEnvelope.model_validate(
+                {
+                    "contract": references["native-request"],
+                    "expires_at": attempt.deadline,
+                    "workflow_policy_revision": workflow_policy.get("revision"),
+                    "workflow_digest": workflow_policy.get("digest"),
+                }
+            )
+            current = await repo.native_queue(queue.target_branch)
+            if current != snapshot:
+                raise ValueError("Queue changed during dependency checks; operator review required")
+            await queue.renew(lease, timedelta(seconds=60))
+            await queue.start_native_deferral(decision, current, lease)
+            member = decision.proposal.member
+            assert member is not None
+            try:
+                async with queue.native_publication(lease):
+                    await self.dispatcher.defer(
+                        envelope,
+                        decision.proposal.request_key,
+                        member,
+                        expires_at=history.batch.deadline,
                     )
-                await queue.renew(lease, timedelta(seconds=60))
-                await queue.start_native_deferral(decision, current, lease)
-                member = decision.proposal.member
-                assert member is not None and current.queue is not None
-                entry = next(
-                    entry for entry in current.queue.entries.nodes if entry.id == member.entry_id
+            except (httpx2.HTTPError, TimeoutError) as exc:
+                if isinstance(exc, httpx2.HTTPStatusError) and exc.response.status_code < 500:
+                    raise
+                logger.warning(
+                    "Reconciling ambiguous dispatch gateway deferral response",
+                    extra={"queue_id": str(queue.id)},
+                    exc_info=True,
                 )
-                # Serialize this short mutation with human pause and configuration changes.
-                try:
-                    async with queue.native_publication(lease):
-                        await writer.dequeue_native_pull(entry, str(decision.proposal.request_key))
-                except httpx2.HTTPError:
-                    logger.warning(
-                        "Reconciling ambiguous native dequeue response",
-                        extra={"queue_id": str(queue.id)},
-                        exc_info=True,
-                    )
-                after = await writer.native_queue(queue.target_branch)
-                if after.repository_id != self.repository_id:
-                    raise ValueError("Native queue repository identity changed")
-                await queue.settle_native_deferral(decision, after, lease)
+            after = await repo.native_queue(queue.target_branch)
+            if after.repository_id != self.repository_id:
+                raise ValueError("Native queue repository identity changed")
+            await queue.settle_native_deferral(decision, after, lease)
         except LeaseLost:
             raise
         except Exception as exc:

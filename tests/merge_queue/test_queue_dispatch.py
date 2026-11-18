@@ -11,11 +11,13 @@ from openswe.merge_queue import dispatch
 from openswe.merge_queue.admission import QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.dispatch import (
+    DispatchEnvelope,
     DispatchGateway,
     DispatchRejected,
     WorkflowPolicy,
     WorkflowPolicyMismatch,
 )
+from openswe.merge_queue.recovery import RecoveryMember
 from openswe.merge_queue.validation_contract import ValidationPolicy, ValidationRequest
 
 
@@ -159,3 +161,52 @@ def test_service_suite_policy_requires_new_revision_and_changes_validation_trust
     assert updated.policy.validation.suite == "services"
     assert updated.native_trust != config.native_trust
     assert updated.generation != config.generation
+
+
+@pytest.mark.parametrize("outcome", ["ok", "timeout", "gateway", "redirect", "rejected"])
+async def test_deferral_uses_gateway_without_replaying_uncertain_removal(monkeypatch, outcome):
+    envelope = DispatchEnvelope(
+        contract=ValidationRequest(
+            repository="acme/widgets",
+            batch_id=uuid7(),
+            attempt_id=uuid7(),
+            candidate_sha="a" * 40,
+            workflow_sha="b" * 40,
+            dispatch_actor_id=123,
+        ),
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+    member = RecoveryMember(entry_id="entry-2", number=2, head_sha="c" * 40)
+    key = uuid7()
+    sent = []
+
+    def respond(request):
+        sent.append(request)
+        assert str(request.url) == "https://dispatcher.example/merge-queue/deferrals"
+        assert (
+            request.headers["X-Merge-Queue-Signature"]
+            == hmac.digest(b"s" * 32, b"deferral:" + request.content, "sha256").hex()
+        )
+        assert json.loads(request.content) == {
+            "dispatch_body": envelope.model_dump_json(exclude_none=True),
+            "request_key": str(key),
+            "expires_at": envelope.model_dump(mode="json")["expires_at"],
+            **member.model_dump(mode="json"),
+        }
+        if outcome == "timeout":
+            raise httpx2.ReadTimeout("Response lost", request=request)
+        return httpx2.Response(
+            {"ok": 204, "gateway": 502, "redirect": 307, "rejected": 409}[outcome],
+            headers={"Location": "https://other.example/"},
+        )
+
+    monkeypatch.setattr(dispatch, "pooled_transport", lambda: httpx2.MockTransport(respond))
+    gateway = DispatchGateway(
+        "https://dispatcher.example/merge-queue/dispatch", SecretStr("s" * 32)
+    )
+    if outcome == "ok":
+        await gateway.defer(envelope, key, member, expires_at=envelope.expires_at)
+    else:
+        with pytest.raises((httpx2.HTTPError, ValueError)):
+            await gateway.defer(envelope, key, member, expires_at=envelope.expires_at)
+    assert len(sent) == 1
