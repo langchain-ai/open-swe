@@ -1,5 +1,6 @@
 """Unit tests for GitHub CI read helpers used by the auto-fix flow."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import httpx2
@@ -8,7 +9,6 @@ import pytest
 from openswe.github import ci as github_ci
 from openswe.github import http as github_http
 from openswe.github.http import GitHubClient, RepoClient
-from openswe.skill_store.run_skills import BUNDLED_SKILLS_DIR
 
 
 def _repo() -> RepoClient:
@@ -138,7 +138,7 @@ async def test_write_permission_fails_closed(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_baby_sit_skill_names_every_robin_check() -> None:
-    skill = (BUNDLED_SKILLS_DIR / "baby-sit" / "SKILL.md").read_text()
+    skill = (Path(__file__).parents[2] / "mda/bundled_skills/baby-sit/SKILL.md").read_text()
 
     assert [name for name in github_ci.OPEN_SWE_CHECK_NAMES if f"`{name}`" not in skill] == []
 

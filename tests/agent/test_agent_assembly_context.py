@@ -123,8 +123,8 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
     assert "Do it." in personal.content
     # The runtime answers reads of skills itself; the files API serves none of them.
     assert not set(surface.skill_sources) & set(surface.backend_paths)
-    # A runtime from before serving the bundled skills itself still has them listed.
-    assert any(f.path.startswith(BUNDLED_SKILLS) for f in listed.files)
+    assert BUNDLED_SKILLS in surface.skill_sources
+    assert not any(f.path.startswith(BUNDLED_SKILLS) for f in listed.files)
 
     # A runtime that serves them gets PostgreSQL's skills alone.
     served = SkillsRequest(served=[BUNDLED_SKILLS]).model_dump()

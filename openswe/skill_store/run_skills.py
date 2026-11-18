@@ -2,11 +2,10 @@
 
 import logging
 from collections.abc import Collection, Mapping
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Final, Self
 
 from deepagents.backends.composite import CompositeBackend
-from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol
 from deepagents.backends.state import StateBackend
 from runtime_api.skills import BUNDLED_SKILLS, RunSkills, SkillFile
@@ -20,10 +19,6 @@ logger = logging.getLogger(__name__)
 USER_SKILLS_ROUTE: Final = "/skills/"
 ORGANIZATION_SKILLS_ROUTE: Final = "/organization-skills/"
 BUNDLED_SKILLS_ROUTE: Final = BUNDLED_SKILLS
-# Deprecated: the runtime ships its own copy (``mda/bundled_skills``); this one lists them
-# for an MDA deployment from before. ``tests/agent/test_mda_bundled_skills.py`` keeps them
-# alike until it goes.
-BUNDLED_SKILLS_DIR: Final = Path(__file__).resolve().parent.parent / "bundled_skills"
 _SKILL_FILE: Final = "SKILL.md"
 
 
@@ -35,9 +30,6 @@ class RunSkillStores:
 
     def __init__(self, credential_login: str | None) -> None:
         self.routes: dict[str, BackendProtocol] = {
-            BUNDLED_SKILLS_ROUTE: ReadOnlyBackend(
-                FilesystemBackend(root_dir=BUNDLED_SKILLS_DIR, virtual_mode=True)
-            ),
             ORGANIZATION_SKILLS_ROUTE: skills_backend(None),
         }
         self.sources: tuple[str, ...] = (ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE)
@@ -60,7 +52,7 @@ class RunSkillStores:
         runtime ``served`` itself."""
         files = CompositeBackend(default=ReadOnlyBackend(StateBackend()), routes=self.routes)
         folders: list[str] = []
-        for source in self.sources:
+        for source in self.routes:
             if source in served:
                 continue
             listing = await files.als(source)
