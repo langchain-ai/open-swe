@@ -3092,7 +3092,8 @@ async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_
         "forwarded context": [(True, "subagent")] * 2,
         "own": [(False, "root")] * 2,
     }
-    assert in_tool == [None, "subagent", "subagent", None]
+    # The worker's type stays on its model calls; a run-wide tag splits the trace by node.
+    assert in_tool == [None, None, None, None]
 
 
 async def test_a_subagent_keeps_its_own_tag_though_it_inherits_the_root_agent_middleware() -> None:

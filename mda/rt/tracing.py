@@ -246,8 +246,9 @@ class RootAgentTraceMiddleware(AgentMiddleware):
     LangSmith shows the calls so tagged as a thread's main conversation, across the
     summaries that restart its history. Installed innermost, it leaves out the summary's
     model call and the calls a tool makes. A call whose trace already names an agent type
-    keeps it: deepagents tags a forked subagent ``subagent``, and MDA tags a worker's run
-    that it nests in its coordinator's trace ``subagent``.
+    keeps it, as deepagents tags a forked subagent ``subagent``. An async worker's calls
+    are tagged ``subagent``, so they stay out of the coordinator's conversation that the
+    worker's run is nested in.
     """
 
     async def awrap_model_call(
@@ -259,6 +260,24 @@ class RootAgentTraceMiddleware(AgentMiddleware):
         metadata = tracing["metadata"] or {}
         if "ls_agent_type" in metadata:
             return await handler(request)
-        tracing["metadata"] = {**metadata, "ls_agent_type": "root"}
+        agent_type = "subagent" if self.is_async_worker(ensure_config()) else "root"
+        tracing["metadata"] = {**metadata, "ls_agent_type": agent_type}
         with tracing_context(**tracing):
             return await handler(request)
+
+    @staticmethod
+    def is_async_worker(config: Mapping[str, object]) -> bool:
+        """Whether the run was launched by another agent's async subagent tool.
+
+        deepagents sends the lead thread as ``configurable.deepagents_parent``; the Agent
+        Server also copies the task thread's ``parent_thread_id`` into every run on it.
+        """
+        configurable = config.get("configurable")
+        reference = (
+            configurable.get("deepagents_parent") if isinstance(configurable, Mapping) else None
+        )
+        metadata = config.get("metadata")
+        return bool(
+            (isinstance(reference, Mapping) and reference.get("thread_id"))
+            or (isinstance(metadata, Mapping) and metadata.get("parent_thread_id"))
+        )

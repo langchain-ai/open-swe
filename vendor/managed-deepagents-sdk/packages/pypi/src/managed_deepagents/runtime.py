@@ -721,18 +721,19 @@ async def parent_run(config: Mapping[str, object]) -> AsyncGenerator[None]:
 
 @contextmanager
 def _parent_trace(config: Mapping[str, object]) -> Generator[None]:
-    """Nest marked traces, classifying only async worker runs as subagents."""
+    """Nest this run's trace under the call that launched it, if deepagents marked it.
+
+    Only the parent is set here. Run-wide tracing metadata in this context detaches
+    the graph's node runs from the graph run in the Agent Server, so each node
+    becomes a trace of its own; the agent classifies its model calls instead.
+    """
     configurable = config.get("configurable")
     parent = _launching_parent(configurable) if isinstance(configurable, Mapping) else None
     if parent is None or not tracing_is_enabled():
         yield
         return
-    if _lead_thread(config) is None:
-        with tracing_context(parent=parent):
-            yield
-    else:
-        with tracing_context(parent=parent, metadata={"ls_agent_type": "subagent"}):
-            yield
+    with tracing_context(parent=parent):
+        yield
 
 
 def _launching_parent(configurable: Mapping[str, object]) -> RunTree | None:
