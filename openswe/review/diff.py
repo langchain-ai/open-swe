@@ -12,6 +12,7 @@ The reviewer needs three things from a PR diff:
    (``last_reviewed_sha..new_head_sha``).
 """
 
+import functools
 import hashlib
 import logging
 import re
@@ -135,6 +136,8 @@ def parse_unified_diff(diff_text: str) -> list[FileDiff]:
     return files
 
 
+# ponytail: holds the last four diffs' text, key by a digest if huge diffs make that matter.
+@functools.lru_cache(maxsize=4)
 def compute_diff_line_set(diff_text: str) -> dict[str, dict[str, set[int]]]:
     """Return ``{file: {"RIGHT": {new_lines}, "LEFT": {old_lines}}}`` for the
     lines covered by the diff.
@@ -144,6 +147,10 @@ def compute_diff_line_set(diff_text: str) -> dict[str, dict[str, set[int]]]:
     (``side = LEFT`` — deletions). ``add_finding`` and ``publish_review``
     validate a finding's ``(file, start_line..end_line, side)`` against the
     matching set so deleted-line bugs aren't wrongly rejected.
+
+    A review run restores these sets on every call it makes to the backend, so
+    each diff is parsed once and every caller shares the result: read it, never
+    change it.
     """
     out: dict[str, dict[str, set[int]]] = {}
     for file_diff in parse_unified_diff(diff_text):
