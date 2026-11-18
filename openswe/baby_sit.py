@@ -29,7 +29,7 @@ from openswe.github.ci import (
 from openswe.github.comments import post_github_comment
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, read_result
 from openswe.github.pull_request_status import PullRequestClient
-from openswe.github.pull_requests import PullRequest, PullRequestPayload
+from openswe.github.pull_requests import PullRequest
 from openswe.github.repositories import Repository
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import InputMessageContext, SystemIdentity
@@ -595,26 +595,22 @@ async def _evaluate_watch(key: str) -> str:
 
 async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
     key = watch.key
-    result = await read_result(pull.pull())
-    pr = result.value
-    if not pr:
+    result = await read_result(pull.ci())
+    ci = result.value
+    if ci is None:
         detail = {
             "missing": "pull request not found or hidden from the GitHub App (404)",
-            "forbidden": "GitHub denied access to the pull request (401/403)",
-        }.get(result.status, "pull request unavailable")
+            "forbidden": "GitHub denied access to the pull request or its checks (401/403)",
+        }.get(result.status, f"pull request or CI status unavailable ({result.status})")
         return await _record_evaluation_error(watch, detail, retryable=result.status == "transient")
     # A merged or closed PR already says so where people look; the watch just ends.
-    if pr.get("state") != "open":
+    if ci.state != "open":
         await watch.stop()
         return "stopped"
 
-    head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
-    head_sha = head.get("sha") if isinstance(head, dict) else None
-    if not isinstance(head_sha, str) or not head_sha:
-        return await _record_evaluation_error(watch, "head SHA unavailable")
-    head_ref = head.get("ref") if isinstance(head, dict) else None
-    if isinstance(head_ref, str) and head_ref:
-        watch.head_ref = head_ref
+    head_sha = ci.head_sha
+    if ci.head_ref:
+        watch.head_ref = ci.head_ref
     if head_sha != watch.head_sha:
         watch.head_sha = head_sha
         watch.ready_head_sha = ""
@@ -622,15 +618,7 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
         watch.retry_count = 0
         watch.alert_keys = []
 
-    check_result = await CommitChecks.read_result(pull.repo, head_sha)
-    checks = check_result.value
-    if checks is None:
-        return await _record_evaluation_error(
-            watch,
-            f"CI status unavailable ({check_result.status})",
-            retryable=check_result.status == "transient",
-        )
-
+    checks = CommitChecks.of(ci.checks)
     watch.evaluation_errors = 0
     state = checks.state
     watch.forget_recovered(checks.failures)
@@ -638,10 +626,9 @@ async def _evaluate_pull(watch: BabySitWatch, pull: PullRequestClient) -> str:
         await WATCHES.save(watch)
         return state
     if state == "success":
-        base_ref = PullRequestPayload.model_validate(pr).base_ref
-        if not base_ref:
+        if not ci.base_ref:
             return await _record_evaluation_error(watch, "base branch unavailable")
-        required = await RequiredCheck.for_branch(pull.repo, base_ref)
+        required = await RequiredCheck.for_branch(pull.repo, ci.base_ref)
         if required is None:
             return await _record_evaluation_error(watch, "required checks unavailable")
         if checks.unreported(required):

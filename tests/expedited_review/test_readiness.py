@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,7 +11,7 @@ from openswe.expedited_review.readiness import (
     readiness_blockers,
 )
 from openswe.github.ci import RequiredCheck
-from openswe.github.http import GitHubClient, RepoClient
+from openswe.github.http import CommitCI, GitHubClient, RepoClient
 from openswe.github.pull_request_status import Mergeability, PullRequestClient
 
 
@@ -83,6 +84,7 @@ def test_every_gate_reports_independently() -> None:
     assert any("grace" in b for b in blockers)
 
 
+@pytest.mark.parametrize("status_time", [None, "2026-11-18T10:30:00Z"])
 @pytest.mark.parametrize(
     ("required", "blockers"),
     [
@@ -91,7 +93,7 @@ def test_every_gate_reports_independently() -> None:
     ],
 )
 async def test_assess_classifies_required_failures_on_a_pr_waiting_for_approval(
-    required: set[RequiredCheck], blockers: list[str]
+    required: set[RequiredCheck], blockers: list[str], status_time: str | None
 ) -> None:
     with (
         patch.object(
@@ -110,19 +112,52 @@ async def test_assess_classifies_required_failures_on_a_pr_waiting_for_approval(
         ),
         patch.object(
             RepoClient,
-            "check_runs",
+            "graphql",
             AsyncMock(
-                return_value=[
-                    {"name": "unit", "status": "completed", "conclusion": "success"},
-                    {
-                        "name": "advisory",
-                        "status": "completed",
-                        "conclusion": "failure",
-                    },
-                ]
+                return_value={
+                    "repository": {
+                        "object": {
+                            "oid": "newsha",
+                            "status": {
+                                "contexts": [
+                                    {
+                                        "context": "deploy",
+                                        "state": "SUCCESS",
+                                        "createdAt": status_time,
+                                    }
+                                ]
+                            },
+                            "checkSuites": {
+                                "pageInfo": {"hasNextPage": False},
+                                "nodes": [
+                                    {
+                                        "databaseId": 1,
+                                        "checkRuns": {
+                                            "pageInfo": {"hasNextPage": False},
+                                            "nodes": [
+                                                {
+                                                    "databaseId": 1,
+                                                    "name": "unit",
+                                                    "status": "COMPLETED",
+                                                    "conclusion": "SUCCESS",
+                                                    "completedAt": "2026-11-18T10:25:00Z",
+                                                },
+                                                {
+                                                    "databaseId": 2,
+                                                    "name": "advisory",
+                                                    "status": "COMPLETED",
+                                                    "conclusion": "FAILURE",
+                                                },
+                                            ],
+                                        },
+                                    }
+                                ],
+                            },
+                        }
+                    }
+                }
             ),
         ),
-        patch.object(RepoClient, "commit_statuses", AsyncMock(return_value=[])),
         patch.object(RequiredCheck, "for_branch", AsyncMock(return_value=required)),
         patch.object(PullRequestClient, "unresolved_threads", AsyncMock(return_value=[])),
         patch.object(PullRequestClient, "reviews", AsyncMock(return_value=[])),
@@ -135,6 +170,11 @@ async def test_assess_classifies_required_failures_on_a_pr_waiting_for_approval(
     assert result is not None
     assert result.blockers == blockers
     assert result.ready == (not blockers)
+    assert result.snapshot.checks_finished_at == (
+        datetime.fromisoformat(status_time)
+        if status_time
+        else datetime(2026, 11, 18, 10, 25, tzinfo=UTC)
+    )
 
 
 @pytest.mark.parametrize("live_approval_id", [None, 123])
@@ -165,15 +205,17 @@ async def test_assess_readiness_does_not_wait_on_an_open_swe_review(
         ),
         patch.object(
             RepoClient,
-            "check_runs",
+            "commit_ci",
             AsyncMock(
-                return_value=[
-                    {"name": review_name, "status": "in_progress"},
-                    {"name": "unit", "status": "completed", "conclusion": "success"},
-                ]
+                return_value=CommitCI(
+                    runs=[
+                        {"name": review_name, "status": "in_progress"},
+                        {"name": "unit", "status": "completed", "conclusion": "success"},
+                    ],
+                    statuses=[],
+                )
             ),
         ),
-        patch.object(RepoClient, "commit_statuses", AsyncMock(return_value=[])),
         patch.object(RequiredCheck, "for_branch", AsyncMock(return_value=set())),
         patch.object(PullRequestClient, "unresolved_threads", AsyncMock(return_value=[])),
         patch.object(PullRequestClient, "reviews", AsyncMock(return_value=live_reviews)),

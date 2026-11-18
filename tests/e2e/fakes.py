@@ -575,6 +575,39 @@ def check_graphql(check: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def commit_ci_graphql(pull: dict[str, Any]) -> dict[str, Any]:
+    """The pull's head as ``COMMIT_CI_FRAGMENT`` reads it: one check suite per check run."""
+    suites = []
+    for index, check in enumerate(pull["check_runs"], start=1):
+        app = check.get("app") if isinstance(check.get("app"), dict) else {}
+        conclusion = check.get("conclusion")
+        suites.append(
+            {
+                "databaseId": index,
+                "app": {"databaseId": app.get("id"), "slug": app.get("slug")},
+                "workflowRun": None,
+                "checkRuns": {
+                    "pageInfo": {"hasNextPage": False},
+                    "nodes": [
+                        {
+                            "databaseId": check.get("id", index),
+                            "name": check.get("name", ""),
+                            "status": str(check.get("status", "completed")).upper(),
+                            "conclusion": str(conclusion).upper() if conclusion else None,
+                            "detailsUrl": check.get("details_url"),
+                            "url": check.get("html_url"),
+                        }
+                    ],
+                },
+            }
+        )
+    return {
+        "oid": pull["head_sha"],
+        "status": {"contexts": [status_graphql(status) for status in pull["statuses"]]},
+        "checkSuites": {"pageInfo": {"hasNextPage": False}, "nodes": suites},
+    }
+
+
 def status_graphql(status: dict[str, Any]) -> dict[str, Any]:
     return {
         "__typename": "StatusContext",

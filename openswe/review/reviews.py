@@ -27,6 +27,7 @@ from starlette.types import Receive, Scope, Send
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
 from openswe.github.http import GitHubClient, or_none
+from openswe.github.metering import MeteredTransport
 from openswe.github.pull_request_diff import (
     fetch_file_versions,
     pull_request_patches,
@@ -406,7 +407,7 @@ class ReviewCheck(BaseModel):
         Read apart from the review page's detail: a busy branch's check runs take
         several slow pages, which held the whole page back.
         """
-        runs = await or_none(pull.repo.check_runs(await pull.head_sha()))
+        ci = await or_none(pull.ci())
         return [
             cls(
                 name=run.get("name") or "",
@@ -414,7 +415,7 @@ class ReviewCheck(BaseModel):
                 conclusion=run.get("conclusion"),
                 url=run.get("html_url"),
             )
-            for run in runs or []
+            for run in (ci.checks.runs if ci else [])
             if run.get("name") != APPROVAL_CHECK_RUN_NAME
         ]
 
@@ -909,9 +910,10 @@ async def get_pull_request_preview(pull_request: PullRequestClient) -> PullReque
     """
     repository = pull_request.repo
     owner, repo, pr_number = repository.owner, repository.name, pull_request.number
-    pull_payload, raw_files, threads = await asyncio.gather(
-        pull_request.pull(), pull_request.files(), pull_request.unresolved_threads()
-    )
+    with MeteredTransport.attributed():
+        pull_payload, raw_files, threads = await asyncio.gather(
+            pull_request.pull(), pull_request.files(), pull_request.unresolved_threads()
+        )
     pull = _GithubPreviewPull.model_validate(pull_payload)
     files = [
         PreviewFile(
@@ -929,31 +931,17 @@ async def get_pull_request_preview(pull_request: PullRequestClient) -> PullReque
     walkthrough = await WalkthroughView.for_head(owner, repo, pr_number, head_sha)
     # CI reaches GitHub as check runs or as legacy commit statuses, and the PR
     # list counts both — a preview reading only one would contradict the rail.
-    raw_checks, raw_statuses = (
-        await asyncio.gather(
-            or_none(repository.check_runs(head_sha)), or_none(repository.commit_statuses(head_sha))
-        )
-        if head_sha
-        else (None, None)
-    )
+    ci = await or_none(repository.commit_ci(head_sha)) if head_sha else None
     checks = (
         None
-        if raw_checks is None and raw_statuses is None
+        if ci is None
         else [
             PreviewCheck(
                 name=run.name, status=run.status, conclusion=run.conclusion, url=run.html_url
             )
-            for run in (
-                _GithubCheckRun.model_validate(item)
-                for item in (raw_checks or [])
-                if isinstance(item, dict)
-            )
+            for run in map(_GithubCheckRun.model_validate, ci.runs)
         ]
-        + [
-            _GithubCommitStatus.model_validate(item).as_check()
-            for item in (raw_statuses or [])
-            if isinstance(item, dict)
-        ]
+        + [_GithubCommitStatus.model_validate(item).as_check() for item in ci.statuses]
     )
     return PullRequestPreview(
         title=pull.title,

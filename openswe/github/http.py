@@ -89,6 +89,107 @@ class _History(BaseModel):
     nodes: list[_HistoryCommit]
 
 
+# A commit's latest check runs and its latest status per context, as ``CommitCI`` reads them.
+COMMIT_CI_FRAGMENT = """
+fragment CommitCI on Commit {
+  oid
+  status { contexts { context state targetUrl createdAt } }
+  checkSuites(first: 100) {
+    pageInfo { hasNextPage }
+    nodes {
+      databaseId
+      app { databaseId slug }
+      workflowRun { event workflow { databaseId } }
+      checkRuns(first: 100, filterBy: {checkType: LATEST}) {
+        pageInfo { hasNextPage }
+        nodes { databaseId name status conclusion detailsUrl url completedAt }
+      }
+    }
+  }
+}
+"""
+_COMMIT_CI_QUERY = (
+    """
+query CommitCI($owner: String!, $repo: String!, $oid: GitObjectID!) {
+  repository(owner: $owner, name: $repo) {
+    object(oid: $oid) { ...CommitCI }
+  }
+}
+"""
+    + COMMIT_CI_FRAGMENT
+)
+# GraphQL's commit status states, as REST spells them; EXPECTED is a context not yet reported.
+_STATUS_STATES = {
+    "SUCCESS": "success",
+    "FAILURE": "failure",
+    "ERROR": "error",
+    "PENDING": "pending",
+    "EXPECTED": "pending",
+}
+
+
+class _CIPage(BaseModel):
+    hasNextPage: bool
+
+
+class _CICheckRun(BaseModel):
+    databaseId: int
+    name: str
+    status: str
+    conclusion: str | None = None
+    detailsUrl: str | None = None
+    url: str | None = None
+    completedAt: datetime | None = None
+
+
+class _CICheckRuns(BaseModel):
+    pageInfo: _CIPage
+    nodes: list[_CICheckRun]
+
+
+class _CIApp(BaseModel):
+    databaseId: int | None = None
+    slug: str | None = None
+
+
+class _CIWorkflow(BaseModel):
+    databaseId: int
+
+
+class _CIWorkflowRun(BaseModel):
+    event: str
+    workflow: _CIWorkflow
+
+
+class _CICheckSuite(BaseModel):
+    databaseId: int
+    app: _CIApp | None = None
+    workflowRun: _CIWorkflowRun | None = None
+    checkRuns: _CICheckRuns
+
+
+class _CICheckSuites(BaseModel):
+    pageInfo: _CIPage
+    nodes: list[_CICheckSuite]
+
+
+class _CIStatusContext(BaseModel):
+    context: str
+    state: str
+    targetUrl: str | None = None
+    createdAt: datetime | None = None
+
+
+class _CIStatus(BaseModel):
+    contexts: list[_CIStatusContext]
+
+
+class _CICommit(BaseModel):
+    oid: str
+    status: _CIStatus | None = None
+    checkSuites: _CICheckSuites
+
+
 _THREAD_PARTICIPANT_MAX_REQUESTS = 100
 _THREAD_PARTICIPANTS_QUERY = """
 query ThreadParticipants(
@@ -654,6 +755,111 @@ class Comparison:
 
     merge_base: str
     files: list[dict[str, Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class CommitCI:
+    """A commit's latest check runs and latest status per context, in REST's shapes.
+
+    Runs carry ``id``, ``name``, ``status``, ``conclusion``, ``details_url``, ``html_url``,
+    ``app`` (``id``, ``slug``) and ``check_suite`` (``id``); statuses carry ``context``,
+    ``state`` and ``target_url``. Enum values are REST's lower-case ones.
+    """
+
+    runs: list[dict[str, Any]]
+    statuses: list[dict[str, Any]]
+
+    @classmethod
+    def from_graphql(cls, commit: object) -> Self | None:
+        """``COMMIT_CI_FRAGMENT``'s answer; ``None`` when it held more than one page."""
+        parsed = _CICommit.model_validate(commit)
+        suites = parsed.checkSuites
+        if suites.pageInfo.hasNextPage or any(
+            suite.checkRuns.pageInfo.hasNextPage for suite in suites.nodes
+        ):
+            return None
+        runs: list[dict[str, Any]] = []
+        workflows: dict[int, tuple[int, str]] = {}
+        for suite in suites.nodes:
+            app = suite.app or _CIApp()
+            if suite.workflowRun is not None:
+                workflows[suite.databaseId] = (
+                    suite.workflowRun.workflow.databaseId,
+                    suite.workflowRun.event,
+                )
+            runs.extend(
+                {
+                    "id": run.databaseId,
+                    "name": run.name,
+                    "status": run.status.lower(),
+                    "conclusion": run.conclusion.lower() if run.conclusion else None,
+                    "details_url": run.detailsUrl,
+                    **({"completed_at": run.completedAt.isoformat()} if run.completedAt else {}),
+                    # REST links an Actions run to its job page and any other app's run to ``url``.
+                    "html_url": run.detailsUrl if app.slug == "github-actions" else run.url,
+                    "app": {"id": app.databaseId, "slug": app.slug},
+                    "check_suite": {"id": suite.databaseId},
+                }
+                for run in suite.checkRuns.nodes
+            )
+        statuses = [
+            {
+                "context": status.context,
+                "state": _STATUS_STATES.get(status.state, status.state.lower()),
+                "target_url": status.targetUrl,
+                **({"updated_at": status.createdAt.isoformat()} if status.createdAt else {}),
+            }
+            for status in (parsed.status.contexts if parsed.status else [])
+        ]
+        return cls(cls.latest_runs(runs, workflows), statuses)
+
+    @staticmethod
+    def _rerunnable(runs: list[dict[str, Any]]) -> dict[int, tuple[int, int, str, int]]:
+        """Actions runs by index: their app, check suite, name and id."""
+        eligible: dict[int, tuple[int, int, str, int]] = {}
+        for index, run in enumerate(runs):
+            app, suite = run.get("app"), run.get("check_suite")
+            if not isinstance(app, dict) or not isinstance(suite, dict):
+                continue
+            app_id, suite_id = app.get("id"), suite.get("id")
+            name, order = run.get("name"), run.get("id")
+            if (
+                app.get("slug") == "github-actions"
+                and isinstance(app_id, int)
+                and isinstance(suite_id, int)
+                and isinstance(name, str)
+                and isinstance(order, int)
+            ):
+                eligible[index] = (app_id, suite_id, name, order)
+        return eligible
+
+    @classmethod
+    def has_reruns(cls, runs: list[dict[str, Any]]) -> bool:
+        """Whether two Actions runs share a name, so one may supersede the other."""
+        names = [(app_id, name) for app_id, _, name, _ in cls._rerunnable(runs).values()]
+        return len(names) != len(set(names))
+
+    @classmethod
+    def latest_runs(
+        cls, runs: list[dict[str, Any]], workflows: Mapping[int, tuple[int, str]]
+    ) -> list[dict[str, Any]]:
+        """``runs`` without the Actions runs a later run of the same workflow, event and
+        name superseded; ``workflows`` maps a check suite to its workflow and event."""
+        identities: dict[int, tuple[int, int, str, str]] = {}
+        latest: dict[tuple[int, int, str, str], int] = {}
+        orders: dict[int, int] = {}
+        for index, (app_id, suite_id, name, order) in cls._rerunnable(runs).items():
+            if (workflow := workflows.get(suite_id)) is None:
+                continue
+            workflow_id, event = workflow
+            identity = (app_id, workflow_id, event, name)
+            identities[index], orders[index] = identity, order
+            latest[identity] = max(latest.get(identity, order), order)
+        return [
+            run
+            for index, run in enumerate(runs)
+            if index not in identities or orders[index] == latest[identities[index]]
+        ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -1357,25 +1563,7 @@ class RepoClient:
             key="check_runs",
             params=params,
         )
-        if include_superseded:
-            return runs
-        eligible: dict[int, tuple[int, int, str, int]] = {}
-        for index, run in enumerate(runs):
-            app, suite = run.get("app"), run.get("check_suite")
-            if not isinstance(app, dict) or not isinstance(suite, dict):
-                continue
-            app_id, suite_id = app.get("id"), suite.get("id")
-            name, order = run.get("name"), run.get("id")
-            if (
-                app.get("slug") == "github-actions"
-                and isinstance(app_id, int)
-                and isinstance(suite_id, int)
-                and isinstance(name, str)
-                and isinstance(order, int)
-            ):
-                eligible[index] = (app_id, suite_id, name, order)
-        names = [(app_id, name) for app_id, _, name, _ in eligible.values()]
-        if len(names) == len(set(names)):
+        if include_superseded or not CommitCI.has_reruns(runs):
             return runs
         try:
             workflows = await self._workflow_runs(sha)
@@ -1386,20 +1574,24 @@ class RepoClient:
                 exc_info=True,
             )
             return runs
-        identities: dict[int, tuple[int, int, str, str]] = {}
-        latest: dict[tuple[int, int, str, str], int] = {}
-        orders: dict[int, int] = {}
-        for index, (app_id, suite_id, name, order) in eligible.items():
-            if (workflow := workflows.get(suite_id)) is None:
-                continue
-            identity = (app_id, workflow.workflow_id, workflow.event, name)
-            identities[index], orders[index] = identity, order
-            latest[identity] = max(latest.get(identity, order), order)
-        return [
-            run
-            for index, run in enumerate(runs)
-            if index not in identities or orders[index] == latest[identities[index]]
-        ]
+        return CommitCI.latest_runs(
+            runs, {suite: (run.workflow_id, run.event) for suite, run in workflows.items()}
+        )
+
+    async def commit_ci(self, sha: str) -> CommitCI:
+        """``sha``'s latest check runs and commit statuses, in one GraphQL query when they fit."""
+        data = await self.graphql(_COMMIT_CI_QUERY, {"oid": self.inside(sha)})
+        repository = data.get("repository")
+        commit = repository.get("object") if isinstance(repository, Mapping) else None
+        if not isinstance(commit, Mapping):
+            raise ValueError("GitHub answered without the commit")
+        return CommitCI.from_graphql(commit) or await self.commit_ci_over_rest(sha)
+
+    async def commit_ci_over_rest(self, sha: str) -> CommitCI:
+        """``commit_ci`` page by page, for a commit with more check runs than one query holds."""
+        with MeteredTransport.attributed():
+            runs, statuses = await asyncio.gather(self.check_runs(sha), self.commit_statuses(sha))
+        return CommitCI(runs, statuses)
 
     async def _workflow_runs(self, sha: str) -> dict[int, _WorkflowRun]:
         """The Actions workflow runs on ``sha``, by the check suite each reports to."""
@@ -1671,6 +1863,21 @@ async def read_result[T](read: Awaitable[T]) -> ReadResult[T]:
             status = "forbidden"
         logger.warning("GitHub read failed", extra={"read_status": status}, exc_info=True)
         return ReadResult(None, status)
+    except GraphQLError as exc:
+        status = (
+            "transient"
+            if "RATE_LIMITED" in exc.types
+            else "missing"
+            if "NOT_FOUND" in exc.types
+            else "forbidden"
+            if "FORBIDDEN" in exc.types
+            else "unavailable"
+        )
+        logger.warning(
+            "GitHub GraphQL read failed",
+            extra={"read_status": status, "graphql_errors": exc.errors},
+        )
+        return ReadResult(None, status)
     except httpx2.TransportError:
         logger.warning("GitHub read transport failed", exc_info=True)
         return ReadResult(None, "transient")
@@ -1789,6 +1996,15 @@ class GraphQLError(ValueError):
     def __init__(self, errors: object) -> None:
         super().__init__(f"GitHub GraphQL errors: {errors}")
         self.errors = errors
+
+    @property
+    def types(self) -> set[str]:
+        """GitHub's ``type`` for each error, such as ``NOT_FOUND`` or ``RATE_LIMITED``."""
+        return {
+            str(error["type"])
+            for error in (self.errors if isinstance(self.errors, list) else [])
+            if isinstance(error, dict) and "type" in error
+        }
 
     @property
     def message(self) -> str:

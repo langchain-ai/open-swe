@@ -1818,6 +1818,12 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
             }
         )
         return JSONResponse({"data": {"repository": {"object": tree}}})
+    if "query CommitCI(" in query:
+        oid = variables.get("oid")
+        found = fakes.find_pull_by_sha(str(owner), str(repo), oid) if isinstance(oid, str) else None
+        if found is None:
+            return JSONResponse({"errors": [{"type": "NOT_FOUND", "message": "No commit"}]})
+        return JSONResponse({"data": {"repository": {"object": fakes.commit_ci_graphql(found)}}})
     number = variables.get("number")
     if not isinstance(owner, str) or not isinstance(repo, str) or not isinstance(number, int):
         return JSONResponse({"errors": [{"message": "Invalid variables"}]}, status_code=400)
@@ -1868,6 +1874,14 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
                 },
             }
         )
+    if "query PullRequestCI(" in query:
+        pull_request = {
+            "state": "MERGED" if pr.get("merged") else str(pr.get("state", "open")).upper(),
+            "headRefOid": pr["head_sha"],
+            "headRefName": pr["head"],
+            "baseRefName": pr["base"],
+            "commits": {"nodes": [{"commit": fakes.commit_ci_graphql(pr)}]},
+        }
     if "PullRequestFixChecks" in query:
         pull_request = {
             "commits": {

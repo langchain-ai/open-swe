@@ -28,10 +28,12 @@ REVALIDATED: Final = "openswe_github_revalidated"
 # Modules between a caller and the wire; the caller is the first frame outside them.
 # ``http`` and ``pull_request_status`` hold the named client methods (``RepoClient``,
 # ``PullRequestClient``) that all other code must call GitHub through, so a frame in
-# them names the method, not the code that wanted the request.
+# them names the method, not the code that wanted the request; so does ``ci``, whose
+# readers (``CommitChecks``, ``RequiredCheck``) serve baby-sitting and expedited review.
 _PLUMBING: Final = frozenset(
     {
         __name__,
+        "openswe.github.ci",
         "openswe.github.http",
         "openswe.github.pull_request_status",
         "openswe.github.revalidation",

@@ -20,7 +20,15 @@ from openswe.github.branch_config import BranchConfig
 from openswe.github.changed_files import CHANGED_FILES, FileList, PullRequestTips
 from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
 from openswe.github.ci import unreported_required_checks
-from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
+from openswe.github.http import (
+    COMMIT_CI_FRAGMENT,
+    GITHUB_API_BASE,
+    CommitCI,
+    GitHubClient,
+    GraphQLError,
+    RepoClient,
+    or_none,
+)
 from openswe.github.metering import MeteredTransport
 from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS, OPEN_SWE_GITHUB_LOGINS
 from openswe.github.queue import QueuePull, Review, ReviewPage
@@ -50,6 +58,23 @@ query PullRequestMergeability($owner: String!, $repo: String!, $number: Int!) {
   }
 }
 """
+# ``commits(last: 1)`` is the head unless the pull holds more commits than GitHub lists.
+_PULL_CI_QUERY = (
+    """
+query PullRequestCI($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      state
+      headRefOid
+      headRefName
+      baseRefName
+      commits(last: 1) { nodes { commit { ...CommitCI } } }
+    }
+  }
+}
+"""
+    + COMMIT_CI_FRAGMENT
+)
 _TIPS_QUERY = """
 query PullRequestTips($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
@@ -558,6 +583,34 @@ class ReviewState:
     review_required: bool = False
 
 
+class _CIPullCommit(BaseModel):
+    commit: dict[str, object]
+
+
+class _CIPullCommits(BaseModel):
+    nodes: list[_CIPullCommit]
+
+
+class _CIPull(BaseModel):
+    state: Literal["OPEN", "CLOSED", "MERGED"]
+    headRefOid: str
+    headRefName: str
+    baseRefName: str
+    commits: _CIPullCommits
+
+
+@dataclass(frozen=True, slots=True)
+class PullRequestCI:
+    """A pull request's state and branches, and the CI on its head commit."""
+
+    state: Literal["open", "closed"]
+    merged: bool
+    head_sha: str
+    head_ref: str
+    base_ref: str
+    checks: CommitCI
+
+
 @dataclass(frozen=True, slots=True)
 class StandingApprovals:
     """A pull request's head and the commits Robin's standing approvals of it are of.
@@ -799,6 +852,28 @@ class PullRequestClient:
         if not isinstance(sha, str) or not sha:
             raise ValueError("GitHub answered the pull request without a head commit")
         return sha
+
+    async def ci(self) -> PullRequestCI:
+        """The pull's state, branches and head commit CI, in one GraphQL query when they fit."""
+        pull = _graphql_pull(await self.repo.graphql(_PULL_CI_QUERY, {"number": self.number}))
+        if pull is None:
+            raise ValueError("GitHub answered without the pull request")
+        parsed = _CIPull.model_validate(pull)
+        head = parsed.commits.nodes[-1].commit if parsed.commits.nodes else None
+        if head is not None and head.get("oid") == parsed.headRefOid:
+            checks = CommitCI.from_graphql(head) or await self.repo.commit_ci_over_rest(
+                parsed.headRefOid
+            )
+        else:
+            checks = await self.repo.commit_ci(parsed.headRefOid)
+        return PullRequestCI(
+            state="open" if parsed.state == "OPEN" else "closed",
+            merged=parsed.state == "MERGED",
+            head_sha=parsed.headRefOid,
+            head_ref=parsed.headRefName,
+            base_ref=parsed.baseRefName,
+            checks=checks,
+        )
 
     async def merge_base(self, head_sha: str) -> str:
         """Where ``head_sha`` meets the base branch: as it is now while the pull is open.

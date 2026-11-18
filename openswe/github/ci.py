@@ -9,7 +9,6 @@ permission, and a missing permission or transient error must never break
 webhook handling.
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Literal, Self
@@ -18,7 +17,7 @@ import httpx2
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from openswe.github.checks import APPROVAL_CHECK_RUN_NAME, REVIEW_CHECK_RUN_NAME
-from openswe.github.http import ReadResult, RepoClient, read_result
+from openswe.github.http import CommitCI, ReadResult, RepoClient, read_result
 
 logger = logging.getLogger(__name__)
 
@@ -70,23 +69,20 @@ class CommitChecks:
     @classmethod
     async def read_result(cls, repo: RepoClient, sha: str) -> ReadResult[Self]:
         """Read both CI sources without losing retryable failure information."""
-        runs, statuses = await asyncio.gather(
-            read_result(repo.check_runs(sha)), read_result(repo.commit_statuses(sha))
-        )
-        if runs.value is None or statuses.value is None:
+        result = await read_result(repo.commit_ci(sha))
+        if result.value is None:
             logger.warning(
                 "Commit checks unavailable", extra={"repo_full_name": repo.full_name, "sha": sha}
             )
-            failure = runs.status if runs.value is None else statuses.status
-            if "transient" in (runs.status, statuses.status):
-                failure = "transient"
-            return ReadResult(None, failure)
-        return ReadResult(
-            cls(
-                runs=[run for run in runs.value if run.get("name") not in OPEN_SWE_CHECK_NAMES],
-                statuses=statuses.value,
-            ),
-            "ok",
+            return ReadResult(None, result.status)
+        return ReadResult(cls.of(result.value), "ok")
+
+    @classmethod
+    def of(cls, ci: CommitCI) -> Self:
+        """``ci`` without the checks Robin itself reports."""
+        return cls(
+            runs=[run for run in ci.runs if run.get("name") not in OPEN_SWE_CHECK_NAMES],
+            statuses=ci.statuses,
         )
 
     @property

@@ -163,3 +163,69 @@ def test_commit_check_failures_are_the_failing_runs_and_statuses() -> None:
         github_ci.CheckFailure(name="build", conclusion="cancelled", url="", run_id=6),
         github_ci.CheckFailure(name="deploy", conclusion="error", url="", run_id=None),
     ]
+
+
+def _suite(
+    suite_id: int,
+    runs: list[dict[str, object]],
+    *,
+    slug: str = "github-actions",
+    more: bool = False,
+) -> dict[str, object]:
+    actions = slug == "github-actions"
+    return {
+        "databaseId": suite_id,
+        "app": {"databaseId": 15368 if actions else 1, "slug": slug},
+        "workflowRun": {"event": "pull_request", "workflow": {"databaseId": 7}}
+        if actions
+        else None,
+        "checkRuns": {"pageInfo": {"hasNextPage": more}, "nodes": runs},
+    }
+
+
+def _graphql_run(run_id: int, status: str, conclusion: str | None) -> dict[str, object]:
+    return {
+        "databaseId": run_id,
+        "name": "tests" if run_id < 30 else "scan",
+        "status": status,
+        "conclusion": conclusion,
+        "detailsUrl": f"https://ci.example/{run_id}",
+        "url": f"https://github.com/o/r/runs/{run_id}",
+    }
+
+
+def test_commit_ci_reads_graphql_in_rest_terms_without_superseded_reruns() -> None:
+    suites = [
+        _suite(1, [_graphql_run(10, "COMPLETED", "TIMED_OUT")]),
+        _suite(2, [_graphql_run(20, "IN_PROGRESS", None)]),
+        _suite(3, [_graphql_run(30, "COMPLETED", "SUCCESS")], slug="socket"),
+    ]
+    commit = {
+        "oid": "a" * 40,
+        "status": {
+            "contexts": [
+                {"context": "deploy", "state": "FAILURE", "targetUrl": "https://d"},
+                {"context": "docs", "state": "EXPECTED", "targetUrl": None},
+            ]
+        },
+        "checkSuites": {"pageInfo": {"hasNextPage": False}, "nodes": suites},
+    }
+
+    ci = github_http.CommitCI.from_graphql(commit)
+
+    assert ci is not None
+    assert [
+        (run["id"], run["status"], run["conclusion"], run["html_url"], run["app"]["id"])
+        for run in ci.runs
+    ] == [
+        (20, "in_progress", None, "https://ci.example/20", 15368),
+        (30, "completed", "success", "https://github.com/o/r/runs/30", 1),
+    ]
+    assert ci.statuses == [
+        {"context": "deploy", "state": "failure", "target_url": "https://d"},
+        {"context": "docs", "state": "pending", "target_url": None},
+    ]
+    assert github_ci.CommitChecks.of(ci).state == "failure"
+
+    suites.append(_suite(4, [], more=True))
+    assert github_http.CommitCI.from_graphql(commit) is None

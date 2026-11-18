@@ -301,6 +301,15 @@ async def test_approval_is_separate_from_ci_and_only_required_by_branch_rules(
     monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
     monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=runs))
     monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    head_ci = prs.PullRequestCI(
+        state="open",
+        merged=False,
+        head_sha="a" * 40,
+        head_ref="",
+        base_ref="main",
+        checks=github_http.CommitCI(runs, []),
+    )
+    monkeypatch.setattr(prs.PullRequestClient, "ci", AsyncMock(return_value=head_ci))
     monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0))

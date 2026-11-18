@@ -10,8 +10,8 @@ import pytest
 from openswe import baby_sit
 from openswe.github import app as github_app
 from openswe.github.ci import CheckFailure, RequiredCheck
-from openswe.github.http import GitHubError, RepoClient
-from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.http import CommitCI, GitHubError, GraphQLError
+from openswe.github.pull_request_status import PullRequestCI, PullRequestClient
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.client import GitHubPrRef
 from openswe.source_context import SourceContext
@@ -48,6 +48,26 @@ def _check_run(run_id: int, name: str, conclusion: str | None) -> dict[str, obje
     }
 
 
+def _ci(
+    runs: list[dict[str, object]],
+    *,
+    head_sha: str = "head-1",
+    head_ref: str = "",
+    state: str = "open",
+) -> AsyncMock:
+    """``PullRequestClient.ci`` answering ``runs``, which a test may change in place."""
+    return AsyncMock(
+        return_value=PullRequestCI(
+            state="open" if state == "open" else "closed",
+            merged=False,
+            head_sha=head_sha,
+            head_ref=head_ref,
+            base_ref="main",
+            checks=CommitCI(runs, []),
+        )
+    )
+
+
 def _failure(name: str, run_id: int | None = None) -> CheckFailure:
     return CheckFailure(name=name, conclusion="failure", url="", run_id=run_id)
 
@@ -69,14 +89,16 @@ _Step = tuple[str, list[CheckFailure], bool, list[str]]
         ("token", 503, "Service unavailable", True),
         ("token", 403, "API rate limit exceeded", True),
         ("token", None, "Connection failed", True),
-        ("pull", 403, "API rate limit exceeded for installation", True),
-        ("pull", 503, "Service unavailable", True),
-        ("pull", None, "Connection failed", True),
-        ("check_runs", 503, "Service unavailable", True),
-        ("commit_statuses", 403, "secondary rate limit", True),
-        ("pull", 404, "Not Found", False),
-        ("pull", 401, "Bad credentials", False),
-        ("pull", 403, "Resource not accessible", False),
+        ("ci", 403, "API rate limit exceeded for installation", True),
+        ("ci", 403, "secondary rate limit", True),
+        ("ci", 503, "Service unavailable", True),
+        ("ci", None, "Connection failed", True),
+        ("ci", None, "RATE_LIMITED", True),
+        ("ci", 404, "Not Found", False),
+        ("ci", 401, "Bad credentials", False),
+        ("ci", 403, "Resource not accessible", False),
+        ("ci", None, "NOT_FOUND", False),
+        ("ci", None, "FORBIDDEN", False),
     ],
 )
 async def test_github_read_failures_only_end_watches_when_persistent(
@@ -91,14 +113,8 @@ async def test_github_read_failures_only_end_watches_when_persistent(
     token = AsyncMock(return_value="t")
     if read_method != "token":
         monkeypatch.setattr(github_app, "get_github_app_installation_token", token)
-    reads = {
-        "pull": AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
-        "check_runs": AsyncMock(return_value=[{"name": "tests", "status": "in_progress"}]),
-        "commit_statuses": AsyncMock(return_value=[]),
-    }
-    monkeypatch.setattr(PullRequestClient, "pull", reads["pull"])
-    monkeypatch.setattr(RepoClient, "check_runs", reads["check_runs"])
-    monkeypatch.setattr(RepoClient, "commit_statuses", reads["commit_statuses"])
+    reads = {"ci": _ci([{"name": "tests", "status": "in_progress"}])}
+    monkeypatch.setattr(PullRequestClient, "ci", reads["ci"])
     failure = (
         GitHubError(
             httpx2.Response(
@@ -108,6 +124,8 @@ async def test_github_read_failures_only_end_watches_when_persistent(
             )
         )
         if status_code is not None
+        else GraphQLError([{"type": body, "message": body}])
+        if body.isupper()
         else httpx2.ConnectError(body)
     )
     read = reads.get(read_method, token)
@@ -159,7 +177,7 @@ async def test_github_read_failures_only_end_watches_when_persistent(
             "GitHub App token unavailable"
             if read_method == "token"
             else "not found"
-            if status_code == 404
+            if status_code == 404 or body == "NOT_FOUND"
             else "denied access"
         ) in message
 
@@ -171,14 +189,8 @@ async def test_a_dispatch_error_is_retried_with_only_unsent_failures(
     monkeypatch.setattr(
         github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
     )
-    monkeypatch.setattr(
-        PullRequestClient,
-        "pull",
-        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
-    )
     checks = [_check_run(1, "approval", "failure"), _check_run(2, "tests", None)]
-    monkeypatch.setattr(RepoClient, "check_runs", AsyncMock(return_value=checks))
-    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(PullRequestClient, "ci", _ci(checks))
     dispatch = AsyncMock(
         side_effect=[RuntimeError("Agent service unavailable"), *[{"run_id": "run-1"}] * 2]
     )
@@ -202,14 +214,8 @@ async def test_spent_rerun_budget_stops_the_watch_only_on_a_new_failure(
     monkeypatch.setattr(
         github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
     )
-    monkeypatch.setattr(
-        PullRequestClient,
-        "pull",
-        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
-    )
     checks = [_check_run(1, "approval", "failure"), _check_run(2, "tests", None)]
-    monkeypatch.setattr(RepoClient, "check_runs", AsyncMock(return_value=checks))
-    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(PullRequestClient, "ci", _ci(checks))
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
     monkeypatch.setattr(baby_sit, "post_slack_thread_reply", AsyncMock(return_value=True))
@@ -244,19 +250,9 @@ async def test_an_in_flight_failure_dispatch_holds_off_every_other_watch_writer(
     )
     monkeypatch.setattr(
         PullRequestClient,
-        "pull",
-        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
+        "ci",
+        _ci([{"id": 11, "name": "tests", "status": "completed", "conclusion": "failure"}]),
     )
-    monkeypatch.setattr(
-        RepoClient,
-        "check_runs",
-        AsyncMock(
-            return_value=[
-                {"id": 11, "name": "tests", "status": "completed", "conclusion": "failure"}
-            ]
-        ),
-    )
-    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     dispatch_started = asyncio.Event()
     release_dispatch = asyncio.Event()
 
@@ -310,25 +306,13 @@ async def test_green_webhook_keeps_watching_without_waking_for_draft_card(
     monkeypatch.setattr(
         github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
     )
-    monkeypatch.setattr(
-        PullRequestClient,
-        "pull",
-        AsyncMock(
-            return_value={"state": "open", "head": {"sha": "head-1"}, "base": {"ref": "main"}}
-        ),
-    )
     required = AsyncMock(return_value={RequiredCheck("tests"), RequiredCheck("e2e")})
     monkeypatch.setattr(RequiredCheck, "for_branch", required)
     monkeypatch.setattr(
-        RepoClient,
-        "check_runs",
-        AsyncMock(
-            return_value=[
-                {"id": 1, "name": "tests", "status": "completed", "conclusion": "success"}
-            ]
-        ),
+        PullRequestClient,
+        "ci",
+        _ci([{"id": 1, "name": "tests", "status": "completed", "conclusion": "success"}]),
     )
-    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     notify = AsyncMock(return_value=True)
     monkeypatch.setattr(baby_sit, "post_slack_thread_reply", notify)
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
@@ -369,22 +353,11 @@ async def test_green_webhook_keeps_watching_without_waking_for_draft_card(
 
     monkeypatch.setattr(
         PullRequestClient,
-        "pull",
-        AsyncMock(
-            return_value={
-                "state": "open",
-                "head": {"sha": "head-2", "ref": "feature"},
-                "base": {"ref": "main"},
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        RepoClient,
-        "check_runs",
-        AsyncMock(
-            return_value=[
-                {"id": 2, "name": "tests", "status": "completed", "conclusion": "failure"}
-            ]
+        "ci",
+        _ci(
+            [{"id": 2, "name": "tests", "status": "completed", "conclusion": "failure"}],
+            head_sha="head-2",
+            head_ref="feature",
         ),
     )
     payload["check_run"]["head_sha"] = "head-2"
@@ -399,12 +372,12 @@ async def test_green_webhook_keeps_watching_without_waking_for_draft_card(
     assert "head-2" in dispatch.await_args.args[1]
     dispatch.reset_mock()
     monkeypatch.setattr(
-        RepoClient,
-        "check_runs",
-        AsyncMock(
-            return_value=[
-                {"id": 3, "name": "tests", "status": "completed", "conclusion": "success"}
-            ]
+        PullRequestClient,
+        "ci",
+        _ci(
+            [{"id": 3, "name": "tests", "status": "completed", "conclusion": "success"}],
+            head_sha="head-2",
+            head_ref="feature",
         ),
     )
     assert await baby_sit.evaluate_watch("acme/repo#7") == "watching"
@@ -413,7 +386,7 @@ async def test_green_webhook_keeps_watching_without_waking_for_draft_card(
     assert await baby_sit.evaluate_watch("acme/repo#7") == "watching"
     dispatch.assert_not_awaited()
 
-    monkeypatch.setattr(PullRequestClient, "pull", AsyncMock(return_value={"state": "closed"}))
+    monkeypatch.setattr(PullRequestClient, "ci", _ci([], state="closed"))
     assert await baby_sit.evaluate_watch("acme/repo#7") == "stopped"
     assert await baby_sit.WATCHES.get("acme/repo#7") is None
 
@@ -470,17 +443,9 @@ async def test_terminal_notification_falls_back_to_originating_agent_thread(
     )
     monkeypatch.setattr(
         PullRequestClient,
-        "pull",
-        AsyncMock(return_value={"state": "open", "head": {"sha": "head-1"}}),
+        "ci",
+        _ci([{"id": 1, "name": "tests", "status": "completed", "conclusion": "stale"}]),
     )
-    monkeypatch.setattr(
-        RepoClient,
-        "check_runs",
-        AsyncMock(
-            return_value=[{"id": 1, "name": "tests", "status": "completed", "conclusion": "stale"}]
-        ),
-    )
-    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     dispatch = AsyncMock(return_value={"run_id": "run-1"})
     monkeypatch.setattr(baby_sit, "dispatch_agent_run", dispatch)
 
@@ -539,15 +504,9 @@ async def test_new_head_resets_retry_budget(
     )
     monkeypatch.setattr(
         PullRequestClient,
-        "pull",
-        AsyncMock(return_value={"state": "open", "head": {"sha": "head-2"}}),
+        "ci",
+        _ci([{"id": 2, "name": "tests", "status": "in_progress"}], head_sha="head-2"),
     )
-    monkeypatch.setattr(
-        RepoClient,
-        "check_runs",
-        AsyncMock(return_value=[{"id": 2, "name": "tests", "status": "in_progress"}]),
-    )
-    monkeypatch.setattr(RepoClient, "commit_statuses", AsyncMock(return_value=[]))
 
     assert await baby_sit.evaluate_watch("acme/repo#7") == "pending"
     watch = await baby_sit.WATCHES.get("acme/repo#7")
