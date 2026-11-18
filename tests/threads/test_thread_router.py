@@ -508,6 +508,7 @@ async def test_a_new_thread_runs_on_mda(
     assert sent["assistant_id"] == graph
     assert sent["config"] == {
         "metadata": {
+            "kind": "task_message",
             "origin": "automation",
             "billing_bucket": "system",
             "owner_ls_user_id": None,
@@ -571,6 +572,7 @@ async def test_runs_include_the_current_slack_thread_link(
     assert sent["config"] == {
         "metadata": {
             "invocation_id": "turn-1",
+            "kind": "follow_up",
             "created_by": None,
             "billing_bucket": "system",
             "owner_ls_user_id": None,

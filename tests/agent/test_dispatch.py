@@ -345,6 +345,7 @@ async def test_billing_survives_service_principal_and_failed_run(
     assert metadata["billed_robin_user_id"] == str(actor_id)
     assert metadata["user_id"] == str(actor_id)
     assert metadata["created_by"] is None
+    assert metadata["kind"] == "preserved"
     assert rewritten["config"] == {
         "metadata": {
             **actor.billing_trace_metadata(),
@@ -367,6 +368,7 @@ async def test_billing_survives_service_principal_and_failed_run(
         thread_metadata={"channel": channel} if channel else {},
     )
     assert unattributed["metadata"] == {
+        "kind": "agent",
         "origin": "automation",
         "billing_bucket": "channel" if channel else "system",
         "created_by": None,
