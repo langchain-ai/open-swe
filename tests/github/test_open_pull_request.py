@@ -519,12 +519,22 @@ def test_plan_reference_survives_source_reference_failure(
     assert client.post_calls
 
 
-@pytest.mark.parametrize("environment", [None, "staging", "production", "preview", "local"])
+@pytest.mark.parametrize(
+    ("environment", "environment_label"),
+    [
+        (None, ""),
+        ("staging", " (staging)"),
+        ("production", ""),
+        ("preview", " (preview)"),
+        ("local", ""),
+    ],
+)
 @pytest.mark.parametrize("footer_name", ["Robin", "Open SWE"])
 def test_public_repo_appends_plan_and_slack_reference(
     monkeypatch: pytest.MonkeyPatch,
     footer_name: str,
     environment: str | None,
+    environment_label: str,
 ) -> None:
     if environment is None:
         monkeypatch.delenv("OPENSWE_ENV", raising=False)
@@ -568,7 +578,6 @@ def test_public_repo_appends_plan_and_slack_reference(
     assert "- [Plan](https://dashboard.example/agents/thread-1/plan)" in sent_body
     assert "- [Slack thread](https://slack.example/p1)" in sent_body
     assert sent_body.count("Made by [") == 1
-    environment_label = f" ({environment})" if environment else ""
     assert sent_body.splitlines()[-1] == (
         "Made by [Robin](https://github.com/langchain-ai/open-swe)"
         f"{environment_label} · [view thread](https://dashboard.example/agents/thread-1)"

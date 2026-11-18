@@ -53,7 +53,8 @@ def build_pr_attribution_footer(
     """Build the Robin PR footer with deployment and model details."""
     url = thread_url.strip() if isinstance(thread_url, str) and thread_url.strip() else ""
     footer = PR_ATTRIBUTION_FOOTER
-    if environment := ENV.OPENSWE_ENV.optional():
+    environment = ENV.OPENSWE_ENV.optional()
+    if environment in {"staging", "preview"}:
         footer += f" ({environment})"
     if url:
         footer += f" · [view thread]({url})"
