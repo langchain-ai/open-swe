@@ -6,7 +6,6 @@ from operator import attrgetter
 from pathlib import Path
 from time import perf_counter
 
-import asyncpg
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
@@ -107,15 +106,14 @@ def _replace_dead_connection(
     # In place of pool_pre_ping, which spends three round trips on it (BEGIN, a
     # ping, ROLLBACK). One query finds the same dead connections: closed by the
     # server, or dropped without a word by a failover and reset on first write.
-    driver = record.driver_connection
-    if not isinstance(dbapi_connection, AdaptedConnection) or not isinstance(
-        driver, asyncpg.Connection
-    ):
+    if not isinstance(dbapi_connection, AdaptedConnection):
         return
     try:
         dbapi_connection.run_async(lambda connection: connection.execute("SELECT 1"))
     except Exception as exc:
-        if driver.is_closed():
+        # Ask the driver connection, not its type: Datadog wraps it in a proxy that
+        # is no asyncpg.Connection.
+        if dbapi_connection.driver_connection.is_closed():
             raise DisconnectionError(str(exc)) from exc
         raise
 

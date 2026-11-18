@@ -6,6 +6,7 @@ import struct
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import asyncpg
 import pytest
 from alembic.util import CommandError
 from blockbuster import BlockBuster
@@ -151,7 +152,27 @@ async def test_pool_replaces_a_connection_the_server_closed(deployment_db):
         assert await conn.scalar(text("SELECT pg_backend_pid()")) != closed
 
 
-async def test_pool_replaces_connections_a_failover_dropped_silently(deployment_db, monkeypatch):
+class _TracedConnection:
+    """A driver connection wrapped as Datadog's tracer wraps it: no asyncpg.Connection."""
+
+    def __init__(self, connection: asyncpg.Connection) -> None:
+        self.__wrapped__ = connection
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.__wrapped__, name)
+
+
+@pytest.mark.parametrize("traced", [False, True])
+async def test_pool_replaces_connections_a_failover_dropped_silently(
+    deployment_db, monkeypatch, traced
+):
+    if traced:
+        connect = asyncpg.connect
+
+        async def traced_connect(*args: object, **kwargs: object) -> _TracedConnection:
+            return _TracedConnection(await connect(*args, **kwargs))
+
+        monkeypatch.setattr(asyncpg, "connect", traced_connect)
     database = make_url(postgres.uri())
     relays: list[tuple[asyncio.StreamWriter, asyncio.Event]] = []
 
