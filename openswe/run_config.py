@@ -113,6 +113,7 @@ class AutomationSlackReply(BaseModel):
 
     channel_id: str = Field(pattern=r"^[CG][A-Z0-9]{8,}$", max_length=40)
     thread_ts: str = Field(pattern=r"^[0-9]+\.[0-9]+$", max_length=40)
+    triggering_user_id: str | None = Field(default=None, pattern=r"^[UW][A-Z0-9]+$", max_length=40)
 
 
 class RunConfig(BaseModel):

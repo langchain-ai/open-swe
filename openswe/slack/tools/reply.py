@@ -197,6 +197,7 @@ async def send_slack_reply(
         else str(thread_ts)
     )
 
+    triggering_user_id = _triggering_user_id(cfg)
     async with slack_thread_mutation_lock(
         channel_id, thread_ts, purpose="ownership" if automation else None
     ):
@@ -204,6 +205,7 @@ async def send_slack_reply(
             try:
                 delivery = await AutomationThreadDelivery.for_run(cfg)
                 channel_id, thread_ts = delivery.channel_id, delivery.thread_ts
+                triggering_user_id = delivery.triggering_user_id
             except DeliveryRefused as exc:
                 return {"success": False, "error": str(exc)}
         if not automation and state and run_id:
@@ -250,27 +252,18 @@ async def send_slack_reply(
                 {**context("Automation reply."), "block_id": notice.block_id},
             ]
         try:
-            if automation:
-                message_ts = await post_slack_thread_reply_with_ts(
-                    channel_id,
-                    thread_ts,
-                    message,
-                    blocks=slack_blocks,
-                    usage=usage,
-                    agent_thread_id=agent_thread_id,
-                )
-            else:
-                message_ts = await _post_and_store_mapping(
-                    channel_id,
-                    thread_ts,
-                    message,
-                    blocks=slack_blocks,
-                    usage=usage,
-                    post_thread_ts=post_thread_ts,
-                    agent_thread_id=agent_thread_id,
-                    run_id=run_id,
-                    triggering_user_id=_triggering_user_id(cfg),
-                )
+            message_ts = await _post_and_store_mapping(
+                channel_id,
+                thread_ts,
+                message,
+                blocks=slack_blocks,
+                usage=usage,
+                post_thread_ts=thread_ts if automation else post_thread_ts,
+                agent_thread_id=agent_thread_id,
+                run_id=run_id,
+                triggering_user_id=triggering_user_id,
+                inherit_current_run=not automation,
+            )
         except SlackRequestError as exc:
             if exc.code == "thread_not_found" and not automation:
                 moved = bool(thread_id) and await move_thread_to_dashboard(
@@ -691,6 +684,7 @@ async def _post_and_store_mapping(
     run_id: str | None = None,
     triggering_user_id: str | None = None,
     post_thread_ts: str | None = None,
+    inherit_current_run: bool = True,
 ) -> str:
     message_ts = await post_slack_thread_reply_with_ts(
         channel_id,
@@ -707,5 +701,6 @@ async def _post_and_store_mapping(
             message_ts,
             run_id=run_id,
             triggering_user_id=triggering_user_id,
+            inherit_current_run=inherit_current_run,
         )
     return message_ts

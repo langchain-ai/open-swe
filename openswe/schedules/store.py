@@ -1776,7 +1776,13 @@ async def launch_slack_automations(
                 repo=None,
                 prompt=_slack_event_prompt(record, channel, event, text),
                 origin="slack",
-                slack_reply=AutomationSlackReply(channel_id=channel_id, thread_ts=event.ts),
+                slack_reply=AutomationSlackReply(
+                    channel_id=channel_id,
+                    thread_ts=event.ts,
+                    triggering_user_id=user
+                    if not event.is_from_bot and re.fullmatch(r"[UW][A-Z0-9]+", user)
+                    else None,
+                ),
             )
         except Exception:
             logger.exception(

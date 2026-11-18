@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 from unittest.mock import ANY, AsyncMock
 from xml.etree import ElementTree
 
@@ -1122,8 +1122,13 @@ def _slack_post(ts: str, text: str, **event: object) -> SlackEventEnvelope:
 
 
 @pytest.mark.parametrize("system", [False, True])
+@pytest.mark.parametrize("senders", ["bots", "people"])
 async def test_slack_triggers_fire_on_matching_posts_once_and_within_their_limit(
-    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch, system: bool
+    fake_client: _FakeClient,
+    auth: None,
+    monkeypatch: pytest.MonkeyPatch,
+    system: bool,
+    senders: Literal["bots", "people"],
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     monkeypatch.setattr(schedules, "_require_watchable_slack_channel", AsyncMock())
@@ -1137,7 +1142,7 @@ async def test_slack_triggers_fire_on_matching_posts_once_and_within_their_limit
                 SlackTrigger(
                     channel=_ALERTS.lower(),
                     events=["message.posted"],
-                    senders="bots",
+                    senders=senders,
                     match="firing",
                     max_runs_per_hour=2,
                 )
@@ -1152,25 +1157,32 @@ async def test_slack_triggers_fire_on_matching_posts_once_and_within_their_limit
         results = await schedules.launch_slack_automations(envelope, channel, "UOPENSWE")
         return [result["schedule_id"] for result in results]
 
-    bot = {"bot_id": "BDATADOG", "subtype": "bot_message"}
-    # Filtered out: a person, no match, a thread reply, an edit, and Open SWE itself.
-    assert await launch(_slack_post("1.0", "FIRING: api latency", user="UALICE")) == []
-    assert await launch(_slack_post("2.0", "RESOLVED: api latency", **bot)) == []
-    assert await launch(_slack_post("3.0", "FIRING", thread_ts="1.0", **bot)) == []
-    assert await launch(_slack_post("4.0", "FIRING", **{**bot, "subtype": "message_changed"})) == []
+    bot = {"bot_id": "BDATADOG", "subtype": "bot_message", "user": "UBOT"}
+    author = bot if senders == "bots" else {"user": "WALICE"}
+    other_author = {"user": "UALICE"} if senders == "bots" else bot
+    assert await launch(_slack_post("1.0", "FIRING: api latency", **other_author)) == []
+    assert await launch(_slack_post("2.0", "RESOLVED: api latency", **author)) == []
+    assert await launch(_slack_post("3.0", "FIRING", thread_ts="1.0", **author)) == []
+    assert (
+        await launch(_slack_post("4.0", "FIRING", **{**author, "subtype": "message_changed"})) == []
+    )
     assert await launch(_slack_post("5.0", "FIRING", user="UOPENSWE", bot_id="BOPENSWE")) == []
 
     # The alert text can sit in an attachment; a redelivery doesn't run twice.
-    alert = _slack_post("6.0", "", attachments=[{"title": "[FIRING] api latency"}], **bot)
+    alert = _slack_post("6.0", "", attachments=[{"title": "[FIRING] api latency"}], **author)
     assert await launch(alert) == [created["id"]]
     assert await launch(alert) == []
-    assert await launch(_slack_post("7.0", "FIRING: db", **bot)) == [created["id"]]
+    assert await launch(_slack_post("7.0", "FIRING: db", **author)) == [created["id"]]
     # Two runs this hour is the limit.
-    assert await launch(_slack_post("8.0", "FIRING: cache", **bot)) == []
+    assert await launch(_slack_post("8.0", "FIRING: cache", **author)) == []
 
     assert len(fake_client.runs.created) == 2
     for run, timestamp in zip(fake_client.runs.created, ("6.0", "7.0"), strict=True):
-        destination = {"channel_id": _ALERTS, "thread_ts": timestamp}
+        destination = {
+            "channel_id": _ALERTS,
+            "thread_ts": timestamp,
+            "triggering_user_id": None if senders == "bots" else "WALICE",
+        }
         config = run["config"]["configurable"]
         assert config["automation_slack_reply"] == destination
         assert config["source"] == "schedule" and config["schedule_id"] == created["id"]

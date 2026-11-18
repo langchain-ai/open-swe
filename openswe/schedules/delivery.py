@@ -42,7 +42,8 @@ class AutomationThreadDelivery(AutomationSlackReply):
             route is None
             or metadata is None
             or metadata.get("schedule_id") != cfg.schedule_id
-            or metadata.get("automation_slack_reply") != route.model_dump(mode="json")
+            or metadata.get("automation_slack_reply")
+            != route.model_dump(mode="json", exclude_unset=True)
             or await authorized_schedule_run(cfg) is None
         ):
             raise DeliveryRefused("This run has no authorized Slack automation reply destination.")

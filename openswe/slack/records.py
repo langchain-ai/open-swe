@@ -710,12 +710,15 @@ async def store_slack_message_run_mapping(
     *,
     run_id: str | None = None,
     triggering_user_id: str | None = None,
+    inherit_current_run: bool = True,
 ) -> None:
-    """Map a bot message to the run that posted it, the thread's current run by default."""
+    """Map a bot message to its run, optionally inheriting the Slack thread's current run."""
     try:
         async with postgres.session() as session:
             await SlackChannel.ensure(session, channel_id)
-            current = await _current_run(session, channel_id, thread_ts)
+            current = (
+                await _current_run(session, channel_id, thread_ts) if inherit_current_run else None
+            )
             run = await _run(session, channel_id, run_id) if run_id else current
             resolved_run_id = run_id or (current.run_id if current else None)
             if not resolved_run_id:

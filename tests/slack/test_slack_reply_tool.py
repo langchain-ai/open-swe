@@ -583,25 +583,31 @@ async def test_reply_does_not_claim_a_handoff_when_detaching_fails(
 
 
 @pytest.mark.parametrize(
-    "refusal",
+    ("refusal", "triggering_user_id"),
     [
-        None,
-        "missing",
-        "malformed",
-        "ask",
-        "redirected",
-        "owned",
-        "external",
-        "unverified",
-        "not-member",
-        "deleted",
-        "human",
+        (None, "UTRIGGER"),
+        (None, None),
+        (None, "legacy"),
+        ("missing", "UTRIGGER"),
+        ("malformed", "UTRIGGER"),
+        ("ask", "UTRIGGER"),
+        ("redirected", "UTRIGGER"),
+        ("reattributed", "UTRIGGER"),
+        ("invalid-user", "UTRIGGER"),
+        ("owned", "UTRIGGER"),
+        ("external", "UTRIGGER"),
+        ("unverified", "UTRIGGER"),
+        ("not-member", "UTRIGGER"),
+        ("deleted", "UTRIGGER"),
+        ("human", "UTRIGGER"),
     ],
 )
 async def test_automation_reply_is_pinned_to_the_verified_event(
-    monkeypatch: pytest.MonkeyPatch, refusal: str | None
+    monkeypatch: pytest.MonkeyPatch, refusal: str | None, triggering_user_id: str | None
 ) -> None:
-    route = {"channel_id": "C0ALERTS01", "thread_ts": "171.1"}
+    route: dict[str, str | None] = {"channel_id": "C0ALERTS01", "thread_ts": "171.1"}
+    if triggering_user_id != "legacy":
+        route["triggering_user_id"] = triggering_user_id
     metadata = {
         "owner_type": "system",
         "visibility": "public",
@@ -613,6 +619,7 @@ async def test_automation_reply_is_pinned_to_the_verified_event(
         "source": "schedule",
         "schedule_id": "automation-1",
         "thread_id": "automation-thread",
+        "run_id": "automation-run",
         "automation_slack_reply": route,
         "slack_thread": {"channel_id": "COTHER001", "thread_ts": "9.0"},
     }
@@ -624,6 +631,11 @@ async def test_automation_reply_is_pinned_to_the_verified_event(
         config["automation_slack_reply"] = {"channel_id": "DOTHER001", "thread_ts": "9.0"}
     elif refusal == "redirected":
         config["automation_slack_reply"] = {"channel_id": "COTHER001", "thread_ts": "9.0"}
+    elif refusal in {"reattributed", "invalid-user"}:
+        config["automation_slack_reply"] = {
+            **route,
+            "triggering_user_id": "UOTHER" if refusal == "reattributed" else "<@UTRIGGER>",
+        }
     elif refusal == "human":
         config["github_login"] = "alice"
     monkeypatch.setattr(slack_reply_tool, "get_config", lambda: {"configurable": config})
@@ -653,7 +665,7 @@ async def test_automation_reply_is_pinned_to_the_verified_event(
     generic = AsyncMock(side_effect=AssertionError("Automation must not use mutable Slack routing"))
     monkeypatch.setattr(slack_reply_tool, "get_active_slack_thread", generic)
     mapping = AsyncMock()
-    monkeypatch.setattr(slack_reply_tool, "_post_and_store_mapping", mapping)
+    monkeypatch.setattr(slack_reply_tool, "store_slack_message_run_mapping", mapping)
     post = AsyncMock(return_value="171.2")
     monkeypatch.setattr(slack_reply_tool, "post_slack_thread_reply_with_ts", post)
 
@@ -661,11 +673,19 @@ async def test_automation_reply_is_pinned_to_the_verified_event(
 
     assert result["success"] is (refusal is None)
     generic.assert_not_awaited()
-    mapping.assert_not_awaited()
     slack_reply_tool.restore_slack_thinking_status.assert_not_awaited()
     if refusal is not None:
         post.assert_not_awaited()
+        mapping.assert_not_awaited()
     else:
+        mapping.assert_awaited_once_with(
+            "C0ALERTS01",
+            "171.1",
+            "171.2",
+            run_id="automation-run",
+            triggering_user_id=None if triggering_user_id == "legacy" else triggering_user_id,
+            inherit_current_run=False,
+        )
         assert post.await_args.args == ("C0ALERTS01", "171.1", "Answer")
         assert post.await_args.kwargs["agent_thread_id"] == "automation-thread"
         assert slack_reply_tool.SlackNotice.marks({"blocks": post.await_args.kwargs["blocks"]})
