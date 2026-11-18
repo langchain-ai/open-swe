@@ -49,23 +49,39 @@ async def test_mixed_attachments_stage_the_same_bytes_stored_in_the_transcript(
 
     monkeypatch.setattr(runs, "queue_slack_files", queue)
     pdf = {"type": "file", "base64": "cGRm", "mime_type": "application/pdf", "file_name": "a.pdf"}
-    content = [image, pdf]
-    files = [
-        *_dashboard_images_from_content(content),
-        *runs.DashboardImageBody.files_in(content),
-    ]
+    content = [image] * 6 + [pdf] * 11
+    images = _dashboard_images_from_content(content)
+    assert len(runs._image_blocks(images, model_id="openai:gpt-6.1-sol")) == 6
+    files = [*images, *runs.DashboardImageBody.files_in(content)]
 
     paths = await runs.DashboardImageBody.stage_files("t1", files, message_id="m1")
     _, pending = runs._transcript_attachments(files, "m1")
 
-    assert len(queued) == len(pending) == 2
+    assert len(queued) == len(pending) == 17
+    assert len({entry.attachment_id for entry in queued}) == 17
     assert [entry.attachment_id for entry in queued] == [file.attachment_id for file in pending]
-    assert [file.data for file in pending] == [b"hi", b"pdf"]
+    assert [file.data for file in pending] == [b"hi"] * 6 + [b"pdf"] * 11
     assert paths == [f"/workspace/.open-swe/attachments/{entry.name}" for entry in queued]
-    assert queued[0].name.endswith(".png")
-    assert queued[1].name == "a.pdf"
+    assert all(entry.name.endswith(".png") for entry in queued[:6])
+    assert all(entry.name == "a.pdf" for entry in queued[6:])
     if image["type"] == "image":
         assert queued[0].name == "a.png"
+
+
+def test_attachment_batches_reject_excessive_total_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runs, "_MAX_DASHBOARD_IMAGES_BASE64", 20)
+    monkeypatch.setattr(runs, "_MAX_DASHBOARD_FILES_BASE64", 40)
+    image = runs.DashboardImageBody(base64="aGk=", mimeType="image/png")
+    with pytest.raises(HTTPException) as failure:
+        runs._image_blocks([image] * 6, model_id="openai:gpt-6.1-sol")
+    assert failure.value.status_code == 413
+    with pytest.raises(HTTPException) as failure:
+        runs.DashboardImageBody.files_in(
+            [{"type": "file", "base64": "aGk=", "mime_type": "text/plain"}] * 11
+        )
+    assert failure.value.status_code == 413
 
 
 def test_unsupported_file_types_are_stored_as_opaque_bytes() -> None:

@@ -105,17 +105,23 @@ describe("PluginHostApi", () => {
     // Plugins built before draft images send none.
     await api.openChat("Hi", undefined)
     expect(openChat).toHaveBeenLastCalledWith("Hi", [])
+    await api.openChat(
+      null,
+      Array.from({ length: 6 }, () => png)
+    )
+    expect(openChat.mock.lastCall?.[1]).toHaveLength(6)
+    const largePng = { ...png, base64: "A".repeat(12 * 1024 * 1024) }
     await expect(
       api.openChat(
         null,
-        Array.from({ length: 6 }, () => png)
+        Array.from({ length: 6 }, () => largePng)
       )
     ).rejects.toMatchObject({ status: 400 })
     const svg = { ...png, mimeType: "image/svg+xml" } as unknown as DraftImage
     await expect(api.openChat(null, [svg])).rejects.toMatchObject({
       status: 400,
     })
-    expect(openChat).toHaveBeenCalledTimes(2)
+    expect(openChat).toHaveBeenCalledTimes(3)
   })
 
   it("refuses capabilities past the session's allowance", async () => {

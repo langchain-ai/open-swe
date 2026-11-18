@@ -313,7 +313,7 @@ describe("ChatComposer drafts", () => {
       expect(screen.getByRole("textbox").textContent).toBe("About the header")
     )
     cleanup()
-    const next = [1, 2, 3, 4].map((n) => shot(`footer-${n}.png`))
+    const next = [1, 2, 3, 4, 5, 6].map((n) => shot(`footer-${n}.png`))
     const onSubmit = vi.fn()
     renderComposer(false, {
       draftKey,
@@ -335,6 +335,48 @@ describe("ChatComposer drafts", () => {
         expect.anything()
       )
     )
+  })
+
+  it("keeps an oversized attachment draft until enough images are removed", async () => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(),
+    })
+    const onSubmit = vi.fn()
+    const image = {
+      kind: "image" as const,
+      base64: "A".repeat(12 * 1024 * 1024),
+      mimeType: "image/png",
+      fileName: "large.png",
+    }
+    renderComposer(false, {
+      onSubmit,
+      restoreDraft: {
+        key: 1,
+        text: "Keep this draft",
+        images: Array.from({ length: 6 }, () => image),
+      },
+    })
+    expect((await screen.findByRole("alert")).textContent).toContain("50MB")
+    expect(
+      screen
+        .getByRole("button", { name: "Send message" })
+        .hasAttribute("disabled")
+    ).toBe(true)
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" })
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByRole("textbox").textContent).toBe("Keep this draft")
+    const remove = screen.getAllByRole("button", {
+      name: "Remove attachment",
+    })[0]
+    if (!remove) throw new Error("Missing attachment removal button")
+    fireEvent.click(remove)
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(
+      screen
+        .getByRole("button", { name: "Send message" })
+        .hasAttribute("disabled")
+    ).toBe(false)
   })
 
   it("keeps every unsent image when a cancelled queued message comes back", async () => {

@@ -140,9 +140,9 @@ _SUPPORTED_FILE_MIME_TYPES = frozenset(
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     }
 )
-_MAX_DASHBOARD_IMAGES = 5
-_MAX_DASHBOARD_FILES = 10
 _MAX_DASHBOARD_IMAGE_BYTES = 10 * 1024 * 1024
+_MAX_DASHBOARD_IMAGES_BASE64 = 5 * ((_MAX_DASHBOARD_IMAGE_BYTES + 2) // 3 * 4)
+_MAX_DASHBOARD_FILES_BASE64 = 10 * ((_MAX_DASHBOARD_IMAGE_BYTES + 2) // 3 * 4)
 _DASHBOARD_HANDOFF_SYSTEM: SystemIdentity = {
     "id": "system:dashboard-handoff",
     "display_name": "Dashboard handoff",
@@ -188,8 +188,8 @@ class DashboardImageBody(BaseModel):
                     fileName=name if isinstance(name, str) else None,
                 )
             )
-        if len(files) > _MAX_DASHBOARD_FILES:
-            raise HTTPException(422, f"at most {_MAX_DASHBOARD_FILES} files are supported")
+        if sum(len(file.base64) for file in files) > _MAX_DASHBOARD_FILES_BASE64:
+            raise HTTPException(413, "files exceed 100MB total limit")
         return files
 
     @staticmethod
@@ -282,8 +282,8 @@ def _decode_dashboard_image(image: DashboardImageBody) -> bytes:
 def _image_blocks(
     images: list[DashboardImageBody], *, model_id: str | None
 ) -> list[ImageContentBlock]:
-    if len(images) > _MAX_DASHBOARD_IMAGES:
-        raise HTTPException(422, f"at most {_MAX_DASHBOARD_IMAGES} images are supported")
+    if sum(len(image.base64) for image in images) > _MAX_DASHBOARD_IMAGES_BASE64:
+        raise HTTPException(413, "images exceed 50MB total limit")
     if images and (not model_id or not model_supports_images(model_id)):
         model_label = model_id or "the current model"
         raise HTTPException(422, f"model {model_label} does not support image input")

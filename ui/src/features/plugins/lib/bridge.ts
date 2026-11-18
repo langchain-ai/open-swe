@@ -48,7 +48,7 @@ import type { RpcStub } from "capnweb"
 
 import {
   MAX_IMAGE_BYTES,
-  MAX_IMAGE_COUNT,
+  MAX_IMAGE_BATCH_BASE64,
   SUPPORTED_IMAGE_TYPES,
 } from "@/features/agents/components/composer/ChatComposer"
 import type { ImageChunk } from "@/features/agents/lib/types"
@@ -397,14 +397,17 @@ const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
 function draftImages(value: unknown): Array<ImageChunk> {
   // Plugins built before draft images send none.
   if (value === undefined || value === null) return []
-  if (!Array.isArray(value) || value.length > MAX_IMAGE_COUNT)
-    invalid(`images must be a list of at most ${MAX_IMAGE_COUNT}`)
+  if (!Array.isArray(value)) invalid("images must be a list")
+  let totalBase64 = 0
   return value.map((item: unknown, index): ImageChunk => {
     const image: Partial<DraftImage> = record(item, `images[${index}]`)
     const mimeType = text(image.mimeType, "mimeType", 20)
     if (!SUPPORTED_IMAGE_TYPES.has(mimeType))
       invalid("images must be PNG, JPEG, WebP or GIF")
     const base64 = text(image.base64, "base64", MAX_DRAFT_IMAGE_BASE64)
+    totalBase64 += base64.length
+    if (totalBase64 > MAX_IMAGE_BATCH_BASE64)
+      invalid("images exceed 50MB total limit")
     if (!BASE64.test(base64)) invalid("base64 must be base64-encoded bytes")
     return {
       kind: "image",

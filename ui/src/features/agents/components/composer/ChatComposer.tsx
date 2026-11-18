@@ -79,9 +79,9 @@ import { cn } from "@/lib/utils"
 
 export type { ActiveRun }
 
-export const MAX_IMAGE_COUNT = 5
-export const MAX_FILE_COUNT = 10
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+export const MAX_IMAGE_BATCH_BASE64 = 5 * Math.ceil(MAX_IMAGE_BYTES / 3) * 4
+const MAX_FILE_BATCH_BASE64 = 10 * Math.ceil(MAX_IMAGE_BYTES / 3) * 4
 const MAX_MENTION_SUGGESTIONS = 8
 /** File types sent as they are; any other non-image file is sent as opaque bytes. */
 export const SUPPORTED_FILE_TYPES: ReadonlySet<string> = new Set([
@@ -601,6 +601,20 @@ export const ChatComposer = memo(function ChatComposer({
     commandItems[0] ??
     null
 
+  const attachmentBase64 = { images: 0, files: 0 }
+  for (const image of pendingImages) {
+    attachmentBase64[isFileChunk(image) ? "files" : "images"] +=
+      image.base64.length
+  }
+  const imageSizeError =
+    attachmentBase64.images > MAX_IMAGE_BATCH_BASE64
+      ? "Images must total 50MB or less. Remove an attachment to send."
+      : null
+  const fileSizeError =
+    attachmentBase64.files > MAX_FILE_BATCH_BASE64
+      ? "Files must total 100MB or less. Remove an attachment to send."
+      : null
+  const attachmentSizeError = imageSizeError ?? fileSizeError
   const imageCount = pendingImages.filter((i) => !isFileChunk(i)).length
   const filesWhileBusy = busy && pendingImages.some(isFileChunk)
   const selectedModelSupportsImages = useMemo(() => {
@@ -615,6 +629,7 @@ export const ChatComposer = memo(function ChatComposer({
   const canSubmit =
     !disabled &&
     !isSubmitting &&
+    !attachmentSizeError &&
     selectedModelSupportsImages &&
     !filesWhileBusy &&
     !composerEmpty
@@ -654,17 +669,10 @@ export const ChatComposer = memo(function ChatComposer({
     const replaced = untouched ? (previous?.images ?? []) : []
     if (restoreDraft.images.length > 0 || replaced.length > 0) {
       // oxlint-disable-next-line react/set-state-in-effect
-      setPendingImages((prev) => {
-        const images = [
-          ...restoreDraft.images,
-          ...prev.filter((image) => !replaced.includes(image)),
-        ]
-        // Only a suggestion is held to the limit; the person's own images
-        // coming back (a cancelled queued message) are never dropped.
-        return restoreDraft.replacesSuggestion
-          ? images.slice(0, MAX_IMAGE_COUNT)
-          : images
-      })
+      setPendingImages((prev) => [
+        ...restoreDraft.images,
+        ...prev.filter((image) => !replaced.includes(image)),
+      ])
     }
     const restoredReplies = restoreDraft.replies ?? []
     if (restoredReplies.length > 0) {
@@ -681,7 +689,7 @@ export const ChatComposer = memo(function ChatComposer({
 
   const handleSubmit = useCallback(
     async (options?: SubmitOptions) => {
-      if (submittingRef.current || disabled) return
+      if (submittingRef.current || disabled || attachmentSizeError) return
       // The editor is the source of truth for what is on screen; a keystroke that
       // has not yet round-tripped through state would otherwise be dropped.
       const snapshot = editorRef.current?.readSnapshot()
@@ -720,6 +728,7 @@ export const ChatComposer = memo(function ChatComposer({
     },
     [
       applyPrompt,
+      attachmentSizeError,
       disabled,
       onSubmit,
       pendingImages,
@@ -845,11 +854,6 @@ export const ChatComposer = memo(function ChatComposer({
     ]
   )
 
-  const pendingImagesRef = useRef(pendingImages)
-  useEffect(() => {
-    pendingImagesRef.current = pendingImages
-  }, [pendingImages])
-
   const addFiles = useCallback(async (files: FileList | Array<File>) => {
     const nextImages = await Promise.all(
       Array.from(files).map(fileToImageChunk)
@@ -864,17 +868,7 @@ export const ChatComposer = memo(function ChatComposer({
         : null
     )
     if (validImages.length === 0) return
-    const next = [...pendingImagesRef.current, ...validImages]
-    if (
-      next.filter((chunk) => !isFileChunk(chunk)).length > MAX_IMAGE_COUNT ||
-      next.filter(isFileChunk).length > MAX_FILE_COUNT
-    ) {
-      setComposerError(
-        `You can add at most ${MAX_IMAGE_COUNT} images and ${MAX_FILE_COUNT} files to a message. Please select fewer attachments.`
-      )
-      return
-    }
-    setPendingImages(next)
+    setPendingImages((prev) => [...prev, ...validImages])
   }, [])
 
   useEffect(() => {
@@ -1067,12 +1061,12 @@ export const ChatComposer = memo(function ChatComposer({
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
-      {composerError && (
+      {(attachmentSizeError ?? composerError) && (
         <div
           className="mb-space-2 px-space-1 text-xs text-error-secondary"
           role="alert"
         >
-          {composerError}
+          {attachmentSizeError ?? composerError}
         </div>
       )}
 
