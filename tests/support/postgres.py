@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import make_url, text
+from sqlalchemy import event, make_url, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -79,6 +79,7 @@ async def isolated_database(uri: str, monkeypatch: pytest.MonkeyPatch) -> AsyncI
         engine = create_async_engine(
             postgres.uri() or uri, connect_args={"server_settings": {"TimeZone": "UTC"}}
         )
+        event.listen(engine.sync_engine, "connect", postgres._set_search_path)
         monkeypatch.setattr(postgres, "SCHEMA", TEST_SCHEMA)
         monkeypatch.setattr(postgres, "_ENGINE", engine)
         monkeypatch.setattr(postgres, "_ENGINE_URI", postgres.uri())

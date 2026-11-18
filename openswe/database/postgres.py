@@ -6,6 +6,7 @@ from operator import attrgetter
 from pathlib import Path
 from time import perf_counter
 
+import asyncpg
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
@@ -19,12 +20,16 @@ from sqlalchemy import (
     make_url,
     text,
 )
+from sqlalchemy.engine import AdaptedConnection
+from sqlalchemy.engine.interfaces import DBAPIConnection
+from sqlalchemy.exc import DisconnectionError
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
     AsyncSession,
     create_async_engine,
 )
+from sqlalchemy.pool import ConnectionPoolEntry
 
 from openswe.config import ENV
 
@@ -71,17 +76,48 @@ def engine() -> AsyncEngine:
     if _ENGINE is None or _ENGINE_URI != database_uri:
         _ENGINE = create_async_engine(
             database_uri,
-            pool_pre_ping=True,
             pool_size=ENV.ANALYTICS_POOL_SIZE.get_int(20),
             max_overflow=ENV.ANALYTICS_POOL_OVERFLOW.get_int(20),
             pool_timeout=ENV.ANALYTICS_POOL_TIMEOUT_SECONDS.get_int(5),
             connect_args={"server_settings": {"application_name": "open-swe"}},
         )
+        event.listen(_ENGINE.sync_engine, "connect", _set_search_path)
         event.listen(_ENGINE.sync_engine, "before_cursor_execute", _query_started)
         event.listen(_ENGINE.sync_engine, "after_cursor_execute", _query_finished)
         event.listen(_ENGINE.sync_engine, "handle_error", _query_failed)
+        event.listen(_ENGINE.sync_engine, "checkout", _replace_dead_connection)
         _ENGINE_URI = database_uri
     return _ENGINE
+
+
+def _set_search_path(dbapi_connection: DBAPIConnection, record: ConnectionPoolEntry) -> None:
+    # Once per connection instead of SET LOCAL in every transaction. Not as a
+    # startup parameter, which PgBouncer refuses unless told to track it.
+    autocommit = dbapi_connection.autocommit
+    dbapi_connection.autocommit = True
+    cursor = dbapi_connection.cursor()
+    cursor.execute(f"SET search_path TO {SCHEMA}, public")
+    cursor.close()
+    dbapi_connection.autocommit = autocommit
+
+
+def _replace_dead_connection(
+    dbapi_connection: DBAPIConnection, record: ConnectionPoolEntry, proxy: object
+) -> None:
+    # In place of pool_pre_ping, which spends three round trips on it (BEGIN, a
+    # ping, ROLLBACK). One query finds the same dead connections: closed by the
+    # server, or dropped without a word by a failover and reset on first write.
+    driver = record.driver_connection
+    if not isinstance(dbapi_connection, AdaptedConnection) or not isinstance(
+        driver, asyncpg.Connection
+    ):
+        return
+    try:
+        dbapi_connection.run_async(lambda connection: connection.execute("SELECT 1"))
+    except Exception as exc:
+        if driver.is_closed():
+            raise DisconnectionError(str(exc)) from exc
+        raise
 
 
 def _query_started(
@@ -131,14 +167,12 @@ def _query_failed(context: ExceptionContext) -> None:
 @asynccontextmanager
 async def connection() -> AsyncIterator[AsyncConnection]:
     async with engine().connect() as conn:
-        await conn.execute(text(f"SET search_path TO {SCHEMA}, public"))
         yield conn
 
 
 @asynccontextmanager
 async def transaction() -> AsyncIterator[AsyncConnection]:
     async with engine().begin() as conn:
-        await conn.execute(text(f"SET LOCAL search_path TO {SCHEMA}, public"))
         yield conn
 
 
@@ -161,7 +195,6 @@ async def _read_only_transaction(*, discard_connection: bool) -> AsyncIterator[A
         transaction = await conn.begin()
         try:
             await conn.execute(text("SET TRANSACTION READ ONLY"))
-            await conn.execute(text(f"SET LOCAL search_path TO {SCHEMA}, public"))
             yield conn
         finally:
             if transaction.is_active:
@@ -183,11 +216,10 @@ async def snapshot_transaction() -> AsyncIterator[AsyncConnection]:
         transaction = await conn.begin()
         try:
             await conn.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
-            await conn.execute(text(f"SET LOCAL search_path TO {SCHEMA}, public"))
             yield conn
         finally:
-            # Both settings are transaction-scoped, so the rollback is what
-            # resets them and the connection goes back to the pool.
+            # The isolation level is transaction-scoped, so the rollback is what
+            # resets it before the connection goes back to the pool.
             if transaction.is_active:
                 await transaction.rollback()
 

@@ -1,13 +1,17 @@
 """Deployment initialization and schema regressions."""
 
 import asyncio
+import socket
+import struct
 from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 from alembic.util import CommandError
 from blockbuster import BlockBuster
-from sqlalchemy import text
+from sqlalchemy import make_url, text
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
 
 from openswe.database import analytics as database
 from openswe.database import postgres
@@ -129,6 +133,72 @@ async def test_preview_forgets_revision_whose_script_left_the_tree(deployment_db
     async with postgres.connection() as conn:
         versions = await conn.scalars(text("SELECT version_num FROM open_swe.alembic_version"))
         assert set(versions) == set(heads)
+
+
+async def test_pool_replaces_a_connection_the_server_closed(deployment_db):
+    async with postgres.connection() as conn:
+        closed = await conn.scalar(text("SELECT pg_backend_pid()"))
+    other = create_async_engine(postgres.uri(), poolclass=NullPool)
+    try:
+        async with other.connect() as conn:
+            assert await conn.scalar(
+                text("SELECT pg_terminate_backend(:pid, 5000)"), {"pid": closed}
+            )
+    finally:
+        await other.dispose()
+
+    async with postgres.transaction() as conn:
+        assert await conn.scalar(text("SELECT pg_backend_pid()")) != closed
+
+
+async def test_pool_replaces_connections_a_failover_dropped_silently(deployment_db, monkeypatch):
+    database = make_url(postgres.uri())
+    relays: list[tuple[asyncio.StreamWriter, asyncio.Event]] = []
+
+    async def relay(client_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter):
+        server_reader, server_writer = await asyncio.open_connection(database.host, database.port)
+        dropped = asyncio.Event()
+        relays.append((server_writer, dropped))
+
+        async def to_server() -> None:
+            while data := await client_reader.read(65536):
+                if dropped.is_set():
+                    # Linger 0: close with a reset, as a host that never had the connection does.
+                    client_writer.get_extra_info("socket").setsockopt(
+                        socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+                    )
+                    client_writer.transport.abort()
+                    return
+                server_writer.write(data)
+
+        async def to_client() -> None:
+            while data := await server_reader.read(65536):
+                client_writer.write(data)
+            if not dropped.is_set():
+                client_writer.close()
+
+        await asyncio.gather(to_server(), to_client(), return_exceptions=True)
+
+    proxy = await asyncio.start_server(relay, "127.0.0.1", 0)
+    port = proxy.sockets[0].getsockname()[1]
+    monkeypatch.setenv(
+        "POSTGRES_URI",
+        database.set(host="127.0.0.1", port=port).render_as_string(hide_password=False),
+    )
+
+    async def run(statement: str) -> None:
+        async with postgres.transaction() as conn:
+            await conn.execute(text(statement))
+
+    try:
+        await asyncio.gather(*(run("SELECT pg_sleep(0.1)") for _ in range(4)))
+        for server_writer, dropped in relays:
+            dropped.set()
+            server_writer.transport.abort()
+        await asyncio.gather(*(run("SELECT 1") for _ in range(4)))
+    finally:
+        await postgres.close()
+        proxy.close()
 
 
 @pytest.mark.parametrize(
