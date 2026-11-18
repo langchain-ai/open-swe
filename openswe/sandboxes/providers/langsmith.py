@@ -495,8 +495,7 @@ async def create_workspace_service_url(sandbox_id: str, port: int) -> str:
     The URL carries no token and never expires, so the same link keeps working
     for as long as the sandbox does; its viewers authenticate with their own
     LangSmith session. LangSmith refuses it while an unexpired service token
-    exists for the same port, and while the tenant's
-    ``sandbox_service_url_langsmith_login`` flag is off.
+    exists for the same port.
     """
     response = await SandboxAPI.from_env().request(
         "POST",
