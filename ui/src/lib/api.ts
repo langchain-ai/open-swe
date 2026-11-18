@@ -135,21 +135,6 @@ export interface AuditLogsPage {
   cursor: string | null
 }
 
-export interface WorkspaceApiKey {
-  id: string
-  workspace: string
-  name: string
-  key_suffix: string
-  created_by: string
-  created_by_name?: string | null
-  description?: string | null
-  created_at: string | null
-  expires_at: string
-  last_used_at: string | null
-  revoked_at: string | null
-  status: "active" | "expired" | "revoked"
-}
-
 /** A token that lets one person's Claude Code hooks mirror their sessions. */
 export interface ClaudeCodeSyncToken {
   id: string
@@ -1712,24 +1697,6 @@ export const api = {
     }),
   revokeClaudeCodeSyncToken: (id: string) =>
     request<void>(`/claude-code/tokens/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-    }),
-  listWorkspaceApiKeys: (slug: string) =>
-    request<WorkspaceApiKey[]>(
-      `/admin/api-keys?workspace=${encodeURIComponent(slug)}`
-    ),
-  createWorkspaceApiKey: (body: {
-    workspace: string
-    name: string
-    description?: string | null
-    expires_at: string
-  }) =>
-    request<WorkspaceApiKey & { secret: string }>("/admin/api-keys", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  revokeWorkspaceApiKey: (id: string) =>
-    request<void>(`/admin/api-keys/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
   listWorkspaceOptions: () =>

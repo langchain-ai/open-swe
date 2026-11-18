@@ -3,14 +3,14 @@
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid7
 
 import pytest
 from fastapi import HTTPException
 
-from openswe.api_keys.models import ApiKey
+from openswe.dashboard.langsmith_api_keys import LangSmithApiKey
 from openswe.federation.github_oidc import GitHubActionsClaims
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.tasks import activity
@@ -87,17 +87,15 @@ async def machine(monkeypatch: pytest.MonkeyPatch, registry_db: None) -> _FakeCl
     return client
 
 
-async def _key_caller(workspace: str = "core") -> Principal:
-    workspace_id = await WORKSPACES.id_for_slug(workspace)
-    assert workspace_id is not None
-    key, _ = await ApiKey.create(
-        workspace_id=workspace_id,
-        workspace=workspace,
-        name="release CI",
-        expires_at=datetime.now(UTC) + timedelta(days=30),
-        created_by="admin",
+def _bot_caller(workspace: str = "core") -> Principal:
+    key = LangSmithApiKey(
+        kind="service",
+        fingerprint="0123456789abcdef",
+        organization_id="org",
+        workspace_id="ws",
+        audit_id="langsmith:key-1",
     )
-    return Principal.of_key(key)
+    return Principal.of_bot(key, workspace)
 
 
 def _workflow_caller(
@@ -115,8 +113,8 @@ def _workflow_caller(
     )
 
 
-async def test_a_key_starts_a_system_thread_with_no_person_on_it(machine: _FakeClient) -> None:
-    principal = await _key_caller()
+async def test_the_bot_starts_a_system_thread_with_no_person_on_it(machine: _FakeClient) -> None:
+    principal = _bot_caller()
 
     enriched = await runs._enrich_system_run_start_command(
         "thread-1",
@@ -131,8 +129,9 @@ async def test_a_key_starts_a_system_thread_with_no_person_on_it(machine: _FakeC
     assert metadata["owner_type"] == "system"
     assert metadata["visibility"] == "public"
     assert metadata["workspace"] == "core"
-    assert metadata["created_by"] == "admin"
-    assert metadata["started_by_name"] == "release CI"
+    assert metadata["created_by"] == "bot"
+    assert metadata["started_by_name"] == "Robin bot"
+    assert metadata["started_by_id"] == "bot:ws"
     assert (metadata["repo_owner"], metadata["repo_name"]) == ("acme", "api")
     assert "owner_login" not in metadata
 
@@ -153,7 +152,7 @@ async def test_a_machine_run_keeps_the_message_id_its_client_minted(machine: _Fa
     command["params"]["input"]["messages"][-1]["id"] = "prompt-1"
 
     enriched = await runs._enrich_system_run_start_command(
-        "thread-ids", await _key_caller(), command, metadata={}, creating=True
+        "thread-ids", _bot_caller(), command, metadata={}, creating=True
     )
 
     assert enriched["params"]["input"]["messages"][-1]["id"] == "prompt-1"
@@ -162,7 +161,7 @@ async def test_a_machine_run_keeps_the_message_id_its_client_minted(machine: _Fa
 async def test_a_machine_run_drops_a_message_id_the_thread_already_holds(
     machine: _FakeClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    principal = await _key_caller()
+    principal = _bot_caller()
 
     class _State:
         async def state(self, thread_id: str) -> dict[str, object]:
@@ -197,7 +196,7 @@ async def test_a_workflow_defaults_to_its_own_repository(machine: _FakeClient) -
 
 
 async def test_a_repository_another_workspace_prefers_is_usable(machine: _FakeClient) -> None:
-    principal = await _key_caller()
+    principal = _bot_caller()
 
     await runs._enrich_system_run_start_command(
         "thread-3",
@@ -212,7 +211,7 @@ async def test_a_repository_another_workspace_prefers_is_usable(machine: _FakeCl
 
 @pytest.mark.parametrize("requested", ["workspace", "private"])
 async def test_a_machine_cannot_start_a_person_thread(machine: _FakeClient, requested: str) -> None:
-    principal = await _key_caller()
+    principal = _bot_caller()
 
     with pytest.raises(HTTPException) as refused:
         await runs._enrich_system_run_start_command(
@@ -228,7 +227,7 @@ async def test_a_machine_cannot_start_a_person_thread(machine: _FakeClient, requ
 
 
 async def test_the_thread_kind_has_to_be_named(machine: _FakeClient) -> None:
-    principal = await _key_caller()
+    principal = _bot_caller()
 
     with pytest.raises(HTTPException) as refused:
         await runs._enrich_system_run_start_command(
@@ -255,8 +254,8 @@ def test_only_an_admin_may_ask_for_a_system_thread(monkeypatch: pytest.MonkeyPat
 
 
 async def test_a_machine_reads_back_only_what_it_started(machine: _FakeClient) -> None:
-    mine = await _key_caller()
-    theirs = await _key_caller()
+    mine = _bot_caller()
+    theirs = _workflow_caller()
 
     started = {"started_by_id": mine.started_by_id}
     mine.assert_can_read(started)
@@ -377,11 +376,11 @@ _TRANSCRIPT_READS: dict[str, _TranscriptRead] = {
 
 
 @pytest.mark.parametrize("read", _TRANSCRIPT_READS.values(), ids=_TRANSCRIPT_READS.keys())
-async def test_a_key_reads_the_transcript_of_only_the_thread_it_started(
+async def test_a_machine_reads_the_transcript_of_only_the_thread_it_started(
     machine: _FakeClient, read: _TranscriptRead
 ) -> None:
-    mine = await _key_caller()
-    theirs = await _key_caller()
+    mine = _bot_caller()
+    theirs = _workflow_caller()
     transcript = await _transcript_started_by(mine)
 
     await read(transcript, mine)
@@ -390,11 +389,11 @@ async def test_a_key_reads_the_transcript_of_only_the_thread_it_started(
     assert refused.value.status_code == 404
 
 
-async def test_a_key_reads_the_workers_of_only_the_thread_it_started(
+async def test_a_machine_reads_the_workers_of_only_the_thread_it_started(
     machine: _FakeClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    mine = await _key_caller()
-    theirs = await _key_caller()
+    mine = _bot_caller()
+    theirs = _workflow_caller()
     thread_id = str(uuid7())
     await index.create(
         thread_id, runtime="mda", metadata={"source": "api", STARTED_BY_ID: mine.started_by_id}
@@ -407,9 +406,11 @@ async def test_a_key_reads_the_workers_of_only_the_thread_it_started(
     assert refused.value.status_code == 404
 
 
-async def test_a_key_stream_ends_on_a_thread_another_key_started(machine: _FakeClient) -> None:
-    mine = await _key_caller()
-    theirs = await _key_caller()
+async def test_a_machine_stream_ends_on_a_thread_another_machine_started(
+    machine: _FakeClient,
+) -> None:
+    mine = _bot_caller()
+    theirs = _workflow_caller()
     transcript = await _transcript_started_by(mine)
 
     async with aclosing(_stream(transcript.thread_id, 0, theirs)) as stream:

@@ -7,7 +7,6 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from openswe.api_keys.models import ApiKey
 from openswe.audit_logs import middleware, store
 from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.middleware import AuditLogMiddleware, audit_endpoint
@@ -16,9 +15,11 @@ from openswe.audit_logs.routes import router
 from openswe.bridge import routes as bridge_routes
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, oauth, workspace_settings
+from openswe.dashboard.langsmith_api_keys import LangSmithApiKey
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
+from openswe.threads import principals
 from openswe.threads.principals import PrincipalDep
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.workspaces.store import WORKSPACES
 from tests.conftest import LangSmithUsers
 
 
@@ -280,20 +281,23 @@ async def test_audit_failure_preserves_response(
     assert "Could not persist audit log" in caplog.text
 
 
-async def test_key_actor_wins_over_cookie_and_survives_workspace_deletion(
+async def test_service_key_actor_wins_over_cookie(
     registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
-    await WORKSPACES.create(WorkspaceCreate(name="Audit scope"), "admin")
-    workspace_id = await WORKSPACES.id_for_slug("audit-scope")
-    assert workspace_id is not None
-    key, secret = await ApiKey.create(
-        workspace_id=workspace_id,
-        workspace="audit-scope",
-        name="automation",
-        expires_at=datetime.now(UTC) + timedelta(days=1),
-        created_by="admin",
+    secret = "lsv2_sk_audit"
+    key = LangSmithApiKey(
+        kind="service",
+        fingerprint="0123456789abcdef",
+        organization_id="org",
+        workspace_id="ws",
+        audit_id="langsmith:key-1",
     )
+
+    async def verify(token: str) -> LangSmithApiKey | None:
+        return key if token == secret else None
+
+    monkeypatch.setattr(principals.LANGSMITH_API_KEYS, "verify", verify)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app()),
         base_url="http://test",
@@ -303,15 +307,18 @@ async def test_key_actor_wins_over_cookie_and_survives_workspace_deletion(
             "/dashboard/api/machine", headers={"Authorization": f"Bearer {secret}"}
         )
     assert response.status_code == 200
-    await WORKSPACES.delete("audit-scope")
+    assert response.json() == {"machine": True}
     now = datetime.now(UTC)
     page = await store.list_logs(
-        start_time=now - timedelta(minutes=1), end_time=now, limit=10, workspace_id=workspace_id
+        start_time=now - timedelta(minutes=1),
+        end_time=now,
+        limit=10,
+        api_key_id="langsmith:key-1",
     )
     (entry,) = page.items
-    assert entry.api_key_id == key.id
     assert entry.user_id is None
     assert entry.enrichments.actor_kind == "api_key"
+    assert entry.enrichments.actor_login == "bot:ws"
     assert secret not in entry.model_dump_json()
 
 

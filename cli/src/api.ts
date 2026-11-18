@@ -188,7 +188,7 @@ export class ApiClient {
     return parsed.data
   }
 
-  /** Whether the server accepts this credential, for machines that have no `/me`. */
+  /** Whether the server accepts this credential, for credentials that have no `/me` session. */
   async verifyMachine(): Promise<void> {
     await this.send("GET", "/threads?limit=1")
   }

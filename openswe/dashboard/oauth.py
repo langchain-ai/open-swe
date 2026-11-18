@@ -636,11 +636,12 @@ def require_same_origin_for_mutations(request: HTTPConnection) -> None:
     if request.scope.get("method") in {"GET", "HEAD", "OPTIONS"}:
         return
     # The origin allowlist defends the ambient session cookie. A request whose
-    # only credential is an explicit bearer header can't be forged by a browser,
-    # so it has nothing to defend.
+    # only credential is an explicit header (a bearer token, or a LangSmith key in
+    # X-Api-Key) can't be forged by a browser, so it has nothing to defend.
     if not isinstance(request, Request):
         raise HTTPException(400, "invalid request")
-    if bearer_github_token(request) and not request.cookies.get(COOKIE_NAME):
+    explicit = bearer_github_token(request) or request.headers.get("x-api-key", "").strip()
+    if explicit and not request.cookies.get(COOKIE_NAME):
         return
     require_same_origin(request)
 

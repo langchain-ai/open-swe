@@ -924,7 +924,7 @@ async def test_a_dashboard_command_on_a_channel_thread_is_its_senders(
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
     ada = await User.sign_in("github", "1", login="ada")
     channel = {"channel": "linear"}
-    machine = Principal(kind="api_key", workspace="acme")
+    machine = Principal(kind="bot", workspace="acme")
 
     assert await proxy._sender_user_id(Principal.of_login("ada"), "ada", channel) == str(ada.id)
     # Only on a channel's thread, for a person Open SWE knows.

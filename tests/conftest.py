@@ -18,6 +18,7 @@ from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 from pydantic import JsonValue, TypeAdapter
 
+from openswe.dashboard import langsmith_api_keys
 from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
@@ -459,6 +460,7 @@ def _reset_ttl_cache() -> Iterator[None]:
 
     def clear() -> None:
         ttl_cache.clear()
+        langsmith_api_keys.LANGSMITH_API_KEYS.clear()
         # The postgres edition caches over gRPC and has no in-process store to clear.
         if not IS_POSTGRES_OR_GRPC_BACKEND:
             cache._CACHE.clear()

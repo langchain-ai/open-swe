@@ -197,6 +197,29 @@ def test_router_allows_allowed_origin_post(dashboard_client: TestClient) -> None
     assert response.status_code == 204
 
 
+def test_router_lets_a_langsmith_key_post_without_an_origin(dashboard_client: TestClient) -> None:
+    # A browser cannot attach X-Api-Key cross-site, so there is no cookie to defend.
+    response = dashboard_client.post(
+        "/dashboard/api/auth/logout",
+        headers={"X-Api-Key": "lsv2_sk_ci", "Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 204
+
+
+def test_router_still_checks_origin_when_a_key_rides_with_the_cookie(
+    dashboard_client: TestClient,
+) -> None:
+    dashboard_client.cookies.set(oauth.COOKIE_NAME, "session")
+    response = dashboard_client.post(
+        "/dashboard/api/auth/logout",
+        headers={"X-Api-Key": "lsv2_sk_ci", "Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "CSRF check failed"
+
+
 async def test_proxy_commands_rejects_non_json_content_type() -> None:
     for content_type in ("text/plain", "application/x-www-form-urlencoded", "multipart/form-data"):
         with pytest.raises(HTTPException) as exc:

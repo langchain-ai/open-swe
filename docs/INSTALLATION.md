@@ -563,34 +563,35 @@ Optionally give the agent an incident tracker by adding its MCP server, for exam
 <details id="api-keys">
 <summary><strong>Machine callers: API keys and GitHub Actions</strong></summary>
 
-Two kinds of machine can start Robin threads without a browser session.
-Both post the same command the dashboard posts, to `POST /dashboard/api/threads/<thread_id>/commands`, and both may only start **system** threads: owned by a workspace rather than a person, public, and carrying no GitHub user, so nothing they do borrows anyone's credentials.
+LangSmith API keys and GitHub Actions workflows can start Robin threads without a browser session.
+They post the same command the dashboard posts, to `POST /dashboard/api/threads/<thread_id>/commands`.
 
 Every creating command names the kind of thread it wants in `config.configurable.thread_type`:
 
 | `thread_type` | Who may ask for it |
 |---|---|
-| `system` | API keys, federated workflows, and admins |
-| `workspace` | any signed-in person |
-| `private` | any signed-in person |
+| `system` | the bot (Workspace Admin service keys), federated workflows, and admins |
+| `workspace` | any signed-in person, or their personal access token |
+| `private` | any signed-in person, or their personal access token |
 
-**API keys.**
-Only `CONFIGURED_ADMINS` mint, list, or revoke them, and a key is scoped to one workspace with a required expiry at most 365 days out:
+**LangSmith API keys.**
+Robin mints no keys of its own.
+Send a LangSmith key as `Authorization: Bearer <key>` or `X-Api-Key: <key>`, and Robin asks LangSmith (its tenant `/auth` endpoint) who it is, pinned to the LangSmith workspace Robin signs people in to: the workspace of the deployment's own `LANGSMITH_API_KEY`.
+A key that cannot act in that workspace is refused, whatever else it can reach.
+LangSmith's answer is reused for up to 60 seconds, so a key revoked in LangSmith stops working here within a minute.
 
-```bash
-curl -X POST "<URL>/dashboard/api/admin/api-keys" \
-  -H 'Content-Type: application/json' -b osw_session=<your session cookie> \
-  -d '{"workspace": "core", "name": "release CI", "expires_at": "2027-01-01T00:00:00Z"}'
-```
+- A **personal access token** (`lsv2_pt_…`) acts as its person: the Robin user who signed in with that LangSmith account, with the same access as their session.
+  Their Robin login must still be live (the same check a session gets), because their runs call models on it; otherwise the token gets a 403 asking them to sign in again.
+- A **service key** (`lsv2_sk_…`) that holds `workspaces:manage` in that workspace (a Workspace Admin key) acts as the workspace's **bot**, a machine that may only start **system** threads: owned by a workspace rather than a person, public, and carrying no GitHub user, so nothing it does borrows anyone's credentials.
+  Every service key is the same bot, so a rotated key still reads the threads the old one started.
+  The bot's threads run in the `default` workspace.
 
-The response is the only place the secret appears.
-The server stores the SHA-256 digest of the secret and its last six characters, so a lost key cannot be recovered: mint a new one and revoke the old.
-`GET /dashboard/api/admin/api-keys?workspace=core` lists keys with `last_used_at`, `revoked_at` and a `status` of `active`, `expired` or `revoked`; `DELETE /dashboard/api/admin/api-keys/<id>` revokes one.
-Deleting a workspace deletes its keys, because a slug can be reused.
+Service keys without `workspaces:manage` (for example ones made for tracing or CI) get a 403: the bot can start threads in any repository the GitHub App reaches, so only a key a workspace admin made for it may act as it.
+Robin's own deployment keys (`LANGSMITH_API_KEY`, `LANGSMITH_GATEWAY_API_KEY`, `MDA_RUNTIME_API_KEY`) are refused, as are tracing keys and legacy `ls__` keys.
 
 ```bash
 curl -X POST "<URL>/dashboard/api/threads/$(uuidgen | tr 'A-Z' 'a-z')/commands" \
-  -H 'Authorization: Bearer osk_…' -H 'Content-Type: application/json' \
+  -H 'X-Api-Key: lsv2_sk_…' -H 'Content-Type: application/json' \
   -d '{"id": 1, "method": "run.start", "params": {
         "input": {"messages": [{"type": "human", "content": "Upgrade the linter and open a PR"}]},
         "config": {"configurable": {"thread_type": "system", "repo": "acme/api"}}}}'

@@ -18,6 +18,7 @@ import {
   rememberThreadBridge,
   storeSession,
 } from "./config.ts"
+import { SessionCredential } from "./credentials.ts"
 import { isGitRepository, originRepo, repoFullName } from "./git.ts"
 import { composePrompt, readPipedStdin } from "./input.ts"
 import { errorMessage, type JsonObject } from "./json.ts"
@@ -139,7 +140,7 @@ async function authStatusCommand(): Promise<number> {
   out(`Credential: ${credential.source}`)
   const api = new ApiClient(config.backend, credential)
   try {
-    if (credential.machine) {
+    if (!(credential instanceof SessionCredential)) {
       await api.verifyMachine()
       out("Accepted.")
     } else {

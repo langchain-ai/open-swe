@@ -137,7 +137,6 @@ function mockApis(record: WorkspaceRecord = RECORD) {
     ],
     refreshing: false,
   })
-  vi.spyOn(api, "listWorkspaceApiKeys").mockResolvedValue([])
   vi.spyOn(api, "me").mockRejectedValue(new Error("not signed in"))
 }
 

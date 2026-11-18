@@ -16,8 +16,9 @@ export class CredentialError extends Error {
 }
 
 /**
- * How the CLI proves who it is. A person signs in; an API key and a CI
- * workflow are machines, which the server lets start only system threads.
+ * How the CLI proves who it is. A person signs in or uses their LangSmith
+ * personal access token; a LangSmith service key (the workspace's bot) and a
+ * CI workflow are machines, which the server lets start only system threads.
  */
 export interface Credential {
   readonly machine: boolean
@@ -52,14 +53,19 @@ export class SessionCredential implements Credential {
   }
 }
 
-/** An admin-minted workspace API key (`osk_…`). */
+/**
+ * A LangSmith API key from Robin's LangSmith workspace: a personal access token
+ * (`lsv2_pt_…`) is its person, a service key (`lsv2_sk_…`) is the bot.
+ */
 export class ApiKeyCredential implements Credential {
-  readonly machine = true
-  readonly source = "API key (OPEN_SWE_API_KEY)"
+  readonly machine: boolean
+  readonly source = "LangSmith API key (OPEN_SWE_API_KEY)"
   readonly rejected =
-    "the API key was rejected — it may have expired or been revoked"
+    "the LangSmith API key was rejected — it may have expired, been revoked, or belong to another workspace"
 
-  constructor(private readonly key: string) {}
+  constructor(private readonly key: string) {
+    this.machine = !key.startsWith("lsv2_pt_")
+  }
 
   async headers(): Promise<Record<string, string>> {
     return { Authorization: `Bearer ${this.key}` }

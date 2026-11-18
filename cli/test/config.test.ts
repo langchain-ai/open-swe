@@ -123,17 +123,26 @@ describe("readConfig", () => {
     })
   })
 
-  test("prefers an API key, which is a machine", async () => {
+  test("prefers an API key; a service key is a machine", async () => {
     await isolated()
     process.env["OPEN_SWE_SESSION"] = "jwt-from-env"
-    process.env["OPEN_SWE_API_KEY"] = "osk_abc"
+    process.env["OPEN_SWE_API_KEY"] = "lsv2_sk_abc"
 
     const credential = (await readConfig())?.credential
     expect(credential).toBeInstanceOf(ApiKeyCredential)
     expect(credential?.machine).toBe(true)
     expect(await credential?.headers("http://127.0.0.1:2027")).toEqual({
-      Authorization: "Bearer osk_abc",
+      Authorization: "Bearer lsv2_sk_abc",
     })
+  })
+
+  test("a personal access token is its person, not a machine", async () => {
+    await isolated()
+    process.env["OPEN_SWE_API_KEY"] = "lsv2_pt_abc"
+
+    const credential = (await readConfig())?.credential
+    expect(credential).toBeInstanceOf(ApiKeyCredential)
+    expect(credential?.machine).toBe(false)
   })
 
   test("uses the GitHub Actions job's identity when the job can mint one", async () => {

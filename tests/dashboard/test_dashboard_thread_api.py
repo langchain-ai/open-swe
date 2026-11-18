@@ -1572,7 +1572,7 @@ async def test_thread_state_of_an_old_thread_the_agent_server_swept_is_not_found
     assert response.status_code == 404
 
 
-@pytest.mark.parametrize(("started_by_id", "status_code"), [("api_key:1", 200), ("api_key:2", 404)])
+@pytest.mark.parametrize(("started_by_id", "status_code"), [("bot:ws-1", 200), ("bot:ws-2", 404)])
 async def test_a_machine_reads_the_state_of_only_the_threads_it_started(
     monkeypatch, started_by_id: str, status_code: int
 ) -> None:
@@ -1591,9 +1591,9 @@ async def test_a_machine_reads_the_state_of_only_the_threads_it_started(
             "source": "api",
             "owner_type": "system",
             "visibility": "public",
-            STARTED_BY_ID: "api_key:1",
+            STARTED_BY_ID: "bot:ws-1",
         },
-        reader=Principal(kind="api_key", workspace="core", started_by_id=started_by_id),
+        reader=Principal(kind="bot", workspace="core", started_by_id=started_by_id),
     )
 
     assert response.status_code == status_code

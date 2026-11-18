@@ -1,10 +1,12 @@
 """Whoever is asking to start or read a thread, and what they are allowed to ask for.
 
-Three kinds of principal reach the thread API. A person signs in and gets their
-own threads. A workspace API key and a federated GitHub Actions workflow are
-machines: they start threads that belong to a workspace rather than to anyone,
-and they may read back only what they themselves started, because none of the
-dashboard's ownership rules describe them.
+Three kinds of principal reach the thread API. A person signs in, or presents a
+LangSmith personal access token, and gets their own threads. The bot (a
+LangSmith service key with ``workspaces:manage`` in Robin's LangSmith workspace)
+and a federated GitHub
+Actions workflow are machines: they start threads that belong to a workspace
+rather than to anyone, and they may read back only what they themselves started,
+because none of the dashboard's ownership rules describe them.
 
 Which kind of thread a request creates is never inferred from who asked. The
 request names it, and the principal is checked against it:
@@ -22,10 +24,9 @@ from typing import Annotated, Any, Literal
 
 from fastapi import Depends, HTTPException, Request
 
-from openswe.api_keys.deps import api_key_from_token, bind_audit_key
-from openswe.api_keys.models import ApiKey
 from openswe.audit_logs.middleware import bind_actor
 from openswe.audit_logs.models import AuditLogEnrichments
+from openswe.dashboard.langsmith_api_keys import LANGSMITH_API_KEYS, LangSmithApiKey
 from openswe.dashboard.oauth import bind_audit_session, optional_session
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.federation.github_oidc import (
@@ -36,18 +37,24 @@ from openswe.federation.github_oidc import (
 )
 from openswe.threads.identity import ThreadIdentity
 from openswe.threads.summary import _assert_thread_postable, assert_thread_readable
+from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
-from openswe.workspaces.store import WORKSPACES
+from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 logger = logging.getLogger(__name__)
 
-PrincipalKind = Literal["api_key", "github_actions", "person"]
+PrincipalKind = Literal["bot", "github_actions", "person"]
 ThreadType = Literal["system", "workspace", "private"]
 
 STARTED_BY_ID = "started_by_id"
 STARTED_BY_NAME = "started_by_name"
 
-_UNAUTHENTICATED = "authenticate with an API key, a federated workflow token, or a session"
+_UNAUTHENTICATED = "authenticate with a LangSmith API key, a federated workflow token, or a session"
+_PAT_NEEDS_SIGN_IN = (
+    "Sign in to Robin with LangSmith before using a personal access token: its runs "
+    "call models through your LangSmith login"
+)
+BOT_NAME = "Robin bot"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -68,14 +75,57 @@ class Principal:
     token_repositories: tuple[str, ...] | None = None
 
     @classmethod
-    def of_key(cls, key: ApiKey) -> Principal:
+    def of_bot(cls, key: LangSmithApiKey, workspace: str = DEFAULT_WORKSPACE_SLUG) -> Principal:
+        """The workspace's bot. Every service key is the same bot, so a rotated key
+        still reads the threads the old one started."""
         return cls(
-            kind="api_key",
-            workspace=key.workspace,
-            started_by_id=f"api_key:{key.id}",
-            started_by_name=key.name,
-            created_by=key.created_by,
+            kind="bot",
+            workspace=workspace,
+            started_by_id=f"bot:{key.workspace_id}",
+            started_by_name=BOT_NAME,
+            created_by="bot",
         )
+
+    @classmethod
+    async def of_langsmith_key(cls, request: Request, key: LangSmithApiKey) -> Principal:
+        """A service key is the bot; a personal access token is the Robin user behind it.
+
+        The token gets exactly what that person's session would: the same path
+        rules, and the same live check of their LangSmith login, which their runs
+        call models through.
+        """
+        if key.kind == "service":
+            principal = cls.of_bot(key)
+            bind_actor(
+                request,
+                api_key_id=key.audit_id,
+                enrichments=AuditLogEnrichments(
+                    actor_kind="api_key",
+                    actor_login=principal.started_by_id,
+                    workspace=principal.workspace,
+                ),
+            )
+            return principal
+        user = await User.for_identity("langsmith", key.ls_user_id)
+        if user is None:
+            raise HTTPException(403, _PAT_NEEDS_SIGN_IN)
+        dashboard = DashboardPrincipal("langsmith", user.session_login, user.id, key.ls_user_id)
+        if request.url.path.startswith("/dashboard/api/"):
+            dashboard.authorize_path(request.url.path, request.method)
+        try:
+            await dashboard.authorize()
+        except HTTPException as exc:
+            # A 401 would read as a bad key; the key is fine, the login behind it is not.
+            if exc.status_code == 401:
+                raise HTTPException(403, _PAT_NEEDS_SIGN_IN) from exc
+            raise
+        bind_actor(
+            request,
+            user_id=user.id,
+            api_key_id=key.audit_id,
+            enrichments=AuditLogEnrichments(actor_kind="person", actor_login=user.session_login),
+        )
+        return cls.of_login(user.session_login, key.email or user.email or None)
 
     @classmethod
     def of_workflow(cls, claims: GitHubActionsClaims, workspace: str) -> Principal:
@@ -155,8 +205,11 @@ class Principal:
 
 
 def _bearer(request: Request) -> str:
+    """The presented token: ``Authorization: Bearer``, else LangSmith's ``X-Api-Key``."""
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
-    return token.strip() if scheme.strip().lower() == "bearer" else ""
+    if scheme.strip().lower() == "bearer" and token.strip():
+        return token.strip()
+    return request.headers.get("X-Api-Key", "").strip()
 
 
 async def _federated_principal(token: str) -> Principal:
@@ -189,15 +242,15 @@ async def _federated_principal(token: str) -> Principal:
 async def require_principal(request: Request) -> Principal:
     """The principal behind this request, whichever credential it brought.
 
-    A bearer token is matched against the API keys first and only then checked
-    as GitHub's, so nothing is verified against keys it was not minted for.
+    A token is sent to LangSmith only when it is shaped like a LangSmith key, and
+    to GitHub's verifier only when it is shaped like GitHub's, so no credential is
+    shown to an issuer that did not mint it.
     """
     token = _bearer(request)
     if token:
-        key = await api_key_from_token(token)
+        key = await LANGSMITH_API_KEYS.verify(token)
         if key is not None:
-            bind_audit_key(request, key)
-            return Principal.of_key(key)
+            return await Principal.of_langsmith_key(request, key)
         if looks_federated(token):
             principal = await _federated_principal(token)
             bind_actor(
