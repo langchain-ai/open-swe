@@ -513,6 +513,7 @@ const TreeRow = memo(function TreeRow({
         variant="plain"
         size="sm"
         aria-label={node.name}
+        title={node.path}
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
