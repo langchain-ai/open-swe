@@ -41,7 +41,7 @@ Usage:
 
 Run options:
   --thread <id>    Continue an existing thread
-  --model <id>     Agent model id (needs --effort to take effect)
+  --model <id>     Agent model id (requires --effort)
   --effort <name>  Reasoning effort for --model
 
 Piped input is attached below the prompt, or is the prompt when none is given.

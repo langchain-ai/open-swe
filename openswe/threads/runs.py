@@ -1971,7 +1971,9 @@ async def _enrich_system_run_start_command(
     The person's path resolves a profile, a model, participants and a GitHub
     token for whoever sent the message. None of that exists here, so this stamps
     the workspace's own thread and run config and leaves the rest of the command
-    pipeline — forwarding, streaming, run bookkeeping — shared.
+    pipeline — forwarding, streaming, run bookkeeping — shared. The one choice a
+    caller makes is the model: a supported model and effort it names runs instead
+    of the workspace default.
     """
     if command.get("method") != "run.start":
         raise HTTPException(403, "a machine principal may only start runs")
@@ -1989,6 +1991,15 @@ async def _enrich_system_run_start_command(
     if requested is None:
         raise HTTPException(422, "thread_type is required")
     principal.authorize(requested)
+
+    requested_model = client_configurable.get("agent_model_id")
+    requested_effort = client_configurable.get("agent_effort")
+    model_id, effort = normalize_model_choice(requested_model, requested_effort)
+    if (requested_model is not None or requested_effort is not None) and model_id is None:
+        raise HTTPException(
+            422,
+            "agent_model_id and agent_effort must name a supported model and one of its efforts",
+        )
 
     content = _command_message_content(params)
     prompt = _command_prompt_text(content)
@@ -2064,6 +2075,10 @@ async def _enrich_system_run_start_command(
         configurable["repo"] = stored_repo
     elif repo_config:
         configurable["repo"] = repo_config
+    if model_id is not None:
+        configurable["agent_model_id"] = model_id
+        configurable["agent_effort"] = effort
+        configurable["model_selection"] = "explicit"
 
     params["assistant_id"] = _ASSISTANT_ID
     params["config"] = {**client_config, "configurable": configurable}

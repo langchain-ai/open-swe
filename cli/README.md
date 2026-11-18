@@ -151,7 +151,7 @@ Options:
 | Flag | Meaning |
 | --- | --- |
 | `--thread <id>` | Continue a thread robin started on this machine, from the directory it serves. Refused while another robin process is serving it. |
-| `--model <id>` | Agent model id. The backend only honors it together with `--effort`. |
+| `--model <id>` | Agent model id, with `--effort`; the backend refuses a model or effort it does not support. |
 | `--effort <name>` | Reasoning effort for `--model`. |
 
 Piped input is attached below the prompt inside `<stdin>` tags, or is the whole prompt when no arguments are given.

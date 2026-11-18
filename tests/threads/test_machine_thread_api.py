@@ -145,6 +145,52 @@ async def test_the_bot_starts_a_system_thread_with_no_person_on_it(machine: _Fak
     assert "github_login" not in configurable
     assert "user_email" not in configurable
     assert "admin_thread" not in configurable
+    assert "agent_model_id" not in configurable
+
+
+async def test_a_machine_run_uses_the_model_its_client_names(machine: _FakeClient) -> None:
+    enriched = await runs._enrich_system_run_start_command(
+        "thread-model",
+        _bot_caller(),
+        _command(
+            "Upgrade the linter",
+            thread_type="system",
+            agent_model_id="anthropic:claude-opus-5-5",
+            agent_effort="medium",
+        ),
+        metadata={},
+        creating=True,
+    )
+
+    configurable = enriched["params"]["config"]["configurable"]
+    assert configurable["agent_model_id"] == "anthropic:claude-opus-5-5"
+    assert configurable["agent_effort"] == "medium"
+    assert configurable["model_selection"] == "explicit"
+
+
+@pytest.mark.parametrize(
+    "choice",
+    [
+        {"agent_model_id": "anthropic:claude-opus-5-5"},
+        {"agent_model_id": "anthropic:claude-opus-5-5", "agent_effort": "turbo"},
+        {"agent_model_id": "acme:unknown-model", "agent_effort": "medium"},
+        {"agent_effort": "medium"},
+    ],
+)
+async def test_a_machine_run_refuses_a_model_it_cannot_run(
+    machine: _FakeClient, choice: dict[str, str]
+) -> None:
+    with pytest.raises(HTTPException) as refused:
+        await runs._enrich_system_run_start_command(
+            "thread-bad-model",
+            _bot_caller(),
+            _command("Upgrade the linter", thread_type="system", **choice),
+            metadata={},
+            creating=True,
+        )
+
+    assert refused.value.status_code == 422
+    assert machine.threads.created == []
 
 
 async def test_a_machine_run_keeps_the_message_id_its_client_minted(machine: _FakeClient) -> None:
