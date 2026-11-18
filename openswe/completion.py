@@ -437,7 +437,7 @@ def _log_run_failure(thread_id: str, run_id: str | None, status: object, error: 
 
 # MDA channels that report a run's failure in their conversation themselves. The
 # GitHub channel doesn't, so its issues still get Open SWE's failure reply.
-_CHANNELS_REPORTING_FAILURES = frozenset({"linear"})
+_CHANNELS_REPORTING_FAILURES = frozenset({"linear", "slack"})
 
 
 async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:

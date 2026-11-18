@@ -272,13 +272,20 @@ async def test_a_github_channel_run_still_reports_its_failure_on_the_issue(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("channel", ["linear", "slack"])
+@pytest.mark.parametrize("status", ["error", "timeout"])
 async def test_a_channel_run_leaves_its_failure_to_the_channel(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, channel: str, status: str
 ) -> None:
-    metadata = {
-        "source": "linear",
-        "source_context": {"linear_issue": {"id": "issue-1", "title": "Bug"}},
-    }
+    metadata = (
+        _slack_metadata()
+        if channel == "slack"
+        else {
+            "source": "linear",
+            "source_context": {"linear_issue": {"id": "issue-1", "title": "Bug"}},
+        }
+    )
+    metadata["channel"] = channel
     monkeypatch.setattr(completion, "langgraph_client", lambda: _FakeClient(metadata))
     notify = AsyncMock(return_value=True)
     monkeypatch.setattr(completion, "_post_failure_reply", notify)
@@ -286,9 +293,8 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
     monkeypatch.setattr(completion.TaskMessage, "deliver_to", task_messages)
     monkeypatch.setattr(completion.EventSubscription, "deliver_to", wakes)
 
-    # MDA's Linear channel started this run; it reports the failure in the session.
     result = await completion.handle_run_completion(
-        {"thread_id": "t1", "run_id": "run-1", "status": "error", "metadata": {"channel": "linear"}}
+        {"thread_id": "t1", "run_id": "run-1", "status": status, "metadata": {"channel": channel}}
     )
     assert result == {"status": "ignored", "reason": "the channel reports the failure"}
     notify.assert_not_awaited()
@@ -297,9 +303,7 @@ async def test_a_channel_run_leaves_its_failure_to_the_channel(
     wakes.assert_awaited_once_with("t1", "enqueue")
 
     # A run the backend started on the same thread still goes to its failure reply.
-    await completion.handle_run_completion(
-        {"thread_id": "t1", "run_id": "run-2", "status": "error"}
-    )
+    await completion.handle_run_completion({"thread_id": "t1", "run_id": "run-2", "status": status})
     notify.assert_awaited_once()
 
 
