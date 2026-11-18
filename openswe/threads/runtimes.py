@@ -586,16 +586,24 @@ class MdaRuntime:
             or (config_metadata.get("origin") if isinstance(config_metadata, dict) else None),
             fallback=configurable.get("source"),
         ).value
+        assistant_id = payload.get("assistant_id")
+        if not isinstance(assistant_id, str):
+            raise ValueError("A run needs an assistant_id")
+        # What kind of work the run is, so its cost groups by it: a run that names its
+        # kind (a wakeup, a task message), else its thread's kind (a review), else its graph.
+        thread_kind = thread_metadata.get("kind")
+        kind = run_metadata.get("kind") or (
+            thread_kind if isinstance(thread_kind, str) else assistant_id
+        )
+        run_metadata["kind"] = kind
         configurable["origin"] = origin
         run_metadata["origin"] = origin
         config["metadata"] = {
             **(config_metadata if isinstance(config_metadata, dict) else {}),
             "origin": origin,
+            "kind": kind,
         }
         streaming = configurable.pop(dispatch.V3_STREAMING_CONFIG_KEY, None)
-        assistant_id = payload.get("assistant_id")
-        if not isinstance(assistant_id, str):
-            raise ValueError("A run needs an assistant_id")
         run_metadata.pop("billed_user_id", None)
         run_metadata["created_by"] = None
         run_metadata.setdefault(
