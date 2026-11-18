@@ -740,7 +740,10 @@ export function AgentsHome({
 
   return (
     <>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div
+        data-chat-drop-zone
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      >
         {session.data && !routePending && <OnboardingDialog />}
         <AgentThreadHeader
           startingThread={startingThread ?? undefined}

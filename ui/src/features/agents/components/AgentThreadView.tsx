@@ -511,10 +511,6 @@ export function AgentThreadView({
     })
   }, [question, canPost, clearQuestion, submitWithExcerpts])
 
-  const [droppedFiles, setDroppedFiles] = useState<{
-    key: number
-    files: Array<File>
-  } | null>(null)
   const [addedReply, setAddedReply] = useState<{
     key: number
     reply: PassageReply
@@ -857,7 +853,8 @@ export function AgentThreadView({
   return (
     <div className="flex min-w-0 flex-1">
       <div
-        className="flex min-w-0 flex-1 flex-col"
+        data-chat-drop-zone
+        className="relative flex min-w-0 flex-1 flex-col"
         style={isMobile ? undefined : { minWidth: SIBLING_COLUMN_MIN_WIDTH }}
       >
         {/* The page around an embedded thread is its header. */}
@@ -943,33 +940,7 @@ export function AgentThreadView({
             </Banner>
           </div>
         )}
-        <div
-          className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-          onDragOver={(event) => {
-            if (canPost && event.dataTransfer.types.includes("Files"))
-              event.preventDefault()
-          }}
-          onDrop={(event) => {
-            if (
-              !canPost ||
-              !event.dataTransfer.types.includes("Files") ||
-              (event.target instanceof Element &&
-                event.target.closest("[data-chat-composer]"))
-            )
-              return
-            event.preventDefault()
-            const files = Array.from(event.dataTransfer.files).filter((file) =>
-              ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
-                file.type
-              )
-            )
-            if (files.length)
-              setDroppedFiles((previous) => ({
-                key: (previous?.key ?? 0) + 1,
-                files,
-              }))
-          }}
-        >
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           {hydrationFailed || hydrationTimedOut ? (
             <LoadError
               title="Unable to load messages"
@@ -1120,7 +1091,6 @@ export function AgentThreadView({
                 onSubmit={submitWithExcerpts}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
-                droppedFiles={droppedFiles}
                 addedReply={addedReply}
                 models={models}
                 modelSelectionEnabled={modelSelectionEnabled}

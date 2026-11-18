@@ -79,10 +79,12 @@ function renderComposer(
     <QueryClientProvider client={client}>
       <AgentThreadStreamBoundary>
         <ThreadSourceProvider threadId="thread-1" transcript={false}>
-          <ChatComposer
-            activeRun={{ threadId: "thread-1", running }}
-            {...props}
-          />
+          <section aria-label="Chat" data-chat-drop-zone>
+            <ChatComposer
+              activeRun={{ threadId: "thread-1", running }}
+              {...props}
+            />
+          </section>
         </ThreadSourceProvider>
       </AgentThreadStreamBoundary>
     </QueryClientProvider>,
@@ -130,6 +132,102 @@ describe("ChatComposer focus", () => {
     renderComposer(false, { autoFocus: true })
 
     expect(document.activeElement).toBe(close)
+  })
+})
+
+describe("ChatComposer file drops", () => {
+  it("only attaches files dropped in the chat area", async () => {
+    renderComposer(false)
+    const file = new File(["Quarterly report"], "report.txt", {
+      type: "text/plain",
+    })
+
+    render(<aside aria-label="Threads">Thread sidebar</aside>)
+    const sidebar = screen.getByRole("complementary", { name: "Threads" })
+    fireEvent.dragEnter(sidebar, { dataTransfer: { types: ["Files"] } })
+    fireEvent.drop(sidebar, {
+      dataTransfer: { types: ["Files"], files: [file] },
+    })
+    expect(screen.queryByText("Drop to attach")).toBeNull()
+    expect(screen.queryByText("report.txt")).toBeNull()
+
+    fireEvent.dragEnter(screen.getByRole("region", { name: "Chat" }), {
+      dataTransfer: { types: ["Files"] },
+    })
+    expect(screen.getByRole("status").textContent).toBe("Drop to attach")
+
+    fireEvent.drop(screen.getByRole("region", { name: "Chat" }), {
+      dataTransfer: { types: ["Files"], files: [file] },
+    })
+
+    expect(screen.queryByText("Drop to attach")).toBeNull()
+    expect(await screen.findByText("report.txt")).toBeTruthy()
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: "Message" })
+    )
+  })
+
+  it("does not duplicate files dropped onto the composer", async () => {
+    renderComposer(false)
+    const file = new File(["Quarterly report"], "report.txt", {
+      type: "text/plain",
+    })
+
+    fireEvent.dragEnter(screen.getByRole("region", { name: "Chat" }), {
+      dataTransfer: { types: ["Files"] },
+    })
+    fireEvent.drop(screen.getByRole("textbox", { name: "Message" }), {
+      dataTransfer: { types: ["Files"], files: [file], getData: () => "" },
+    })
+
+    expect(screen.queryByText("Drop to attach")).toBeNull()
+    expect(await screen.findByText("report.txt")).toBeTruthy()
+    expect(screen.getAllByText("report.txt")).toHaveLength(1)
+  })
+
+  it("keeps the overlay across child targets and clears it on exit or cancellation", () => {
+    renderComposer(false)
+    fireEvent.dragEnter(screen.getByRole("region", { name: "Chat" }), {
+      dataTransfer: { types: ["text/plain"] },
+    })
+    expect(screen.queryByText("Drop to attach")).toBeNull()
+
+    const dataTransfer = { types: ["Files"] }
+    const editor = screen.getByRole("textbox", { name: "Message" })
+    fireEvent.dragEnter(screen.getByRole("region", { name: "Chat" }), {
+      dataTransfer,
+    })
+    fireEvent.dragEnter(editor, { dataTransfer })
+    fireEvent.dragLeave(screen.getByRole("region", { name: "Chat" }), {
+      dataTransfer,
+    })
+    expect(screen.getByRole("status").textContent).toBe("Drop to attach")
+
+    fireEvent.dragLeave(editor, { dataTransfer })
+    expect(screen.queryByText("Drop to attach")).toBeNull()
+
+    fireEvent.dragEnter(screen.getByRole("region", { name: "Chat" }), {
+      dataTransfer,
+    })
+    fireEvent.blur(window)
+    expect(screen.queryByText("Drop to attach")).toBeNull()
+  })
+
+  it("does not attach chat drops when disabled", () => {
+    renderComposer(false, { disabled: true })
+    const drop = new Event("drop", { bubbles: true, cancelable: true })
+    Object.defineProperty(drop, "dataTransfer", {
+      value: { types: ["Files"], files: [new File(["report"], "report.txt")] },
+    })
+
+    fireEvent.dragEnter(screen.getByRole("region", { name: "Chat" }), {
+      dataTransfer: { types: ["Files"] },
+    })
+    expect(screen.queryByText("Drop to attach")).toBeNull()
+    fireEvent(screen.getByRole("region", { name: "Chat" }), drop)
+
+    expect(drop.defaultPrevented).toBe(false)
+    expect(screen.queryByText("report.txt")).toBeNull()
   })
 })
 

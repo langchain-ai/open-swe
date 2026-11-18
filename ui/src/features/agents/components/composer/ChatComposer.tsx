@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
+import { Text } from "@langchain/macaw-components/Text"
 import {
   ChatComposer as MacawChatComposer,
   ChatComposerAttachment,
@@ -213,7 +215,6 @@ export interface ChatComposerProps {
   followUpBehavior?: FollowUpBehavior
   /** Content to put back in front of whatever is being typed. */
   restoreDraft?: RestoredDraft | null
-  droppedFiles?: { key: number; files: Array<File> } | null
   /** A reply to a passage the user selected; it rides ahead of their next message. */
   addedReply?: { key: number; reply: PassageReply } | null
   models?: Array<ModelOption>
@@ -408,7 +409,6 @@ export const ChatComposer = memo(function ChatComposer({
   onSubmit,
   followUpBehavior = "steer",
   restoreDraft = null,
-  droppedFiles = null,
   addedReply = null,
   models = [],
   modelSelectionEnabled = true,
@@ -470,6 +470,8 @@ export const ChatComposer = memo(function ChatComposer({
       ])
   }
   const [draggingPath, setDraggingPath] = useState(false)
+  const composerRef = useRef<HTMLDivElement>(null)
+  const [fileDropTarget, setFileDropTarget] = useState<HTMLElement | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
   const [dismissedTriggerKey, setDismissedTriggerKey] = useState<string | null>(
@@ -887,9 +889,60 @@ export const ChatComposer = memo(function ChatComposer({
   }, [])
 
   useEffect(() => {
-    if (droppedFiles)
-      void Promise.resolve().then(() => addFiles(droppedFiles.files))
-  }, [addFiles, droppedFiles])
+    if (disabled) return
+    const dropZone = composerRef.current?.closest<HTMLElement>(
+      "[data-chat-drop-zone]"
+    )
+    if (!dropZone) return
+    let dragDepth = 0
+    const reset = () => {
+      dragDepth = 0
+      setFileDropTarget(null)
+    }
+    const dragEnter = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes("Files")) return
+      dragDepth += 1
+      setFileDropTarget(dropZone)
+    }
+    const dragOver = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes("Files")) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = "copy"
+      setFileDropTarget(dropZone)
+    }
+    const dragLeave = () => {
+      dragDepth = Math.max(0, dragDepth - 1)
+      if (dragDepth === 0) reset()
+    }
+    const drop = (event: DragEvent) => {
+      reset()
+      if (
+        event.defaultPrevented ||
+        !event.dataTransfer?.types.includes("Files") ||
+        (event.target instanceof Element &&
+          event.target.closest("[data-chat-composer]"))
+      )
+        return
+      event.preventDefault()
+      void addFiles(Array.from(event.dataTransfer.files))
+      editorRef.current?.focusAtEnd()
+    }
+    dropZone.addEventListener("dragenter", dragEnter)
+    dropZone.addEventListener("dragover", dragOver)
+    dropZone.addEventListener("dragleave", dragLeave)
+    dropZone.addEventListener("drop", drop)
+    window.addEventListener("dragend", reset)
+    window.addEventListener("blur", reset)
+    return () => {
+      reset()
+      dropZone.removeEventListener("dragenter", dragEnter)
+      dropZone.removeEventListener("dragover", dragOver)
+      dropZone.removeEventListener("dragleave", dragLeave)
+      dropZone.removeEventListener("drop", drop)
+      window.removeEventListener("dragend", reset)
+      window.removeEventListener("blur", reset)
+    }
+  }, [addFiles, disabled])
 
   const handlePathDragOver = (event: React.DragEvent<HTMLFormElement>) => {
     if (disabled || !event.dataTransfer.types.includes(COMPOSER_PATH_DRAG_MIME))
@@ -1003,11 +1056,25 @@ export const ChatComposer = memo(function ChatComposer({
 
   return (
     <div
+      ref={composerRef}
       className={cn(
         "relative w-full font-sans text-xs",
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
+      {fileDropTarget &&
+        !disabled &&
+        createPortal(
+          <div
+            role="status"
+            className="pointer-events-none absolute inset-0 z-drag-overlay flex items-center justify-center bg-surface-level-1/90 p-space-5 font-sans text-primary backdrop-blur-sm"
+          >
+            <Text as="p" variant="h1">
+              Drop to attach
+            </Text>
+          </div>,
+          fileDropTarget
+        )}
       <MacawChatComposer
         {...run.composer}
         data-chat-composer
