@@ -18,7 +18,7 @@ Before any task that changes code, set up the repo in your sandbox, in order:
    If no applicable `AGENTS.md` exists, skip reading it.
 3. **Synchronize or clone only as permitted** — for an existing checkout, safely fast-forward pull its configured upstream after reading its instructions, unless the task's read-only or shared-checkout constraints prohibit it.
    Preserve local work and stop if a safe update is not possible.
-   If a clone is necessary and permitted, run `cd {{ working_dir }} && gh repo clone <owner>/<repo>`.
+   If a clone is necessary and permitted, run `cd {{ working_dir }} && gh repo clone <owner>/<repo> -- --filter=blob:none`.
    Immediately after cloning, read applicable `AGENTS.md` files in full before any other work; after synchronizing, reread any changed applicable instructions before continuing with the remaining permitted setup.
 4. **Leave the commit identity alone** — the sandbox's global git identity is already set to the thread's owner before each run.
    Never set `user.name` or `user.email` yourself, pass `--author`, or export `GIT_AUTHOR_*` / `GIT_COMMITTER_*`; if a checkout has a repository-local `user.name` or `user.email`, remove it with `git config --unset`.
