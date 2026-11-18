@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 const repoRoot = resolve(__dirname, "..", "..");
@@ -18,6 +19,16 @@ const serverEnv = {
   E2E_EXIT_WHEN_ORPHANED: "1",
   DROPPED_EVENTS: "",
 };
+// Where the servers' output goes, when set (CI uploads it with the report).
+// Playwright drops a server's stdout, which is where the backend and the Managed
+// Deep Agents server log, so a run that fails inside them leaves no trace of why.
+// Appended to, as the auth config starts the backend again for its own spec.
+const serverLogDir = process.env.E2E_SERVER_LOG_DIR;
+if (serverLogDir) mkdirSync(serverLogDir, { recursive: true });
+const logged = (command: string, name: string) =>
+  serverLogDir
+    ? `${command} >> ${JSON.stringify(resolve(serverLogDir, name))} 2>&1`
+    : command;
 // The app's own server, as a deployed browser sees it: it serves the pages and
 // fronts `/dashboard/api/*` itself. Driving the harness origin instead skipped
 // the app server's proxy, which is how a broken proxy shipped past a green run.
@@ -60,7 +71,7 @@ export default defineConfig({
     {
       // The real mda/ project on Managed Deep Agents' local dev server, where
       // every Open SWE thread runs its model loop. Only the LLM is faked.
-      command: "tests/e2e/mda-dev.sh",
+      command: logged("tests/e2e/mda-dev.sh", "mda.log"),
       cwd: repoRoot,
       url: `http://127.0.0.1:${MDA_PORT}/ok`,
       reuseExistingServer: !process.env.CI,
@@ -70,9 +81,11 @@ export default defineConfig({
     {
       // Real langgraph dev: the backend's graphs, hooks and webhook routes + the
       // harness http app (fake GitHub/Slack + mock UIs). Only the LLM is faked.
-      command:
+      command: logged(
         "uv run --extra dev langgraph dev --config tests/e2e/langgraph.e2e.json " +
-        `--port ${PORT} --no-browser --allow-blocking --no-reload`,
+          `--port ${PORT} --no-browser --allow-blocking --no-reload`,
+        "backend.log",
+      ),
       cwd: repoRoot,
       url: `${harnessURL}/mock/github/data`,
       reuseExistingServer: !process.env.CI,
