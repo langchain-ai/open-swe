@@ -488,7 +488,11 @@ async def resolve_review_threads(
             extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
         )
         raise HTTPException(502, "GitHub did not return the review threads")
-    open_ids = {thread["thread_id"] for thread in threads if thread.get("thread_id")}
+    open_ids = {
+        thread_id
+        for thread in threads
+        if isinstance(thread_id := thread.get("thread_id"), str) and thread_id
+    }
     wanted = open_ids if thread_ids is None else dict.fromkeys(thread_ids)
     resolved: list[str] = []
     failed: list[str] = []

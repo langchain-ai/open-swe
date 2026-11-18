@@ -9,6 +9,7 @@ from openswe.github import http as github_http
 from openswe.github import pull_request_status
 from openswe.threads import handlers
 from tests.conftest import patch_thread_module
+from tests.dashboard.test_my_pull_requests import serve_status, status_answer
 
 
 def _response(status: int, payload: object) -> httpx2.Response:
@@ -42,18 +43,10 @@ def test_pull_request_identity_rejects_untrusted_path_components() -> None:
 
 
 def test_merge_conflict_state_only_marks_confirmed_clean_as_mergeable() -> None:
-    assert (
-        pull_request_status._merge_conflict_state({"mergeable": True, "mergeable_state": "clean"})
-        == "mergeable"
-    )
-    assert (
-        pull_request_status._merge_conflict_state({"mergeable": True, "mergeable_state": "blocked"})
-        == "unknown"
-    )
-    assert (
-        pull_request_status._merge_conflict_state({"mergeable": False, "mergeable_state": "dirty"})
-        == "conflicting"
-    )
+    Mergeability = pull_request_status.Mergeability
+    assert Mergeability(True, "clean").conflict_state == "mergeable"
+    assert Mergeability(True, "blocked").conflict_state == "unknown"
+    assert Mergeability(False, "dirty").conflict_state == "conflicting"
 
 
 def test_normalize_checks_classifies_failures_and_pending() -> None:
@@ -81,100 +74,67 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     graphql_pages: list[str | None] = []
+    first_threads = {
+        "nodes": [
+            {
+                "id": "PRRT_1",
+                "isResolved": False,
+                "path": "a.py",
+                "line": 4,
+                "originalLine": None,
+                "comments": {
+                    "nodes": [
+                        {
+                            "author": {"login": "alice"},
+                            "body": "fix this",
+                            "url": "https://github.com/o/r/pull/7#discussion_r1",
+                        }
+                    ]
+                },
+            },
+            {"isResolved": True},
+        ],
+        "pageInfo": {"hasNextPage": True, "endCursor": "next"},
+    }
+    later_threads = {
+        "nodes": [
+            {
+                "id": "PRRT_2",
+                "isResolved": False,
+                "path": "b.py",
+                "line": None,
+                "originalLine": 9,
+                "comments": {
+                    "nodes": [
+                        {
+                            "author": {"login": "bob"},
+                            "body": "question",
+                            "url": "https://github.com/o/r/pull/7#discussion_r2",
+                        },
+                        {
+                            "author": {"login": "alice"},
+                            "body": "answer",
+                            "url": "https://github.com/o/r/pull/7#discussion_r3",
+                        },
+                    ]
+                },
+            }
+        ],
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+    }
 
     async def request(client, method, url, **kwargs):
-        assert client is not None
-        if url.endswith("/pulls/7"):
+        assert client is not None and url == github_http.GITHUB_GRAPHQL
+        variables = kwargs["json"]["variables"]
+        if "cursor" not in variables:
+            assert variables["threadComments"] is True
             return _response(
                 200,
-                {
-                    "state": "closed",
-                    "draft": False,
-                    "merged": True,
-                    "mergeable": False,
-                    "mergeable_state": "dirty",
-                    "head": {"sha": "a" * 40},
-                },
-            )
-        if url == github_http.GITHUB_GRAPHQL:
-            cursor = kwargs["json"]["variables"]["cursor"]
-            graphql_pages.append(cursor)
-            if cursor is None:
-                return _response(
-                    200,
-                    {
-                        "data": {
-                            "repository": {
-                                "pullRequest": {
-                                    "reviewThreads": {
-                                        "nodes": [
-                                            {
-                                                "id": "PRRT_1",
-                                                "isResolved": False,
-                                                "path": "a.py",
-                                                "line": 4,
-                                                "originalLine": None,
-                                                "comments": {
-                                                    "nodes": [
-                                                        {
-                                                            "author": {"login": "alice"},
-                                                            "body": "fix this",
-                                                            "url": "https://github.com/o/r/pull/7#discussion_r1",
-                                                        }
-                                                    ]
-                                                },
-                                            },
-                                            {"isResolved": True},
-                                        ],
-                                        "pageInfo": {"hasNextPage": True, "endCursor": "next"},
-                                    }
-                                }
-                            }
-                        }
-                    },
-                )
-            return _response(
-                200,
-                {
-                    "data": {
-                        "repository": {
-                            "pullRequest": {
-                                "reviewThreads": {
-                                    "nodes": [
-                                        {
-                                            "id": "PRRT_2",
-                                            "isResolved": False,
-                                            "path": "b.py",
-                                            "line": None,
-                                            "originalLine": 9,
-                                            "comments": {
-                                                "nodes": [
-                                                    {
-                                                        "author": {"login": "bob"},
-                                                        "body": "question",
-                                                        "url": "https://github.com/o/r/pull/7#discussion_r2",
-                                                    },
-                                                    {
-                                                        "author": {"login": "alice"},
-                                                        "body": "answer",
-                                                        "url": "https://github.com/o/r/pull/7#discussion_r3",
-                                                    },
-                                                ]
-                                            },
-                                        }
-                                    ],
-                                    "pageInfo": {"hasNextPage": False, "endCursor": None},
-                                }
-                            }
-                        }
-                    }
-                },
-            )
-        if url.endswith("/check-runs"):
-            return _response(
-                200,
-                {
-                    "check_runs": [
+                status_answer(
+                    state="MERGED",
+                    mergeable="CONFLICTING",
+                    merge_state="DIRTY",
+                    runs=[
                         {
                             "name": "unit",
                             "status": "completed",
@@ -182,23 +142,21 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
                             "details_url": "https://checks/unit",
                         },
                         {"name": "deploy", "status": "queued", "conclusion": None},
-                    ]
-                },
-            )
-        if url.endswith("/status"):
-            return _response(
-                200,
-                {
-                    "statuses": [
+                    ],
+                    statuses=[
                         {
                             "context": "legacy",
                             "state": "failure",
                             "target_url": "https://checks/legacy",
                         }
-                    ]
-                },
+                    ],
+                    reviewThreads=first_threads,
+                ),
             )
-        raise AssertionError(url)
+        graphql_pages.append(variables["cursor"])
+        return _response(
+            200, {"data": {"repository": {"pullRequest": {"reviewThreads": later_threads}}}}
+        )
 
     monkeypatch.setattr(github_http, "github_request", request)
 
@@ -206,7 +164,7 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
         _github(), [{"repo_full_name": "o/r", "number": 7}]
     )
 
-    assert graphql_pages == [None, "next"]
+    assert graphql_pages == ["next"]
     assert result == [
         {
             "repoFullName": "o/r",
@@ -287,45 +245,22 @@ async def test_one_inaccessible_pull_request_does_not_fail_the_response(
     assert result[1]["url"] is None
 
 
+@pytest.mark.parametrize("failed_read", ["check_runs", "commit_statuses"])
 async def test_partial_check_failure_cannot_appear_green(
     monkeypatch: pytest.MonkeyPatch,
+    failed_read: str,
 ) -> None:
-
-    async def request(client, method, url, **kwargs):
-        if url.endswith("/pulls/3"):
-            return _response(
-                200,
-                {
-                    "state": "open",
-                    "draft": True,
-                    "mergeable": None,
-                    "mergeable_state": "unknown",
-                    "head": {"sha": "b" * 40},
-                },
-            )
-        if url == github_http.GITHUB_GRAPHQL:
-            return _response(
-                200,
-                {
-                    "data": {
-                        "repository": {
-                            "pullRequest": {
-                                "reviewThreads": {
-                                    "nodes": [],
-                                    "pageInfo": {"hasNextPage": False, "endCursor": None},
-                                }
-                            }
-                        }
-                    }
-                },
-            )
-        if url.endswith("/check-runs"):
-            return _response(403, {"message": "checks permission missing"})
-        if url.endswith("/status"):
-            return _response(200, {"statuses": []})
-        raise AssertionError(url)
-
-    monkeypatch.setattr(github_http, "github_request", request)
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=[]))
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        github_http.RepoClient, failed_read, AsyncMock(side_effect=ValueError("Unavailable"))
+    )
+    serve_status(
+        monkeypatch,
+        status_answer(
+            isDraft=True, mergeable="UNKNOWN", merge_state="UNKNOWN", unreadable=["commits"]
+        ),
+    )
 
     result = (
         await pull_request_status.get_pull_request_statuses(

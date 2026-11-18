@@ -1833,7 +1833,7 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
     if "PullRequestTips" in query:
         tips = {"baseRefOid": fakes.base_sha(pr), "headRefOid": pr["head_sha"]}
         return JSONResponse({"data": {"repository": {"pullRequest": tips}}})
-    if "fullDatabaseId" in query and "reviewThreads" in query:
+    if "PullRequestAllReviewThreads" in query or "PullRequestReviewThreadRoots" in query:
         threads = {
             "nodes": fakes.review_threads_graphql(pr, viewer),
             "pageInfo": {"hasNextPage": False, "endCursor": None},
@@ -1856,6 +1856,90 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
         "pageInfo": {"hasNextPage": False, "endCursor": None},
     }
     pull_request: dict[str, Any] = {"reviewThreads": review_threads}
+    if "PullRequestStatus" in query:
+        reviews: list[dict[str, object]] = []
+        for index, raw in enumerate(pr["reviews"]):
+            review = fakes.review_rest_json(raw, index)
+            user = review["user"]
+            reviews.append(
+                {
+                    "fullDatabaseId": str(review["id"]),
+                    "state": review["state"],
+                    "author": {
+                        "__typename": "Bot" if user["login"].endswith("[bot]") else "User",
+                        "login": user["login"].removesuffix("[bot]"),
+                        "databaseId": user["id"],
+                        "avatarUrl": user["avatar_url"],
+                    },
+                }
+            )
+        runs: list[dict[str, object]] = []
+        for check in pr["check_runs"]:
+            conclusion = check.get("conclusion")
+            runs.append(
+                {
+                    **fakes.check_graphql(check),
+                    "databaseId": check.get("id"),
+                    "permalink": check.get("html_url"),
+                    "conclusion": conclusion.upper() if isinstance(conclusion, str) else None,
+                }
+            )
+        pull_request.update(
+            {
+                "title": pr["title"],
+                "state": "MERGED" if pr["merged"] else pr["state"].upper(),
+                "isDraft": pr["draft"],
+                "createdAt": pr["created_at"],
+                "updatedAt": pr["updated_at"],
+                "additions": pr["additions"],
+                "deletions": pr["deletions"],
+                "author": {"__typename": "User", "login": pr["author"]},
+                "mergeable": (
+                    "UNKNOWN"
+                    if pr["mergeable"] is None
+                    else "MERGEABLE"
+                    if pr["mergeable"]
+                    else "CONFLICTING"
+                ),
+                "mergeStateStatus": pr["mergeable_state"].upper(),
+                "autoMergeRequest": None,
+                "headRefName": pr["head"],
+                "headRefOid": pr["head_sha"],
+                "baseRefName": pr["base"],
+                "reviewDecision": pr["review_decision"],
+                "reviews": {
+                    "nodes": reviews,
+                    "pageInfo": {"hasNextPage": False, "endCursor": None},
+                },
+                "commits": {
+                    "nodes": [
+                        {
+                            "commit": {
+                                "oid": pr["head_sha"],
+                                "status": {
+                                    "contexts": [
+                                        fakes.status_graphql(status) for status in pr["statuses"]
+                                    ]
+                                },
+                                "checkSuites": {
+                                    "pageInfo": {"hasNextPage": False},
+                                    "nodes": [
+                                        {
+                                            "app": None,
+                                            "workflowRun": None,
+                                            "checkRuns": {
+                                                "pageInfo": {"hasNextPage": False},
+                                                "nodes": runs,
+                                            },
+                                        }
+                                    ],
+                                },
+                            }
+                        }
+                    ]
+                },
+            }
+        )
     if "PullRequestFixReviews" in query:
         pull_request.update(
             {

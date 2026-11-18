@@ -450,7 +450,7 @@ def create_pull(
         "review_comments": [],
         "standalone_comment_posts": [],
         "issue_comments": [],
-        "review_decision": "REVIEW_REQUIRED",
+        "review_decision": None,
         "requested_reviewers": [],
         "author": author,
         "merge_method": None,

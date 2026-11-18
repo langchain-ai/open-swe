@@ -1,3 +1,4 @@
+from collections.abc import Mapping, Sequence
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 import httpx2
@@ -25,6 +26,129 @@ def response(payload, status=200):
     )
 
 
+def status_answer(
+    *,
+    state: str = "OPEN",
+    mergeable: str = "MERGEABLE",
+    merge_state: str = "BLOCKED",
+    sha: str = "a" * 40,
+    runs: Sequence[Mapping[str, object]] = (),
+    statuses: Sequence[Mapping[str, str]] = (),
+    reviews: Sequence[Mapping[str, object]] = (),
+    resolved: Sequence[bool] = (),
+    unreadable: Sequence[str] = (),
+    **fields: object,
+) -> dict[str, object]:
+    """GitHub's answer to the status query; ``runs`` are shaped as REST lists them."""
+    suites: dict[object, dict[str, object]] = {}
+    for index, run in enumerate(runs):
+        suite = run.get("check_suite")
+        suite_id = suite["id"] if isinstance(suite, dict) else -index
+        app = run.get("app") if isinstance(run.get("app"), dict) else {}
+        node = suites.setdefault(
+            suite_id,
+            {
+                "databaseId": suite_id,
+                "app": {"databaseId": app.get("id"), "slug": app.get("slug")},
+                "workflowRun": run.get("workflow"),
+                "checkRuns": {"pageInfo": {"hasNextPage": False}, "nodes": []},
+            },
+        )
+        conclusion = run.get("conclusion")
+        node["checkRuns"]["nodes"].append(
+            {
+                "databaseId": run.get("id"),
+                "name": run.get("name"),
+                "status": str(run.get("status")).upper(),
+                "conclusion": conclusion.upper() if isinstance(conclusion, str) else None,
+                "detailsUrl": run.get("details_url"),
+                "permalink": run.get("html_url"),
+            }
+        )
+    pull: dict[str, object] = {
+        "title": "Live",
+        "state": state,
+        "isDraft": False,
+        "mergeable": mergeable,
+        "mergeStateStatus": merge_state,
+        "author": {"__typename": "User", "login": "octocat"},
+        "autoMergeRequest": None,
+        "headRefName": "feature",
+        "headRefOid": sha,
+        "baseRefName": "main",
+        "reviewDecision": None,
+        "reviews": {"pageInfo": {"hasNextPage": False}, "nodes": list(reviews)},
+        "reviewThreads": {
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+            "nodes": [{"isResolved": flag} for flag in resolved],
+        },
+        "commits": {
+            "nodes": [
+                {
+                    "commit": {
+                        "oid": sha,
+                        "status": {
+                            "contexts": [
+                                {
+                                    "context": status["context"],
+                                    "state": status["state"].upper(),
+                                    "targetUrl": status.get("target_url"),
+                                }
+                                for status in statuses
+                            ]
+                        }
+                        if statuses
+                        else None,
+                        "checkSuites": {
+                            "pageInfo": {"hasNextPage": False},
+                            "nodes": list(suites.values()),
+                        },
+                    }
+                }
+            ]
+        },
+        **fields,
+    }
+    for field in unreadable:
+        pull[field] = None
+    answer: dict[str, object] = {"data": {"repository": {"pullRequest": pull}}}
+    if unreadable:
+        answer["errors"] = [
+            {"path": ["repository", "pullRequest", field], "message": "Resource not accessible"}
+            for field in unreadable
+        ]
+    return answer
+
+
+def serve_status(monkeypatch, *answers: dict[str, object]) -> list[str]:
+    """Answer each GraphQL query with the next of ``answers``; returns the queries' names."""
+    queries: list[str] = []
+    pending = list(answers)
+
+    async def request(_client, method, url, **kwargs):
+        assert (method, url) == ("POST", github_http.GITHUB_GRAPHQL)
+        queries.append(kwargs["json"]["query"].split("(")[0].split()[-1])
+        return response(pending.pop(0) if len(pending) > 1 else pending[0])
+
+    monkeypatch.setattr(github_http, "github_request", request)
+    return queries
+
+
+def _reviewer(
+    login: str, state: str, *, review_id: int = 1, user_id: int = 10, typename: str = "User"
+):
+    return {
+        "fullDatabaseId": str(review_id),
+        "state": state.upper(),
+        "author": {
+            "__typename": typename,
+            "login": login,
+            "databaseId": user_id,
+            "avatarUrl": None,
+        },
+    }
+
+
 @pytest.mark.parametrize(
     ("scope", "qualifier"), [("mine", "author"), ("review-requested", "review-requested")]
 )
@@ -35,78 +159,63 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(
 
     async def request(_client, method, url, **kwargs):
         if method == "POST":
-            return _threads_response([False, True])
-        assert method == "GET"
-        if url.endswith("/search/issues"):
-            queries.append(kwargs["params"]["q"])
-            return response(
-                {
-                    "items": [
-                        {
-                            "number": n,
-                            "title": f"PR {n}",
-                            "repository_url": "https://api.github.com/repos/acme/app",
-                        }
-                        for n in range(1, 5)
-                    ],
-                    "total_count": 4,
-                }
-            )
-        if url.endswith("/reviews"):
-            return response([])
-        if "/pulls/" in url:
-            n = int(url.rsplit("/", 1)[1])
+            n = kwargs["json"]["variables"]["number"]
             if n == 3:
-                return response({}, 403)
+                return response({"message": "Resource not accessible"}, 403)
             return response(
-                {
-                    "state": "closed" if n == 2 else "open",
-                    "merged": n == 2,
-                    "title": f"Current {n}",
-                    "draft": False,
-                    "additions": n,
-                    "deletions": 4,
-                    "mergeable": True,
-                    "mergeable_state": "blocked",
-                    "head": {"sha": str(n) * 40},
-                    "created_at": "2026-09-01T00:00:00Z",
-                    "updated_at": "2026-09-12T00:00:00Z",
-                }
+                status_answer(
+                    state="MERGED" if n == 2 else "OPEN",
+                    sha=str(n) * 40,
+                    runs=[{"name": "unit", "status": "in_progress"}] if n == 1 else [],
+                    statuses=[{"context": "legacy-ci", "state": "failure"}] if n == 1 else [],
+                    resolved=[False, True],
+                    reviews=[_reviewer("robin-agent", "approved", typename="Bot")],
+                    title=f"Current {n}",
+                    additions=n,
+                    deletions=4,
+                    createdAt="2026-09-01T00:00:00Z",
+                    updatedAt="2026-09-12T00:00:00Z",
+                    author={"__typename": "Bot", "login": "dependabot"},
+                )
             )
-        assert "/commits/" in url
-        sha = url.split("/commits/")[1].split("/")[0]
-        assert sha in {"1" * 40, "4" * 40}
-        if url.endswith("check-runs"):
-            return response(
-                {
-                    "check_runs": [{"name": "unit", "status": "in_progress"}]
-                    if sha.startswith("1")
-                    else []
-                }
-            )
+        assert method == "GET" and url.endswith("/search/issues")
+        queries.append(kwargs["params"]["q"])
         return response(
             {
-                "statuses": [{"context": "legacy-ci", "state": "failure"}]
-                if sha.startswith("1")
-                else []
+                "items": [
+                    {
+                        "number": n,
+                        "title": f"PR {n}",
+                        "repository_url": "https://api.github.com/repos/acme/app",
+                    }
+                    for n in range(1, 5)
+                ],
+                "total_count": 4,
             }
         )
 
     monkeypatch.setattr(github_http, "github_request", request)
+    monkeypatch.setattr(prs.BranchConfig, "read", AsyncMock(return_value=None))
     result = await prs.list_open_pull_requests(
         github_http.GitHubClient(MagicMock()), "octocat", "acme/app", scope=scope
     )
     assert queries == [f"is:pr is:open {qualifier}:octocat repo:acme/app"]
     assert [pr.number for pr in result.pull_requests] == [1, 3, 4]
     live, unavailable, no_checks = result.pull_requests
+    assert live.title == "Current 1"
+    assert live.author == "dependabot[bot]"
     assert live.ci == "failing"
     assert live.failing_checks == ["legacy-ci"]
     assert live.pending_checks == ["unit"]
     assert live.mergeable is True and live.merge_state == "blocked"
     assert live.unresolved_threads == 1
+    assert live.reviewers == [
+        prs.PullRequestReviewer(user_id=10, login="robin-agent[bot]", state="approved")
+    ]
     assert (live.additions, live.deletions) == (1, 4)
     assert live.updated_at == "2026-09-12T00:00:00Z"
     assert unavailable.status_available is False and unavailable.ci == "unknown"
+    assert unavailable.title == "PR 3"
     assert no_checks.ci == "none"
 
 
@@ -120,33 +229,19 @@ async def test_repository_filter_cannot_change_query_or_path(repo):
 @pytest.mark.parametrize(
     ("merge_state", "runs", "missing", "required_passing"),
     [
-        ("blocked", [{"name": "unit", "status": "completed"}], ["lint"], False),
-        ("blocked", [{"name": "unit", "status": "in_progress"}], [], False),
-        ("clean", [{"name": "unit", "status": "completed"}], [], True),
+        ("BLOCKED", [{"name": "unit", "status": "completed"}], ["lint"], False),
+        ("BLOCKED", [{"name": "unit", "status": "in_progress"}], [], False),
+        ("CLEAN", [{"name": "unit", "status": "completed"}], [], True),
     ],
 )
 async def test_blocked_merge_names_required_checks_the_head_never_reported(
     monkeypatch, merge_state, runs, missing, required_passing
 ):
-    pull = {
-        "state": "open",
-        "mergeable": True,
-        "mergeable_state": merge_state,
-        "head": {"sha": "a" * 40},
-        "base": {"ref": "main"},
-    }
-    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
-    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=runs))
-    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        prs.PullRequestClient,
-        "reviewers",
-        AsyncMock(
-            return_value=[prs.PullRequestReviewer(user_id=10, login="reviewer", state="approved")]
+    serve_status(
+        monkeypatch,
+        status_answer(
+            merge_state=merge_state, runs=runs, reviews=[_reviewer("reviewer", "approved")]
         ),
-    )
-    monkeypatch.setattr(
-        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0, False))
     )
     rules = AsyncMock(
         return_value=BranchRules({RequiredCheck("unit"), RequiredCheck("lint")}, True)
@@ -162,24 +257,7 @@ async def test_blocked_merge_names_required_checks_the_head_never_reported(
 async def test_ruleset_approval_is_required_when_github_omits_the_review_decision(
     monkeypatch, state, review_required
 ):
-    pull = {
-        "state": "open",
-        "mergeable": True,
-        "mergeable_state": "blocked",
-        "head": {"sha": "a" * 40},
-        "base": {"ref": "main"},
-    }
-    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
-    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=[]))
-    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        prs.PullRequestClient,
-        "reviewers",
-        AsyncMock(return_value=[prs.PullRequestReviewer(user_id=10, login="bot", state=state)]),
-    )
-    monkeypatch.setattr(
-        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0, False))
-    )
+    serve_status(monkeypatch, status_answer(reviews=[_reviewer("bot", state)]))
     monkeypatch.setattr(
         prs.BranchConfig, "read", AsyncMock(return_value=BranchRules(set(), True, 1))
     )
@@ -203,17 +281,10 @@ async def test_ruleset_approval_is_required_when_github_omits_the_review_decisio
 async def test_review_and_thread_status_agree_on_current_check_outcomes(
     monkeypatch, conclusion, ci, failures, inconclusive, required_passing
 ):
-    pull = {
-        "state": "open",
-        "draft": False,
-        "mergeable": True,
-        "mergeable_state": "blocked",
-        "head": {"sha": "a" * 40},
-        "base": {"ref": "main"},
-    }
     monkeypatch.setattr(
         prs.BranchConfig, "read", AsyncMock(return_value=BranchRules({RequiredCheck("unit")}, True))
     )
+    # Three runs of one workflow's job: only the latest run counts.
     runs = [
         {
             "id": suite * 10,
@@ -222,29 +293,11 @@ async def test_review_and_thread_status_agree_on_current_check_outcomes(
             "conclusion": result,
             "app": {"id": 15368, "slug": "github-actions"},
             "check_suite": {"id": suite},
+            "workflow": {"event": "pull_request", "workflow": {"databaseId": 100}},
         }
         for suite, result in [(10, "failure"), (20, "success"), (30, conclusion)]
     ]
-    workflows = [
-        {
-            "id": run_id,
-            "check_suite_id": suite,
-            "workflow_id": 100,
-            "event": "pull_request",
-            "run_attempt": 2 if suite == 30 else 1,
-        }
-        for suite, run_id in [(10, 10), (20, 20), (30, 5)]
-    ]
-    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
-    monkeypatch.setattr(
-        github_http.RepoClient, "pages", AsyncMock(side_effect=[runs, workflows] * 2)
-    )
-    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
-    monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0))
-    )
-    monkeypatch.setattr(prs.PullRequestClient, "unresolved_threads", AsyncMock(return_value=[]))
+    serve_status(monkeypatch, status_answer(runs=runs))
     review = await _client(1).load()
     thread = await _client(1).thread_status()
     assert review is not None
@@ -273,13 +326,6 @@ async def test_review_and_thread_status_agree_on_current_check_outcomes(
 async def test_approval_is_separate_from_ci_and_only_required_by_branch_rules(
     monkeypatch, required, conclusion, unit, review_required, ci, required_passing
 ):
-    pull = {
-        "state": "open",
-        "mergeable": True,
-        "mergeable_state": "blocked" if required else "unstable",
-        "head": {"sha": "a" * 40},
-        "base": {"ref": "main"},
-    }
     runs = []
     if conclusion != "absent":
         runs.append(
@@ -288,6 +334,7 @@ async def test_approval_is_separate_from_ci_and_only_required_by_branch_rules(
                 "status": "completed" if conclusion else "queued",
                 "conclusion": conclusion,
                 "html_url": "https://github.com/acme/app/runs/1",
+                "app": {"id": 42},
             }
         )
     if unit:
@@ -298,9 +345,10 @@ async def test_approval_is_separate_from_ci_and_only_required_by_branch_rules(
                 "conclusion": None if unit == "queued" else unit,
             }
         )
-    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
-    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=runs))
-    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    serve_status(
+        monkeypatch,
+        status_answer(merge_state="BLOCKED" if required else "UNSTABLE", runs=runs),
+    )
     head_ci = prs.PullRequestCI(
         state="open",
         merged=False,
@@ -310,11 +358,8 @@ async def test_approval_is_separate_from_ci_and_only_required_by_branch_rules(
         checks=github_http.CommitCI(runs, []),
     )
     monkeypatch.setattr(prs.PullRequestClient, "ci", AsyncMock(return_value=head_ci))
-    monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0))
-    )
-    monkeypatch.setattr(prs.PullRequestClient, "unresolved_threads", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs.PullRequestClient, "head_sha", AsyncMock(return_value="a" * 40))
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=runs))
     monkeypatch.setattr(
         prs.BranchConfig,
         "read",
@@ -326,8 +371,6 @@ async def test_approval_is_separate_from_ci_and_only_required_by_branch_rules(
             else None
         ),
     )
-    if runs and conclusion != "absent":
-        runs[0]["app"] = {"id": 42}
     client = _client(1)
     review = await client.load()
     thread = await client.thread_status()
@@ -346,40 +389,107 @@ async def test_approval_is_separate_from_ci_and_only_required_by_branch_rules(
 
 
 async def test_clean_merge_confirms_required_checks_when_details_are_unavailable(monkeypatch):
-    pull = {
-        "state": "open",
-        "mergeable": True,
-        "mergeable_state": "clean",
-        "head": {"sha": "a" * 40},
-        "base": {"ref": "main"},
-    }
-    monkeypatch.setattr(prs.PullRequestClient, "pull", AsyncMock(return_value=pull))
+    serve_status(monkeypatch, status_answer(merge_state="CLEAN", unreadable=["commits"]))
     monkeypatch.setattr(
-        github_http.RepoClient,
-        "check_runs",
-        AsyncMock(side_effect=httpx2.HTTPError("Unavailable")),
+        github_http.RepoClient, "check_runs", AsyncMock(side_effect=ValueError("Unavailable"))
     )
     monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
-    monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        prs.PullRequestClient, "review_state", AsyncMock(return_value=prs.ReviewState(0))
-    )
     result = await _client(1).load()
     assert result is not None
     assert result.required_checks_passing is True
+    assert result.ci == "unknown"
+
+
+async def test_checks_past_one_page_are_read_in_full_over_rest(monkeypatch):
+    answer = status_answer()
+    commit = answer["data"]["repository"]["pullRequest"]["commits"]["nodes"][0]["commit"]
+    commit["checkSuites"]["pageInfo"]["hasNextPage"] = True
+    serve_status(monkeypatch, answer)
+    monkeypatch.setattr(
+        github_http.RepoClient,
+        "check_runs",
+        AsyncMock(return_value=[{"name": "unit", "status": "completed", "conclusion": "failure"}]),
+    )
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs.BranchConfig, "read", AsyncMock(return_value=None))
+    result = await _client(1).load()
+    assert result is not None
+    assert result.failing_checks == ["unit"]
+
+
+async def test_a_forbidden_workflow_hides_no_checks(monkeypatch):
+    # Two runs of one job whose workflow GitHub would not name: both are kept.
+    runs = [
+        {
+            "id": suite,
+            "name": "unit",
+            "status": status,
+            "conclusion": conclusion,
+            "app": {"id": 15368, "slug": "github-actions"},
+            "check_suite": {"id": suite},
+        }
+        for suite, status, conclusion in [(1, "completed", "failure"), (2, "queued", None)]
+    ]
+    answer = status_answer(runs=runs)
+    answer["errors"] = [
+        {
+            "type": "FORBIDDEN",
+            "message": "Resource not accessible by integration",
+            "path": [
+                "repository",
+                "pullRequest",
+                "commits",
+                "nodes",
+                0,
+                "commit",
+                "checkSuites",
+                "nodes",
+                index,
+                "workflowRun",
+            ],
+        }
+        for index in range(2)
+    ]
+    serve_status(monkeypatch, answer)
+    rest = AsyncMock(side_effect=AssertionError("checks were read over GraphQL"))
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", rest)
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", rest)
+    monkeypatch.setattr(prs.BranchConfig, "read", AsyncMock(return_value=None))
+    result = await _client(1).load()
+    thread = await _client(1).thread_status()
+    assert result is not None
+    assert (result.failing_checks, result.pending_checks) == (["unit"], ["unit"])
+    assert thread["checksAvailable"] is True
+    assert [check["name"] for check in thread["failingChecks"]] == ["unit"]
+    assert thread["pendingCheckCount"] == 1
 
 
 async def test_mergeability_is_not_awaited_forever(monkeypatch):
     monkeypatch.setattr(prs, "_MERGEABILITY_DELAY_SECONDS", 0)
-    fetches = AsyncMock(
-        return_value={"state": "open", "mergeable": None, "mergeable_state": "unknown"}
-    )
-    monkeypatch.setattr(prs.PullRequestClient, "pull", fetches)
-    monkeypatch.setattr(prs.PullRequestClient, "reviewers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(prs.BranchConfig, "read", AsyncMock(return_value=None))
+    queries = serve_status(monkeypatch, status_answer(mergeable="UNKNOWN", merge_state="UNKNOWN"))
     result = await _client(1).load(wanted={"open"})
-    assert fetches.await_count == prs._MERGEABILITY_ATTEMPTS
+    assert queries[: prs._MERGEABILITY_ATTEMPTS] == [
+        "PullRequestStatus",
+        *["PullRequestMergeability"] * (prs._MERGEABILITY_ATTEMPTS - 1),
+    ]
     assert result is not None
     assert result.status_available is True and result.mergeable is None
+    assert result.merge_state == "unknown"
+
+
+async def test_mergeability_settles_on_a_later_read(monkeypatch):
+    monkeypatch.setattr(prs, "_MERGEABILITY_DELAY_SECONDS", 0)
+    monkeypatch.setattr(prs.BranchConfig, "read", AsyncMock(return_value=None))
+    settled = {
+        "data": {
+            "repository": {"pullRequest": {"mergeable": "CONFLICTING", "mergeStateStatus": "DIRTY"}}
+        }
+    }
+    serve_status(monkeypatch, status_answer(mergeable="UNKNOWN", merge_state="UNKNOWN"), settled)
+    result = await _client(1).load(wanted={"open"})
+    assert result is not None
+    assert (result.mergeable, result.merge_state) == (False, "dirty")
 
 
 @pytest.mark.parametrize("scope", ["mine", "review-requested"])
@@ -438,61 +548,67 @@ async def test_a_plugins_search_reads_past_githubs_first_page(monkeypatch, last_
     assert found.incomplete is (last_page != "read")
 
 
-async def _decision() -> prs.ReviewDecision:
-    reviewers = await _client(1).reviewers()
-    assert reviewers is not None
-    return prs.PullRequestReviewer.decision(reviewers)
+async def _reviewers(monkeypatch, first, *later):
+    """What ``load`` reports of the reviews GitHub lists in pages ``first`` and ``later``."""
+    answer = status_answer(reviews=first)
+    if later:
+        reviews = answer["data"]["repository"]["pullRequest"]["reviews"]
+        reviews["pageInfo"] = {"hasNextPage": True, "endCursor": "page-1"}
+    pages = [
+        {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviews": {
+                            "pageInfo": {
+                                "hasNextPage": index + 1 < len(later),
+                                "endCursor": f"page-{index + 2}",
+                            },
+                            "nodes": page,
+                        }
+                    }
+                }
+            }
+        }
+        for index, page in enumerate(later)
+    ]
+    serve_status(monkeypatch, answer, *pages)
+    monkeypatch.setattr(prs.BranchConfig, "read", AsyncMock(return_value=None))
+    result = await _client(1).load()
+    assert result is not None and result.reviewers is not None
+    return [(reviewer.login, reviewer.state) for reviewer in result.reviewers], (
+        result.review_decision
+    )
 
 
 async def test_review_decision_uses_latest_active_decision_per_reviewer(monkeypatch):
-    monkeypatch.setattr(
-        github_http,
-        "github_request",
-        AsyncMock(
-            return_value=response(
-                [
-                    {
-                        "id": 1,
-                        "user": {"id": 10, "login": "reviewer"},
-                        "state": "CHANGES_REQUESTED",
-                    },
-                    {"id": 2, "user": {"id": 10, "login": "reviewer"}, "state": "APPROVED"},
-                    {"id": 3, "user": {"id": 10, "login": "reviewer"}, "state": "COMMENTED"},
-                    {"id": 4, "user": {"id": 20, "login": "other"}, "state": "DISMISSED"},
-                ]
-            )
-        ),
+    assert await _reviewers(
+        monkeypatch,
+        [
+            _reviewer("reviewer", "changes_requested", review_id=1),
+            _reviewer("reviewer", "approved", review_id=2),
+        ],
+        [
+            _reviewer("reviewer", "commented", review_id=3),
+            _reviewer("other", "dismissed", review_id=4, user_id=20),
+        ],
+    ) == ([("reviewer", "approved"), ("other", "dismissed")], "approved")
+    _, decision = await _reviewers(
+        monkeypatch,
+        [
+            _reviewer("reviewer", "approved", review_id=1),
+            _reviewer("reviewer", "dismissed", review_id=2),
+        ],
     )
-    assert [
-        (reviewer.login, reviewer.state) for reviewer in await _client(1).reviewers() or []
-    ] == [("reviewer", "approved"), ("other", "dismissed")]
-    assert await _decision() == "approved"
-    monkeypatch.setattr(
-        github_http,
-        "github_request",
-        AsyncMock(
-            return_value=response(
-                [
-                    {"id": 1, "user": {"id": 10, "login": "reviewer"}, "state": "APPROVED"},
-                    {"id": 2, "user": {"id": 10, "login": "reviewer"}, "state": "DISMISSED"},
-                ]
-            )
-        ),
+    assert decision == "none"
+    _, decision = await _reviewers(
+        monkeypatch,
+        [
+            _reviewer("reviewer", "approved", review_id=1),
+            _reviewer("other", "changes_requested", review_id=2, user_id=20),
+        ],
     )
-    assert await _decision() == "none"
-    monkeypatch.setattr(
-        github_http,
-        "github_request",
-        AsyncMock(
-            return_value=response(
-                [
-                    {"id": 1, "user": {"id": 10, "login": "reviewer"}, "state": "APPROVED"},
-                    {"id": 2, "user": {"id": 20, "login": "other"}, "state": "CHANGES_REQUESTED"},
-                ]
-            )
-        ),
-    )
-    assert await _decision() == "changes_requested"
+    assert decision == "changes_requested"
 
 
 async def test_review_indicators_require_repo_access_before_reading(monkeypatch):
@@ -518,55 +634,14 @@ async def test_review_indicators_require_repo_access_before_reading(monkeypatch)
     lookup.assert_awaited_once_with([("acme", "allowed", 1)])
 
 
-def _patch_detail_fetchers(monkeypatch):
-    monkeypatch.setattr(
-        prs.PullRequestClient,
-        "pull",
-        AsyncMock(
-            return_value={
-                "state": "open",
-                "draft": False,
-                "mergeable": True,
-                "mergeable_state": "clean",
-                "head": {"ref": "feature", "sha": "a" * 40},
-            }
+async def test_unreadable_review_threads_leave_only_the_unresolved_count_unknown(monkeypatch):
+    serve_status(
+        monkeypatch,
+        status_answer(
+            merge_state="CLEAN",
+            reviews=[_reviewer("reviewer", "approved")],
+            unreadable=["reviewThreads"],
         ),
-    )
-    monkeypatch.setattr(github_http.RepoClient, "check_runs", AsyncMock(return_value=[]))
-    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
-    monkeypatch.setattr(
-        prs.PullRequestClient,
-        "reviewers",
-        AsyncMock(
-            return_value=[prs.PullRequestReviewer(user_id=10, login="reviewer", state="approved")]
-        ),
-    )
-    monkeypatch.setattr(github_http, "GITHUB_GRAPHQL", "https://fake-gh/graphql")
-
-
-def _threads_response(resolved_flags, *, has_next=False, cursor=None):
-    return response(
-        {
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "nodes": [{"isResolved": flag} for flag in resolved_flags],
-                            "pageInfo": {"hasNextPage": has_next, "endCursor": cursor},
-                        }
-                    }
-                }
-            }
-        }
-    )
-
-
-async def test_a_graphql_failure_leaves_the_unresolved_count_unknown(monkeypatch):
-    _patch_detail_fetchers(monkeypatch)
-    monkeypatch.setattr(
-        github_http,
-        "github_request",
-        AsyncMock(return_value=response({"errors": [{"message": "Bad credentials"}]})),
     )
     result = await _client(7).load(wanted={"open"})
     assert result is not None
