@@ -738,6 +738,35 @@ async def test_the_watch_judges_a_preview_by_each_workflows_latest_deploy_that_r
 
 
 @pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_the_watch_reads_workflows_only_once_a_preview_check_passed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each look spends the GitHub App's hourly quota, so one that finds no passing preview
+    check reads nothing more."""
+    preview = _Preview(monkeypatch)
+    app = {"id": 15368, "slug": "github-actions"}
+    preview.repository.check_runs.return_value = [
+        {"id": 1, "name": _PREVIEW_CHECK, "conclusion": None, "app": app, "check_suite": {"id": 10}}
+    ]
+    await preview.open()
+
+    await preview.work()
+
+    preview.repository.workflow_ids.assert_not_awaited()
+    preview.dispatch.assert_not_awaited()
+    (watch,) = preview.jobs.values()
+    assert watch.kind == PreviewReady.RECONCILE
+    assert watch.due_at == preview.now + PreviewReady.LOOK
+
+    preview.repository.check_runs.return_value = [
+        {**preview.repository.check_runs.return_value[0], "conclusion": "success"}
+    ]
+    await preview.work()
+
+    preview.repository.workflow_ids.assert_awaited_once_with(_HEAD)
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
 @pytest.mark.parametrize("change", [{"state": "closed"}, {"head": {"sha": "c" * 40}}])
 async def test_the_watch_stops_once_the_pull_request_moves_on(
     monkeypatch: pytest.MonkeyPatch, change: dict[str, object]

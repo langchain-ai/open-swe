@@ -989,7 +989,7 @@ class PreviewReady:
 
     GitHub doesn't send a missed completion again, so in a workspace that names preview
     checks, a pull request opening or changing also starts a watch on its head
-    (``RECONCILE``): every ``WAIT`` until ``WINDOW`` after,
+    (``RECONCILE``): every ``LOOK`` until ``WINDOW`` after,
     it queues the job of each configured check that passed there, unless that commit's work
     for it is done (``CLAIMS``).
     """
@@ -1005,6 +1005,9 @@ class PreviewReady:
     WAIT: Final = timedelta(minutes=5)
     MOST_WAITS: Final = 12
     RECONCILE: Final = "review_apps_preview_reconcile"
+    # How often the watch looks. Each look reads a commit's checks, often several pages, from
+    # the GitHub App's hourly quota; the watch only recovers a completion GitHub never sent.
+    LOOK: Final = timedelta(minutes=10)
     WINDOW: Final = timedelta(hours=1)
 
     @staticmethod
@@ -1078,7 +1081,7 @@ class PreviewReady:
                         "repo_id": repo_id,
                         "deadline": (datetime.now(UTC) + cls.WINDOW).isoformat(),
                     },
-                    due_at=datetime.now(UTC) + cls.WAIT,
+                    due_at=datetime.now(UTC) + cls.LOOK,
                     key=f"{cls.RECONCILE}:{owner}/{name}#{number}@{head_sha}".lower(),
                     replace=False,
                 )
@@ -1196,17 +1199,22 @@ class PreviewReady:
                     pr = await repository.pull_request(number).pull()
                     if pr.get("state") != "open" or (pr.get("head") or {}).get("sha") != head_sha:
                         return
-                    try:
-                        workflows = await repository.workflow_ids(head_sha)
-                    except httpx2.HTTPError, ValueError:
-                        common.logger.warning(
-                            "Could not identify preview check workflows",
-                            extra={"repository": f"{owner}/{repo}", "sha": head_sha},
-                            exc_info=True,
-                        )
-                        workflows = None
                     # Called workflows prefix job names, so an exact-name query misses them.
                     runs = await repository.check_runs(head_sha, include_superseded=True)
+                    # Telling workflows apart can only hide a pass, never make one, so their
+                    # identities are read only once some check has passed.
+                    candidates = {check for check in checks if cls.deployed(runs, check, {})}
+                    workflows: dict[int, int] | None = {}
+                    if candidates:
+                        try:
+                            workflows = await repository.workflow_ids(head_sha)
+                        except httpx2.HTTPError, ValueError:
+                            common.logger.warning(
+                                "Could not identify preview check workflows",
+                                extra={"repository": f"{owner}/{repo}", "sha": head_sha},
+                                exc_info=True,
+                            )
+                            workflows = None
                     if workflows is None:
                         # Actions reruns can span suites; without workflow identities,
                         # an older success could hide a failed redeploy.
@@ -1216,7 +1224,7 @@ class PreviewReady:
                             if (run.get("app") or {}).get("slug") != "github-actions"
                         ]
                     passed = {
-                        check for check in checks if cls.deployed(runs, check, workflows or {})
+                        check for check in candidates if cls.deployed(runs, check, workflows or {})
                     }
                 again = passed != checks
                 for check in passed:
@@ -1235,7 +1243,7 @@ class PreviewReady:
                 extra={"repository": f"{owner}/{repo}", "pr_number": number},
                 exc_info=True,
             )
-        due = datetime.now(UTC) + cls.WAIT
+        due = datetime.now(UTC) + cls.LOOK
         if again and due < datetime.fromisoformat(deadline):
             await queue.schedule(cls.RECONCILE, job.payload, due_at=due, key=job.key)
 
