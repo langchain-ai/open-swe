@@ -5,9 +5,11 @@ from typing import Any, Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.deps import DashboardReadDep
+from openswe.database import postgres
 from openswe.users.records import UserRecords
 from openswe.utils.time import now_iso
 
@@ -45,9 +47,12 @@ def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-async def get_user_preferences(login: str) -> dict[str, Any]:
+async def get_user_preferences(
+    login: str, *, session: AsyncSession | None = None
+) -> dict[str, Any]:
     try:
-        record = await USER_PREFERENCES.get(login)
+        async with postgres.session(session) as db, db.begin_nested():
+            record = await USER_PREFERENCES.get(login, session=db)
     except Exception:  # noqa: BLE001
         # Preferences only pick defaults; a store hiccup must not block a run.
         logger.debug("Could not load user preferences", exc_info=True)
@@ -55,30 +60,33 @@ async def get_user_preferences(login: str) -> dict[str, Any]:
     return _normalize(record)
 
 
-async def set_user_preferences(login: str, update: UserPreferencesUpdate) -> dict[str, Any]:
-    existing = await USER_PREFERENCES.get(login) or {}
-    value = {
-        **existing,
-        "login": login,
-        "default_visibility": update.default_visibility,
-        "default_workspace": update.default_workspace.strip().lower()
-        if update.default_workspace and update.default_workspace.strip()
-        else None,
-        "follow_up_behavior": (
-            update.follow_up_behavior
-            if update.follow_up_behavior is not None
-            else existing.get("follow_up_behavior")
-        ),
-        "auto_show_changes": (
-            update.auto_show_changes
-            if update.auto_show_changes is not None
-            else existing.get("auto_show_changes")
-        ),
-        "created_at": existing.get("created_at") or now_iso(),
-        "updated_at": now_iso(),
-    }
-    await USER_PREFERENCES.put(login, value)
-    return _normalize(value)
+async def set_user_preferences(
+    login: str, update: UserPreferencesUpdate, *, session: AsyncSession | None = None
+) -> dict[str, Any]:
+    async with postgres.session(session) as db:
+        existing = await USER_PREFERENCES.get(login, session=db) or {}
+        value = {
+            **existing,
+            "login": login,
+            "default_visibility": update.default_visibility,
+            "default_workspace": update.default_workspace.strip().lower()
+            if update.default_workspace and update.default_workspace.strip()
+            else None,
+            "follow_up_behavior": (
+                update.follow_up_behavior
+                if update.follow_up_behavior is not None
+                else existing.get("follow_up_behavior")
+            ),
+            "auto_show_changes": (
+                update.auto_show_changes
+                if update.auto_show_changes is not None
+                else existing.get("auto_show_changes")
+            ),
+            "created_at": existing.get("created_at") or now_iso(),
+            "updated_at": now_iso(),
+        }
+        await USER_PREFERENCES.put(login, value, session=db)
+        return _normalize(value)
 
 
 router = APIRouter(tags=["user-preferences"])
@@ -86,15 +94,15 @@ router = APIRouter(tags=["user-preferences"])
 
 @router.get("/me/preferences")
 async def api_get_my_preferences(
-    session: dict[str, Any] = SESSION_DEP,
+    reader: DashboardReadDep,
 ) -> dict[str, Any]:
-    return await get_user_preferences(session["sub"])
+    return await get_user_preferences(reader.principal.subject, session=reader.session)
 
 
 @router.put("/me/preferences")
 @audit_endpoint
 async def api_put_my_preferences(
     body: UserPreferencesUpdate,
-    session: dict[str, Any] = SESSION_DEP,
+    reader: DashboardReadDep,
 ) -> dict[str, Any]:
-    return await set_user_preferences(session["sub"], body)
+    return await set_user_preferences(reader.principal.subject, body, session=reader.session)

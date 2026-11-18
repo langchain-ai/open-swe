@@ -9,8 +9,10 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import ColumnElement, ForeignKey, delete, select, update
+from sqlalchemy import ColumnElement, ForeignKey, delete, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
@@ -77,8 +79,8 @@ class Skill(Base):
 type Owner = UUID | None
 
 
-async def _person(login: str) -> UUID:
-    user = await User.for_login("github", login)
+async def _person(login: str, *, session: AsyncSession | None = None) -> UUID:
+    user = await User.for_login("github", login, session=session)
     if user is None:
         raise HTTPException(409, "No Robin user record for this login yet")
     return user.id
@@ -117,8 +119,10 @@ def _owned_by(owner: Owner) -> ColumnElement[bool]:
     return Skill.user_id.is_(None) if owner is None else Skill.user_id == owner
 
 
-async def _search(owner: Owner, *, limit: int, offset: int = 0) -> list[dict[str, Any]]:
-    async with postgres.session() as session:
+async def _search(
+    owner: Owner, *, limit: int, offset: int = 0, session: AsyncSession | None = None
+) -> list[dict[str, Any]]:
+    async with postgres.session(session) as session:
         values = await session.scalars(
             select(Skill.value)
             .where(_owned_by(owner))
@@ -129,45 +133,59 @@ async def _search(owner: Owner, *, limit: int, offset: int = 0) -> list[dict[str
         return list(values)
 
 
-async def _get_skill(owner: Owner, name: str) -> dict[str, Any] | None:
+async def _get_skill(
+    owner: Owner, name: str, *, session: AsyncSession | None = None
+) -> dict[str, Any] | None:
     SkillCreate(name=name, description="valid")
-    async with postgres.session() as session:
+    async with postgres.session(session) as session:
         return await session.scalar(select(Skill.value).where(_owned_by(owner), Skill.name == name))
 
 
-async def _list_skills(owner: Owner, *, limit: int, offset: int) -> dict[str, Any]:
-    found = await _search(owner, limit=limit + 1, offset=offset)
+async def _list_skills(
+    owner: Owner, *, limit: int, offset: int, session: AsyncSession | None = None
+) -> dict[str, Any]:
+    found = await _search(owner, limit=limit + 1, offset=offset, session=session)
     return {
         "items": found[:limit],
         "next_offset": offset + limit if len(found) > limit else None,
     }
 
 
-async def _create_skill(owner: Owner, body: SkillCreate) -> dict[str, Any]:
-    if await _get_skill(owner, body.name):
-        raise HTTPException(409, "skill already exists")
+async def _create_skill(
+    owner: Owner, body: SkillCreate, *, session: AsyncSession | None = None
+) -> dict[str, Any]:
     value = _record(body.name, body.description, body.instructions)
-    async with postgres.session() as session:
-        session.add(Skill(user_id=owner, name=body.name, value=value))
+    try:
+        async with postgres.session(session) as db:
+            if await _get_skill(owner, body.name, session=db):
+                raise HTTPException(409, "skill already exists")
+            db.add(Skill(user_id=owner, name=body.name, value=value))
+            await db.flush()
+    except IntegrityError as exc:
+        if getattr(exc.orig, "sqlstate", None) != "23505":
+            raise
+        raise HTTPException(409, "skill already exists") from exc
     return value
 
 
-async def _update_skill(owner: Owner, name: str, body: SkillUpdate) -> dict[str, Any]:
+async def _update_skill(
+    owner: Owner, name: str, body: SkillUpdate, *, session: AsyncSession | None = None
+) -> dict[str, Any]:
     SkillCreate(name=name, description=body.description, instructions=body.instructions)
-    existing = await _get_skill(owner, name)
-    if not existing:
-        raise HTTPException(404, "skill not found")
-    value = _record(name, body.description, body.instructions, existing)
-    async with postgres.session() as session:
-        await session.execute(
+    async with postgres.session(session) as db:
+        existing = await _get_skill(owner, name, session=db)
+        if not existing:
+            raise HTTPException(404, "skill not found")
+        value = _record(name, body.description, body.instructions, existing)
+        await db.execute(
             update(Skill).where(_owned_by(owner), Skill.name == name).values(value=value)
         )
     return value
 
 
-async def _delete_skill(owner: Owner, name: str) -> None:
+async def _delete_skill(owner: Owner, name: str, *, session: AsyncSession | None = None) -> None:
     SkillCreate(name=name, description="valid")
-    async with postgres.session() as session:
+    async with postgres.session(session) as session:
         deleted = await session.execute(
             delete(Skill).where(_owned_by(owner), Skill.name == name).returning(Skill.id)
         )
@@ -179,20 +197,46 @@ async def get_skill(login: str, name: str) -> dict[str, Any] | None:
     return await _get_skill(await _person(login), name)
 
 
-async def list_skills(login: str, *, limit: int, offset: int) -> dict[str, Any]:
-    return await _list_skills(await _person(login), limit=limit, offset=offset)
+async def list_skills(
+    login: str,
+    *,
+    limit: int,
+    offset: int,
+    user: User | None = None,
+    session: AsyncSession | None = None,
+) -> dict[str, Any]:
+    async with postgres.session(session) as db:
+        owner = user.id if user is not None else await _person(login, session=db)
+        return await _list_skills(owner, limit=limit, offset=offset, session=db)
 
 
-async def create_skill(login: str, body: SkillCreate) -> dict[str, Any]:
-    return await _create_skill(await _person(login), body)
+async def create_skill(
+    login: str, body: SkillCreate, *, user: User | None = None, session: AsyncSession | None = None
+) -> dict[str, Any]:
+    async with postgres.session(session) as db:
+        owner = user.id if user is not None else await _person(login, session=db)
+        return await _create_skill(owner, body, session=db)
 
 
-async def update_skill(login: str, name: str, body: SkillUpdate) -> dict[str, Any]:
-    return await _update_skill(await _person(login), name, body)
+async def update_skill(
+    login: str,
+    name: str,
+    body: SkillUpdate,
+    *,
+    user: User | None = None,
+    session: AsyncSession | None = None,
+) -> dict[str, Any]:
+    async with postgres.session(session) as db:
+        owner = user.id if user is not None else await _person(login, session=db)
+        return await _update_skill(owner, name, body, session=db)
 
 
-async def delete_skill(login: str, name: str) -> None:
-    await _delete_skill(await _person(login), name)
+async def delete_skill(
+    login: str, name: str, *, user: User | None = None, session: AsyncSession | None = None
+) -> None:
+    async with postgres.session(session) as db:
+        owner = user.id if user is not None else await _person(login, session=db)
+        await _delete_skill(owner, name, session=db)
 
 
 async def agent_skills(login: str | None) -> list[dict[str, Any]]:
@@ -254,10 +298,13 @@ async def list_organization_skills(*, limit: int, cursor: str | None) -> dict[st
 
 
 async def create_organization_skill(body: SkillCreate) -> dict[str, Any]:
-    existing = await _search(None, limit=MAX_ORGANIZATION_SKILLS)
-    if len(existing) >= MAX_ORGANIZATION_SKILLS:
-        raise HTTPException(409, "organization skill limit reached")
-    return await _create_skill(None, body)
+    async with postgres.session() as session:
+        # Serialize organization creates so the limit check and insert are atomic.
+        await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('organization-skills'))"))
+        existing = await _search(None, limit=MAX_ORGANIZATION_SKILLS, session=session)
+        if len(existing) >= MAX_ORGANIZATION_SKILLS:
+            raise HTTPException(409, "organization skill limit reached")
+        return await _create_skill(None, body, session=session)
 
 
 async def update_organization_skill(name: str, body: SkillUpdate) -> dict[str, Any]:

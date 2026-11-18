@@ -10,6 +10,7 @@ from uuid import UUID
 
 from sqlalchemy import ColumnElement, ForeignKey, ScalarSelect, and_, delete, func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 
 from openswe.database import postgres
@@ -76,14 +77,18 @@ class UserRecords:
             UserRecord.key == key,
         )
 
-    async def get(self, login: str, key: str = "") -> JsonObject | None:
-        async with postgres.session() as session:
+    async def get(
+        self, login: str, key: str = "", *, session: AsyncSession | None = None
+    ) -> JsonObject | None:
+        async with postgres.session(session) as session:
             return await session.scalar(select(UserRecord.value).where(self._where(login, key)))
 
-    async def for_keys(self, login: str, keys: list[str]) -> dict[str, JsonObject]:
+    async def for_keys(
+        self, login: str, keys: list[str], *, session: AsyncSession | None = None
+    ) -> dict[str, JsonObject]:
         if not keys:
             return {}
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             rows = await session.execute(
                 select(UserRecord.key, UserRecord.value).where(
                     UserRecord.user_id == user_id_for_login(login),
@@ -93,8 +98,10 @@ class UserRecords:
             )
             return dict(rows.tuples().all())
 
-    async def put(self, login: str, value: JsonObject, key: str = "") -> None:
-        async with postgres.session() as session:
+    async def put(
+        self, login: str, value: JsonObject, key: str = "", *, session: AsyncSession | None = None
+    ) -> None:
+        async with postgres.session(session) as session:
             user_id = await session.scalar(select(user_id_for_login(login)))
             if user_id is None:
                 raise UnknownUser(login)
@@ -130,9 +137,9 @@ class UserRecords:
             )
             return dict(rows.tuples().all())
 
-    async def keys(self, login: str) -> list[str]:
+    async def keys(self, login: str, *, session: AsyncSession | None = None) -> list[str]:
         """The person's keys of this kind, oldest write first."""
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             keys = await session.scalars(
                 select(UserRecord.key)
                 .where(UserRecord.user_id == user_id_for_login(login), UserRecord.kind == self.kind)

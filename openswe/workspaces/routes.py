@@ -1,6 +1,5 @@
 """Dashboard API for named workspaces."""
 
-import asyncio
 import logging
 from typing import Any
 
@@ -10,9 +9,14 @@ from pydantic import BaseModel
 
 from openswe.audit_logs.context import bind_workspace
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.agent_overrides import get_profile_default_repo
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
-from openswe.dashboard.workspace_settings import delete_workspace_settings, get_workspace_settings
+from openswe.dashboard.deps import ADMIN_DEP, DashboardReadDep, session_is_admin
+from openswe.dashboard.profiles import PROFILES
+from openswe.dashboard.workspace_settings import (
+    WorkspaceSettings,
+    delete_workspace_settings,
+    fallback_settings,
+)
+from openswe.users.repository_defaults import RepositoryDefaults
 from openswe.workspaces.configuration import configure_workspace, require_kitchen_eligible
 from openswe.workspaces.refresh import (
     RefreshStartError,
@@ -93,30 +97,38 @@ async def api_create_workspace(
     return record
 
 
-async def _default_repo_for(slug: str, login: str | None = None) -> str | None:
-    """The repository a run composed in ``slug`` starts from when none is picked."""
-    repo = await get_profile_default_repo(login, slug)
-    repo = repo or (await get_workspace_settings(slug)).default_repo
-    if not repo:
-        return None
-    return f"{repo['owner']}/{repo['name']}"
-
-
 @router.get("/workspaces/options")
 async def api_workspace_options(
-    session: dict[str, Any] = SESSION_DEP,
+    reader: DashboardReadDep,
 ) -> dict[str, Any]:
     """Pickable workspaces for any signed-in user; refresh logs only for admins.
 
     Each option carries ``default_repo`` so the composer can preselect it when
     the workspace is chosen first.
     """
-    options = await list_workspace_options(include_logs=session_is_admin(session))
-    defaults = await asyncio.gather(
-        *(_default_repo_for(option["slug"], session.get("sub")) for option in options)
+    options = await list_workspace_options(
+        include_logs=session_is_admin(reader.claims), session=reader.session
     )
-    for option, default_repo in zip(options, defaults, strict=True):
-        option["default_repo"] = default_repo
+    profile = None
+    try:
+        async with reader.session.begin_nested():
+            profile = await PROFILES.get(reader.principal.subject, session=reader.session)
+    except Exception:
+        logger.warning("profile lookup failed", exc_info=True)
+    defaults = RepositoryDefaults.model_validate(profile or {})
+    missing = [option["slug"] for option in options if not defaults.repo_config(option["slug"])]
+    settings: dict[str, WorkspaceSettings] = {}
+    if missing:
+        try:
+            async with reader.session.begin_nested():
+                settings = await WorkspaceSettings.load_many(missing, session=reader.session)
+        except Exception:
+            logger.warning("workspace settings lookup failed; using defaults", exc_info=True)
+    fallback = fallback_settings()
+    for option in options:
+        repo = defaults.repo_config(option["slug"])
+        repo = repo or settings.get(option["slug"], fallback).default_repo
+        option["default_repo"] = f"{repo['owner']}/{repo['name']}" if repo else None
     return {"workspaces": options, "default_slug": DEFAULT_WORKSPACE_SLUG}
 
 

@@ -17,12 +17,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs.context import bind_workspace, current_audit_log
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.audit_logs.models import SettingsChange
 from openswe.config import ENV
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, DashboardReadDep
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
@@ -35,6 +36,7 @@ from openswe.dashboard.options import (
     provider_fallback_pair,
 )
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
+from openswe.database import postgres
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.run_config import RunConfig
 from openswe.ui_invalidations import Topic
@@ -459,14 +461,14 @@ def _finish(merged: dict[str, Any]) -> WorkspaceSettings:
     return WorkspaceSettings(normalize_workspace_settings_for_response(merged))
 
 
-async def instance_record() -> dict[str, Any]:
+async def instance_record(*, session: AsyncSession | None = None) -> dict[str, Any]:
     """The instance record's set fields, without defaults."""
-    return _set_fields(await INSTANCE_SETTINGS.get())
+    return _set_fields(await INSTANCE_SETTINGS.get(session=session))
 
 
-async def workspace_record(slug: str) -> dict[str, Any]:
+async def workspace_record(slug: str, *, session: AsyncSession | None = None) -> dict[str, Any]:
     """The fields ``slug``'s own record overrides; a field missing or None inherits."""
-    return _set_fields(await WORKSPACE_SETTINGS.get(slug))
+    return _set_fields(await WORKSPACE_SETTINGS.get(slug, session=session))
 
 
 def fallback_settings() -> WorkspaceSettings:
@@ -513,8 +515,8 @@ async def get_workspace_settings(workspace: str | None = None) -> WorkspaceSetti
 async def load_workspace_settings(workspace: str | None = None) -> WorkspaceSettings:
     """:func:`get_workspace_settings`, but raising when the store read fails."""
     slug = resolve_settings_workspace(workspace)
-    instance, overrides = await asyncio.gather(instance_record(), workspace_record(slug))
-    return _finish({**_default_settings(), **instance, **overrides})
+    async with postgres.session() as session:
+        return (await WorkspaceSettings.load_many([slug], session=session))[slug]
 
 
 class WorkspaceSettingsView(TypedDict):
@@ -524,10 +526,21 @@ class WorkspaceSettingsView(TypedDict):
     overrides: dict[str, Any]
 
 
-async def workspace_settings_view(slug: str) -> WorkspaceSettingsView:
-    overrides = await workspace_record(slug)
+async def workspace_settings_view(
+    slug: str, *, session: AsyncSession | None = None
+) -> WorkspaceSettingsView:
+    async with postgres.session(session) as db:
+        overrides = await workspace_record(slug, session=db)
+        # The override read is strict; only inherited settings are fail-soft.
+        try:
+            async with db.begin_nested():
+                instance = await instance_record(session=db)
+            effective = _finish({**_default_settings(), **instance, **overrides})
+        except Exception:
+            logger.warning("workspace settings lookup failed; using defaults", exc_info=True)
+            effective = fallback_settings()
     overrides.pop("updated_at", None)
-    return {"effective": dict(await get_workspace_settings(slug)), "overrides": overrides}
+    return {"effective": dict(effective), "overrides": overrides}
 
 
 def _record_values(update: WorkspaceSettingsUpdate) -> dict[str, Any]:
@@ -654,6 +667,19 @@ class WorkspaceSettings(Mapping[str, Any]):
 
     def __init__(self, values: Mapping[str, Any]) -> None:
         self._values = dict(values)
+
+    @staticmethod
+    async def load_many(slugs: list[str], *, session: AsyncSession) -> dict[str, WorkspaceSettings]:
+        """Resolve workspace settings in bulk using the caller's connection."""
+        if not slugs:
+            return {}
+        instance = await instance_record(session=session)
+        overrides = await WORKSPACE_SETTINGS.for_keys(slugs, session=session)
+        defaults = _default_settings()
+        return {
+            slug: _finish({**defaults, **instance, **_set_fields(overrides.get(slug))})
+            for slug in slugs
+        }
 
     def __getitem__(self, key: str) -> Any:
         return self._values[key]
@@ -881,9 +907,9 @@ def _normalized_workspace(raw: str) -> str:
         raise HTTPException(400, str(exc)) from exc
 
 
-async def _existing_workspace(raw: str) -> str:
+async def _existing_workspace(raw: str, *, session: AsyncSession | None = None) -> str:
     slug = _normalized_workspace(raw)
-    if await WORKSPACES.get(slug) is None:
+    if await WORKSPACES.get(slug, session=session) is None:
         raise HTTPException(404, "workspace not found")
     return slug
 
@@ -911,9 +937,10 @@ async def api_put_instance_settings(
 
 @router.get("/workspaces/{workspace}/settings")
 async def api_get_workspace_settings(
-    workspace: str, _session: dict[str, Any] = SESSION_DEP
+    workspace: str, reader: DashboardReadDep
 ) -> WorkspaceSettingsView:
-    return await workspace_settings_view(await _existing_workspace(workspace))
+    slug = await _existing_workspace(workspace, session=reader.session)
+    return await workspace_settings_view(slug, session=reader.session)
 
 
 @router.put("/workspaces/{workspace}/settings")

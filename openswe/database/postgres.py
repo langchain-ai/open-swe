@@ -225,8 +225,11 @@ async def snapshot_transaction() -> AsyncIterator[AsyncConnection]:
 
 
 @asynccontextmanager
-async def session() -> AsyncIterator[AsyncSession]:
-    """An ORM session joined to one ``transaction()``, flushed before it commits."""
+async def session(existing: AsyncSession | None = None) -> AsyncIterator[AsyncSession]:
+    """Borrow a caller-owned session, or own a transaction and flush before commit."""
+    if existing is not None:
+        yield existing
+        return
     async with transaction() as conn:
         async with AsyncSession(bind=conn, expire_on_commit=False) as orm:
             yield orm

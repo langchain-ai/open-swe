@@ -8,7 +8,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.deps import SESSION_DEP, DashboardReadDep
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.projects.store import (
     NAME_MAX_CHARS,
@@ -46,8 +46,8 @@ class MemberSet(BaseModel):
 
 
 @router.get("/projects")
-async def api_list_projects(viewer: Viewer) -> dict[str, list[Project]]:
-    return {"projects": await PROJECTS.for_member(viewer)}
+async def api_list_projects(reader: DashboardReadDep) -> dict[str, list[Project]]:
+    return {"projects": await PROJECTS.for_member(reader.user, session=reader.session)}
 
 
 @router.post("/projects")

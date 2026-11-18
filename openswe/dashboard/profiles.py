@@ -10,24 +10,25 @@ Each upsert only touches its own record, so the two flows can't clobber
 each other's fields even when they interleave.
 """
 
-import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import Field, field_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs.middleware import audit_endpoint
+from openswe.dashboard.deps import DashboardReadDep
 from openswe.dashboard.oauth import (
     expires_at_from_github_response,
     is_unrecoverable_refresh_error,
     refresh_user_access_token,
-    require_session,
 )
 from openswe.dashboard.oauth_refresh import refresh_guard
+from openswe.database import postgres
 from openswe.encryption import decrypt_token, encrypt_token
-from openswe.users import User, UserPreferences, UserPreferencesPatch
+from openswe.users import UserPreferencesPatch
 from openswe.users.preferences import KitchenChannelPreference
 from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
@@ -66,7 +67,9 @@ class ProfileRecords(UserRecords):
         """Where agent runs keep this person's profile for a few seconds."""
         return f"profile:{login}"
 
-    async def put(self, login: str, value: JsonObject, key: str = "") -> None:
+    async def put(
+        self, login: str, value: JsonObject, key: str = "", *, session: AsyncSession | None = None
+    ) -> None:
         await super().put(
             login,
             {
@@ -75,6 +78,7 @@ class ProfileRecords(UserRecords):
                 if field not in RETIRED_PROFILE_KEYS
             },
             key,
+            session=session,
         )
         # A setting someone just changed applies to their next run, not 30s later.
         ttl_cache.invalidate(self.cache_key(login))
@@ -127,8 +131,8 @@ def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
-async def get_profile(login: str) -> dict[str, Any] | None:
-    return await PROFILES.get(login)
+async def get_profile(login: str, *, session: AsyncSession | None = None) -> dict[str, Any] | None:
+    return await PROFILES.get(login, session=session)
 
 
 async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
@@ -136,58 +140,63 @@ async def get_oauth_token_record(login: str) -> dict[str, Any] | None:
     return await GITHUB_OAUTH_TOKENS.get(login)
 
 
-async def upsert_profile(login: str, email: str, update: ProfileUpdate) -> dict[str, Any]:
+async def upsert_profile(
+    login: str, email: str, update: ProfileUpdate, *, session: AsyncSession | None = None
+) -> dict[str, Any]:
     """Write the user's editable settings.
 
     Only touches the profile record — the OAuth token record is untouched, so a concurrent re-login can't be clobbered by this write
     and vice versa.
     """
-    existing = normalize_profile_for_response(await get_profile(login) or {})
-    value: dict[str, Any] = {
-        **existing,
-        "login": login,
-        "email": email or existing.get("email", ""),
-        "default_repo": update.default_repo,
-        "workspace_default_repos": (
-            update.workspace_default_repos
-            if "workspace_default_repos" in update.model_fields_set
-            else existing.get("workspace_default_repos", {})
-        ),
-        "base_branch": update.base_branch,
-        "branch_prefix": update.branch_prefix,
-        "auto_fix_ci": update.auto_fix_ci,
-        "auto_human_review_enabled": (
-            update.auto_human_review_enabled
-            if "auto_human_review_enabled" in update.model_fields_set
-            else existing.get("auto_human_review_enabled", True)
-        ),
-        "draft_prs": (
-            update.draft_prs if update.draft_prs is not None else existing.get("draft_prs", True)
-        ),
-        "review_draft_prs": update.review_draft_prs,
-        "experimental_background_callbacks": (
-            update.experimental_background_callbacks
-            if update.experimental_background_callbacks is not None
-            else existing.get("experimental_background_callbacks")
-        ),
-        "slack_onboarding_dismissed": (
-            update.slack_onboarding_dismissed
-            if "slack_onboarding_dismissed" in update.model_fields_set
-            else existing.get("slack_onboarding_dismissed", False)
-        ),
-        "updated_at": now_iso(),
-    }
-    for stale_field in (
-        "first_name",
-        "last_name",
-        "allow_artifacts",
-        "slack_notifications",
-        "preferred_pr_destination",
-        "create_prs",
-    ):
-        value.pop(stale_field, None)
-    await PROFILES.put(login, value)
-    return value
+    async with postgres.session(session) as db:
+        existing = normalize_profile_for_response(await get_profile(login, session=db) or {})
+        value: dict[str, Any] = {
+            **existing,
+            "login": login,
+            "email": email or existing.get("email", ""),
+            "default_repo": update.default_repo,
+            "workspace_default_repos": (
+                update.workspace_default_repos
+                if "workspace_default_repos" in update.model_fields_set
+                else existing.get("workspace_default_repos", {})
+            ),
+            "base_branch": update.base_branch,
+            "branch_prefix": update.branch_prefix,
+            "auto_fix_ci": update.auto_fix_ci,
+            "auto_human_review_enabled": (
+                update.auto_human_review_enabled
+                if "auto_human_review_enabled" in update.model_fields_set
+                else existing.get("auto_human_review_enabled", True)
+            ),
+            "draft_prs": (
+                update.draft_prs
+                if update.draft_prs is not None
+                else existing.get("draft_prs", True)
+            ),
+            "review_draft_prs": update.review_draft_prs,
+            "experimental_background_callbacks": (
+                update.experimental_background_callbacks
+                if update.experimental_background_callbacks is not None
+                else existing.get("experimental_background_callbacks")
+            ),
+            "slack_onboarding_dismissed": (
+                update.slack_onboarding_dismissed
+                if "slack_onboarding_dismissed" in update.model_fields_set
+                else existing.get("slack_onboarding_dismissed", False)
+            ),
+            "updated_at": now_iso(),
+        }
+        for stale_field in (
+            "first_name",
+            "last_name",
+            "allow_artifacts",
+            "slack_notifications",
+            "preferred_pr_destination",
+            "create_prs",
+        ):
+            value.pop(stale_field, None)
+        await PROFILES.put(login, value, session=db)
+        return value
 
 
 def _token_expired(expires_at: str | None, *, skew_seconds: int = 300) -> bool:
@@ -370,64 +379,50 @@ async def has_access_token_record(login: str) -> bool:
 
 router = APIRouter(tags=["profiles"])
 # Not openswe.dashboard.deps: that module imports repo_access, which imports this one.
-_SESSION_DEP = Depends(require_session)
 
 
 @router.get("/profile")
-async def get_my_profile(
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    profile, preferences = await asyncio.gather(
-        get_profile(session["sub"]), User.preferences_for_login(session["sub"])
-    )
+async def get_my_profile(reader: DashboardReadDep) -> dict[str, object]:
+    profile = await get_profile(reader.principal.subject, session=reader.session)
     return {
         **normalize_profile_for_response(profile or {}),
-        **preferences.model_dump(),
+        **reader.user.typed_preferences.model_dump(),
     }
 
 
 @router.post("/profile/slack-onboarding-dismissal")
-async def dismiss_slack_onboarding(
-    session: dict[str, str] = _SESSION_DEP,
-) -> dict[str, object]:
-    login = session["sub"]
-    profile = await get_profile(login) or {}
-    await PROFILES.put(
-        login, {**profile, "slack_onboarding_dismissed": True, "updated_at": now_iso()}
-    )
-    return await get_my_profile(session)
+async def dismiss_slack_onboarding(reader: DashboardReadDep) -> dict[str, object]:
+    login = reader.principal.subject
+    profile = await get_profile(login, session=reader.session) or {}
+    value = {**profile, "slack_onboarding_dismissed": True, "updated_at": now_iso()}
+    await PROFILES.put(login, value, session=reader.session)
+    return {
+        **normalize_profile_for_response(value),
+        **reader.user.typed_preferences.model_dump(),
+    }
 
 
 @router.put("/profile")
 @audit_endpoint
-async def put_my_profile(
-    update: ProfileUpdate,
-    session: dict[str, Any] = _SESSION_DEP,
-) -> dict[str, Any]:
-    login = session["sub"]
-    try:
-        preferences = await User.update_preferences(
-            login,
-            UserPreferencesPatch(
-                personal_kitchen_channel_id=update.personal_kitchen_channel_id,
-                concierge_mode=update.concierge_mode,
-                experimental_classify=update.experimental_classify,
-                experimental_force_code_mode=update.experimental_force_code_mode,
-                experimental_cloud_first_desktop=update.experimental_cloud_first_desktop,
-            ),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if preferences is None and (
-        update.personal_kitchen_channel_id is not None
-        or update.concierge_mode
-        or update.experimental_classify
-        or update.experimental_force_code_mode
-        or update.experimental_cloud_first_desktop
-    ):
-        raise HTTPException(status_code=409, detail="No Robin user record for this login yet")
-    profile = await upsert_profile(login, session.get("email") or "", update)
-    return {
-        **normalize_profile_for_response(profile),
-        **(preferences or UserPreferences()).model_dump(),
-    }
+async def put_my_profile(update: ProfileUpdate, reader: DashboardReadDep) -> dict[str, object]:
+    login = reader.principal.subject
+    patch = UserPreferencesPatch(
+        personal_kitchen_channel_id=update.personal_kitchen_channel_id,
+        concierge_mode=update.concierge_mode,
+        experimental_classify=update.experimental_classify,
+        experimental_force_code_mode=update.experimental_force_code_mode,
+        experimental_cloud_first_desktop=update.experimental_cloud_first_desktop,
+    )
+    # Channel validation may call Slack; it must precede the write transaction.
+    if patch.personal_kitchen_channel_id is not None:
+        await reader.close()
+        try:
+            await patch.validate_channel(reader.user)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        preferences = await reader.user.merge_validated_preferences(patch)
+        profile = await upsert_profile(login, reader.email or "", update)
+    else:
+        preferences = await reader.user.merge_validated_preferences(patch, session=reader.session)
+        profile = await upsert_profile(login, reader.email or "", update, session=reader.session)
+    return {**normalize_profile_for_response(profile), **preferences.model_dump()}

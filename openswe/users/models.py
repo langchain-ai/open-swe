@@ -159,9 +159,9 @@ class User(Base):
             self.desktop_seen_at is not None and self.desktop_seen_at > datetime.now(UTC) - window
         )
 
-    async def note_desktop_use(self) -> None:
+    async def note_desktop_use(self, *, session: AsyncSession | None = None) -> None:
         """Record that this person has the desktop app open, at most hourly."""
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             await session.execute(
                 update(User)
                 .where(
@@ -175,23 +175,27 @@ class User(Base):
             )
 
     @classmethod
-    async def get(cls, user_id: UUID) -> Self | None:
-        async with postgres.session() as session:
+    async def get(cls, user_id: UUID, *, session: AsyncSession | None = None) -> Self | None:
+        async with postgres.session(session) as session:
             return await cls._load(session, user_id)
 
     @classmethod
-    async def for_ids(cls, user_ids: Collection[UUID]) -> dict[UUID, Self]:
+    async def for_ids(
+        cls, user_ids: Collection[UUID], *, session: AsyncSession | None = None
+    ) -> dict[UUID, Self]:
         """The people with these ids, identities loaded; ids with no row are left out."""
         if not user_ids:
             return {}
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             users = await session.scalars(
                 cls._with_identities(select(cls)).where(cls.id.in_(user_ids))
             )
             return {user.id: user for user in users}
 
     @classmethod
-    async def for_session(cls, user_id: UUID | None, github_login: str) -> Self | None:
+    async def for_session(
+        cls, user_id: UUID | None, github_login: str, *, session: AsyncSession | None = None
+    ) -> Self | None:
         """The person a dashboard session belongs to.
 
         The session's ``user_id`` wins while that row still holds any GitHub
@@ -199,10 +203,10 @@ class User(Base):
         handle; only a row whose GitHub identity moved away falls back to the login.
         """
         if user_id is not None:
-            user = await cls.get(user_id)
+            user = await cls.get(user_id, session=session)
             if user is not None and any(i.provider == "github" for i in user.identities):
                 return user
-        return await cls.for_login("github", github_login)
+        return await cls.for_login("github", github_login, session=session)
 
     @classmethod
     async def for_email(cls, email: str) -> Self | None:
@@ -417,25 +421,38 @@ class User(Base):
         if not changes:
             return user.typed_preferences
         await patch.validate_channel(user)
+        return await user.merge_validated_preferences(patch, keep_existing=keep_existing)
+
+    async def merge_validated_preferences(
+        self,
+        patch: UserPreferencesPatch,
+        *,
+        keep_existing: bool = False,
+        session: AsyncSession | None = None,
+    ) -> UserPreferences:
+        """Persist a patch after the caller has validated its external channel access."""
+        changes = patch.model_dump(exclude_none=True)
+        if not changes:
+            return self.typed_preferences
         incoming = bindparam("preferences_patch", changes, type_=JSONB)
         merged = (
-            incoming.op("||")(cls.preferences)
+            incoming.op("||")(User.preferences)
             if keep_existing
-            else cls.preferences.op("||")(incoming)
+            else User.preferences.op("||")(incoming)
         )
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             previous = (
                 await session.scalar(
-                    select(cls.preferences).where(cls.id == user.id).with_for_update()
+                    select(User.preferences).where(User.id == self.id).with_for_update()
                 )
                 if patch.personal_kitchen_channel_id is not None
-                else user.preferences
+                else self.preferences
             )
             stored = await session.scalar(
-                update(cls)
-                .where(cls.id == user.id)
+                update(User)
+                .where(User.id == self.id)
                 .values(preferences=merged)
-                .returning(cls.preferences)
+                .returning(User.preferences)
             )
         preferences = UserPreferences.model_validate(stored or {})
         if patch.personal_kitchen_channel_id is not None:
@@ -500,9 +517,11 @@ class User(Base):
             return list(rows.all()), total
 
     @classmethod
-    async def for_identity(cls, provider: Provider, external_id: str) -> Self | None:
+    async def for_identity(
+        cls, provider: Provider, external_id: str, *, session: AsyncSession | None = None
+    ) -> Self | None:
         """The person owning that provider account, or ``None``."""
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             return await session.scalar(
                 cls._with_identities(select(cls))
                 .join(cls.identities)
@@ -530,12 +549,14 @@ class User(Base):
             return {external_id: user for user, external_id in rows.tuples()}
 
     @classmethod
-    async def for_github_logins(cls, logins: Collection[str]) -> dict[str, Self]:
+    async def for_github_logins(
+        cls, logins: Collection[str], *, session: AsyncSession | None = None
+    ) -> dict[str, Self]:
         """The people behind GitHub ``logins``, keyed by the lowercased login asked for."""
         wanted = {login.lower() for login in logins}
         if not wanted:
             return {}
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             rows = await session.execute(
                 select(cls, func.lower(UserIdentity.login))
                 .join(cls.identities)
@@ -571,12 +592,14 @@ class User(Base):
         return await cls.for_login("github", login.strip())
 
     @classmethod
-    async def for_login(cls, provider: Provider, login: str) -> Self | None:
+    async def for_login(
+        cls, provider: Provider, login: str, *, session: AsyncSession | None = None
+    ) -> Self | None:
         """The person behind a mutable handle; the most recently seen one wins."""
         if login.startswith("user:"):
             user_id = cls.key_id(login)
-            return await cls.get(user_id) if user_id is not None else None
-        async with postgres.session() as session:
+            return await cls.get(user_id, session=session) if user_id is not None else None
+        async with postgres.session(session) as session:
             return await session.scalar(
                 cls._with_identities(select(cls))
                 .join(cls.identities)

@@ -180,9 +180,9 @@ NO_PROJECTS: Final = ProjectFiling()
 class ProjectStore:
     """Every read and change of a project, each checked against the person it is for."""
 
-    async def for_member(self, user: User) -> list[Project]:
+    async def for_member(self, user: User, *, session: AsyncSession | None = None) -> list[Project]:
         """Every project ``user`` belongs to, most recently changed first."""
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             project_ids = list(
                 await session.scalars(
                     select(ProjectMemberRow.project_id).where(ProjectMemberRow.user_id == user.id)
@@ -192,8 +192,13 @@ class ProjectStore:
 
     async def filing_for(self, login: str) -> ProjectFiling:
         """How the person signed in as ``login`` files threads into their projects."""
-        user = await User.for_login("github", login)
-        return ProjectFiling.of(await self.for_member(user)) if user is not None else NO_PROJECTS
+        async with postgres.session() as session:
+            user = await User.for_login("github", login, session=session)
+            return (
+                ProjectFiling.of(await self.for_member(user, session=session))
+                if user is not None
+                else NO_PROJECTS
+            )
 
     async def member_for_run(self, config: Mapping[str, object]) -> User:
         """The person an agent tool acts for: whoever started the run."""
@@ -203,8 +208,10 @@ class ProjectStore:
             raise ProjectNotFound("could not tell who started this run")
         return user
 
-    async def get(self, project_id: UUID, user: User) -> Project:
-        async with postgres.session() as session:
+    async def get(
+        self, project_id: UUID, user: User, *, session: AsyncSession | None = None
+    ) -> Project:
+        async with postgres.session(session) as session:
             loaded = await self._load(session, [project_id], user)
         if not loaded or not any(member.user_id == user.id for member in loaded[0].members):
             raise ProjectNotFound("project not found")
@@ -222,6 +229,7 @@ class ProjectStore:
         changes = ProjectChanges(name=name, workspace=workspace, repo_full_name=repo_full_name)
         if changes.name is None:
             raise ProjectError("name is required")
+        await self._authorize_repository(changes, user)
         project = ProjectRow(name=changes.name, created_by=user.id, updated_by=user.id)
         async with postgres.session() as session:
             await self._apply(session, project, changes, user)
@@ -237,9 +245,11 @@ class ProjectStore:
                 )
             )
             await self._flush(session)
-        return await self.get(project.id, user)
+            result = await self.get(project.id, user, session=session)
+        return result
 
     async def update(self, project_id: UUID, user: User, changes: ProjectChanges) -> Project:
+        await self._authorize_repository(changes, user, project_id=project_id)
         async with postgres.session() as session:
             await self._require_owner(session, project_id, user)
             project = await session.get_one(ProjectRow, project_id)
@@ -247,7 +257,8 @@ class ProjectStore:
             project.updated_by = user.id
             project.updated_at = datetime.now(UTC)
             await self._flush(session)
-        return await self.get(project_id, user)
+            result = await self.get(project_id, user, session=session)
+        return result
 
     async def delete(self, project_id: UUID, user: User) -> None:
         """Delete the project; its threads keep an id that no longer files them anywhere."""
@@ -284,7 +295,8 @@ class ProjectStore:
                 existing.updated_by = user.id
                 existing.updated_at = datetime.now(UTC)
             await self._flush(session)
-        return await self.get(project_id, user)
+            result = await self.get(project_id, user, session=session)
+        return result
 
     async def remove_member(self, project_id: UUID, user: User, member: User) -> None:
         """Take ``member`` out of the project: an owner may remove anyone, anyone may leave."""
@@ -328,7 +340,7 @@ class ProjectStore:
         if changes.name is not None:
             project.name = changes.name
         if changes.workspace is not None:
-            workspace_id = await WORKSPACES.id_for_slug(changes.workspace)
+            workspace_id = await WORKSPACES.id_for_slug(changes.workspace, session=session)
             if workspace_id is None:
                 raise ProjectError(f"no workspace named {changes.workspace!r}")
             project.workspace_id = workspace_id
@@ -336,13 +348,28 @@ class ProjectStore:
             project.repository_id = None
         elif changes.repo_full_name is not None:
             full_name = normalize_repo_full_name(changes.repo_full_name)
+            project.repository_id = await Repository.ensure_id(session, full_name)
+
+    async def _authorize_repository(
+        self, changes: ProjectChanges, user: User, *, project_id: UUID | None = None
+    ) -> None:
+        if changes.repo_full_name:
+            if project_id is not None or changes.workspace is not None:
+                async with postgres.session() as session:
+                    if project_id is not None:
+                        await self._require_owner(session, project_id, user)
+                    if (
+                        changes.workspace is not None
+                        and await WORKSPACES.id_for_slug(changes.workspace, session=session) is None
+                    ):
+                        raise ProjectError(f"no workspace named {changes.workspace!r}")
+            full_name = normalize_repo_full_name(changes.repo_full_name)
             if not user.github_login:
                 raise ProjectForbidden("Link GitHub to bind a repository to a project")
             try:
                 await require_repo_access_for_user(user.github_login, full_name)
             except HTTPException as exc:
                 raise ProjectForbidden(f"no access to {full_name}") from exc
-            project.repository_id = await Repository.ensure_id(session, full_name)
 
     async def _flush(self, session: AsyncSession) -> None:
         try:

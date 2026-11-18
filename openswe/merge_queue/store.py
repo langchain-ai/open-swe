@@ -153,8 +153,10 @@ class MergeQueue(Record):
     configuration_generation: Mapped[str | None] = mapped_column(default=None)
 
     @classmethod
-    async def load(cls, queue_id: UUID, workspace_id: UUID) -> Self | None:
-        async with postgres.session() as session:
+    async def load(
+        cls, queue_id: UUID, workspace_id: UUID, *, session: AsyncSession | None = None
+    ) -> Self | None:
+        async with postgres.session(session) as session:
             return await session.scalar(
                 select(cls).where(cls.id == queue_id, cls.workspace_id == workspace_id)
             )

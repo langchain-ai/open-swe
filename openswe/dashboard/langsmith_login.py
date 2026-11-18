@@ -3,7 +3,8 @@
 import asyncio
 import logging
 import secrets
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from time import monotonic
@@ -13,6 +14,7 @@ from urllib.parse import urlencode, urlparse
 import httpx2
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.config import ENV
 from openswe.dashboard.langsmith_oauth import langsmith_issuer, langsmith_oauth_configured
@@ -24,6 +26,7 @@ from openswe.dashboard.oauth_credentials import (
     save_credential,
 )
 from openswe.dashboard.oauth_refresh import refresh_guard
+from openswe.database import postgres
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users.authorization import UnauthorizedUser
 from openswe.utils.dashboard_links import PublicOrigin
@@ -351,13 +354,17 @@ class LangSmithLogin:
         principal = DashboardPrincipal(
             "langsmith", f"user:{user.id}", user.id, identity.external_id
         )
-        return await self.authorize_session(principal)
+        return await self.authorize_session(principal, user=user)
 
-    async def credential(self, key: str) -> OAuthCredential:
-        credential = await load_credential("langsmith_login", key)
-        if credential is None or credential.client_id != self.client_id:
-            raise HTTPException(401, "LangSmith login expired — sign in again")
-        if not await credential.signed_in_since(LANGSMITH_WORKSPACE_LOGIN_SINCE):
+    async def credential(self, key: str, *, session: AsyncSession | None = None) -> OAuthCredential:
+        async with postgres.session(session) as session:
+            credential = await load_credential("langsmith_login", key, session=session)
+            if credential is None or credential.client_id != self.client_id:
+                raise HTTPException(401, "LangSmith login expired — sign in again")
+            signed_in = await credential.signed_in_since(
+                LANGSMITH_WORKSPACE_LOGIN_SINCE, session=session
+            )
+        if not signed_in:
             raise HTTPException(
                 401, "Sign in with LangSmith again to authorize Robin in its workspace"
             )
@@ -420,9 +427,7 @@ class LangSmithLogin:
                     )
                 raise
 
-    async def authorize_credential(
-        self, credential: OAuthCredential, principal: DashboardPrincipal
-    ) -> str:
+    def cached_token(self, credential: OAuthCredential) -> str | None:
         token = self.checked_token(credential)
         now = datetime.now(UTC)
         if (
@@ -433,19 +438,78 @@ class LangSmithLogin:
             and credential.access_token_expires_at > now
         ):
             return token
+        return None
+
+    @asynccontextmanager
+    async def authorized_person(
+        self, principal: DashboardPrincipal
+    ) -> AsyncIterator[tuple[AsyncSession, User]]:
+        """Share local authorization reads; release the transaction for provider calls."""
+        await self.require_configured()
+        async with postgres.session() as session:
+            user = await principal.user(session=session)
+            if user is None:
+                raise HTTPException(401, "Sign in with LangSmith to use Robin")
+            identity = next(
+                (item for item in user.identities if item.provider == "langsmith"), None
+            )
+            if identity is None:
+                raise HTTPException(401, "Sign in with LangSmith to use Robin")
+            principal = replace(
+                principal,
+                provider="langsmith",
+                subject=f"user:{user.id}",
+                user_id=user.id,
+                langsmith_subject=identity.external_id,
+            )
+            credential = await self.credential(principal.subject, session=session)
+            try:
+                cached = (
+                    not self.needs_refresh(credential) and self.cached_token(credential) is not None
+                )
+            except HTTPException:
+                logger.debug("Cached login token could not be read", exc_info=True)
+                cached = False
+            if cached:
+                yield session, user
+                return
+        await self.authorize_loaded(principal, credential)
+        async with postgres.session() as session:
+            yield session, user
+
+    @asynccontextmanager
+    async def authorized_read(self, principal: DashboardPrincipal) -> AsyncIterator[AsyncSession]:
+        async with self.authorized_person(principal) as (session, _user):
+            yield session
+
+    async def authorize_credential(
+        self, credential: OAuthCredential, principal: DashboardPrincipal
+    ) -> str:
+        token = self.cached_token(credential)
+        if token is not None:
+            return token
+        token = self.checked_token(credential)
+        now = datetime.now(UTC)
         authorized_until = now + LANGSMITH_AUTHORIZATION_TTL
         await self.check_identity(token, principal)
         if not await credential.authorize_login(self.org_id, authorized_until):
             raise HTTPException(401, "LangSmith login expired — sign in again")
         return token
 
-    async def authorize_session(self, principal: DashboardPrincipal) -> str:
+    async def authorize_session(
+        self, principal: DashboardPrincipal, *, user: User | None = None
+    ) -> str:
         await self.require_configured()
-        user = await principal.user()
+        user = user if user is not None else await principal.user()
         if user is not None:
             principal = replace(principal, subject=f"user:{user.id}", user_id=user.id)
+        credential = await self.credential(principal.subject)
+        return await self.authorize_loaded(principal, credential)
+
+    async def authorize_loaded(
+        self, principal: DashboardPrincipal, credential: OAuthCredential
+    ) -> str:
         key = principal.subject
-        credential = await self.credential(key)
         try:
             if self.needs_refresh(credential):
                 token = await self.refresh(principal)

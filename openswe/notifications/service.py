@@ -8,6 +8,7 @@ from uuid import UUID, uuid7
 from pydantic import BaseModel, computed_field
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.database import postgres
 from openswe.jobs import queue
@@ -91,8 +92,8 @@ class AppNotification(BaseModel):
         )
 
     @classmethod
-    async def pending(cls, recipient: UUID) -> list[Self]:
-        async with postgres.session() as session:
+    async def pending(cls, recipient: UUID, *, session: AsyncSession | None = None) -> list[Self]:
+        async with postgres.session(session) as session:
             rows = await session.scalars(
                 select(Notification)
                 .where(
@@ -106,8 +107,10 @@ class AppNotification(BaseModel):
             return [cls.model_validate(row, from_attributes=True) for row in rows]
 
     @classmethod
-    async def acknowledge(cls, recipient: UUID, notification_id: UUID) -> bool:
-        async with postgres.session() as session:
+    async def acknowledge(
+        cls, recipient: UUID, notification_id: UUID, *, session: AsyncSession | None = None
+    ) -> bool:
+        async with postgres.session(session) as session:
             acknowledged_id = await session.scalar(
                 update(Notification)
                 .where(

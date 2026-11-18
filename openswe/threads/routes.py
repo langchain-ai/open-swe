@@ -9,12 +9,12 @@ from uuid import UUID
 
 import httpx
 import httpx2
-from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, session_is_admin
+from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, DashboardRead, session_is_admin
 from openswe.dashboard.oauth import bind_audit_session, decode_upload_ticket
 from openswe.dashboard.ttft import SUBMITTED_AT_HEADER, DashboardClient
 from openswe.github.pull_request_checks import PullRequestState
@@ -228,9 +228,10 @@ async def api_reorder_sidebar_threads(
 
 @router.get("/threads/pinned")
 async def api_list_pinned_threads(
-    session: dict[str, Any] = SESSION_DEP,
+    reader: Annotated[DashboardRead, Depends(DashboardRead.open)],
 ) -> list[dict[str, Any]]:
-    return await list_dashboard_pinned_threads(session["sub"], email=session.get("email"))
+    await reader.close()
+    return await list_dashboard_pinned_threads(reader.principal.subject, email=reader.email)
 
 
 class PinnedThreadOrderBody(BaseModel):

@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.slack import routed_work
 from openswe.slack.routed_work import RoutedWork
@@ -32,7 +33,7 @@ async def test_delegated_work_reads_every_worker_run_at_once(
     all_reading = asyncio.Barrier(len(workers))
 
     async def memberships(
-        thread_ids: list[str], *, workers_of: bool = False
+        thread_ids: list[str], *, workers_of: bool = False, session: AsyncSession | None = None
     ) -> dict[str, SidebarTaskMembership]:
         return workers if workers_of and thread_ids == ["coordinator"] else {}
 

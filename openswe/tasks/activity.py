@@ -12,6 +12,7 @@ from typing import Literal, Self
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, computed_field
 
+from openswe.database import postgres
 from openswe.tasks import store
 from openswe.tasks.events import finished_delivery_id
 from openswe.tasks.messages import TaskMessage
@@ -41,6 +42,22 @@ class WorkerActivity(BaseModel):
 
     @classmethod
     async def of(cls, delegation: store.TaskDelegation) -> Self:
+        if delegation.cancelled or delegation.launch_error:
+            return cls.from_runs(delegation, [], reported=False)
+        try:
+            runs, _latest = await CoordinatorActivity.runs_after(delegation.worker_thread_id, None)
+        except NotFoundError:
+            runs = []
+        parsed = [Run.model_validate(run) for run in runs]
+        reported = (
+            await cls._reported(delegation, parsed[0]) if parsed and not parsed[0].live else False
+        )
+        return cls.from_runs(delegation, parsed, reported=reported)
+
+    @classmethod
+    def from_runs(
+        cls, delegation: store.TaskDelegation, runs: list[Run], *, reported: bool | None
+    ) -> Self:
         worker = cls(
             worker_thread_id=delegation.worker_thread_id,
             thread_url=dashboard_thread_url(delegation.worker_thread_id),
@@ -51,21 +68,19 @@ class WorkerActivity(BaseModel):
             return worker
         if delegation.launch_error:
             return worker.failed(delegation.launch_error)
-        try:
-            runs = await langgraph_client().runs.list(delegation.worker_thread_id, limit=1)
-        except NotFoundError:
-            runs = []
         if not runs:
             if delegation.created_at < datetime.now(UTC) - LOST_AFTER:
                 return worker.failed(
                     f"The worker did not start within {LOST_AFTER.seconds // 60} minutes."
                 )
             return worker
-        latest = Run.model_validate(runs[0])
+        latest = runs[0]
         worker.run_status = latest.status
         if latest.live:
             worker.state = "running"
-        elif await cls._reported(delegation, latest):
+        elif (
+            reported or latest.ended_at is None or latest.ended_at < datetime.now(UTC) - LOST_AFTER
+        ):
             worker.state = "done"
         else:
             worker.state = "reporting"
@@ -109,33 +124,65 @@ class CoordinatorActivity(BaseModel):
     @classmethod
     async def of(cls, thread_id: str, *, after: str | None = None) -> Self:
         """The thread's activity; ``runs`` are the ids of those created after ``after``."""
-        newer, latest = await cls._runs_after(thread_id, after)
+        newer, latest = await cls.runs_after(thread_id, after)
         running = latest is not None and latest.live
         lost_before = datetime.now(UTC) - LOST_AFTER
         idle_since = latest.ended_at if latest is not None else None
         # A message held back while the coordinator ran could not be delivered before that run ended.
         recently_deliverable = running or (idle_since is not None and idle_since >= lost_before)
-        context = await store.TaskMembership.context_for_thread(thread_id)
-        delegations = (
-            [
-                delegation
-                for delegation in await store.TaskDelegation.for_task(context.task.id)
-                if delegation.coordinator_thread_id == thread_id
-            ]
-            if context is not None and context.membership.role == "coordinator"
-            else []
-        )
+        async with postgres.session() as session:
+            context = await store.TaskMembership.context_for_thread(thread_id, session=session)
+            delegations = (
+                [
+                    delegation
+                    for delegation in await store.TaskDelegation.for_task(
+                        context.task.id, session=session
+                    )
+                    if delegation.coordinator_thread_id == thread_id
+                ]
+                if context is not None and context.membership.role == "coordinator"
+                else []
+            )
+        # Runtime reads own no database scope; receipts are read once afterwards.
+        worker_runs: list[list[Run]] = []
+        for delegation in delegations:
+            runs: list[Run] = []
+            if not delegation.cancelled and not delegation.launch_error:
+                try:
+                    runs, _latest = await cls.runs_after(delegation.worker_thread_id, None)
+                except NotFoundError:
+                    runs = []
+            worker_runs.append(runs)
+        deliveries = {
+            finished_delivery_id(delegation.worker_thread_id, runs[0].run_id)
+            for delegation, runs in zip(delegations, worker_runs, strict=True)
+            if runs and not runs[0].live
+        }
+        async with postgres.session() as session:
+            awaiting = await TaskMessage.awaiting_delivery(
+                thread_id, since=None if recently_deliverable else lost_before, session=session
+            )
+            recorded = await TaskMessage.recorded_deliveries(thread_id, deliveries, session=session)
         return cls(
             runs=[run.run_id for run in reversed(newer)],
             running=running,
-            awaiting_delivery=await TaskMessage.awaiting_delivery(
-                thread_id, since=None if recently_deliverable else lost_before
-            ),
-            workers=[await WorkerActivity.of(delegation) for delegation in delegations],
+            awaiting_delivery=awaiting,
+            workers=[
+                WorkerActivity.from_runs(
+                    delegation,
+                    runs,
+                    reported=bool(
+                        runs
+                        and finished_delivery_id(delegation.worker_thread_id, runs[0].run_id)
+                        in recorded
+                    ),
+                )
+                for delegation, runs in zip(delegations, worker_runs, strict=True)
+            ],
         )
 
     @staticmethod
-    async def _runs_after(thread_id: str, after: str | None) -> tuple[list[Run], Run | None]:
+    async def runs_after(thread_id: str, after: str | None) -> tuple[list[Run], Run | None]:
         """The thread's runs created after ``after``, newest first, and its latest run.
 
         Without ``after``, or when ``after`` is not among the thread's runs, only the latest is new.

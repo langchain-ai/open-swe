@@ -472,7 +472,9 @@ class PluginApps:
         return None if row is None else AppVersion.of(row)
 
     @staticmethod
-    async def releases(pinned: Mapping[UUID, UUID], *, listed: bool = False) -> list[AppVersion]:
+    async def releases(
+        pinned: Mapping[UUID, UUID], *, listed: bool = False, session: AsyncSession | None = None
+    ) -> list[AppVersion]:
         """Each app's pinned release, by app id to release id, in ``pinned``'s order; an app
         whose release is gone, unreadable, or is not its own, is left out, and with ``listed``
         an app its owner doesn't list for anyone to add."""
@@ -487,7 +489,7 @@ class PluginApps:
                 PluginRow.listed.is_(True)
             )
         found: dict[UUID, AppVersion] = {}
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             for row in await session.scalars(query):
                 if pinned.get(row.plugin) != row.id:
                     continue
@@ -503,12 +505,14 @@ class PluginApps:
         return [found[app] for app in pinned if app in found]
 
     @staticmethod
-    async def listed(app_ids: Collection[UUID]) -> frozenset[UUID]:
+    async def listed(
+        app_ids: Collection[UUID], *, session: AsyncSession | None = None
+    ) -> frozenset[UUID]:
         """Which of ``app_ids`` their owners list for anyone to add, whether or not their
         releases still read."""
         if not app_ids:
             return frozenset()
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             found = await session.scalars(
                 select(PluginRow.id).where(
                     PluginRow.id.in_(list(app_ids)), PluginRow.listed.is_(True)
@@ -543,13 +547,15 @@ class PluginApps:
         return None if row is None else AppVersion.of(row)
 
     @staticmethod
-    async def version(version_id: UUID, user_id: UUID) -> AppVersion:
+    async def version(
+        version_id: UUID, user_id: UUID, *, session: AsyncSession | None = None
+    ) -> AppVersion:
         """A release ``user_id`` may add: of their own app, or a listed one.
 
         A preview runs only beside its thread (``newest_preview``), so it is never one,
         even of a listed app.
         """
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             row = await session.scalar(
                 select(PluginVersionRow)
                 .join(PluginRow, PluginRow.id == PluginVersionRow.plugin)
@@ -581,8 +587,10 @@ class PluginInstallations:
     """Every person's installed apps."""
 
     @staticmethod
-    async def _of(user_id: UUID, *where: ColumnElement[bool]) -> list[Installation]:
-        async with postgres.session() as session:
+    async def _of(
+        user_id: UUID, *where: ColumnElement[bool], session: AsyncSession | None = None
+    ) -> list[Installation]:
+        async with postgres.session(session) as session:
             rows = await session.execute(
                 select(
                     PluginInstallationRow,
@@ -620,25 +628,31 @@ class PluginInstallations:
         return found
 
     @classmethod
-    async def visible_to(cls, user_id: UUID) -> list[Installation]:
+    async def visible_to(
+        cls, user_id: UUID, *, session: AsyncSession | None = None
+    ) -> list[Installation]:
         """The apps in the person's web UI; previews run in their threads instead."""
-        return await cls._of(user_id, PluginInstallationRow.preview_of.is_(None))
+        return await cls._of(user_id, PluginInstallationRow.preview_of.is_(None), session=session)
 
     @classmethod
-    async def get(cls, installation_id: UUID, user_id: UUID) -> Installation:
+    async def get(
+        cls, installation_id: UUID, user_id: UUID, *, session: AsyncSession | None = None
+    ) -> Installation:
         """The person's install, a thread's preview included."""
-        found = await cls._of(user_id, PluginInstallationRow.id == installation_id)
+        found = await cls._of(user_id, PluginInstallationRow.id == installation_id, session=session)
         if not found:
             raise InstallationNotFound
         return found[0]
 
     @classmethod
-    async def install(cls, version: AppVersion, *, user_id: UUID) -> UUID:
+    async def install(
+        cls, version: AppVersion, *, user_id: UUID, session: AsyncSession | None = None
+    ) -> UUID:
         """Add ``version``'s app to ``user_id``'s web UI, pinned to it."""
-        for installed in await cls.visible_to(user_id):
-            if installed.manifest.name == version.manifest.name:
-                raise PluginNameTaken(version.manifest.name)
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
+            for installed in await cls.visible_to(user_id, session=session):
+                if installed.manifest.name == version.manifest.name:
+                    raise PluginNameTaken(version.manifest.name)
             row = PluginInstallationRow(
                 plugin=version.app,
                 user_id=user_id,
@@ -651,7 +665,9 @@ class PluginInstallations:
             return row.id
 
     @classmethod
-    async def feature(cls, user_id: UUID, versions: Sequence[AppVersion]) -> None:
+    async def feature(
+        cls, user_id: UUID, versions: Sequence[AppVersion], *, session: AsyncSession | None = None
+    ) -> None:
         """Adds each of ``versions``' apps to the person's web UI, as an install nobody made,
         and moves such an install nobody has changed since to its version.
 
@@ -661,9 +677,10 @@ class PluginInstallations:
         if not versions:
             return
         names = {
-            installed.manifest.name: installed.plugin for installed in await cls.visible_to(user_id)
+            installed.manifest.name: installed.plugin
+            for installed in await cls.visible_to(user_id, session=session)
         }
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             for version in versions:
                 if names.get(version.manifest.name, version.app) != version.app:
                     continue
@@ -696,7 +713,7 @@ class PluginInstallations:
                     await cls._drop_unused(session, version.app)
 
     @staticmethod
-    async def robin_added(user_id: UUID) -> bool:
+    async def robin_added(user_id: UUID, *, session: AsyncSession | None = None) -> bool:
         """Whether Robin added an app or shared a repository for the person, because an
         admin featured an app, that is still as Robin left it."""
         installs = select(PluginInstallationRow.id).where(
@@ -709,14 +726,16 @@ class PluginInstallations:
             PluginRepositoryGrantRow.user_id == user_id,
             PluginRepositoryGrantRow.created_by.is_(None),
         )
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             return bool(await session.scalar(select(or_(exists(installs), exists(grants)))))
 
     @classmethod
-    async def retract(cls, user_id: UUID, featured: Collection[UUID]) -> None:
+    async def retract(
+        cls, user_id: UUID, featured: Collection[UUID], *, session: AsyncSession | None = None
+    ) -> None:
         """Removes from the person's web UI each app Robin added that is no longer featured,
         unless they changed its install since."""
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             gone = await session.scalars(
                 delete(PluginInstallationRow)
                 .where(
@@ -732,9 +751,16 @@ class PluginInstallations:
                 await cls._drop_unused(session, app)
 
     @classmethod
-    async def upgrade(cls, installation_id: UUID, version: AppVersion, *, by: UUID) -> None:
+    async def upgrade(
+        cls,
+        installation_id: UUID,
+        version: AppVersion,
+        *,
+        by: UUID,
+        session: AsyncSession | None = None,
+    ) -> None:
         """Move the install to ``version``, another of the same app."""
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             await session.execute(
                 update(PluginInstallationRow)
                 .where(
@@ -828,6 +854,7 @@ class PluginInstallations:
         repositories: Sequence[str],
         *,
         added_by_robin: bool = False,
+        session: AsyncSession | None = None,
     ) -> None:
         """Let the install reach ``repositories`` for ``user_id``, who chose them, or for whom
         Robin shares them because an admin named them for a featured app.
@@ -852,7 +879,7 @@ class PluginInstallations:
                 for repository in repositories
             ]
         )
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             await session.execute(
                 statement.on_conflict_do_nothing()
                 if added_by_robin
@@ -871,10 +898,15 @@ class PluginInstallations:
             )
 
     @staticmethod
-    async def unshare_unfeatured(user_id: UUID, featured: Mapping[UUID, Collection[str]]) -> None:
+    async def unshare_unfeatured(
+        user_id: UUID,
+        featured: Mapping[UUID, Collection[str]],
+        *,
+        session: AsyncSession | None = None,
+    ) -> None:
         """Stops sharing each repository Robin shared for the person that ``featured``, by
         app id, no longer names; what they shared themselves stays."""
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             rows = await session.execute(
                 select(
                     PluginRepositoryGrantRow.id,
@@ -899,8 +931,14 @@ class PluginInstallations:
                 )
 
     @staticmethod
-    async def unshare(installation_id: UUID, user_id: UUID, repository: str) -> None:
-        async with postgres.session() as session:
+    async def unshare(
+        installation_id: UUID,
+        user_id: UUID,
+        repository: str,
+        *,
+        session: AsyncSession | None = None,
+    ) -> None:
+        async with postgres.session(session) as session:
             await session.execute(
                 delete(PluginRepositoryGrantRow).where(
                     PluginRepositoryGrantRow.installation == installation_id,

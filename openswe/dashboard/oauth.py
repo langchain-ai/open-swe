@@ -516,9 +516,13 @@ async def require_session(
 
     principal = DashboardPrincipal.from_session(session)
     principal.authorize_path(request.url.path, request.scope.get("method", "GET"))
-    await principal.authorize(path=request.url.path)
-    bind_audit_session(request, session)
-    return session
+    from openswe.dashboard.langsmith_login import LangSmithLogin
+    from openswe.dashboard.principal import AuthorizedClaims
+
+    async with LangSmithLogin().authorized_person(principal) as (_db, user):
+        authorized = AuthorizedClaims(session, user)
+    bind_audit_session(request, authorized)
+    return authorized
 
 
 def bind_audit_session(request: HTTPConnection, session: dict[str, object]) -> None:

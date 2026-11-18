@@ -1,10 +1,11 @@
 import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 
+from openswe.database import postgres
 from openswe.message_queue import QueuedMessage
 from openswe.tasks.messages import TaskMessage
-from openswe.tasks.store import TaskMembership, sidebar_memberships
+from openswe.tasks.store import SidebarTaskMembership, TaskMembership, sidebar_memberships
 from openswe.threads.runtimes import RUNTIMES
 from openswe.threads.store import THREADS
 from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
@@ -68,9 +69,51 @@ class RoutedWork:
         answered = run is not None and thread.metadata.get(ANSWERED_RUN_KEY) == run.run_id
         if thread.metadata.get(RUNNING_BACKGROUND_TASKS_KEY) and not answered:
             return True
-        if await TaskMessage.pending_threads([self.thread_id]):
-            return True
-        return bool(await QueuedMessage.for_thread(self.thread_id))
+        async with postgres.session() as session:
+            if await TaskMessage.pending_threads([self.thread_id], session=session):
+                return True
+            return bool(await QueuedMessage.for_thread(self.thread_id, session=session))
+
+    @classmethod
+    async def delegated_active_for(cls, thread_ids: Sequence[str]) -> dict[str, bool]:
+        """Batch the sidebar's initial local reads before traversing live routed work."""
+        if not thread_ids:
+            return {}
+        async with postgres.session() as session:
+            children = await sidebar_memberships(thread_ids, workers_of=True, session=session)
+            pending = await TaskMessage.pending_threads([*thread_ids, *children], session=session)
+        by_parent: dict[str, list[SidebarTaskMembership]] = {}
+        for child in children.values():
+            by_parent.setdefault(child.coordinator_thread_id, []).append(child)
+        reads = asyncio.Semaphore(_WORKER_READS)
+        active: dict[str, bool] = {}
+        for offset in range(0, len(thread_ids), 8):
+            batch = thread_ids[offset : offset + 8]
+            results = await asyncio.gather(
+                *(
+                    cls(thread_id).delegated_active(
+                        prune=False,
+                        workers=by_parent.get(thread_id, []),
+                        pending=pending,
+                        reads=reads,
+                    )
+                    for thread_id in batch
+                ),
+                return_exceptions=True,
+            )
+            for thread_id, result in zip(batch, results, strict=True):
+                if isinstance(result, Exception):
+                    logger.error(
+                        "Could not read delegated work status",
+                        exc_info=result,
+                        extra={"thread_id": thread_id},
+                    )
+                    active[thread_id] = False
+                elif isinstance(result, BaseException):
+                    raise result
+                else:
+                    active[thread_id] = result
+        return active
 
     async def delegated_active(
         self,
@@ -78,6 +121,8 @@ class RoutedWork:
         visited: frozenset[str] = frozenset(),
         prune: bool = True,
         metadata: Mapping[str, object] | None = None,
+        workers: Sequence[SidebarTaskMembership] | None = None,
+        pending: Collection[str] | None = None,
         reads: asyncio.Semaphore | None = None,
     ) -> bool:
         """Whether work this thread handed off is still going.
@@ -88,23 +133,40 @@ class RoutedWork:
         if self.thread_id in visited:
             return False
         visited = visited | {self.thread_id}
-        if await TaskMessage.pending_threads([self.thread_id]):
+        if workers is None or pending is None:
+            async with postgres.session() as session:
+                if pending is None:
+                    pending = await TaskMessage.pending_threads([self.thread_id], session=session)
+                if self.thread_id in pending:
+                    return True
+                if workers is None:
+                    found = await sidebar_memberships(
+                        [self.thread_id], workers_of=True, session=session
+                    )
+                    workers = list(found.values())
+                pending = set(pending) | await TaskMessage.pending_threads(
+                    [worker.thread_id for worker in workers], session=session
+                )
+        if self.thread_id in pending:
             return True
-        workers = [
+        worker_ids = [
             worker.thread_id
-            for worker in (await sidebar_memberships([self.thread_id], workers_of=True)).values()
+            for worker in workers
             if not worker.cancelled and not worker.launch_error
         ]
-        if await TaskMessage.pending_threads(workers):
+        if any(worker_id in pending for worker_id in worker_ids):
             return True
         reads = reads or asyncio.Semaphore(_WORKER_READS)
         checks = await asyncio.gather(
-            *(RoutedWork(worker).busy(reads, visited=visited, prune=prune) for worker in workers),
+            *(
+                RoutedWork(worker).busy(reads, visited=visited, prune=prune)
+                for worker in worker_ids
+            ),
             return_exceptions=True,
         )
         errors = [
             (worker, check)
-            for worker, check in zip(workers, checks, strict=True)
+            for worker, check in zip(worker_ids, checks, strict=True)
             if isinstance(check, BaseException)
         ]
         if any(check is True for check in checks):

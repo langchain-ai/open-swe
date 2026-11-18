@@ -6,6 +6,7 @@ import httpx
 import pytest
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs import middleware, store
 from openswe.audit_logs.context import current_audit_log
@@ -172,7 +173,7 @@ async def test_settings_audit_changes_are_redacted_and_track_resets(
     async def append(entry: AuditLog) -> None:
         entries.append(entry)
 
-    async def workspace_exists(slug: str) -> dict[str, str]:
+    async def workspace_exists(slug: str, *, session: AsyncSession | None = None) -> dict[str, str]:
         return {"slug": slug}
 
     monkeypatch.setattr(middleware, "append_safely", append)

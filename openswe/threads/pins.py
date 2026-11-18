@@ -1,5 +1,8 @@
 """The threads each person pinned to the top of their dashboard sidebar."""
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from openswe.database import postgres
 from openswe.users.records import UserRecords
 
 
@@ -8,9 +11,10 @@ class ThreadPins(UserRecords):
         super().__init__("thread_pin")
         self.order = UserRecords("thread_pin_order")
 
-    async def ordered_ids(self, login: str) -> list[str]:
-        pin_ids = await self.keys(login)
-        order = await self.order.get(login)
+    async def ordered_ids(self, login: str, *, session: AsyncSession | None = None) -> list[str]:
+        async with postgres.session(session) as session:
+            pin_ids = await self.keys(login, session=session)
+            order = await self.order.get(login, session=session)
         saved = order.get("thread_ids") if order else None
         pinned = set(pin_ids)
         ordered = dict.fromkeys(

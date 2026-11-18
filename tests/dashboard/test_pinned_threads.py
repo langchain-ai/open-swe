@@ -8,6 +8,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from langgraph_sdk.client import LangGraphClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.dashboard.oauth import require_session
 from openswe.projects.store import PROJECTS
@@ -122,7 +123,7 @@ class ThreadAPI:
         return True
 
     async def sidebar_memberships(
-        self, ids: list[str], *, workers_of: bool = False
+        self, ids: list[str], *, workers_of: bool = False, session: AsyncSession | None = None
     ) -> dict[str, SidebarTaskMembership]:
         return {
             thread_id: membership

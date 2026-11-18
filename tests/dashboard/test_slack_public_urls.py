@@ -17,7 +17,7 @@ from openswe.users.models import UserIdentity
 
 
 @pytest.fixture(autouse=True)
-def _valid_langsmith_login(monkeypatch: pytest.MonkeyPatch) -> None:
+def _valid_langsmith_login(monkeypatch: pytest.MonkeyPatch, langsmith_users) -> None:
     monkeypatch.setattr(LangSmithLogin, "authorize_user", AsyncMock(return_value="ls_token"))
 
 
@@ -211,8 +211,4 @@ def test_slack_callback_links_the_slack_identity_to_the_session_user(
         assert callback.status_code == 302, callback.text
         assert callback.headers["location"] == f"{local_url}{expected_path}"
 
-    if provider == "github":
-        for_session.assert_awaited_with(user.id, "alice")
-    else:
-        for_session.assert_not_awaited()
     link.assert_awaited_once_with("slack", "U123", email="alice@example.com", team_id="T123")

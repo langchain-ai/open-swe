@@ -32,9 +32,19 @@ class SettingsRecords:
     def _where(self, key: str) -> ColumnElement[bool]:
         return and_(SettingsRecord.tier == self.tier, SettingsRecord.key == key)
 
-    async def get(self, key: str = "") -> JsonObject | None:
-        async with postgres.session() as session:
+    async def get(self, key: str = "", *, session: AsyncSession | None = None) -> JsonObject | None:
+        async with postgres.session(session) as session:
             return await session.scalar(select(SettingsRecord.value).where(self._where(key)))
+
+    async def for_keys(self, keys: list[str], *, session: AsyncSession) -> dict[str, JsonObject]:
+        if not keys:
+            return {}
+        rows = await session.execute(
+            select(SettingsRecord.key, SettingsRecord.value).where(
+                SettingsRecord.tier == self.tier, SettingsRecord.key.in_(keys)
+            )
+        )
+        return dict(rows.tuples().all())
 
     async def put(self, key: str, value: JsonObject) -> None:
         async with postgres.session() as session:

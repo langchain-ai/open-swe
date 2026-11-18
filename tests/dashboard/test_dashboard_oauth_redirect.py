@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 import jwt
 import pytest
 from cryptography.fernet import Fernet
-from fastapi import FastAPI, Response
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from openswe.api.public_origin import PublicOriginMiddleware
@@ -30,7 +30,7 @@ from openswe.utils.dashboard_links import PUBLIC_ORIGIN_HEADER
     [(False, 401), (True, 500)],
 )
 def test_me_reauthenticates_only_a_confirmed_missing_account(
-    monkeypatch: pytest.MonkeyPatch, unavailable: bool, status: int
+    monkeypatch: pytest.MonkeyPatch, langsmith_users, unavailable: bool, status: int
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
     monkeypatch.setattr(
@@ -97,13 +97,16 @@ def test_logout_clears_cookie_when_database_is_unavailable(
 @pytest.mark.parametrize("session_avatar", [None, "https://avatars.example/old.png"])
 async def test_me_returns_current_avatar_on_first_load(
     monkeypatch: pytest.MonkeyPatch,
+    langsmith_users,
     provider: str,
     stored_avatar: str,
     session_avatar: str | None,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
-    user = User(avatar_url=stored_avatar)
+    user = langsmith_users.add("user:avatar")
+    user.avatar_url = stored_avatar
     monkeypatch.setattr(DashboardPrincipal, "user", AsyncMock(return_value=user))
+    monkeypatch.setattr(auth_routes.LangSmithLogin, "authorize_user", AsyncMock())
     monkeypatch.setattr(
         auth_routes,
         "get_user_preferences",
@@ -117,7 +120,23 @@ async def test_me_returns_current_avatar_on_first_load(
         "avatar_url": session_avatar,
     }
 
-    result = await auth_routes.me(Response(), session)
+    app = FastAPI()
+    app.include_router(routes.router)
+    with TestClient(app) as client:
+        client.cookies.set(
+            COOKIE_NAME,
+            issue_session(
+                login=session["sub"],
+                email=None,
+                avatar_url=session_avatar,
+                user_id=str(user.id),
+                provider=provider,
+                langsmith_subject="ls-alice",
+            ),
+        )
+        response = client.get("/dashboard/api/me")
+    assert response.status_code == 200, response.text
+    result = response.json()
 
     assert result["avatar_url"] == (stored_avatar or session["avatar_url"])
 
@@ -221,7 +240,7 @@ _TOKENS = {"access_token": "gho_test", "refresh_token": "ghr_test", "expires_in"
 
 
 @pytest.fixture
-def linking(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+def linking(monkeypatch: pytest.MonkeyPatch, langsmith_users) -> dict[str, Any]:
     """A signed-in LangSmith person whose GitHub legs are stubbed; collects what linking does."""
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", "https://dashboard.example")
@@ -271,7 +290,7 @@ def linking(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(github_link, "upsert_access_token_from_github_response", fake_upsert)
     monkeypatch.setattr(User, "join_github", fake_join)
     monkeypatch.setattr(DashboardPrincipal, "user", fake_user)
-    monkeypatch.setattr(DashboardPrincipal, "authorize", AsyncMock())
+    monkeypatch.setattr(auth_routes.LangSmithLogin, "authorize_user", AsyncMock())
     collected["person"] = person
     collected["joined"] = joined
     return collected

@@ -3,6 +3,7 @@
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -13,12 +14,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from langchain_core.runnables import RunnableConfig
 from runtime_api.loop import GatewayCredential
-from sqlalchemy import update
+from sqlalchemy import event, update
 
 from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, oauth
 from openswe.dashboard.langsmith_login import LangSmithAccount
 from openswe.dashboard.oauth_credentials import load_credential, save_credential
+from openswe.dashboard.principal import DashboardPrincipal
 from openswe.dashboard.profiles import PROFILES, get_profile
 from openswe.dashboard.profiles import router as profiles_router
 from openswe.dashboard.user_preferences import USER_PREFERENCES
@@ -26,6 +28,7 @@ from openswe.database import postgres
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.github import dashboard_routes
 from openswe.review.routes import router as review_router
+from openswe.threads.pins import THREAD_PINS
 from openswe.threads.principals import Principal
 from openswe.users import AccountConflict, UnauthorizedUser, User
 from openswe.users.models import UserIdentity
@@ -599,6 +602,20 @@ async def test_cached_authorization_uses_no_provider_calls_or_refresh_lock(
     client.cookies.set(oauth.COOKIE_NAME, exchanged.json()["session"])
     assert (await client.get("/dashboard/api/me")).status_code == 200
     assert await langsmith_oauth.langsmith_access_token(session["sub"]) == "access"
+    await THREAD_PINS.add(session["sub"], {}, key="pinned")
+    checkout = Mock()
+    engine = postgres.engine().sync_engine
+    event.listen(engine, "checkout", checkout)
+    try:
+        login = langsmith_login.LangSmithLogin()
+        async with login.authorized_read(DashboardPrincipal.from_session(session)) as db:
+            assert await THREAD_PINS.ordered_ids(session["sub"], session=db) == ["pinned"]
+        assert checkout.call_count == 1
+        checkout.reset_mock()
+        assert (await client.get("/dashboard/api/me")).status_code == 200
+        assert checkout.call_count == 1
+    finally:
+        event.remove(engine, "checkout", checkout)
     assert server.authorizations == checks
     assert server.discoveries == discoveries
     credential = await load_credential("langsmith_login", session["sub"])

@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock
 
 import httpx2
@@ -12,8 +13,15 @@ from pydantic import ValidationError
 from openswe.audit_logs import tools as audit_tools
 from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.models import AuditLog
-from openswe.dashboard import oauth, routes, workspace_settings, workspace_settings_cache
+from openswe.dashboard import (
+    oauth,
+    routes,
+    workspace_settings,
+    workspace_settings_cache,
+)
+from openswe.dashboard.deps import DashboardRead
 from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS, ExecutionDefaults
+from openswe.dashboard.principal import AuthorizedClaims, DashboardPrincipal
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     get_instance_settings,
@@ -21,13 +29,35 @@ from openswe.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
+from openswe.database import postgres
 from openswe.sandboxes.lifecycle import SandboxCreateConfig
 from openswe.tools import access as tool_access
 from openswe.tools.access import Access
-from openswe.tools.execution_defaults import configure_execution_defaults, read_execution_defaults
+from openswe.tools.execution_defaults import (
+    configure_execution_defaults,
+    read_execution_defaults,
+)
 from openswe.tools.mcp_exposure import EXPOSED_TOOLS
+from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate
+
+
+@pytest.fixture
+async def reader(registry_db, monkeypatch):
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
+    user = await User.sign_in("github", "1", login="alice")
+    claims = {"sub": "alice"}
+    async with AsyncExitStack() as scope:
+        db = await scope.enter_async_context(postgres.session())
+        yield DashboardRead(
+            DashboardPrincipal.from_session(claims),
+            user,
+            AuthorizedClaims(claims, user),
+            None,
+            db,
+            scope,
+        )
 
 
 async def test_an_override_applies_to_its_workspace_only(registry_db) -> None:
@@ -147,21 +177,19 @@ async def test_a_failed_store_read_is_not_cached(
     ] == "internal only"
 
 
-async def test_workspace_settings_api_refuses_unknown_and_unslugifiable_names(registry_db) -> None:
+async def test_workspace_settings_api_refuses_unknown_and_unslugifiable_names(
+    registry_db, reader
+) -> None:
     """A name the store could never hold is a bad request; a name it does not hold is 404."""
     with pytest.raises(HTTPException) as refused:
-        await workspace_settings.api_get_workspace_settings(
-            workspace="!!!", _session={"sub": "alice"}
-        )
+        await workspace_settings.api_get_workspace_settings(workspace="!!!", reader=reader)
     assert refused.value.status_code == 400
     with pytest.raises(HTTPException) as missing:
-        await workspace_settings.api_get_workspace_settings(
-            workspace="oss", _session={"sub": "alice"}
-        )
+        await workspace_settings.api_get_workspace_settings(workspace="oss", reader=reader)
     assert missing.value.status_code == 404
 
 
-async def test_workspace_settings_api_round_trips_overrides(registry_db) -> None:
+async def test_workspace_settings_api_round_trips_overrides(registry_db, reader) -> None:
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
     await upsert_instance_settings(WorkspaceSettingsUpdate(review_draft_prs=True))
 
@@ -178,9 +206,7 @@ async def test_workspace_settings_api_round_trips_overrides(registry_db) -> None
     assert saved["overrides"] == {"review_draft_prs": False}
     assert saved["effective"]["review_draft_prs"] is False
 
-    fetched = await workspace_settings.api_get_workspace_settings(
-        workspace="oss", _session={"sub": "alice"}
-    )
+    fetched = await workspace_settings.api_get_workspace_settings(workspace="oss", reader=reader)
     assert fetched == saved
     assert (await workspace_settings.api_get_instance_settings(_session={"sub": "alice"}))[
         "review_draft_prs"

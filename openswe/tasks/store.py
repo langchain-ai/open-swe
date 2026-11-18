@@ -168,8 +168,10 @@ class TaskMembership(Base):
     role: Mapped[TaskRole] = mapped_column(Text)
 
     @classmethod
-    async def context_for_thread(cls, thread_id: str) -> TaskContext | None:
-        async with postgres.session() as session:
+    async def context_for_thread(
+        cls, thread_id: str, *, session: AsyncSession | None = None
+    ) -> TaskContext | None:
+        async with postgres.session(session) as session:
             membership = await session.get(cls, thread_id)
             if membership is None:
                 return None
@@ -230,8 +232,10 @@ class TaskDelegation(Base):
             return await own.scalar(query)
 
     @classmethod
-    async def for_task(cls, task_id: UUID) -> list[TaskDelegation]:
-        async with postgres.session() as session:
+    async def for_task(
+        cls, task_id: UUID, *, session: AsyncSession | None = None
+    ) -> list[TaskDelegation]:
+        async with postgres.session(session) as session:
             return list(
                 await session.scalars(
                     select(cls).where(cls.task_id == task_id).order_by(cls.worker_thread_id)
@@ -257,13 +261,13 @@ class SidebarTaskMembership:
 
 
 async def sidebar_memberships(
-    thread_ids: Sequence[str], *, workers_of: bool = False
+    thread_ids: Sequence[str], *, workers_of: bool = False, session: AsyncSession | None = None
 ) -> dict[str, SidebarTaskMembership]:
     """Read authoritative task relationships in batches, without thread metadata."""
     if not thread_ids:
         return {}
     memberships: dict[str, SidebarTaskMembership] = {}
-    async with postgres.session() as session:
+    async with postgres.session(session) as session:
         for offset in range(0, len(thread_ids), 1000):
             ids = thread_ids[offset : offset + 1000]
             statement = (

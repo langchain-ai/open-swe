@@ -70,13 +70,30 @@ class BaseTopic(ABC):
             name, _, key = topic.partition("/")
             if name in cls._by_name:
                 keys_by_kind.setdefault(cls._by_name[name], set()).add(key)
-        allowed = await asyncio.gather(
-            *(kind.authorize(session, keys) for kind, keys in keys_by_kind.items())
+        # Several topics protect the same records (queues, browsers, workers).
+        # Authorize their union once so startup does not fetch each thread again.
+        grouped: dict[KeysAuthorizer, set[str]] = {}
+        callbacks: dict[BaseTopic, KeysAuthorizer] = {}
+        for kind, keys in keys_by_kind.items():
+            if (
+                isinstance(kind, KeyedTopic)
+                and keys - {""}
+                and (callback := kind.batch_authorizer) is not None
+            ):
+                callbacks[kind] = callback
+                grouped.setdefault(callback, set()).update(keys - {""})
+        checked = await asyncio.gather(*(check(session, keys) for check, keys in grouped.items()))
+        shared = dict(zip(grouped, checked, strict=True))
+        remaining = {kind: keys for kind, keys in keys_by_kind.items() if kind not in callbacks}
+        checked_remaining = await asyncio.gather(
+            *(kind.authorize(session, keys) for kind, keys in remaining.items())
         )
+        allowed = dict(zip(remaining, checked_remaining, strict=True))
+        for kind, callback in callbacks.items():
+            keys = keys_by_kind[kind]
+            allowed[kind] = (keys & {""}) | (keys & shared[callback])
         return {
-            f"{kind}/{key}" if key else kind.name
-            for kind, keys in zip(keys_by_kind, allowed, strict=True)
-            for key in keys
+            f"{kind}/{key}" if key else kind.name for kind, keys in allowed.items() for key in keys
         }
 
     @abstractmethod
@@ -191,6 +208,11 @@ class KeyedTopic[K: str](BaseTopic):
         super().__init__(name, min_interval_seconds=min_interval_seconds)
         self._authorize_keys = authorize_keys
 
+    @property
+    def batch_authorizer(self) -> KeysAuthorizer | None:
+        """Only the standard authorization policy can share checks across topics."""
+        return self._authorize_keys if type(self).authorize is KeyedTopic.authorize else None
+
     async def invalidate(self, conn: Connection | None = None, *, key: K | None = None) -> None:
         """Mark this topic stale, and with ``key`` that one record's topic too.
 
@@ -263,12 +285,11 @@ async def _readable_pull_requests(session: Session, keys: set[str]) -> set[str]:
 
 async def _readable_plugin_documents(session: Session, keys: set[str]) -> set[str]:
     # Imported on use: most of the app imports this module, which stays light.
-    from openswe.dashboard.oauth import session_user_id
-    from openswe.users.models import User
+    from openswe.dashboard.principal import DashboardPrincipal
 
     # A key is "<digest>/<scope>"; the scope is "user/<id>" or "owner/repo".
     scopes = {key: parts[1] for key in keys if len(parts := key.split("/", 1)) == 2}
-    user = await User.for_session(session_user_id(session), session["sub"]) if scopes else None
+    user = await DashboardPrincipal.from_session(session).user() if scopes else None
     if user is None:
         return set()
     readable = {key for key, scope in scopes.items() if scope == f"user/{user.id}"}

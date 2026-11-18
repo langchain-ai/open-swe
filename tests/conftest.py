@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import os
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
@@ -17,6 +18,7 @@ import pytest
 from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 from pydantic import JsonValue, TypeAdapter
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.dashboard import langsmith_api_keys
 from openswe.dashboard.langsmith_login import LangSmithLogin
@@ -148,16 +150,20 @@ class LangSmithUsers:
         self.people[user.id] = user
         return user
 
-    async def get(self, user_id: UUID) -> User | None:
-        return self.people.get(user_id) or await self.original_get(user_id)
+    async def get(self, user_id: UUID, *, session: AsyncSession | None = None) -> User | None:
+        return self.people.get(user_id) or await self.original_get(user_id, session=session)
 
-    async def for_session(self, user_id: UUID | None, login: str) -> User | None:
+    async def for_session(
+        self, user_id: UUID | None, login: str, *, session: AsyncSession | None = None
+    ) -> User | None:
         if user_id is not None and user_id in self.people:
             return self.people[user_id]
         user = next((user for user in self.people.values() if user.github_login == login), None)
-        return user or await self.original_for_session(user_id, login)
+        return user or await self.original_for_session(user_id, login, session=session)
 
-    async def for_login(self, provider: Provider, login: str) -> User | None:
+    async def for_login(
+        self, provider: Provider, login: str, *, session: AsyncSession | None = None
+    ) -> User | None:
         user = next(
             (
                 user
@@ -168,9 +174,11 @@ class LangSmithUsers:
             ),
             None,
         )
-        return user or await self.original_for_login(provider, login)
+        return user or await self.original_for_login(provider, login, session=session)
 
-    async def for_identity(self, provider: Provider, external_id: str) -> User | None:
+    async def for_identity(
+        self, provider: Provider, external_id: str, *, session: AsyncSession | None = None
+    ) -> User | None:
         user = next(
             (
                 user
@@ -182,9 +190,25 @@ class LangSmithUsers:
             ),
             None,
         )
-        return user or await self.original_for_identity(provider, external_id)
+        return user or await self.original_for_identity(provider, external_id, session=session)
 
-    async def authorize_session(self, principal: DashboardPrincipal) -> str:
+    @asynccontextmanager
+    async def authorized_person(
+        self, principal: DashboardPrincipal
+    ) -> AsyncIterator[tuple[AsyncSession, User]]:
+        from openswe.database import postgres
+
+        user = await principal.user()
+        if user is None:
+            raise HTTPException(401, "Sign in with LangSmith to use Robin")
+        await LangSmithLogin().authorize_user(user)
+        scope = postgres.session() if os.environ.get("POSTGRES_URI") else AsyncSession()
+        async with scope as session:
+            yield session, user
+
+    async def authorize_session(
+        self, principal: DashboardPrincipal, *, user: User | None = None
+    ) -> str:
         user = self.people.get(principal.user_id) if principal.user_id else None
         if (
             user is None
@@ -208,6 +232,7 @@ def langsmith_users(monkeypatch: pytest.MonkeyPatch) -> LangSmithUsers:
     monkeypatch.setattr(User, "for_login", users.for_login)
     monkeypatch.setattr(User, "for_identity", users.for_identity)
     monkeypatch.setattr(LangSmithLogin, "authorize_session", users.authorize_session)
+    monkeypatch.setattr(LangSmithLogin, "authorized_person", users.authorized_person)
     return users
 
 
@@ -232,18 +257,29 @@ def user_records(monkeypatch: pytest.MonkeyPatch) -> FakeUserRecords:
     """Route every ``UserRecords`` access to an in-memory table for this test."""
     fake = FakeUserRecords()
 
-    async def get(self: UserRecords, login: str, key: str = "") -> dict[str, Any] | None:
+    async def get(
+        self: UserRecords, login: str, key: str = "", *, session: AsyncSession | None = None
+    ) -> dict[str, Any] | None:
         value = fake.items.get((self.kind, login.strip().lower(), key))
         return None if value is None else dict(value)
 
-    async def for_keys(self: UserRecords, login: str, keys: list[str]) -> dict[str, JsonObject]:
+    async def for_keys(
+        self: UserRecords, login: str, keys: list[str], *, session: AsyncSession | None = None
+    ) -> dict[str, JsonObject]:
         return {
             key: dict(value)
             for (kind, person, key), value in fake.items.items()
             if kind == self.kind and person == login.strip().lower() and key in keys
         }
 
-    async def put(self: UserRecords, login: str, value: dict[str, Any], key: str = "") -> None:
+    async def put(
+        self: UserRecords,
+        login: str,
+        value: dict[str, Any],
+        key: str = "",
+        *,
+        session: AsyncSession | None = None,
+    ) -> None:
         fake.seed(self.kind, login, value, key)
 
     async def pop(self: UserRecords, login: str, key: str = "") -> dict[str, Any] | None:

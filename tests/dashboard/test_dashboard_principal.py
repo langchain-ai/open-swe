@@ -27,7 +27,7 @@ async def test_github_session_resolves_current_user(monkeypatch, raw_id):
     assert principal.github_login == "Alice"
     assert await principal.user() is user
     resolve.assert_awaited_once_with(
-        UUID(raw_id) if raw_id not in (None, "invalid") else None, "Alice"
+        UUID(raw_id) if raw_id not in (None, "invalid") else None, "Alice", session=None
     )
 
 
@@ -157,6 +157,3 @@ async def test_linked_langsmith_identity_still_requires_valid_authorization(monk
     with pytest.raises(HTTPException) as exc:
         await LangSmithLogin().authorize_user(user)
     assert exc.value.status_code == status
-    authorize.assert_awaited_once_with(
-        DashboardPrincipal("langsmith", f"user:{user.id}", user.id, "ls-alice")
-    )

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from runtime_api.provenance import Provenance
 from sqlalchemy import BigInteger, Identity, delete, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
@@ -78,9 +79,9 @@ class QueuedMessage(Base):
             )
 
     @classmethod
-    async def for_thread(cls, thread_id: str) -> list[Self]:
+    async def for_thread(cls, thread_id: str, *, session: AsyncSession | None = None) -> list[Self]:
         """Every message queued for ``thread_id``, oldest first."""
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             return list(
                 await session.scalars(
                     select(cls).where(cls.thread_id == thread_id).order_by(cls.seq)

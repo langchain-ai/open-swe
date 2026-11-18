@@ -12,6 +12,7 @@ from langgraph_sdk.errors import NotFoundError
 from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel, Field, model_validator
 
+from openswe.database import postgres
 from openswe.projects.store import NO_PROJECTS, PROJECT_ID_KEY, PROJECTS, ProjectFiling
 from openswe.review.session import ReviewSessionMetadata
 from openswe.slack.client import parse_github_pr_url, parse_slack_thread_url
@@ -502,13 +503,6 @@ async def _summarize_threads(
     minimal_run_update: bool = False,
     viewer_login: str | None = None,
 ) -> list[dict[str, Any]]:
-    read_states = (
-        await THREAD_READ_STATES.for_threads(
-            viewer_login, [thread_id for thread in threads if (thread_id := _thread_id(thread))]
-        )
-        if viewer_login
-        else {}
-    )
     owner_logins = {
         login.lower()
         for thread in threads
@@ -517,9 +511,25 @@ async def _summarize_threads(
         and (login := _metadata_string(metadata, "owner_login"))
         and ThreadIdentity(login).user_id is None
     }
-    owner_ids = {
-        login: str(user.id) for login, user in (await User.for_github_logins(owner_logins)).items()
-    }
+    read_states = {}
+    owner_ids = {}
+    if threads and (viewer_login or owner_logins):
+        async with postgres.session() as session:
+            read_states = (
+                await THREAD_READ_STATES.for_threads(
+                    viewer_login,
+                    [thread_id for thread in threads if (thread_id := _thread_id(thread))],
+                    session=session,
+                )
+                if viewer_login
+                else {}
+            )
+            owner_ids = {
+                login: str(user.id)
+                for login, user in (
+                    await User.for_github_logins(owner_logins, session=session)
+                ).items()
+            }
     semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
 
     async def summarize(thread: ThreadLike) -> dict[str, Any]:
@@ -610,34 +620,27 @@ async def attach_task_workers(
     filter_workers: Callable[[list[ThreadLike]], Awaitable[list[ThreadLike]]] | None = None,
 ) -> None:
     """Attach independently readable task children without recursively expanding them."""
-    semaphore = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
-    worker_reads = asyncio.Semaphore(_RUN_REFRESH_CONCURRENCY)
-
-    async def attach_waiting(summary: JsonObject) -> None:
-        summary["waitingForDelegatedWork"] = False
-        if summary.get("status") == "running" or not isinstance(
-            thread_id := summary.get("id"), str
-        ):
-            return
-        async with semaphore:
-            try:
-                summary["waitingForDelegatedWork"] = await RoutedWork(thread_id).delegated_active(
-                    prune=False, reads=worker_reads
-                )
-            except Exception:
-                logger.exception(
-                    "Could not read delegated work status", extra={"thread_id": thread_id}
-                )
-
-    await asyncio.gather(*(attach_waiting(summary) for summary in summaries))
-    ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
-    memberships = await sidebar_memberships(ids)
-    if not memberships:
-        return
-    coordinator_ids = [
-        key for key, membership in memberships.items() if membership.role == "coordinator"
+    waiting_ids = [
+        thread_id
+        for summary in summaries
+        if summary.get("status") != "running" and isinstance(thread_id := summary.get("id"), str)
     ]
-    children = await sidebar_memberships(coordinator_ids, workers_of=True)
+    try:
+        waiting = await RoutedWork.delegated_active_for(waiting_ids)
+    except Exception:
+        logger.exception("Could not read delegated work status")
+        waiting = {}
+    for summary in summaries:
+        summary["waitingForDelegatedWork"] = waiting.get(str(summary.get("id")), False)
+    ids = [thread_id for summary in summaries if isinstance(thread_id := summary.get("id"), str)]
+    async with postgres.session() as session:
+        memberships = await sidebar_memberships(ids, session=session)
+        if not memberships:
+            return
+        coordinator_ids = [
+            key for key, membership in memberships.items() if membership.role == "coordinator"
+        ]
+        children = await sidebar_memberships(coordinator_ids, workers_of=True, session=session)
     parent_ids = list({membership.coordinator_thread_id for membership in memberships.values()})
     related = await _readable_threads_by_id(
         client,

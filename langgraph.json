@@ -1,7 +1,7 @@
 {
   "$schema": "https://langgra.ph/schema.json",
   "python_version": "3.14",
-  "api_version": ">~=0.15.0rc1",
+  "api_version": "0.18.2",
   "graphs": {
     "agent": "openswe.graphs.agent:traced_agent",
     "reviewer": "openswe.graphs.reviewer:traced_reviewer_agent",

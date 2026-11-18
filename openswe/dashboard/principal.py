@@ -1,13 +1,22 @@
 """Provider-aware dashboard identity, independent of a GitHub handle."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.users import User
+
+
+class AuthorizedClaims(dict[str, object]):
+    """Verified cookie claims carrying the person resolved during this request."""
+
+    def __init__(self, claims: Mapping[str, object], user: User) -> None:
+        super().__init__(claims)
+        self.user = user
 
 
 @dataclass(frozen=True)
@@ -16,6 +25,7 @@ class DashboardPrincipal:
     subject: str
     user_id: UUID | None
     langsmith_subject: str | None = None
+    resolved_user: User | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def from_session(cls, session: Mapping[str, object]) -> DashboardPrincipal:
@@ -47,6 +57,7 @@ class DashboardPrincipal:
             subject,
             user_id,
             external_id if isinstance(external_id, str) else None,
+            session.user if isinstance(session, AuthorizedClaims) else None,
         )
 
     @property
@@ -108,10 +119,12 @@ class DashboardPrincipal:
                 return
         raise HTTPException(403, "This operation requires a linked GitHub account")
 
-    async def user(self) -> User | None:
+    async def user(self, *, session: AsyncSession | None = None) -> User | None:
+        if self.resolved_user is not None:
+            return self.resolved_user
         if self.provider == "github":
-            return await User.for_session(self.user_id, self.subject)
-        user = await User.get(self.user_id) if self.user_id is not None else None
+            return await User.for_session(self.user_id, self.subject, session=session)
+        user = await User.get(self.user_id, session=session) if self.user_id is not None else None
         if (
             user is None
             or not any(
@@ -120,7 +133,7 @@ class DashboardPrincipal:
             )
         ) and self.langsmith_subject:
             # Linking GitHub may have moved the LangSmith identity to the account's person.
-            user = await User.for_identity("langsmith", self.langsmith_subject)
+            user = await User.for_identity("langsmith", self.langsmith_subject, session=session)
         if user is None:
             raise HTTPException(401, "LangSmith account not found — sign in again")
         if self.github_login is not None and user.github_login.lower() != self.github_login.lower():

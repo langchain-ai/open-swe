@@ -845,14 +845,14 @@ class WorkspaceStore:
     it lands on the constraint and is translated into the same one.
     """
 
-    async def get(self, slug: str) -> Workspace | None:
+    async def get(self, slug: str, *, session: AsyncSession | None = None) -> Workspace | None:
         """The workspace stored under ``slug``, or ``None``.
 
         An unreadable row reads as a missing one, logged at error, the way
         :meth:`list_all` skips it: a record an older release wrote must not make
         the workspace unreachable to every caller that resolves one.
         """
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             row = await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
             if row is None:
                 return None
@@ -875,19 +875,19 @@ class WorkspaceStore:
         """
         return await self.id_for_slug(slug) is not None
 
-    async def id_for_slug(self, slug: str) -> UUID | None:
+    async def id_for_slug(self, slug: str, *, session: AsyncSession | None = None) -> UUID | None:
         """The stable id behind ``slug``, for records that must outlive it."""
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             return await session.scalar(select(WorkspaceRow.id).where(WorkspaceRow.slug == slug))
 
-    async def list_all(self) -> list[Workspace]:
+    async def list_all(self, *, session: AsyncSession | None = None) -> list[Workspace]:
         """Every workspace, skipping a row that fails to validate.
 
         Mirrors ``TypedStore._parse_all``: one unreadable ``create_params`` or
         ``refresh_steps`` value — written by an older release, or edited by
         hand — must not take the whole listing down.
         """
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             rows = list(await session.scalars(select(WorkspaceRow).order_by(WorkspaceRow.name)))
             repos = await _repos_by_workspace(session)
             channels = await _channels_by_workspace(session)
@@ -1750,13 +1750,18 @@ async def load_workspace(slug: str | None) -> Workspace | None:
     return record
 
 
-async def list_workspace_options(*, include_logs: bool = False) -> list[dict[str, Any]]:
+async def list_workspace_options(
+    *, include_logs: bool = False, session: AsyncSession | None = None
+) -> list[dict[str, Any]]:
     """Every workspace's picker/settings view; ``include_logs`` only for admins.
 
     Prompts and snapshot ids never appear here; picking a workspace needs
     neither.
     """
-    return [record.option(include_log=include_logs) for record in await WORKSPACES.list_all()]
+    return [
+        record.option(include_log=include_logs)
+        for record in await WORKSPACES.list_all(session=session)
+    ]
 
 
 async def _delete_snapshot(snapshot_id: object) -> None:

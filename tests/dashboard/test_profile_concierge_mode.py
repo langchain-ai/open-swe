@@ -1,16 +1,19 @@
 """PostgreSQL regressions for concierge mode on the dashboard profile endpoint."""
 
+from contextlib import AsyncExitStack
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
 
+from openswe.dashboard.deps import DashboardRead
 from openswe.dashboard.personal_settings import patch_personal_settings
+from openswe.dashboard.principal import AuthorizedClaims, DashboardPrincipal
 from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
+from openswe.database import postgres
 from openswe.jobs import queue
 from openswe.slack.channels import PERSONAL_KITCHEN_JOB, SlackChannel
 from openswe.users import User, UserPreferences
-from openswe.users.records import UnknownUser
 from openswe.workspaces.routing import is_kitchen_channel
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -30,28 +33,55 @@ def _update(concierge_mode: bool | None) -> ProfileUpdate:
     )
 
 
-async def test_saving_a_profile_needs_a_users_row() -> None:
-    with pytest.raises(UnknownUser):
-        await put_my_profile(_update(False), _SESSION)
+class ProfileRequests:
+    def __init__(self, person: User) -> None:
+        self.person = person
+
+    async def put(self, update: ProfileUpdate) -> dict[str, object]:
+        async with AsyncExitStack() as scope:
+            db = await scope.enter_async_context(postgres.session())
+            person = await User.get(self.person.id, session=db)
+            assert person is not None
+            reader = DashboardRead(
+                DashboardPrincipal.from_session(_SESSION),
+                person,
+                AuthorizedClaims(_SESSION, person),
+                "ada@example.com",
+                db,
+                scope,
+            )
+            return await put_my_profile(update, reader)
 
 
-async def test_turning_concierge_mode_on_needs_a_users_row() -> None:
-    with pytest.raises(HTTPException) as exc:
-        await put_my_profile(_update(True), _SESSION)
-    assert exc.value.status_code == 409
+@pytest.fixture
+async def reader():
+    person = await User.sign_in("github", "1", login="ada")
+    async with AsyncExitStack() as scope:
+        db = await scope.enter_async_context(postgres.session())
+        yield DashboardRead(
+            DashboardPrincipal.from_session(_SESSION),
+            person,
+            AuthorizedClaims(_SESSION, person),
+            "ada@example.com",
+            db,
+            scope,
+        )
 
-    await User.sign_in("github", "1", login="ada")
-    saved = await put_my_profile(_update(True), _SESSION)
 
+async def test_turning_concierge_mode_on(reader) -> None:
+    saved = await put_my_profile(_update(True), reader)
     assert saved["concierge_mode"] is True
+    await reader.close()
     assert await User.preferences_for_login("ada") == UserPreferences(concierge_mode=True)
 
 
 @pytest.mark.parametrize("via_tool", [False, True])
 async def test_personal_kitchen_validates_round_trips_and_clears(
-    monkeypatch: pytest.MonkeyPatch, via_tool: bool
+    monkeypatch: pytest.MonkeyPatch, via_tool: bool, reader: DashboardRead
 ) -> None:
-    person = await User.sign_in("github", "1", login="ada")
+    requests = ProfileRequests(reader.user)
+    person = reader.user
+    await reader.close()
     with pytest.raises(ValueError, match="Link your Slack"):
         await patch_personal_settings("ada", {"personal_kitchen_channel_id": "C0PERSONAL"})
     await person.link("slack", "UADA")
@@ -62,7 +92,7 @@ async def test_personal_kitchen_validates_round_trips_and_clears(
             await patch_personal_settings("ada", {"personal_kitchen_channel_id": channel.id})
     else:
         with pytest.raises(HTTPException) as error:
-            await put_my_profile(ProfileUpdate(personal_kitchen_channel_id=channel.id), _SESSION)
+            await requests.put(ProfileUpdate(personal_kitchen_channel_id=channel.id))
         assert error.value.status_code == 422
     assert not await is_kitchen_channel(channel.id, slack_user_id="UADA")
     channel.payload = {"is_member": True, "is_ext_shared": False, "is_pending_ext_shared": False}
@@ -73,9 +103,7 @@ async def test_personal_kitchen_validates_round_trips_and_clears(
                 await patch_personal_settings("ada", {"personal_kitchen_channel_id": channel.id})
         else:
             with pytest.raises(HTTPException) as error:
-                await put_my_profile(
-                    ProfileUpdate(personal_kitchen_channel_id=channel.id), _SESSION
-                )
+                await requests.put(ProfileUpdate(personal_kitchen_channel_id=channel.id))
             assert error.value.status_code == 422
     channel.payload["creator"] = "UADA"
     channel.payload["purpose"] = {"value": "x" * 250}
@@ -86,9 +114,7 @@ async def test_personal_kitchen_validates_round_trips_and_clears(
     if via_tool:
         await patch_personal_settings("ada", {"personal_kitchen_channel_id": " c0personal "})
     else:
-        saved = await put_my_profile(
-            ProfileUpdate(personal_kitchen_channel_id=" c0personal "), _SESSION
-        )
+        saved = await requests.put(ProfileUpdate(personal_kitchen_channel_id=" c0personal "))
         assert saved["personal_kitchen_channel_id"] == channel.id
     assert await is_kitchen_channel(channel.id, slack_user_id="UADA")
     assert not await is_kitchen_channel(channel.id, slack_user_id="UOTHER")
@@ -97,7 +123,7 @@ async def test_personal_kitchen_validates_round_trips_and_clears(
     assert label.kind == PERSONAL_KITCHEN_JOB
     assert label.payload == {"channel_id": channel.id}
     await label.finish()
-    await put_my_profile(ProfileUpdate(), _SESSION)
+    await requests.put(ProfileUpdate())
     assert await is_kitchen_channel(channel.id, slack_user_id="UADA")
     assert await queue.claim_due(10) == []
     elsewhere = SlackChannel(id="C0ELSEWHERE", payload=channel.payload)

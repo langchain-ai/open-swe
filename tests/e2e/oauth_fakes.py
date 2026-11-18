@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from openswe.dashboard.langsmith_login import LangSmithLogin
+from openswe.dashboard.langsmith_login import LangSmithAccount, LangSmithLogin
 from openswe.dashboard.oauth import GithubUser, pkce_s256_challenge
 from openswe.users import User
 
@@ -22,7 +22,7 @@ class OAuthProviders:
         token = secrets.token_urlsafe()
         self.tokens[token] = email
         login = LangSmithLogin()
-        account = await login.account(token)
+        account = LangSmithAccount.model_validate(self.account_claims(email))
         signed_in = await User.sign_in("langsmith", account.sub, email=email, authorization=account)
         github = next(identity for identity in user.identities if identity.provider == "github")
         user = await signed_in.join_github(github.external_id, login=user.github_login, email=email)
@@ -99,6 +99,10 @@ class OAuthProviders:
         email = self.tokens.get(request.headers.get("authorization", "").removeprefix("Bearer "))
         if email is None:
             raise HTTPException(401)
+        return self.account_claims(email)
+
+    @staticmethod
+    def account_claims(email: str) -> dict[str, str]:
         return {"sub": "e2e-langsmith:" + email.lower(), "email": email, "ls_org_id": "e2e-org"}
 
     async def public_auth(self, request: Request) -> dict[str, str]:

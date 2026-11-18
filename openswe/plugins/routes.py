@@ -35,10 +35,12 @@ from pydantic import (
     TypeAdapter,
     model_validator,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.principal import DashboardPrincipal
+from openswe.database import postgres
 from openswe.github.http import (
     GitHubClient,
     GitHubError,
@@ -246,11 +248,20 @@ class PluginSummary(BaseModel):
         )
 
     @classmethod
-    async def get(cls, installation_id: UUID, user_id: UUID) -> PluginSummary:
+    async def get(
+        cls,
+        installation_id: UUID,
+        user_id: UUID,
+        *,
+        session: AsyncSession | None = None,
+        featured: frozenset[UUID] | None = None,
+    ) -> PluginSummary:
         """The person's install as it is now."""
         with _as_http():
-            installation = await PluginInstallations.get(installation_id, user_id)
-        return cls.of(installation, featured=installation.plugin in await FeaturedApps.active())
+            installation = await PluginInstallations.get(installation_id, user_id, session=session)
+        if featured is None:
+            featured = await FeaturedApps.active()
+        return cls.of(installation, featured=installation.plugin in featured)
 
 
 class PreviewModel(BaseModel):
@@ -300,26 +311,16 @@ class RepositoriesBody(BaseModel):
 async def api_list_plugins(viewer: ViewerDep) -> list[PluginSummary]:
     """The viewer's apps, kept in line with the ones an admin added for everyone."""
     try:
-        await FeaturedApps.add_for(viewer)
-    except Exception:  # noqa: BLE001
-        # The person's apps still load; what's featured catches up on a later load.
-        logger.exception(
-            "Could not bring featured apps into a person's web UI",
-            extra={"user_id": str(viewer.id)},
-        )
-    try:
-        # As uninstalling reads it, so an app shown as featured is one that can't be removed.
-        featured = await FeaturedApps.active()
-    except Exception:  # noqa: BLE001
-        logger.exception(
-            "Could not read the featured apps for a person's web UI",
-            extra={"user_id": str(viewer.id)},
-        )
-        featured = frozenset()
-    return [
-        PluginSummary.of(i, featured=i.plugin in featured)
-        for i in await PluginInstallations.visible_to(viewer.id)
-    ]
+        featured, installations = await FeaturedApps.add_for(viewer)
+    except Exception:
+        logger.exception("Could not reconcile featured apps", extra={"user_id": str(viewer.id)})
+        try:
+            featured = await FeaturedApps.active()
+        except Exception:
+            logger.exception("Could not read featured apps", extra={"user_id": str(viewer.id)})
+            featured = frozenset()
+        installations = await PluginInstallations.visible_to(viewer.id)
+    return [PluginSummary.of(i, featured=i.plugin in featured) for i in installations]
 
 
 @router.get("/apps")
@@ -397,11 +398,18 @@ async def api_list_app(app_id: UUID, body: ListedBody, viewer: ViewerDep) -> Res
 @audit_endpoint
 async def api_install_plugin(body: InstallBody, viewer: ViewerDep) -> PluginSummary:
     """Add a version of an app to the viewer's web UI."""
+    featured = await FeaturedApps.active()
     with _as_http():
-        version = await PluginApps.version(body.version, viewer.id)
-        body.require_approved(version.manifest)
-        installation_id = await PluginInstallations.install(version, user_id=viewer.id)
-    return await PluginSummary.get(installation_id, viewer.id)
+        async with postgres.session() as session:
+            version = await PluginApps.version(body.version, viewer.id, session=session)
+            body.require_approved(version.manifest)
+            installation_id = await PluginInstallations.install(
+                version, user_id=viewer.id, session=session
+            )
+            summary = await PluginSummary.get(
+                installation_id, viewer.id, session=session, featured=featured
+            )
+    return summary
 
 
 @router.get("/previews/{thread_id}")
@@ -465,13 +473,20 @@ async def api_upgrade_plugin(
     body: InstallBody, plugin: PluginDep, viewer: ViewerDep
 ) -> PluginSummary:
     """Move the install to another version of its app."""
+    featured = await FeaturedApps.active()
     with _as_http():
-        version = await PluginApps.version(body.version, viewer.id)
-        if version.app != plugin.installation.plugin:
-            raise HTTPException(409, "That is not a release of this app")
-        body.require_approved(version.manifest)
-        await PluginInstallations.upgrade(plugin.installation.id, version, by=viewer.id)
-    return await PluginSummary.get(plugin.installation.id, viewer.id)
+        async with postgres.session() as session:
+            version = await PluginApps.version(body.version, viewer.id, session=session)
+            if version.app != plugin.installation.plugin:
+                raise HTTPException(409, "That is not a release of this app")
+            body.require_approved(version.manifest)
+            await PluginInstallations.upgrade(
+                plugin.installation.id, version, by=viewer.id, session=session
+            )
+            summary = await PluginSummary.get(
+                plugin.installation.id, viewer.id, session=session, featured=featured
+            )
+    return summary
 
 
 @router.post("/{installation_id}/repositories")
@@ -481,8 +496,15 @@ async def api_share_plugin_repositories(
 ) -> PluginSummary:
     """Share repositories with the app, for the viewer only: what they picked when it asked."""
     repositories = await body.readable_by(viewer)
-    await PluginInstallations.share(plugin.installation.id, viewer.id, repositories)
-    return await PluginSummary.get(plugin.installation.id, viewer.id)
+    featured = await FeaturedApps.active()
+    async with postgres.session() as session:
+        await PluginInstallations.share(
+            plugin.installation.id, viewer.id, repositories, session=session
+        )
+        summary = await PluginSummary.get(
+            plugin.installation.id, viewer.id, session=session, featured=featured
+        )
+    return summary
 
 
 @router.delete("/{installation_id}/repositories/{owner}/{repo}")
@@ -490,12 +512,20 @@ async def api_share_plugin_repositories(
 async def api_unshare_plugin_repository(
     owner: str, repo: str, plugin: PluginDep, viewer: ViewerDep
 ) -> PluginSummary:
-    if await FeaturedApps.shares(plugin.installation.plugin, f"{owner}/{repo}"):
+    featured = await FeaturedApps.active()
+    named = await FeaturedApps.repositories(featured)
+    if f"{owner}/{repo}".lower() in named.get(plugin.installation.plugin, ()):
         raise HTTPException(
             409, "An admin shares this repository with the app for everyone, so it stays shared"
         )
-    await PluginInstallations.unshare(plugin.installation.id, viewer.id, f"{owner}/{repo}".lower())
-    return await PluginSummary.get(plugin.installation.id, viewer.id)
+    async with postgres.session() as session:
+        await PluginInstallations.unshare(
+            plugin.installation.id, viewer.id, f"{owner}/{repo}".lower(), session=session
+        )
+        summary = await PluginSummary.get(
+            plugin.installation.id, viewer.id, session=session, featured=featured
+        )
+    return summary
 
 
 @router.delete("/{installation_id}", status_code=204)

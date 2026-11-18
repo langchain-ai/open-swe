@@ -13,6 +13,7 @@ from uuid import UUID
 
 from sqlalchemy import ForeignKey, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
@@ -43,11 +44,13 @@ class OAuthCredential(Base):
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
-    async def signed_in_since(self, since: datetime) -> bool:
+    async def signed_in_since(
+        self, since: datetime, *, session: AsyncSession | None = None
+    ) -> bool:
         """Require an interactive sign-in preceding this credential snapshot."""
         if self.updated_at is None:
             return False
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             return (
                 await session.scalar(
                     select(UserIdentity.user_id)
@@ -83,8 +86,10 @@ class OAuthCredential(Base):
             )
 
 
-async def load_credential(provider: OAuthProvider, login: str) -> OAuthCredential | None:
-    async with postgres.session() as session:
+async def load_credential(
+    provider: OAuthProvider, login: str, *, session: AsyncSession | None = None
+) -> OAuthCredential | None:
+    async with postgres.session(session) as session:
         return await session.scalar(
             select(OAuthCredential).where(
                 OAuthCredential.user_id == user_id_for_login(login),

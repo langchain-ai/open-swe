@@ -17,6 +17,7 @@ from uuid import UUID
 from fastapi import HTTPException
 
 from openswe.dashboard.workspace_settings_cache import cached_instance_settings
+from openswe.database import postgres
 from openswe.github.http import GitHubError, GitHubSignInRequired
 from openswe.plugins.records import AppVersion, Installation, PluginApps, PluginInstallations
 from openswe.users import User
@@ -62,7 +63,7 @@ class FeaturedApps:
         return repository.lower() in (await cls.repositories()).get(app, ())
 
     @classmethod
-    async def add_for(cls, person: User) -> None:
+    async def add_for(cls, person: User) -> tuple[frozenset[UUID], list[Installation]]:
         """Brings the person's web UI in line with what's featured.
 
         It takes back each app no longer featured that they never changed, first, so a
@@ -71,21 +72,41 @@ class FeaturedApps:
         names any longer; and shares with every install of a featured app the repositories
         an admin names that the person can read.
         """
-        featured = await cls.active()
-        if not featured and not await PluginInstallations.robin_added(person.id):
-            # Nothing featured, and nothing of Robin's to take back.
-            return
-        await PluginInstallations.retract(person.id, featured)
-        # Only adding or moving installs needs the approved release to read.
-        await PluginInstallations.feature(person.id, await cls.releases())
-        named = await cls.repositories(featured)
-        await PluginInstallations.unshare_unfeatured(person.id, named)
-        for installation in await PluginInstallations.visible_to(person.id):
+        settings = await cached_instance_settings()
+        pinned = settings.featured_app_releases
+        async with postgres.session() as session:
+            featured = await PluginApps.listed(list(pinned), session=session)
+            if not featured and not await PluginInstallations.robin_added(
+                person.id, session=session
+            ):
+                return featured, await PluginInstallations.visible_to(person.id, session=session)
+            versions = await PluginApps.releases(pinned, listed=True, session=session)
+            named = {
+                app: names
+                for app, names in settings.featured_app_repositories.items()
+                if app in featured and names
+            }
+            await PluginInstallations.retract(person.id, featured, session=session)
+            await PluginInstallations.feature(person.id, versions, session=session)
+            await PluginInstallations.unshare_unfeatured(person.id, named, session=session)
+            installations = await PluginInstallations.visible_to(person.id, session=session)
+        shares: list[tuple[UUID, list[str]]] = []
+        for installation in installations:
             if names := named.get(installation.plugin):
-                await cls._share(person, installation, names)
+                shares.append((installation.id, await cls._readable(person, installation, names)))
+        if any(names for _, names in shares):
+            async with postgres.session() as session:
+                for installation_id, names in shares:
+                    await PluginInstallations.share(
+                        installation_id, person.id, names, added_by_robin=True, session=session
+                    )
+                installations = await PluginInstallations.visible_to(person.id, session=session)
+        return featured, installations
 
     @staticmethod
-    async def _share(person: User, installation: Installation, names: tuple[str, ...]) -> None:
+    async def _readable(
+        person: User, installation: Installation, names: tuple[str, ...]
+    ) -> list[str]:
         readable: list[str] = []
         for name in names:
             if name in installation.repositories:
@@ -105,4 +126,4 @@ class FeaturedApps:
                     extra={"repository": name, "user_id": str(person.id)},
                     exc_info=True,
                 )
-        await PluginInstallations.share(installation.id, person.id, readable, added_by_robin=True)
+        return readable

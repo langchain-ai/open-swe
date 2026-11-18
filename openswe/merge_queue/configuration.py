@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.database import postgres
 from openswe.merge_queue.admission import QueuePolicy, digest
@@ -29,8 +30,10 @@ class QueueConfiguration(BaseModel):
     retention_days: int = Field(default=90, ge=7, le=365)
 
     @classmethod
-    async def load(cls, workspace_id: UUID | None = None) -> Self | None:
-        async with postgres.session() as session:
+    async def load(
+        cls, workspace_id: UUID | None = None, *, session: AsyncSession | None = None
+    ) -> Self | None:
+        async with postgres.session(session) as session:
             query = select(WorkspaceRow.id, WorkspaceRow.merge_queue_config).where(
                 WorkspaceRow.merge_queue_config.is_not(None)
             )

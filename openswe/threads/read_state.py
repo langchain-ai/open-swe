@@ -2,7 +2,7 @@
 
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from openswe.database import postgres
 from openswe.transcript.events import MessageCompleted
@@ -17,8 +17,10 @@ class ThreadReadStates(UserRecords):
     async def saved(self, login: str, thread_id: str) -> JsonObject | None:
         return await self.get(login, key=thread_id)
 
-    async def for_threads(self, login: str, thread_ids: list[str]) -> dict[str, JsonObject]:
-        return await self.for_keys(login, thread_ids)
+    async def for_threads(
+        self, login: str, thread_ids: list[str], *, session: AsyncSession | None = None
+    ) -> dict[str, JsonObject]:
+        return await self.for_keys(login, thread_ids, session=session)
 
     @staticmethod
     def response_id(saved: JsonObject) -> str | None:

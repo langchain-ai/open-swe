@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from openswe.config import ENV
-from openswe.dashboard.deps import SESSION_DEP, session_is_admin
+from openswe.dashboard.deps import SESSION_DEP, DashboardReadDep, session_is_admin
 from openswe.dashboard.dev_login import GhUnavailable, dev_login_enabled, gh_credentials
 from openswe.dashboard.github_link import GitHubLink
 from openswe.dashboard.langsmith_login import (
@@ -287,26 +287,10 @@ async def auth_logout(request: Request) -> Response:
 
 
 @router.get("/me")
-async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[str, Any]:
-    # Best-effort: this endpoint is what the dashboard boots on, and it must
-    # answer from the session alone when the database is unreachable.
-    principal = DashboardPrincipal.from_session(session)
-    user = None
-    try:
-        user = await principal.user()
-    except HTTPException:
-        raise
-    except Exception:
-        if principal.provider == "langsmith":
-            raise
-        logger.warning(
-            "Could not read the signed-in user's row",
-            extra={"github_login": session["sub"]},
-            exc_info=True,
-        )
-    else:
-        if user is None:
-            raise HTTPException(401, "Robin account not found — sign in again")
+async def me(response: Response, reader: DashboardReadDep) -> dict[str, Any]:
+    session = reader.claims
+    principal = reader.principal
+    user = reader.user
     if user is not None and session_user_id(session) != user.id:
         # The dashboard boots here, so every stale cookie is repaired on its next load.
         set_session_cookie(response, rebind_session(session, str(user.id)))
@@ -315,9 +299,9 @@ async def me(response: Response, session: dict[str, Any] = SESSION_DEP) -> dict[
             extra={"github_login": session["sub"], "user_id": str(user.id)},
         )
     if principal.provider == "langsmith" and user is not None:
-        set_session_cookie(response, GitHubLink.session(principal, user, session.get("email")))
+        set_session_cookie(response, GitHubLink.session(principal, user, reader.email))
         principal = DashboardPrincipal.from_session({**session, "sub": user.session_login})
-    preferences = await get_user_preferences(principal.subject)
+    preferences = await get_user_preferences(principal.subject, session=reader.session)
     return {
         "login": principal.subject,
         "auth_provider": principal.provider,

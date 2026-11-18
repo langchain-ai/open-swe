@@ -270,7 +270,10 @@ async def require_principal(request: Request) -> Principal:
     dashboard = DashboardPrincipal.from_session(session)
     if request.url.path.startswith("/dashboard/api/"):
         dashboard.authorize_path(request.url.path, request.method)
-    await dashboard.authorize()
+    from openswe.dashboard.langsmith_login import LangSmithLogin
+
+    async with LangSmithLogin().authorized_person(dashboard):
+        pass
     principal = Principal.of_person(session)
     bind_audit_session(request, session)
     return principal

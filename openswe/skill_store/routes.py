@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import Response
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
+from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, DashboardReadDep
 from openswe.skill_store.store import (
     DEFAULT_SKILLS_PAGE_SIZE,
     MAX_SKILLS_PAGE_SIZE,
@@ -27,20 +27,28 @@ router = APIRouter()
 
 @router.get("/skills")
 async def api_list_skills(
+    reader: DashboardReadDep,
     limit: int = Query(DEFAULT_SKILLS_PAGE_SIZE, ge=1, le=MAX_SKILLS_PAGE_SIZE),
     offset: int = Query(0, ge=0),
-    session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    return await list_skills(session["sub"], limit=limit, offset=offset)
+    return await list_skills(
+        reader.principal.subject,
+        limit=limit,
+        offset=offset,
+        user=reader.user,
+        session=reader.session,
+    )
 
 
 @router.post("/skills")
 @audit_endpoint
 async def api_create_skill(
     body: SkillCreate,
-    session: dict[str, Any] = SESSION_DEP,
+    reader: DashboardReadDep,
 ) -> dict[str, Any]:
-    return await create_skill(session["sub"], body)
+    return await create_skill(
+        reader.principal.subject, body, user=reader.user, session=reader.session
+    )
 
 
 @router.put("/skills/{name}")
@@ -48,18 +56,20 @@ async def api_create_skill(
 async def api_update_skill(
     name: str,
     body: SkillUpdate,
-    session: dict[str, Any] = SESSION_DEP,
+    reader: DashboardReadDep,
 ) -> dict[str, Any]:
-    return await update_skill(session["sub"], name, body)
+    return await update_skill(
+        reader.principal.subject, name, body, user=reader.user, session=reader.session
+    )
 
 
 @router.delete("/skills/{name}")
 @audit_endpoint
 async def api_delete_skill(
     name: str,
-    session: dict[str, Any] = SESSION_DEP,
+    reader: DashboardReadDep,
 ) -> Response:
-    await delete_skill(session["sub"], name)
+    await delete_skill(reader.principal.subject, name, user=reader.user, session=reader.session)
     return Response(status_code=204)
 
 

@@ -14,6 +14,7 @@ import httpx2
 import pytest
 from fastapi import FastAPI, HTTPException
 from langgraph_sdk.errors import APIStatusError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.bridge.store import BridgeStore
@@ -1746,7 +1747,7 @@ async def test_task_hierarchy_opt_in_visibility_and_idle_refresh(
     }
 
     async def membership_lookup(
-        ids: list[str], *, workers_of: bool = False
+        ids: list[str], *, workers_of: bool = False, session: AsyncSession | None = None
     ) -> dict[str, SidebarTaskMembership]:
         return {
             key: member
@@ -1837,7 +1838,7 @@ async def test_task_hierarchy_stops_at_distinct_root_target_or_scan_cap(
     offsets: list[int] = []
 
     async def membership_lookup(
-        ids: list[str], *, workers_of: bool = False
+        ids: list[str], *, workers_of: bool = False, session: AsyncSession | None = None
     ) -> dict[str, SidebarTaskMembership]:
         return {
             key: member
@@ -2050,7 +2051,9 @@ async def test_flat_status_filter_applies_task_overrides_before_paging(
         for thread_id in ("t0", "t1")
     }
 
-    async def membership_lookup(ids: list[str]) -> dict[str, SidebarTaskMembership]:
+    async def membership_lookup(
+        ids: list[str], *, session: AsyncSession | None = None
+    ) -> dict[str, SidebarTaskMembership]:
         return {key: member for key, member in memberships.items() if key in ids}
 
     async def search(*, offset: int, limit: int, **_: object) -> list[dict[str, object]]:

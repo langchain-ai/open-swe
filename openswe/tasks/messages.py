@@ -164,6 +164,20 @@ class TaskMessage(Base):
         return found is not None
 
     @classmethod
+    async def recorded_deliveries(
+        cls, thread_id: str, delivery_ids: Collection[str], *, session: AsyncSession
+    ) -> set[str]:
+        if not delivery_ids:
+            return set()
+        return set(
+            await session.scalars(
+                select(cls.delivery_id).where(
+                    cls.thread_id == thread_id, cls.delivery_id.in_(delivery_ids)
+                )
+            )
+        )
+
+    @classmethod
     async def _any_undelivered(cls, thread_id: str, *conditions: ColumnElement[bool]) -> bool:
         async with postgres.session() as session:
             found = await session.scalar(
@@ -174,22 +188,29 @@ class TaskMessage(Base):
         return found is not None
 
     @classmethod
-    async def awaiting_delivery(cls, thread_id: str, *, since: datetime | None) -> bool:
+    async def awaiting_delivery(
+        cls, thread_id: str, *, since: datetime | None, session: AsyncSession | None = None
+    ) -> bool:
         """Whether a message has yet to reach a run of the thread.
 
         Only messages recorded after ``since`` count, when given. A message that ran out of
         delivery attempts awaits nothing.
         """
         recent = [] if since is None else [cls.matched_at >= since]
-        if not await cls._any_undelivered(
-            thread_id, cls.delivery_attempts < _MAX_ATTEMPTS, *recent
-        ):
-            return False
-        return any(
-            message.delivery_attempts < _MAX_ATTEMPTS
-            and (since is None or (message.matched_at is not None and message.matched_at >= since))
-            for message in await cls.owed(thread_id)
-        )
+        async with postgres.session(session) as db:
+            return (
+                await db.scalar(
+                    select(cls.id)
+                    .where(
+                        cls.thread_id == thread_id,
+                        cls.delivered_at.is_(None),
+                        cls.delivery_attempts < _MAX_ATTEMPTS,
+                        *recent,
+                    )
+                    .limit(1)
+                )
+                is not None
+            )
 
     @classmethod
     async def deliver(cls, thread_id: str, strategy: Literal["enqueue", "interrupt"]) -> bool:
@@ -339,10 +360,12 @@ class TaskMessage(Base):
             )
 
     @classmethod
-    async def pending_threads(cls, thread_ids: Sequence[str]) -> set[str]:
+    async def pending_threads(
+        cls, thread_ids: Sequence[str], *, session: AsyncSession | None = None
+    ) -> set[str]:
         if not thread_ids:
             return set()
-        async with postgres.session() as session:
+        async with postgres.session(session) as session:
             return set(
                 await session.scalars(
                     select(cls.thread_id).where(

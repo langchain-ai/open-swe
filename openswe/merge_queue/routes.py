@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.deps import DashboardReadDep
 from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
@@ -112,19 +112,17 @@ class QueueAccess:
             raise HTTPException(403, "Repository write access required")
 
 
-async def queue_access(
-    workspace_id: UUID, session: dict[str, str] = SESSION_DEP
-) -> AsyncIterator[QueueAccess]:
+async def queue_access(workspace_id: UUID, reader: DashboardReadDep) -> AsyncIterator[QueueAccess]:
     running = controller.CONTROLLER
     if running is None or running.config.workspace_id != workspace_id:
         raise HTTPException(404, "Queue is not enabled for this workspace")
     # A stable user ID must survive login renames; never use an API-key actor here.
-    user_id = session_user_id(session)
-    user = await User.for_session(user_id, session["sub"])
+    user_id = session_user_id(reader.claims)
+    user = reader.user
     if user is None or user.id != user_id or not user.github_login:
         raise HTTPException(401, "Sign in again to use the queue")
     try:
-        config = await QueueConfiguration.load(workspace_id)
+        config = await QueueConfiguration.load(workspace_id, session=reader.session)
     except ValueError as exc:
         raise HTTPException(409, "Queue configuration is invalid") from exc
     if config is None:
@@ -134,9 +132,10 @@ async def queue_access(
         or config.repository_id != running.config.repository_id
     ):
         raise HTTPException(409, "Queue identity changed; explicit handoff required")
-    queue = await MergeQueue.load(running.queue.id, workspace_id)
+    queue = await MergeQueue.load(running.queue.id, workspace_id, session=reader.session)
     if queue is None:
         raise HTTPException(404, "Queue not found")
+    await reader.close()
     await require_repo_access_for_user(user.github_login, config.repository)
     if queue.mode != config.mode:
         raise HTTPException(409, "Queue mode changed; explicit handoff required")
@@ -156,7 +155,7 @@ async def queue_access(
             raise HTTPException(409, str(exc)) from exc
 
 
-ACCESS = Depends(queue_access)
+ACCESS = Depends(queue_access, scope="function")
 
 
 @router.get("")

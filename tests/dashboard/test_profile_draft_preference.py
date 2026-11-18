@@ -1,52 +1,39 @@
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from openswe.dashboard.profiles import ProfileUpdate, upsert_profile
-from tests.conftest import FakeUserRecords
+from openswe.dashboard.profiles import PROFILES, ProfileUpdate, upsert_profile
+from openswe.users import User
+from openswe.users.records import UserRecords
+
+pytestmark = pytest.mark.usefixtures("registry_db")
 
 
-@pytest.mark.asyncio
-async def test_omitted_draft_preference_preserves_existing_value(
-    user_records: FakeUserRecords,
-) -> None:
-    update = ProfileUpdate(default_model="openai:gpt-5.6-sol", reasoning_effort="medium")
-    with (
-        patch(
-            "openswe.dashboard.profiles.get_profile",
-            new_callable=AsyncMock,
-            return_value={
-                "draft_prs": False,
-                "auto_human_review_enabled": False,
-                "model_routing_enabled": False,
-                "recent_thread_context_enabled": True,
-                "experimental_local_auto_mode": True,
-                "slack_onboarding_dismissed": True,
-            },
-        ),
-    ):
-        profile = await upsert_profile("octocat", "octocat@example.com", update)
-
+async def test_omitted_draft_preference_preserves_existing_value(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "octocat")
+    await User.sign_in("github", "1", login="octocat")
+    await UserRecords("profile").put(
+        "octocat",
+        {
+            "draft_prs": False,
+            "auto_human_review_enabled": False,
+            "model_routing_enabled": False,
+            "recent_thread_context_enabled": True,
+            "experimental_local_auto_mode": True,
+            "slack_onboarding_dismissed": True,
+        },
+    )
+    profile = await upsert_profile("octocat", "octocat@example.com", ProfileUpdate())
     assert profile["draft_prs"] is False
     assert profile["auto_human_review_enabled"] is False
     assert "model_routing_enabled" not in profile
     assert "recent_thread_context_enabled" not in profile
     assert "experimental_local_auto_mode" not in profile
     assert profile["slack_onboarding_dismissed"] is True
-    assert user_records.get("profile", "octocat") == profile
+    assert await PROFILES.get("octocat") == profile
 
 
-@pytest.mark.asyncio
-async def test_explicit_draft_preference_is_persisted(user_records: FakeUserRecords) -> None:
-    update = ProfileUpdate(
-        default_model="openai:gpt-5.6-sol",
-        reasoning_effort="medium",
-        draft_prs=True,
-    )
-    with (
-        patch("openswe.dashboard.profiles.get_profile", new_callable=AsyncMock, return_value=None),
-    ):
-        profile = await upsert_profile("octocat", "octocat@example.com", update)
-
+async def test_explicit_draft_preference_is_persisted(monkeypatch) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "octocat")
+    await User.sign_in("github", "1", login="octocat")
+    profile = await upsert_profile("octocat", "octocat@example.com", ProfileUpdate(draft_prs=True))
     assert profile["draft_prs"] is True
-    assert user_records.get("profile", "octocat") == profile
+    assert await PROFILES.get("octocat") == profile
