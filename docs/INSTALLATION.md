@@ -723,9 +723,17 @@ To have the browser call the backend cross-origin instead, build the UI with `VI
 **Mount prefix.**
 If the server runs under a LangGraph `http.mount_prefix`, the Platform image builds the UI for that prefix automatically; locally pass it to the build (`DASHBOARD_BASE_PATH=/<prefix>/ make build-dashboard`) and keep `LANGGRAPH_URL` on the mounted URL.
 
-**Datadog RUM.**
-Set `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` when building.
-Optional: `VITE_DATADOG_SITE` (default `us5.datadoghq.com`), `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `100`).
+</details>
+
+<details id="datadog-rum">
+<summary><strong>Datadog RUM</strong></summary>
+
+Set `DD_RUM_APPLICATION_ID` and `DD_RUM_CLIENT_TOKEN` on the backend to enable RUM for the web and downloaded desktop UI without rebuilding them.
+Optionally set `DD_RUM_SITE` (default `us5.datadoghq.com`); both identifiers must be set or RUM stays disabled.
+The backend returns these public values from `/dashboard/api/analytics/config`: use only a browser client token, never a Datadog API or application key.
+A complete pair of `VITE_DATADOG_APPLICATION_ID` and `VITE_DATADOG_CLIENT_TOKEN` at build time takes precedence over the backend settings; `VITE_DATADOG_SITE` applies to that pair.
+Other optional build settings: `VITE_DATADOG_SERVICE` (default `open-swe-dashboard`), `VITE_DATADOG_VERSION`, `VITE_DATADOG_SESSION_SAMPLE_RATE` (default `100`), and `VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE` (default `0` for runtime configuration, `100` for build-time identifiers).
+Review replay sampling before enabling it; changing a build setting requires rebuilding the UI.
 The environment comes from the backend's `DD_ENV` at runtime, shared with Segment and analytics (default `production`); `ANALYTICS_ENVIRONMENT`, `VITE_DATADOG_ENV`, and the Vite mode no longer select it.
 RUM skips initialization if the backend telemetry configuration cannot be loaded.
 Session Replay masks all content and telemetry strips query strings and fragments.

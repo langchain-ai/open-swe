@@ -18,6 +18,9 @@ async def test_telemetry_config_is_public_and_names_the_posthog_project(monkeypa
     monkeypatch.setenv("POSTHOG_API_KEY", "phc_project")
     monkeypatch.setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
     monkeypatch.setenv("SEGMENT_BROWSER_WRITE_KEY", "segment_browser_source")
+    monkeypatch.setenv("DD_RUM_APPLICATION_ID", " rum-app ")
+    monkeypatch.setenv("DD_RUM_CLIENT_TOKEN", " rum-token ")
+    monkeypatch.setenv("DD_RUM_SITE", "datadoghq.eu")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -27,14 +30,21 @@ async def test_telemetry_config_is_public_and_names_the_posthog_project(monkeypa
             "environment": "staging",
             "posthog": {"key": "phc_project", "host": "https://eu.i.posthog.com"},
             "segment_write_key": "segment_browser_source",
+            "datadog_rum": {
+                "application_id": "rum-app",
+                "client_token": "rum-token",
+                "site": "datadoghq.eu",
+            },
         }
         monkeypatch.setenv("POSTHOG_API_KEY", "")
         monkeypatch.setenv("SEGMENT_BROWSER_WRITE_KEY", " ")
+        monkeypatch.setenv("DD_RUM_CLIENT_TOKEN", " ")
         response = await client.get("/dashboard/api/analytics/config")
     assert response.json() == {
         "environment": "staging",
         "posthog": None,
         "segment_write_key": None,
+        "datadog_rum": None,
     }
 
 

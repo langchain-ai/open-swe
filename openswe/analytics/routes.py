@@ -28,19 +28,37 @@ class PostHogProject(BaseModel):
     host: str
 
 
+class DatadogRumConfig(BaseModel):
+    application_id: str
+    client_token: str
+    site: str
+
+
 class TelemetryConfig(BaseModel):
     environment: str
     posthog: PostHogProject | None
     segment_write_key: str | None
+    datadog_rum: DatadogRumConfig | None
 
 
 @router.get("/analytics/config")
 async def api_telemetry_config() -> TelemetryConfig:
     key = ENV.POSTHOG_API_KEY.get()
+    application_id = ENV.DD_RUM_APPLICATION_ID.get()
+    client_token = ENV.DD_RUM_CLIENT_TOKEN.get()
     return TelemetryConfig(
         environment=ENV.DD_ENV.get(),
         posthog=PostHogProject(key=key, host=ENV.POSTHOG_HOST.get()) if key else None,
         segment_write_key=ENV.SEGMENT_BROWSER_WRITE_KEY.get().strip() or None,
+        datadog_rum=(
+            DatadogRumConfig(
+                application_id=application_id,
+                client_token=client_token,
+                site=ENV.DD_RUM_SITE.get(),
+            )
+            if application_id and client_token
+            else None
+        ),
     )
 
 

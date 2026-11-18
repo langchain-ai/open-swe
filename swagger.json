@@ -2241,6 +2241,29 @@
         "title": "CursorModel",
         "type": "object"
       },
+      "DatadogRumConfig": {
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "string"
+          },
+          "client_token": {
+            "title": "Client Token",
+            "type": "string"
+          },
+          "site": {
+            "title": "Site",
+            "type": "string"
+          }
+        },
+        "required": [
+          "application_id",
+          "client_token",
+          "site"
+        ],
+        "title": "DatadogRumConfig",
+        "type": "object"
+      },
       "DesktopConnectExchange": {
         "description": "Body of a desktop connect handoff redemption.",
         "properties": {
@@ -9430,6 +9453,16 @@
       },
       "TelemetryConfig": {
         "properties": {
+          "datadog_rum": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DatadogRumConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "environment": {
             "title": "Environment",
             "type": "string"
@@ -9459,7 +9492,8 @@
         "required": [
           "environment",
           "posthog",
-          "segment_write_key"
+          "segment_write_key",
+          "datadog_rum"
         ],
         "title": "TelemetryConfig",
         "type": "object"

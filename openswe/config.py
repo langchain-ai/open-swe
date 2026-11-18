@@ -470,6 +470,9 @@ ENV.var(
     default="",
 )
 ENV.var("DD_ENV", "Shared Datadog and analytics environment.", default="production")
+ENV.var("DD_RUM_APPLICATION_ID", "Public Datadog RUM application ID for the dashboard.")
+ENV.var("DD_RUM_CLIENT_TOKEN", "Public Datadog RUM browser client token for the dashboard.")
+ENV.var("DD_RUM_SITE", "Datadog RUM site for the dashboard.", default="us5.datadoghq.com")
 ENV.var("ANALYTICS_SUMMARY_VERSION", "Active metric semantics version.", default="1")
 ENV.var("ANALYTICS_PR_MATURITY_DAYS", "PR cohort maturity period.", default="14")
 ENV.var("ANALYTICS_MIN_COHORT_SIZE", "Minimum aggregate cohort size.", default="5")

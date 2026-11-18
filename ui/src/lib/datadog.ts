@@ -38,9 +38,9 @@ function sampleRate(env: PublicEnv, name: string, fallback: number): number {
   return Number.isFinite(value) && value >= 0 && value <= 100 ? value : fallback
 }
 
-function replaySampleRate(env: PublicEnv): number {
+function replaySampleRate(env: PublicEnv, fallback: number): number {
   const configured = env.VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE
-  if (typeof configured !== "string") return 100
+  if (typeof configured !== "string") return fallback
   const value = configured.trim() ? Number(configured) : Number.NaN
   return Number.isFinite(value) && value >= 0 && value <= 100 ? value : 0
 }
@@ -116,14 +116,12 @@ export async function initializeDatadogRum(
   loadRum: RumLoader = async () =>
     (await import("@datadog/browser-rum")).datadogRum
 ): Promise<void> {
-  const applicationId = envString(env, "VITE_DATADOG_APPLICATION_ID")
-  const clientToken = envString(env, "VITE_DATADOG_CLIENT_TOKEN")
-  if (!applicationId || !clientToken) return
-
+  const buildApplicationId = envString(env, "VITE_DATADOG_APPLICATION_ID")
+  const buildClientToken = envString(env, "VITE_DATADOG_CLIENT_TOKEN")
   const version = envString(env, "VITE_DATADOG_VERSION")
-  let environment: string
+  let config: TelemetryConfig
   try {
-    environment = (await TelemetryConfig.load()).environment
+    config = await TelemetryConfig.load()
   } catch (error) {
     console.warn(
       "Datadog initialization skipped: telemetry configuration unavailable",
@@ -131,10 +129,21 @@ export async function initializeDatadogRum(
     )
     return
   }
+  const buildConfigured = buildApplicationId && buildClientToken
+  const applicationId = buildConfigured
+    ? buildApplicationId
+    : config.datadogRum?.applicationId
+  const clientToken = buildConfigured
+    ? buildClientToken
+    : config.datadogRum?.clientToken
+  if (!applicationId || !clientToken) return
+
   const rum = await loadRum().catch(() => undefined)
   if (!rum) return
 
-  const site = envString(env, "VITE_DATADOG_SITE") ?? "us5.datadoghq.com"
+  const site = buildConfigured
+    ? (envString(env, "VITE_DATADOG_SITE") ?? "us5.datadoghq.com")
+    : (config.datadogRum?.site ?? "us5.datadoghq.com")
 
   if (typeof window !== "undefined") {
     const globalRum = window as Window & { DD_RUM?: RumClient }
@@ -146,10 +155,10 @@ export async function initializeDatadogRum(
     clientToken,
     site: site as RumInitConfiguration["site"],
     service: envString(env, "VITE_DATADOG_SERVICE") ?? "open-swe-dashboard",
-    env: environment,
+    env: config.environment,
     ...(version ? { version } : {}),
     sessionSampleRate: sampleRate(env, "VITE_DATADOG_SESSION_SAMPLE_RATE", 100),
-    sessionReplaySampleRate: replaySampleRate(env),
+    sessionReplaySampleRate: replaySampleRate(env, buildConfigured ? 100 : 0),
     trackUserInteractions: true,
     trackResources: true,
     trackLongTasks: true,
