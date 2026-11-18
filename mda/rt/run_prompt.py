@@ -14,21 +14,30 @@ goes first:
 4. the run's skills, the same for the runs of people who see the same skills;
 5. what only the thread's prompt says (``ModelCall.thread_prompt``).
 
-For Anthropic the last two of the first three each end in a cache breakpoint, so a
-thread's first call reads them from a cache another thread wrote; the prompt cache
+The last two of the first three each end in a cache breakpoint, so a thread's first
+call reads them from a cache another thread wrote. For Anthropic the prompt cache
 middleware marks the end of the system prompt and of the conversation, and a request
-may have no more than those four. OpenAI finds the longest prefix it cached itself.
+may have no more than those four. OpenAI's GPT-5.6 and later cache only up to a
+breakpoint too, and the one it places itself ends the request, which no other thread's
+request starts with; it writes that one and up to three explicit ones per request.
 """
 
+import re
 from collections.abc import Awaitable, Callable, Mapping
+from typing import Final
 
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import SystemMessage
+from langchain_openai import ChatOpenAI
 from runtime_api.loop import ModelCall
 
 from rt.model_calls import PROMPT_CACHE_TTL
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
+
+# The first OpenAI models that take ``prompt_cache_breakpoint``; earlier ones reject it.
+_OPENAI_BREAKPOINTS_SINCE: Final = (5, 6)
+_GPT_VERSION: Final = re.compile(r"gpt-(\d+)(?:\.(\d+))?(?:-|$)")
 
 type _Block = str | dict
 
@@ -39,15 +48,10 @@ def _planned(request: ModelRequest) -> ModelCall | None:
     return ModelCall.model_validate(raw) if isinstance(raw, Mapping) else None
 
 
-def _cached(block: _Block) -> dict:
-    return {
-        **({"type": "text", "text": block} if isinstance(block, str) else block),
-        "cache_control": {"type": "ephemeral", "ttl": PROMPT_CACHE_TTL},
-    }
-
-
-def _appended(system: SystemMessage | None, texts: list[str], *, cached: int) -> SystemMessage:
-    """``system`` and then each of ``texts``; the last ``cached`` blocks end in a breakpoint."""
+def _appended(
+    system: SystemMessage | None, texts: list[str], *, cached: int, marker: dict | None = None
+) -> SystemMessage:
+    """``system`` and then each of ``texts``; the last ``cached`` blocks end in ``marker``."""
     blocks: list[_Block] = [
         *(
             []
@@ -59,7 +63,17 @@ def _appended(system: SystemMessage | None, texts: list[str], *, cached: int) ->
         *({"type": "text", "text": text} for text in texts),
     ]
     split = max(len(blocks) - cached, 0)
-    content = [*blocks[:split], *map(_cached, blocks[split:])]
+    content = (
+        blocks
+        if marker is None
+        else [
+            *blocks[:split],
+            *(
+                {**({"type": "text", "text": block} if isinstance(block, str) else block), **marker}
+                for block in blocks[split:]
+            ),
+        ]
+    )
     return (
         SystemMessage(content=content)
         if system is None
@@ -87,11 +101,22 @@ class RunPromptMiddleware(AgentMiddleware):
             return await handler(request)
         texts = [text for text in (planned.system_prompt, planned.workspace_prompt) if text]
         system = _appended(
-            request.system_message,
-            texts,
-            cached=2 if isinstance(request.model, ChatAnthropic) else 0,
+            request.system_message, texts, cached=2, marker=self._breakpoint(request.model)
         )
         return await handler(request.override(system_message=system))
+
+    @staticmethod
+    def _breakpoint(model: object) -> dict | None:
+        """What ends a block in a cache breakpoint for ``model``; None for a model without them."""
+        if isinstance(model, ChatAnthropic):
+            return {"cache_control": {"type": "ephemeral", "ttl": PROMPT_CACHE_TTL}}
+        version = _GPT_VERSION.match(model.model_name) if isinstance(model, ChatOpenAI) else None
+        if version is not None and (
+            (int(version[1]), int(version[2] or 0)) >= _OPENAI_BREAKPOINTS_SINCE
+        ):
+            # Without a ttl it lives as long as the request's, OpenAI's 30m default.
+            return {"prompt_cache_breakpoint": {"mode": "explicit"}}
+        return None
 
 
 class ThreadPromptMiddleware(AgentMiddleware):

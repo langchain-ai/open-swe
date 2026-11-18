@@ -350,7 +350,7 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
 ) -> None:
     """The run's shared prompt and the workspace's each end in an Anthropic cache
     breakpoint ahead of the skills and the thread's own part, keeping a request within
-    four, the tools take none, and a fallback to another provider carries none."""
+    four, the tools take none, and a fallback to OpenAI carries OpenAI's breakpoints."""
     built: dict[str, BaseChatModel] = {"anthropic:opus": _ANTHROPIC, "openai:gpt": _OPENAI}
     monkeypatch.setattr("rt.middleware.build_model", lambda spec: built[spec.model_id])
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
@@ -417,10 +417,11 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
         "text": "Next thread's part",
         "cache_control": cached,
     }
+    explicit = {"mode": "explicit"}
     assert cast(SystemMessage, first_fallback.system_message).content == [
         {"type": "text", "text": "The graph's own instructions"},
-        {"type": "text", "text": "Every thread's prompt"},
-        {"type": "text", "text": "The workspace's prompt"},
+        {"type": "text", "text": "Every thread's prompt", "prompt_cache_breakpoint": explicit},
+        {"type": "text", "text": "The workspace's prompt", "prompt_cache_breakpoint": explicit},
         {"type": "text", "text": "\n\nSkills"},
         {"type": "text", "text": "First thread's part"},
     ]

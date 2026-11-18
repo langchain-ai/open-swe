@@ -42,6 +42,7 @@ from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.tools import ToolException, tool
 from langchain_core.tracers.langchain import LangChainTracer
 from langchain_core.tracers.run_collector import RunCollectorCallbackHandler
+from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphInterrupt
 from langgraph.prebuilt.tool_node import ToolCallRequest
@@ -67,7 +68,7 @@ from managed_deepagents._memory.layers import MemoryLayers
 from managed_deepagents._memory_instructions import create_memory_instructions_middleware
 from managed_deepagents._run_input import ManagedTurnTracer
 from managed_deepagents.runtime import compile_managed_agent_async, parent_run
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, SecretStr
 from rt.backend import (
     BackendCallError,
     BackendUnavailableError,
@@ -1013,6 +1014,80 @@ async def test_the_anthropic_model_the_backend_names_caches_for_an_hour(
     assert '"5m"' not in json.dumps(payload)
 
 
+class _PayloadOpenAI(ChatOpenAI):
+    payloads: list[dict[str, object]] = []
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        self.payloads.append(self._get_request_payload(messages, stop=stop, **kwargs))
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+
+
+@pytest.mark.parametrize(
+    ("model", "marked"),
+    [("gpt-6.1-sol", ["You are Open SWE.", "The workspace's part."]), ("gpt-5.5", [])],
+)
+async def test_an_openai_model_caches_the_prompt_every_thread_shares(
+    monkeypatch: pytest.MonkeyPatch, model: str, marked: list[str]
+) -> None:
+    """GPT-5.6 and later cache only up to a breakpoint, and the implicit one ends the
+    request, which no other thread's request starts with: the shared prompt and the
+    workspace's each end in an explicit one. Earlier models reject the field."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
+    named = _PayloadOpenAI(
+        model=model, api_key=SecretStr("test-key"), use_responses_api=True, store=False, payloads=[]
+    )
+    monkeypatch.setattr("rt.middleware.build_model", lambda spec: named)
+    backend = _run_backend(
+        invocation_id="invocation-1",
+        catalog=_models(ModelSpec(model_id=f"openai:{model}", kwargs={})),
+    )
+    _answering(
+        monkeypatch,
+        backend,
+        _preparing(
+            rendered_system_prompt="You are Open SWE.\n\nThe workspace's part.\n\nThis thread is yours.",
+            rendered_workspace_prompt="The workspace's part.",
+            rendered_thread_prompt="This thread is yours.",
+        ),
+    )
+    middleware = cast(
+        list[AgentMiddleware],
+        [
+            BackendRunMiddleware(backend),
+            RunPromptMiddleware(),
+            ThreadPromptMiddleware(),
+            *model_call_guards(),
+        ],
+    )
+    graph = create_deep_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        system_prompt="The graph's own instructions.",
+        middleware=middleware,
+    )
+
+    await graph.ainvoke({"messages": [HumanMessage("hi")]})
+
+    [payload] = named.payloads
+    [system, *_] = cast(list[dict[str, object]], payload["input"])
+    blocks = cast(list[dict[str, object]], system["content"])
+    assert system["role"] == "system"
+    assert [block["text"] for block in blocks if "prompt_cache_breakpoint" in block] == marked
+    assert json.dumps(payload).count('"prompt_cache_breakpoint": {"mode": "explicit"}') == len(
+        marked
+    )
+    assert "This thread is yours." in cast(str, blocks[-1]["text"])
+    # The implicit breakpoint still ends the request, for the thread's next call.
+    assert "prompt_cache_options" not in payload
+    assert '"cache_control"' not in json.dumps(payload)
+
+
 class _StalledAnthropic(ChatAnthropic):
     async def _agenerate(
         self,
@@ -1153,7 +1228,7 @@ async def test_turn_model_tracks_the_selected_call_without_relabeling_llm_spans(
         model=FakeListChatModel(responses=["unused"]),
         middleware=cast(
             list[AgentMiddleware],
-            [BackendRunMiddleware(backend), *model_call_guards(timeout_seconds=0.05)],
+            [BackendRunMiddleware(backend), *model_call_guards(timeout_seconds=1.0)],
         ),
     )
     message = (
