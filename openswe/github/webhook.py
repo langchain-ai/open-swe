@@ -1460,24 +1460,26 @@ class PreviewReady:
         pulls = await PullRequest.preview_candidates(
             UUID(after) if isinstance(after, str) else None
         )
+        due: list[PullRequest] = []
         for pull in pulls:
             recovery_key = str(pull.id)
             if await event_claims.held(cls.RECOVER, recovery_key):
                 # Keep the marker while the PR remains open; it expires after it leaves the scan.
                 await event_claims.defer(cls.RECOVER, recovery_key, ttl=timedelta(days=7))
                 continue
+            try:
+                if await cls.checks({"owner": pull.owner, "name": pull.repo}):
+                    due.append(pull)
+            except Exception:
+                cls._recovery_failed(pull)
+        heads = await cls._open_heads(due)
+        for pull in due:
+            head = heads.get(pull.id)
+            if head is None:
+                continue
+            recovery_key = str(pull.id)
             claimed = False
             try:
-                config = {"owner": pull.owner, "name": pull.repo}
-                if not await cls.checks(config):
-                    continue
-                async with GitHubClient.as_app(pull.owner, pull.repo) as github:
-                    current = (
-                        await github.repo(pull.owner, pull.repo).pull_request(pull.number).pull()
-                    )
-                head = (current.get("head") or {}).get("sha")
-                if current.get("state") != "open" or not isinstance(head, str):
-                    continue
                 claimed = await event_claims.claim(cls.RECOVER, recovery_key, ttl=timedelta(days=7))
                 if not claimed:
                     continue
@@ -1500,11 +1502,7 @@ class PreviewReady:
             except Exception:
                 if claimed:
                     await event_claims.release(cls.RECOVER, recovery_key)
-                common.logger.warning(
-                    "Recovering a preview watch failed",
-                    extra={"repository": f"{pull.owner}/{pull.repo}", "pr_number": pull.number},
-                    exc_info=True,
-                )
+                cls._recovery_failed(pull)
         if len(pulls) == 50:
             await queue.schedule(
                 cls.RECOVER,
@@ -1513,6 +1511,41 @@ class PreviewReady:
                 key=f"{cls.RECOVER}:{pulls[-1].id}",
                 replace=False,
             )
+
+    @staticmethod
+    async def _open_heads(pulls: Sequence[PullRequest]) -> dict[UUID, str]:
+        """The head of each of ``pulls`` that is open, read with one query per repository."""
+        by_repo: dict[tuple[str, str], list[PullRequest]] = {}
+        for pull in pulls:
+            by_repo.setdefault((pull.owner, pull.repo), []).append(pull)
+        heads: dict[UUID, str] = {}
+        for (owner, repo), repo_pulls in by_repo.items():
+            try:
+                async with GitHubClient.as_app(owner, repo) as github:
+                    open_heads = await github.repo(owner, repo).open_pull_heads(
+                        [pull.number for pull in repo_pulls]
+                    )
+            except Exception:
+                common.logger.warning(
+                    "Reading pull request heads to recover preview watches failed",
+                    extra={"repository": f"{owner}/{repo}", "pr_count": len(repo_pulls)},
+                    exc_info=True,
+                )
+                continue
+            heads.update(
+                (pull.id, open_heads[pull.number])
+                for pull in repo_pulls
+                if pull.number in open_heads
+            )
+        return heads
+
+    @staticmethod
+    def _recovery_failed(pull: PullRequest) -> None:
+        common.logger.warning(
+            "Recovering a preview watch failed",
+            extra={"repository": f"{pull.owner}/{pull.repo}", "pr_number": pull.number},
+            exc_info=True,
+        )
 
     @classmethod
     async def _wait(cls, job: Job) -> None:

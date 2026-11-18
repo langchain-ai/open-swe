@@ -219,12 +219,18 @@ async def _review_author_allowed(author: str, owner: str, repo: str) -> bool | N
     }
 
 
-async def review_blockers(pull: PullRequestClient) -> list[str] | None:
-    """Why ``pull`` may not be put up for review now; ``None`` when GitHub was unavailable."""
-    payload = await or_none(pull.pull())
-    if payload is None:
-        return None
-    snapshot = PullRequestPayload.model_validate(payload)
+async def review_blockers(
+    pull: PullRequestClient, snapshot: PullRequestPayload | None = None
+) -> list[str] | None:
+    """Why ``pull`` may not be put up for review now; ``None`` when GitHub was unavailable.
+
+    ``snapshot`` is the pull request as the caller already read it, so it isn't read again.
+    """
+    if snapshot is None:
+        payload = await or_none(pull.pull())
+        if payload is None:
+            return None
+        snapshot = PullRequestPayload.model_validate(payload)
     if not snapshot.head_sha:
         return None
     blockers = request_blockers(snapshot)

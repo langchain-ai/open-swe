@@ -7,6 +7,7 @@ from openswe.review_scout import graph
 from openswe.run_config import RunConfig
 from openswe.sandboxes.repo_prep import ReviewRepoPreparationError
 from openswe.tools import plan_walkthrough
+from openswe.walkthrough import planner
 
 
 @pytest.mark.parametrize(
@@ -20,6 +21,7 @@ from openswe.tools import plan_walkthrough
         (2, ["head", "new"], "stale"),
         (0, ["new"], "stale"),
         (0, ["head"], "moved"),
+        (0, ["head", "new"], "advanced"),
         (0, [RuntimeError("GitHub unavailable")], "planned"),
         (1, [RuntimeError("GitHub unavailable"), "head"], "planned"),
         (2, [RuntimeError("GitHub unavailable")] * 2, "error"),
@@ -56,7 +58,16 @@ async def test_scout_preparation_retries_and_checks_head_without_a_pinned_checko
             pull_request=MagicMock(concise_walkthrough=AsyncMock(return_value=False)),
         ),
     )
-    monkeypatch.setattr(graph, "_workspace", workspace)
+    install = AsyncMock()
+    if expected == "advanced":
+        stored = MagicMock(merge_base_sha="base", head_sha="head")
+        checkout.pinned = AsyncMock(return_value=("base", "head"))
+        checkout.pin.side_effect = lambda **_: setattr(stored, "head_sha", "new")
+        monkeypatch.setattr(planner.PullRequest, "ensure", AsyncMock(return_value=MagicMock()))
+        monkeypatch.setattr(graph.Walkthrough, "get", AsyncMock(return_value=stored))
+        monkeypatch.setattr(graph.Walkthrough, "install", install)
+    else:
+        monkeypatch.setattr(graph, "_workspace", workspace)
     monkeypatch.setattr(graph, "prompt", lambda *args, **kwargs: "scout instructions")
     monkeypatch.setattr(graph.SteeringHistory, "load", AsyncMock(return_value=None))
     middleware = graph.PrepareReviewScoutRunMiddleware(
@@ -82,11 +93,16 @@ async def test_scout_preparation_retries_and_checks_head_without_a_pinned_checko
         if expected == "planned":
             assert result["rendered_system_prompt"] == "scout instructions"
         assert checkout.pin.await_count == (
-            1 if expected in ("planned", "complete", "moved") else 0
+            1 if expected in ("planned", "complete", "moved", "advanced") else 0
         )
         assert workspace.await_count == (1 if expected in ("planned", "complete", "moved") else 0)
-    assert prepare.await_count == len(heads)
-    assert sleep.await_args_list == ([] if len(heads) == 1 else [((3,), {})])
+        if expected == "advanced":
+            install.assert_not_awaited()
+            assert stored.head_sha == "new"
+    assert prepare.await_count == (1 if expected == "advanced" else len(heads))
+    assert sleep.await_args_list == (
+        [] if len(heads) == 1 or expected == "advanced" else [((3,), {})]
+    )
 
 
 @pytest.mark.parametrize("scout", [False, True, None])

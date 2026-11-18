@@ -7,7 +7,7 @@ from openswe.github.http import RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_files import RepoSettings
-from openswe.human_review import routes
+from openswe.human_review import routes, standard
 from openswe.human_review.requests import HumanReviewRequest
 
 
@@ -56,20 +56,25 @@ async def test_review_availability_uses_cached_settings(
         patch.object(
             RepoClient, "read_file", AsyncMock(side_effect=AssertionError("uncached read"))
         ),
-        patch.object(PullRequestClient, "head_sha", AsyncMock(return_value="abc")) as head,
+        patch.object(
+            PullRequestClient,
+            "pull",
+            AsyncMock(return_value={"state": "open", "head": {"sha": "abc"}}),
+        ) as pull,
         patch.object(
             PullRequestClient, "files", AsyncMock(return_value=[{"filename": filename}])
         ) as files,
         patch.object(routes.HumanReviewRequest, "active_for", AsyncMock(return_value=None)),
-        patch.object(routes, "review_blockers", AsyncMock(return_value=[])) as blockers,
+        patch.object(standard, "_review_author_allowed", AsyncMock(return_value=True)),
     ):
         result = await routes.api_human_review_availability(
             "lc", "repo", 7, session={"sub": "ada"}, active_only=active_only
         )
+    # The head check and the blockers share one read of the pull request.
+    assert pull.await_count == (0 if active_only else 1)
     if active_only:
-        head.assert_not_awaited()
         files.assert_not_awaited()
-        blockers.assert_not_awaited()
+    assert result.blockers == []
     assert result.available is (not active_only and (not routed or filename.startswith("ui/")))
     assert result.active is False
 
@@ -89,7 +94,7 @@ async def test_active_review_links_to_slack_when_permalink_lookup_fails(
     with (
         patch.object(routes, "require_repo_access_for_user", AsyncMock()),
         patch.object(RepoSettings, "cached", AsyncMock(return_value=RepoSettings())),
-        patch.object(PullRequestClient, "head_sha", AsyncMock(return_value="abc")),
+        patch.object(PullRequestClient, "pull", AsyncMock(return_value={"head": {"sha": "abc"}})),
         patch.object(HumanReviewRequest, "active_for", AsyncMock(return_value=active)),
         patch.object(routes.User, "for_login", AsyncMock(return_value=None)),
         patch("openswe.slack.client.get_slack_permalink", AsyncMock(return_value=None)),

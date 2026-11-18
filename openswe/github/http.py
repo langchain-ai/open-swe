@@ -27,7 +27,7 @@ import random
 import re
 import time
 import zipfile
-from collections.abc import AsyncIterator, Awaitable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -735,6 +735,34 @@ class RepoClient:
         return await self.github.graphql(
             query, {"owner": self.owner, "repo": self.name, **(variables or {})}
         )
+
+    async def open_pull_heads(self, numbers: Collection[int]) -> dict[int, str]:
+        """The head commit of each of ``numbers`` that is open, read in one GraphQL query.
+
+        A number GitHub can't resolve, as a deleted pull request, is left out.
+        """
+        if not numbers:
+            return {}
+        fields = " ".join(
+            f"pr{number}: pullRequest(number: {number}) {{ state headRefOid }}"
+            for number in sorted(set(numbers))
+        )
+        data = await self.github.graphql(
+            "query OpenPullHeads($owner: String!, $repo: String!) "
+            f"{{ repository(owner: $owner, name: $repo) {{ {fields} }} }}",
+            {"owner": self.owner, "repo": self.name},
+            partial=True,
+        )
+        repository = data.get("repository")
+        if not isinstance(repository, Mapping):
+            raise ValueError("GitHub answered pull request heads without the repository")
+        heads: dict[int, str] = {}
+        for number in numbers:
+            pull = repository.get(f"pr{number}")
+            head = pull.get("headRefOid") if isinstance(pull, Mapping) else None
+            if isinstance(pull, Mapping) and pull.get("state") == "OPEN" and isinstance(head, str):
+                heads[number] = head
+        return heads
 
     @staticmethod
     def _participant_page(

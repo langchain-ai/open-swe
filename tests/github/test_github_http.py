@@ -708,6 +708,31 @@ async def test_a_file_path_never_leaves_its_repository(path: str) -> None:
     assert sent == ["https://api.github.com/repos/me/shared/contents/docs/a%20b.png?ref=main"]
 
 
+async def test_open_pull_heads_reads_many_pulls_in_one_query() -> None:
+    queries: list[str] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        queries.append(request.read().decode())
+        return httpx2.Response(
+            200,
+            json={
+                "data": {
+                    "repository": {
+                        "pr7": {"state": "OPEN", "headRefOid": "a" * 40},
+                        "pr8": {"state": "MERGED", "headRefOid": "b" * 40},
+                        "pr9": None,
+                    }
+                },
+                "errors": [{"type": "NOT_FOUND", "path": ["repository", "pr9"]}],
+            },
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(handle)) as http:
+        heads = await GitHubClient(http).repo("acme", "widgets").open_pull_heads([7, 8, 9])
+    assert heads == {7: "a" * 40}
+    assert len(queries) == 1
+
+
 class TestThreadParticipants:
     @staticmethod
     def author(login: str, kind: str = "User") -> dict[str, str]:

@@ -16,6 +16,7 @@ from openswe.github.pull_request_status import (
     OpenPullRequests,
     pull_request_identity,
 )
+from openswe.github.pull_requests import PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.card import mention
 from openswe.human_review.dashboard import DashboardReviewRequest
@@ -110,12 +111,13 @@ async def api_human_review_availability(
     if not active_only:
         async with GitHubClient.as_app(owner, repo) as github:
             pull = github.repo(owner, repo).pull_request(number)
-            sha = await or_none(pull.head_sha())
-            if sha is None:
+            payload = await or_none(pull.pull())
+            snapshot = PullRequestPayload.model_validate(payload) if payload is not None else None
+            if snapshot is None or not snapshot.head_sha:
                 raise HTTPException(404, "Pull request is unavailable")
             settings = await RepoSettings.cached(owner, repo)
             channel = await settings.channel_for_pr(pull)
-            blockers = None if active is not None else await review_blockers(pull)
+            blockers = None if active is not None else await review_blockers(pull, snapshot)
     return HumanReviewAvailability(
         available=bool(channel),
         active=active is not None,

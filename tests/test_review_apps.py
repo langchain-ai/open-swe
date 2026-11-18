@@ -502,6 +502,7 @@ class _Preview:
         self.head_checks = AsyncMock(side_effect=self._head_checks)
         self.repository.pull_request.return_value.head_checks = self.head_checks
         self.repository.pull_request.return_value.pull = AsyncMock(side_effect=lambda: self.pull)
+        self.repository.open_pull_heads = AsyncMock(side_effect=self._open_heads)
         github = MagicMock()
         github.__aenter__.return_value = Mock(repo=Mock(return_value=self.repository))
         monkeypatch.setattr(GitHubClient, "as_app", Mock(return_value=github))
@@ -516,6 +517,11 @@ class _Preview:
                 "pull_request": {"number": 7, **self.pull},
             }
         )
+
+    async def _open_heads(self, numbers: list[int]) -> dict[int, str]:
+        head = self.pull["head"]
+        assert isinstance(head, dict)
+        return {7: head["sha"]} if 7 in numbers and self.pull["state"] == "open" else {}
 
     async def _head_checks(self) -> HeadChecks:
         head = self.pull["head"]
@@ -1088,13 +1094,32 @@ async def test_recovery_does_not_restart_an_expired_watch(monkeypatch: pytest.Mo
         preview.now + PreviewReady.WINDOW
     )
     await preview.drain()
-    requests = preview.repository.pull_request.return_value.pull.await_count
+    requests = preview.repository.open_pull_heads.await_count
 
     await PreviewReady.recover(Mock(payload={}))
 
     assert not preview.jobs
-    assert preview.repository.pull_request.return_value.pull.await_count == requests
+    assert preview.repository.open_pull_heads.await_count == requests
     preview.dispatch.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_recovery_reads_a_repositorys_heads_in_one_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch)
+    pulls = [Mock(id=uuid4(), owner="acme", repo="widgets", number=n) for n in (7, 8, 9)]
+    monkeypatch.setattr(
+        github_webhook.PullRequest, "preview_candidates", AsyncMock(return_value=pulls)
+    )
+
+    await PreviewReady.recover(Mock(payload={}))
+
+    preview.repository.open_pull_heads.assert_awaited_once_with([7, 8, 9])
+    preview.repository.pull_request.return_value.pull.assert_not_awaited()
+    assert [(job.payload["number"], job.payload["head_sha"]) for job in preview.jobs.values()] == [
+        (7, _HEAD)
+    ]
 
 
 @pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
