@@ -12,8 +12,10 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# The scan is about 120 git calls waiting on the disk; 8, 16 and 128 workers measured the same.
+# The scan is about 50 git calls waiting on the disk; 8, 16 and 128 workers measured the same.
 WORKERS = 16
+# Path records in `git status --porcelain=v2`: how many space-separated fields precede the path.
+PATH_FIELDS = {b"1": 8, b"2": 9, b"u": 10, b"?": 1}
 # A cold sandbox's first scan has taken 25s, and the caller gives the script 30.
 DEADLINE_SECONDS = 20
 
@@ -55,16 +57,44 @@ def output(call: "Future[subprocess.CompletedProcess[bytes]]", optional: bool = 
     return result.stdout
 
 
+def status(output: bytes) -> Tuple[str, str, List[Tuple[bytes, bytes]]]:
+    """The branch, HEAD commit and changed paths of `git status --porcelain=v2 --branch -z`."""
+    branch, head, changes = "", "", []
+    records = iter(output.split(b"\0"))
+    for record in records:
+        kind = record[:1]
+        if kind == b"#":
+            key, _, value = record[2:].partition(b" ")
+            if key == b"branch.head" and value != b"(detached)":
+                branch = os.fsdecode(value)
+            elif key == b"branch.oid" and value != b"(initial)":
+                head = value.decode()
+        elif kind in PATH_FIELDS:
+            path = record.split(b" ", PATH_FIELDS[kind])[-1]
+            # A rename's record is followed by its original path.
+            entry = record + b"\0" + next(records, b"") if kind == b"2" else record
+            changes.append((entry, path))
+    return branch, head, changes
+
+
 class Checkout:
-    """One checkout, with every git call it needs already running."""
+    """One checkout with its git status and remote lookup already running."""
 
     def __init__(self, git: Git, path: Path) -> None:
+        self.git = git
         self.path = path
         self.remote = git.start(path, "remote", "get-url", "origin")
-        self.head = git.start(path, "rev-parse", "--verify", "HEAD")
-        self.branch = git.start(path, "branch", "--show-current")
-        self.diff = git.start(path, "diff", "--no-ext-diff", "--no-textconv", "HEAD")
-        self.untracked = git.start(path, "ls-files", "--others", "--exclude-standard", "-z")
+        # One walk of the worktree names the branch, HEAD and every changed path; a further
+        # edit to a path already changed shows in its lstat, not its record.
+        self.status = git.start(
+            path,
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--no-ahead-behind",
+            "--untracked-files=all",
+            "-z",
+        )
 
     def fingerprint(self) -> Optional[Dict[str, str]]:
         """None for a checkout that is not a GitHub repository with a commit."""
@@ -75,24 +105,27 @@ class Checkout:
         )
         if not match:
             return None
-        head = output(self.head, optional=True).decode().strip()
+        branch, head, changes = status(output(self.status))
         if not head:
             return None
-        digest = hashlib.sha256(output(self.diff))
-        for name in output(self.untracked).split(b"\0"):
-            if name:
-                try:
-                    stat = (self.path / os.fsdecode(name)).lstat()
-                except OSError:
-                    raise Skipped("an untracked file changed during the scan") from None
-                digest.update(name)
-                digest.update(str((stat.st_size, stat.st_mtime_ns)).encode())
-        return {
-            "repo": match.group(1),
-            "branch": output(self.branch).decode().strip(),
-            "head": head,
-            "dirty": digest.hexdigest(),
-        }
+        digest = hashlib.sha256()
+        for record, name in changes:
+            path = self.path / os.fsdecode(name)
+            try:
+                stat = path.lstat()
+                token = (stat.st_mode, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            except FileNotFoundError:
+                token = None
+            except OSError:
+                raise Skipped("a changed file could not be read during the scan") from None
+            digest.update(record + b"\0" + str(token).encode() + b"\0")
+            if (
+                token is not None
+                and record[:1] != b"?"
+                and record.split(b" ", 3)[2].startswith(b"SC")
+            ):
+                digest.update(output(self.git.start(path, "rev-parse", "--verify", "HEAD")))
+        return {"repo": match.group(1), "branch": branch, "head": head, "dirty": digest.hexdigest()}
 
 
 def snapshot(directory: str) -> Dict[str, object]:

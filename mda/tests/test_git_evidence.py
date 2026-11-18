@@ -147,3 +147,103 @@ async def test_the_script_sees_more_edits_to_an_already_dirty_checkout(
     assert recovered.changes_since(before) == []
     with pytest.raises(SandboxScriptError, match="Could not inspect workspace git state"):
         await script.run(sandbox, {"root": str(tmp_path / "missing")})
+
+
+async def test_the_script_sees_untracked_staged_deleted_and_renamed_work(
+    tmp_path: Path, sandbox: LocalShellBackend
+) -> None:
+    repo = _checkout(tmp_path, "repo", "https://github.com/org/actual.git")
+    script = SandboxScript("git_trace.py")
+
+    async def dirty() -> str:
+        snapshot = GitSnapshot.model_validate(await script.run(sandbox, {"root": str(tmp_path)}))
+        return snapshot.repos[str(repo)].dirty
+
+    seen = [await dirty()]
+    (repo / "new").mkdir()
+    (repo / "new" / "untracked").write_text("one")
+    seen.append(await dirty())
+    (repo / "new" / "untracked").write_text("one more")
+    seen.append(await dirty())
+    _git("-C", str(repo), "add", "new/untracked")
+    seen.append(await dirty())
+    _git("-C", str(repo), "mv", "file", "moved")
+    seen.append(await dirty())
+    (repo / "moved").unlink()
+    seen.append(await dirty())
+
+    assert len(set(seen)) == len(seen)
+    assert seen[-1] == await dirty()
+
+
+async def test_the_script_sees_an_already_diverged_submodule_change_commits(
+    tmp_path: Path, sandbox: LocalShellBackend
+) -> None:
+    source = _checkout(tmp_path, "source", "https://github.com/org/submodule.git")
+    (source / "src").mkdir()
+    commits = []
+    for content in ("one", "two", "three"):
+        (source / "src" / "file").write_text(content)
+        _git("-C", str(source), "add", "src/file")
+        _git("-C", str(source), "commit", "-m", content)
+        commits.append(_git("-C", str(source), "rev-parse", "HEAD"))
+
+    repo = _checkout(tmp_path, "repo", "https://github.com/org/actual.git")
+    _git(
+        "-c",
+        "protocol.file.allow=always",
+        "-C",
+        str(repo),
+        "submodule",
+        "add",
+        str(source),
+        "module",
+    )
+    module = repo / "module"
+    _git("-C", str(module), "checkout", commits[0])
+    _git("-C", str(repo), "add", ".")
+    _git("-C", str(repo), "commit", "-m", "add submodule")
+    _git("-C", str(module), "checkout", commits[1])
+    before = GitSnapshot.model_validate(
+        await SandboxScript("git_trace.py").run(sandbox, {"root": str(repo)})
+    )
+    stat = module.stat()
+
+    _git("-C", str(module), "checkout", commits[2])
+    after = GitSnapshot.model_validate(
+        await SandboxScript("git_trace.py").run(sandbox, {"root": str(repo)})
+    )
+
+    assert module.stat().st_mtime_ns == stat.st_mtime_ns
+    assert module.stat().st_ctime_ns == stat.st_ctime_ns
+    assert [change.repo for change in after.changes_since(before)] == ["org/actual"]
+
+
+async def test_a_detached_checkout_has_its_commit_and_no_branch(
+    tmp_path: Path, sandbox: LocalShellBackend
+) -> None:
+    repo = _checkout(tmp_path, "repo", "https://github.com/org/actual")
+    head = _git("-C", str(repo), "rev-parse", "HEAD")
+    _git("-C", str(repo), "checkout", "--detach")
+
+    snapshot = GitSnapshot.model_validate(
+        await SandboxScript("git_trace.py").run(sandbox, {"root": str(tmp_path)})
+    )
+
+    assert snapshot.repos[str(repo)] == GitCheckout(
+        repo="org/actual", branch="", head=head, dirty=snapshot.repos[str(repo)].dirty
+    )
+
+
+async def test_a_skipped_checkout_logs_its_reason_in_the_message(
+    tmp_path: Path, sandbox: LocalShellBackend, caplog: pytest.LogCaptureFixture
+) -> None:
+    broken = _checkout(tmp_path, "broken", "https://github.com/org/actual")
+    (broken / ".git" / "index").write_bytes(b"corrupt")
+    git = TurnGit()
+
+    with caplog.at_level("WARNING", logger="rt.git_evidence"):
+        git.start(sandbox, str(tmp_path))
+        await git.changing()
+
+    assert f"Skipped checkouts in turn git evidence: {broken} (git failed)" in caplog.messages

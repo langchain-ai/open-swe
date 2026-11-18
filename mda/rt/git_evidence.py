@@ -187,8 +187,11 @@ class TurnGit:
             logger.warning("Could not fingerprint the turn's checkouts", exc_info=True)
             return None
         if snapshot.skipped:
+            # The reasons go in the message too: deployment logs drop ``extra``.
             logger.warning(
-                "Skipped checkouts in turn git evidence", extra={"skipped": snapshot.skipped}
+                "Skipped checkouts in turn git evidence: %s",
+                "; ".join(f"{path} ({reason})" for path, reason in snapshot.skipped.items()),
+                extra={"skipped": snapshot.skipped},
             )
         return snapshot
 
