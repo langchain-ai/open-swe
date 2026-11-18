@@ -111,12 +111,16 @@ async def api_human_review_availability(
     if not active_only:
         async with GitHubClient.as_app(owner, repo) as github:
             pull = github.repo(owner, repo).pull_request(number)
+            settings = await RepoSettings.cached(owner, repo)
             payload = await or_none(pull.pull())
             snapshot = PullRequestPayload.model_validate(payload) if payload is not None else None
-            if snapshot is None or not snapshot.head_sha:
+            if not settings.review_channel_rules and (snapshot is None or not snapshot.head_sha):
                 raise HTTPException(404, "Pull request is unavailable")
-            settings = await RepoSettings.cached(owner, repo)
-            channel = await settings.channel_for_pr(pull)
+            channel = await or_none(
+                settings.channel_for_pr(pull, snapshot=snapshot, for_display=True)
+            )
+            if channel is None:
+                raise HTTPException(404, "Pull request is unavailable")
             blockers = None if active is not None else await review_blockers(pull, snapshot)
     return HumanReviewAvailability(
         available=bool(channel),

@@ -1,5 +1,6 @@
 """Small configuration files Open SWE reads from a repository's ``.open-swe`` directory."""
 
+import hashlib
 import json
 import logging
 import random
@@ -8,6 +9,7 @@ from datetime import timedelta
 from fnmatch import fnmatchcase
 from typing import Annotated
 
+import httpx2
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -21,10 +23,12 @@ from pydantic import (
 from openswe.github.http import (
     GitHubAppUnavailable,
     GitHubClient,
+    GitHubError,
     RepoClient,
     RepoFileUnreadableError,
 )
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.pull_requests import PullRequestPayload
 
 logger = logging.getLogger(__name__)
 
@@ -212,15 +216,89 @@ class RepoSettings(BaseModel):
         count = max(counts.values())
         return random.choice([candidate for candidate, total in counts.items() if total == count])
 
-    async def channel_for_pr(self, pull: PullRequestClient) -> str:
+    def _channel_cache_key(self, pull: PullRequestClient) -> str:
+        routing = self.model_dump_json(include={"review_channel", "review_channel_rules"})
+        version = hashlib.sha256(routing.encode()).hexdigest()
+        return f"review-channel:v1:{pull.repo.full_name.lower()}:{pull.number}:{version}"
+
+    async def _cached_channel(self, key: str) -> str | None:
+        from langgraph_api.cache import cache_get
+
+        try:
+            channel: object = await cache_get(key)
+        except Exception:
+            logger.warning("Review channel cache read failed", exc_info=True)
+            return None
+        return (
+            channel if isinstance(channel, str) and channel in self.review_channels | {""} else None
+        )
+
+    async def _remember_channel(self, key: str, revision: str, channel: str) -> None:
+        from langgraph_api.cache import cache_set
+
+        try:
+            await cache_set(f"{key}:{revision}", channel, SETTINGS_MAX_AGE)
+            await cache_set(key, channel, SETTINGS_MAX_AGE)
+        except Exception:
+            logger.warning("Review channel cache write failed", exc_info=True)
+
+    async def channel_for_pr(
+        self,
+        pull: PullRequestClient,
+        *,
+        snapshot: PullRequestPayload | None = None,
+        for_display: bool = False,
+    ) -> str:
+        """Route the current diff; only display reads may fall back when its revision is unavailable.
+
+        ``snapshot`` is the pull request as the caller already read it, so it isn't read again.
+        """
         if not self.review_channel_rules:
             return self.review_channel.strip()
+        key = self._channel_cache_key(pull)
+        if snapshot is None:
+            try:
+                payload = await pull.pull()
+            except httpx2.HTTPError as exc:
+                transient = isinstance(exc, httpx2.TransportError) or (
+                    isinstance(exc, httpx2.HTTPStatusError)
+                    and (
+                        500 <= exc.response.status_code < 600
+                        or GitHubError(exc.response).rate_limited
+                    )
+                )
+                if (
+                    for_display
+                    and transient
+                    and (cached := await self._cached_channel(key)) is not None
+                ):
+                    logger.warning(
+                        "Displaying the last review channel while GitHub is unavailable",
+                        exc_info=True,
+                    )
+                    return cached
+                raise
+            snapshot = PullRequestPayload.model_validate(payload)
+        if not snapshot.head_sha or not snapshot.base_sha:
+            raise ValueError("Cannot route a pull request without its head and base commits")
+        revision = f"{snapshot.head_sha}:{snapshot.base_sha}"
+        cached = await self._cached_channel(f"{key}:{revision}")
+        if cached is not None:
+            await self._remember_channel(key, revision, cached)
+            return cached
         files = TypeAdapter(list[ReviewFile]).validate_python(
             await pull.files(max_pages=_ROUTED_FILE_PAGES)
         )
-        if len(files) >= _ROUTED_FILE_PAGES * 100:
+        if len(files) >= _ROUTED_FILE_PAGES * 100 or (
+            snapshot.changed_files is not None and len(files) != snapshot.changed_files
+        ):
             raise ValueError("Cannot route a pull request with an incomplete changed-file list")
-        return self.channel_for_files([file.filename for file in files])
+        current = PullRequestPayload.model_validate(await pull.pull())
+        if (current.head_sha, current.base_sha) != (snapshot.head_sha, snapshot.base_sha):
+            raise ValueError("Pull request changed while reading its review channel")
+        channel = self.channel_for_files([file.filename for file in files])
+        await self._remember_channel(key, revision, channel)
+        return channel
 
     @classmethod
     async def fetch(
@@ -257,14 +335,14 @@ class RepoSettings(BaseModel):
     async def cached(cls, owner: str, repo: str) -> RepoSettings:
         """The default branch's settings as the App reads them, served stale while they revalidate.
 
-        Reads as empty when the App cannot reach the repository.
+        Unreadable settings read as empty without a usable cache; failed refreshes retain good values.
         """
         from langgraph_api.cache import swr
 
         async def load() -> RepoSettings:
             try:
                 async with GitHubClient.as_app(owner, repo) as github:
-                    return await cls.fetch(github.repo(owner, repo))
+                    return await cls.fetch(github.repo(owner, repo), strict=True)
             except GitHubAppUnavailable:
                 logger.warning(
                     "No GitHub App token to read repository settings",
@@ -273,7 +351,15 @@ class RepoSettings(BaseModel):
                 return cls()
 
         key = f"repo-settings:{owner}/{repo}".lower()
-        result = await swr(
-            key, load, fresh_for=SETTINGS_FRESH_FOR, max_age=SETTINGS_MAX_AGE, model=cls
-        )
+        try:
+            result = await swr(
+                key, load, fresh_for=SETTINGS_FRESH_FOR, max_age=SETTINGS_MAX_AGE, model=cls
+            )
+        except RepoFileUnreadableError:
+            logger.warning(
+                "Repository settings unavailable without a usable cache; reading as empty",
+                extra={"repository": f"{owner}/{repo}"},
+                exc_info=True,
+            )
+            return cls()
         return result.value
