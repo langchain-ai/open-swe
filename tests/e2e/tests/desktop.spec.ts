@@ -393,7 +393,13 @@ test("Desktop links supersede startup loading", async () => {
       protocol.unhandle("open-swe");
       protocol.handle("open-swe", () => new Response("Ready"));
     });
+    const desktopWindow = await electronApp.browserWindow(page);
     await page.goto("data:text/html,Reload fixture");
+    await expect
+      .poll(() =>
+        desktopWindow.evaluate((window) => window.webContents.isLoading()),
+      )
+      .toBe(false);
     await electronApp.evaluate(({ app, Menu }) => {
       Menu.getApplicationMenu()
         ?.items.find((item) => item.label === "View")
@@ -419,6 +425,11 @@ test("Desktop links supersede startup loading", async () => {
       await electronApp.evaluate(({ clipboard }) => clipboard.readText()),
     ).toBe("https://desktop.test/agents/reviews/a/b/1?tab=changes#file-1");
     await page.goto("data:text/html,Non-app page");
+    await expect
+      .poll(() =>
+        desktopWindow.evaluate((window) => window.webContents.isLoading()),
+      )
+      .toBe(false);
     await electronApp.evaluate(({ Menu }) => {
       Menu.getApplicationMenu()
         ?.items.find((item) => item.label === "View")
