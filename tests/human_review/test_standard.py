@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
@@ -1034,17 +1034,24 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
             updated_at="",
         )
 
-    async def pull(self) -> dict[str, object]:
-        author = "ada" if self.number == 10 else "grace"
-        return {
-            "state": "open",
-            "user": {"login": author},
-            "title": f"PR {self.number}",
-            "draft": self.number == 31,
-        }
-
-    async def states(pull, author):
-        return {5: {"ada": "APPROVED"}, 20: {"ada": "CHANGES_REQUESTED"}}.get(pull.number, {})
+    async def graphql(
+        github: GitHubClient, query: str, variables: Mapping[str, object], *, partial: bool
+    ) -> dict[str, object]:
+        assert variables["reviewer"] == "ada"
+        data: dict[str, object] = {}
+        for key, number in variables.items():
+            if key.startswith("number"):
+                review = [{"state": "APPROVED"}] if number == 5 else []
+                data[f"pull{key.removeprefix('number')}"] = {
+                    "pullRequest": {
+                        "state": "OPEN",
+                        "isDraft": number == 31,
+                        "title": f"PR {number}",
+                        "author": {"login": "ada" if number == 10 else "grace"},
+                        "reviews": {"nodes": review},
+                    }
+                }
+        return data
 
     async def tentative(self) -> frozenset[UUID]:
         return frozenset({ada.id} if self.request.pull_request.number in {7, 14} else {grace.id})
@@ -1052,13 +1059,12 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
     with (
         patch("openswe.human_review.routes.GitHubClient.as_user", as_user),
         patch.object(RepoClient, "info", info),
-        patch.object(PullRequestClient, "pull", pull),
+        patch.object(GitHubClient, "graphql", graphql),
         patch.object(TentativeReviewers, "user_ids", tentative),
         patch(
             "openswe.human_review.review_queue.accessible_repo_full_names",
             AsyncMock(return_value=frozenset({"o/r"})),
         ),
-        patch("openswe.human_review.review_queue.latest_review_states", states),
         patch("openswe.human_review.review_queue.list_open_pull_requests", search),
     ):
         result = await api_review_assignments(page=1, session={"sub": "ada"})
@@ -1070,6 +1076,54 @@ async def test_assignment_inbox_is_personal_and_hides_completed_or_inaccessible_
         (22, "draft"),
         (30, "speculative"),
     ]
+
+
+async def test_queued_pull_requests_are_read_in_batched_graphql() -> None:
+    from openswe.github.pull_request_status import QueuedPullRequestRead
+
+    queries: list[Mapping[str, object]] = []
+
+    async def graphql(
+        github: GitHubClient, query: str, variables: Mapping[str, object], *, partial: bool
+    ) -> dict[str, object]:
+        queries.append(variables)
+        return {
+            f"pull{key.removeprefix('number')}": None
+            if number == 7
+            else {
+                "pullRequest": {
+                    "state": "OPEN" if number != 8 else "CLOSED",
+                    "isDraft": False,
+                    "title": f"PR {number}",
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "updatedAt": None,
+                    "author": None,
+                    "reviews": {"nodes": [{"state": "DISMISSED"}]},
+                }
+            }
+            for key, number in variables.items()
+            if key.startswith("number")
+        }
+
+    refs = [("o", "r", number) for number in range(1, 121)]
+    request = AsyncMock(side_effect=AssertionError("REST read"))
+    with (
+        patch.object(GitHubClient, "graphql", graphql),
+        patch.object(GitHubClient, "request", request),
+    ):
+        read = await QueuedPullRequestRead.read(GitHubClient(MagicMock()), refs, "ada")
+    assert [len(variables) for variables in queries] == [1 + 3 * 50, 1 + 3 * 50, 1 + 3 * 20]
+    assert read[6] is None
+    assert read[7] == QueuedPullRequestRead(
+        open=False,
+        draft=False,
+        title="PR 8",
+        created_at="2026-01-01T00:00:00Z",
+        updated_at=None,
+        author=None,
+        standing_review="DISMISSED",
+    )
+    assert [found.title if found else None for found in read[118:]] == ["PR 119", "PR 120"]
 
 
 @asynccontextmanager

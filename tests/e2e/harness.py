@@ -1755,6 +1755,35 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
             {"data": {"markPullRequestReadyForReview": {"pullRequest": {"isDraft": False}}}}
         )
     viewer = _token_login(request)
+    if "QueuedPullRequests" in query:
+        data: dict[str, object] = {}
+        for key, number in variables.items():
+            if not key.startswith("number"):
+                continue
+            suffix = key.removeprefix("number")
+            pr = fakes.find_pull(number, variables[f"owner{suffix}"], variables[f"repo{suffix}"])
+            if pr is None:
+                data[f"pull{suffix}"] = None
+                continue
+            reviews = [
+                {"state": review["state"]}
+                for index, raw in enumerate(pr["reviews"])
+                if (review := fakes.review_rest_json(raw, index))["user"]["login"].lower()
+                == variables["reviewer"].lower()
+                and review["state"] in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
+            ]
+            data[f"pull{suffix}"] = {
+                "pullRequest": {
+                    "state": "MERGED" if pr["merged"] else pr["state"].upper(),
+                    "isDraft": pr["draft"],
+                    "title": pr["title"],
+                    "createdAt": pr["created_at"],
+                    "updatedAt": pr["updated_at"],
+                    "author": {"login": pr["author"]} if pr["author"] else None,
+                    "reviews": {"nodes": reviews[-1:]},
+                }
+            }
+        return JSONResponse({"data": data})
     mutation_input = variables.get("input")
     if "addPullRequestReviewThread" in query and isinstance(mutation_input, dict):
         comment = fakes.add_review_thread(viewer, mutation_input)

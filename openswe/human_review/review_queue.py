@@ -10,7 +10,6 @@ approved or requested changes on drops off, unless GitHub asks them to review it
 
 import asyncio
 import logging
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Literal, Self
@@ -19,9 +18,12 @@ import httpx2
 from fastapi import HTTPException
 
 from openswe.dashboard.profiles import PROFILES
-from openswe.expedited_review.readiness import latest_review_states
 from openswe.github.http import GitHubClient, GitHubError
-from openswe.github.pull_request_status import OpenPullRequest, list_open_pull_requests
+from openswe.github.pull_request_status import (
+    OpenPullRequest,
+    QueuedPullRequestRead,
+    list_open_pull_requests,
+)
 from openswe.github.pull_request_status import ReviewAssignment as Assignment
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repos import accessible_repo_full_names
@@ -196,81 +198,59 @@ class ReviewQueue:
         readable = await asyncio.gather(*(self.readable(name) for name in names))
         return {name.lower() for name, ok in zip(names, readable, strict=True) if ok}
 
-    async def _live(self, queued: QueuedPullRequest) -> Mapping[str, object] | None:
-        """The open PR's GitHub payload, or ``None`` once it is closed or unreadable."""
-        pull = self.github.repo(queued.ref.owner, queued.ref.repo).pull_request(queued.ref.number)
-        try:
-            payload = await pull.pull()
-        except GitHubError, httpx2.HTTPError, ValueError:
-            logger.warning(
-                "Could not read a mentioned pull request",
-                extra={"pr_url": queued.ref.url},
-                exc_info=True,
-            )
-            return None
-        return payload if payload.get("state") == "open" else None
-
-    async def _row(self, queued: QueuedPullRequest) -> tuple[OpenPullRequest, str] | None:
-        """The row and the PR's author, or ``None`` for a closed PR this person wrote."""
-        ref = queued.ref
-        if (listed := queued.listed) is not None:
-            return listed, listed.author or ""
+    def _row(
+        self, queued: QueuedPullRequest, live: QueuedPullRequestRead
+    ) -> OpenPullRequest | None:
+        """The row, unless this person wrote the PR or already approved or blocked it."""
         if (request := queued.request) is not None:
             pr = request.pull_request
+            author = pr.author
             row = OpenPullRequest(
                 repo=pr.repo_full_name,
-                number=ref.number,
+                number=queued.ref.number,
                 title=pr.title,
                 created_at=request.created_at.isoformat() if request.created_at else None,
                 updated_at=request.updated_at.isoformat() if request.updated_at else None,
                 details_loading=True,
                 assignment=queued.assignment,
             )
-            return row, pr.author
-        payload = await self._live(queued)
-        if payload is None:
-            return None
-        user = payload.get("user")
-        author = user.get("login") if isinstance(user, Mapping) else None
-        if not isinstance(author, str) or author.lower() == self.login.lower():
-            return None
-        if queued.assignment == "speculative" and payload.get("draft") is not False:
-            return None
-        created, updated, title = (payload.get(k) for k in ("created_at", "updated_at", "title"))
-        row = OpenPullRequest(
-            repo=queued.repo_full_name,
-            number=ref.number,
-            title=title if isinstance(title, str) else "",
-            created_at=created if isinstance(created, str) else None,
-            updated_at=updated if isinstance(updated, str) else None,
-            details_loading=True,
-            assignment=queued.assignment,
-        )
-        return row, author
-
-    async def pending(self, queued: QueuedPullRequest) -> OpenPullRequest | None:
-        """The row, unless this person wrote the PR or already approved or blocked it."""
-        ref = queued.ref
-        pull = self.github.repo(ref.owner, ref.repo).pull_request(ref.number)
-        async with self._gate:
-            found = await self._row(queued)
-            if found is None:
+        else:
+            # GitHub names a deleted account's pull requests' author null.
+            author = live.author or ""
+            if not live.open or author.lower() == self.login.lower():
                 return None
-            row, author = found
-            if queued.listed is not None:
-                return row
-            states = await latest_review_states(pull, author)
-        if states is None:
-            if queued.assignment == "assigned":
-                raise HTTPException(502, "Could not load assigned reviews from GitHub")
-            logger.warning("Could not read a queued PR's reviews", extra={"pr_url": ref.url})
-            return None
-        if any(
-            who.lower() == self.login.lower() and state in {"APPROVED", "CHANGES_REQUESTED"}
-            for who, state in states.items()
-        ):
+            if queued.assignment == "speculative" and live.draft is not False:
+                return None
+            row = OpenPullRequest(
+                repo=queued.repo_full_name,
+                number=queued.ref.number,
+                title=live.title,
+                created_at=live.created_at,
+                updated_at=live.updated_at,
+                details_loading=True,
+                assignment=queued.assignment,
+            )
+        if author.lower() != self.login.lower() and live.standing_review in {
+            "APPROVED",
+            "CHANGES_REQUESTED",
+        }:
             return None
         return row
+
+    async def pending(self, queued: list[QueuedPullRequest]) -> list[OpenPullRequest]:
+        """The rows of ``queued`` GitHub's search did not list, read in batches."""
+        refs = [(item.ref.owner, item.ref.repo, item.ref.number) for item in queued]
+        rows: list[OpenPullRequest] = []
+        for item, live in zip(
+            queued, await QueuedPullRequestRead.read(self.github, refs, self.login), strict=True
+        ):
+            if live is None:
+                if item.assignment == "assigned":
+                    raise HTTPException(502, "Could not load assigned reviews from GitHub")
+                logger.warning("Could not read a queued PR", extra={"pr_url": item.ref.url})
+            elif (row := self._row(item, live)) is not None:
+                rows.append(row)
+        return rows
 
     async def rows(
         self, sort: Literal["created", "updated"], direction: Literal["asc", "desc"]
@@ -296,8 +276,8 @@ class ReviewQueue:
             if item.repo_full_name.lower() in allowed and item.key not in seen:
                 seen.add(item.key)
                 distinct.append(item)
-        loaded = await asyncio.gather(*(self.pending(item) for item in distinct))
-        rows = [row for row in loaded if row is not None]
+        rows = [item.listed for item in distinct if item.listed is not None]
+        rows += await self.pending([item for item in distinct if item.listed is None])
         rows.sort(
             key=lambda row: (
                 (row.created_at if sort == "created" else row.updated_at) or "",

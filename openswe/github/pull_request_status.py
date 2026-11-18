@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, Self
+from typing import Any, ClassVar, Literal, Self
 from urllib.parse import quote
 
 import httpx2
@@ -291,6 +291,89 @@ class OpenPullRequests(BaseModel):
     next_page: int | None
     incomplete: bool
     updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class QueuedPullRequestRead:
+    """What a To Review list needs of a pull request, with its reviewer's standing review.
+
+    ``standing_review`` is the reviewer's latest ``APPROVED``, ``CHANGES_REQUESTED`` or
+    ``DISMISSED`` review, ``None`` when they left none.
+    """
+
+    open: bool
+    draft: bool | None
+    title: str
+    created_at: str | None
+    updated_at: str | None
+    author: str | None
+    standing_review: str | None
+
+    BATCH: ClassVar[int] = 50
+    _FIELDS: ClassVar[str] = (
+        "state isDraft title createdAt updatedAt author { login } "
+        "reviews(author: $reviewer, states: [APPROVED, CHANGES_REQUESTED, DISMISSED], last: 1)"
+        " { nodes { state } }"
+    )
+
+    @classmethod
+    async def read(
+        cls, github: GitHubClient, refs: Sequence[tuple[str, str, int]], reviewer: str
+    ) -> list[Self | None]:
+        """Each ``(owner, repo, number)`` in order, ``None`` where GitHub could not read it.
+
+        One GraphQL query per ``BATCH`` pull requests, instead of a REST read of each.
+        """
+        batches = [refs[start : start + cls.BATCH] for start in range(0, len(refs), cls.BATCH)]
+        with MeteredTransport.attributed():
+            read = await asyncio.gather(*(cls._batch(github, batch, reviewer) for batch in batches))
+        return [found for batch in read for found in batch]
+
+    @classmethod
+    async def _batch(
+        cls, github: GitHubClient, refs: Sequence[tuple[str, str, int]], reviewer: str
+    ) -> list[Self | None]:
+        variables: dict[str, object] = {"reviewer": reviewer}
+        params = ["$reviewer: String!"]
+        fields: list[str] = []
+        for i, (owner, repo, number) in enumerate(refs):
+            variables |= {f"owner{i}": owner, f"repo{i}": repo, f"number{i}": number}
+            params.append(f"$owner{i}: String!, $repo{i}: String!, $number{i}: Int!")
+            fields.append(
+                f"pull{i}: repository(owner: $owner{i}, name: $repo{i})"
+                f" {{ pullRequest(number: $number{i}) {{ {cls._FIELDS} }} }}"
+            )
+        query = f"query QueuedPullRequests({', '.join(params)}) {{ {' '.join(fields)} }}"
+        try:
+            # Partial, so a deleted or hidden pull request comes back null beside the others.
+            data = await github.graphql(query, variables, partial=True)
+        except httpx2.HTTPError, ValueError:
+            logger.warning(
+                "Could not read queued pull requests", extra={"count": len(refs)}, exc_info=True
+            )
+            return [None] * len(refs)
+        return [cls._of(data.get(f"pull{i}")) for i in range(len(refs))]
+
+    @classmethod
+    def _of(cls, repository: object) -> Self | None:
+        pull = _graphql_pull({"repository": repository})
+        reviews = pull.get("reviews") if pull is not None else None
+        nodes = reviews.get("nodes") if isinstance(reviews, Mapping) else None
+        if pull is None or not isinstance(nodes, list):
+            return None
+        author = pull.get("author")
+        latest = nodes[-1] if nodes else None
+        return cls(
+            open=pull.get("state") == "OPEN",
+            draft=_as_optional_bool(pull.get("isDraft")),
+            title=_as_str(pull.get("title"), ""),
+            created_at=_as_optional_str(pull.get("createdAt")),
+            updated_at=_as_optional_str(pull.get("updatedAt")),
+            author=_as_optional_str(author.get("login")) if isinstance(author, Mapping) else None,
+            standing_review=(
+                _as_optional_str(latest.get("state")) if isinstance(latest, Mapping) else None
+            ),
+        )
 
 
 def _as_str(value: object, default: str) -> str:
