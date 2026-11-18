@@ -1,4 +1,7 @@
-import { STREAM_PREFERENCE_STORAGE_KEY } from "@/lib/streamPreference"
+import {
+  STREAM_PREFERENCE_DEFAULT,
+  STREAM_PREFERENCE_STORAGE_KEY,
+} from "@/lib/streamPreference"
 import { agentsLangGraphApiUrl } from "./api"
 import { SIDEBAR_PREFS_STORAGE_KEY } from "./sidebarPrefs"
 import { SIDEBAR_PAGE_SIZE } from "./queries"
@@ -16,32 +19,42 @@ const AGENTS_HOME_RE = /^\/agents\/?$/
  * wrong parameter costs a whole duplicate request.
  */
 function warmApiRequests(
-  thread: { state: string; transcript: string; summary: string } | null,
+  thread: {
+    state: string
+    runningRun: string
+    transcript: string
+    summary: string
+  } | null,
   sidebarPath: string | null,
   prefsKey: string,
   streamPreferenceKey: string,
+  streamPreferenceDefault: boolean,
   pageSize: number
 ) {
   if (document.readyState !== "loading") return
 
   const targets: Array<{ url: string; dashboard: boolean }> = []
   if (thread) {
-    let prefersStream = false
+    let prefersStream = streamPreferenceDefault
     try {
-      prefersStream = localStorage.getItem(streamPreferenceKey) === "true"
+      const stored = localStorage.getItem(streamPreferenceKey)
+      if (stored !== null) prefersStream = stored === "true"
     } catch {
-      // An unreadable preference just means the default, the transcript view.
+      // An unreadable preference just means the default.
     }
     // For a thread the transcript log records, the setting picks the view, and
     // each view reads only its own source. A thread the log doesn't record opens
     // in the stream view either way, and its state read waits for the summary.
     // That is on purpose: warming the state too would waste it on every other thread.
-    targets.push(
-      prefersStream
-        ? { url: thread.state, dashboard: false }
-        : { url: thread.transcript, dashboard: true },
-      { url: thread.summary, dashboard: true }
-    )
+    if (prefersStream) {
+      targets.push(
+        { url: thread.state, dashboard: false },
+        { url: thread.runningRun, dashboard: false }
+      )
+    } else {
+      targets.push({ url: thread.transcript, dashboard: true })
+    }
+    targets.push({ url: thread.summary, dashboard: true })
   }
   if (sidebarPath) {
     let includeAutomations = false
@@ -206,6 +219,19 @@ function threadStateUrl(threadId: string): string {
   return `${agentsLangGraphApiUrl}/threads/${threadId}/state?${search}`
 }
 
+/**
+ * The stream's first lookup for a running run, which it sends with the state
+ * read and joins once both have answered.
+ */
+function threadRunningRunUrl(threadId: string): string {
+  const search = new URLSearchParams({
+    limit: "1",
+    offset: "0",
+    status: "running",
+  })
+  return `${agentsLangGraphApiUrl}/threads/${threadId}/runs?${search}`
+}
+
 /** What `agentsApi.getThread` requests. The thread page waits on it to show the thread. */
 function threadSummaryUrl(threadId: string): string {
   return `${agentsLangGraphApiUrl}/threads/${threadId}`
@@ -237,6 +263,7 @@ export function apiWarmupScript(pathname: string): string | null {
       threadId
         ? {
             state: threadStateUrl(threadId),
+            runningRun: threadRunningRunUrl(threadId),
             transcript: threadTranscriptUrl(threadId),
             summary: threadSummaryUrl(threadId),
           }
@@ -245,6 +272,7 @@ export function apiWarmupScript(pathname: string): string | null {
     JSON.stringify(sidebarPageEndpoint()),
     JSON.stringify(SIDEBAR_PREFS_STORAGE_KEY),
     JSON.stringify(STREAM_PREFERENCE_STORAGE_KEY),
+    JSON.stringify(STREAM_PREFERENCE_DEFAULT),
     JSON.stringify(SIDEBAR_PAGE_SIZE),
   ].join(",")
   return `(${warmApiRequests.toString()})(${args});`

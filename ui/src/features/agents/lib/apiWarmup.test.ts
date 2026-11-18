@@ -6,7 +6,10 @@ import { createElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { clearPerfSpans, getPerfSpans } from "@/lib/perf/trace"
-import { STREAM_PREFERENCE_STORAGE_KEY } from "@/lib/streamPreference"
+import {
+  STREAM_PREFERENCE_STORAGE_KEY,
+  readPreference,
+} from "@/lib/streamPreference"
 import { agentsApi } from "./api"
 import { apiWarmupScript } from "./apiWarmup"
 import { SIDEBAR_PAGE_SIZE, sidebarRecentsParams } from "./queries"
@@ -19,6 +22,7 @@ const THREAD_ID = "1dd69115-f4b9-507f-b4d5-9f355f9f5ba0"
 const SUMMARY_PATH = `/dashboard/api/threads/${THREAD_ID}`
 const STATE_PATH = `${SUMMARY_PATH}/state`
 const TRANSCRIPT_PATH = `${SUMMARY_PATH}/transcript`
+const RUNS_PATH = `${SUMMARY_PATH}/runs`
 const SIDEBAR_PATH = "/dashboard/api/threads/page"
 
 function setReadyState(value: DocumentReadyState) {
@@ -76,6 +80,16 @@ function requestsTo(
 ): Array<Parameters<typeof window.fetch>> {
   return fetch.mock.calls.filter(
     ([input]) => new URL(requestUrl(input)).pathname === path
+  )
+}
+
+function runLookups(
+  fetch: ReturnType<typeof stubFetch>,
+  status: "running" | "pending"
+): Array<Parameters<typeof window.fetch>> {
+  return requestsTo(fetch, RUNS_PATH).filter(
+    ([input]) =>
+      new URL(requestUrl(input)).searchParams.get("status") === status
   )
 }
 
@@ -175,6 +189,7 @@ describe("apiWarmupScript", () => {
     run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
     expect(original).toHaveBeenCalledTimes(3)
     expect(requestsTo(original, STATE_PATH)).toHaveLength(0)
+    expect(requestsTo(original, RUNS_PATH)).toHaveLength(0)
 
     for (const path of [TRANSCRIPT_PATH, SUMMARY_PATH, SIDEBAR_PATH]) {
       const [warmed] = requestsTo(original, path)
@@ -235,24 +250,61 @@ describe("apiWarmupScript", () => {
     expect(window.fetch).toBe(original)
   })
 
-  it("hands the warmed thread state to the thread page's stream under the SDK useStream setting", async () => {
+  it.each([null, "false"])(
+    "warms the view the app reads when the stored setting is %s",
+    (stored) => {
+      vi.stubGlobal("localStorage", {
+        getItem: (key: string) =>
+          key === STREAM_PREFERENCE_STORAGE_KEY ? stored : null,
+      })
+      setReadyState("loading")
+      const original = stubFetch()
+      run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+
+      const warmed = readPreference() ? STATE_PATH : TRANSCRIPT_PATH
+      const skipped = readPreference() ? TRANSCRIPT_PATH : STATE_PATH
+      expect(requestsTo(original, warmed)).toHaveLength(1)
+      expect(requestsTo(original, skipped)).toHaveLength(0)
+    }
+  )
+
+  it("hands the warmed state and running-run lookup to the thread page's stream under the SDK useStream setting", async () => {
     stubStreamPreference()
     setReadyState("loading")
-    const original = stubAgentServer()
+    const network = stubAgentServer()
     run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
-    expect(requestsTo(original, TRANSCRIPT_PATH)).toHaveLength(0)
+    network.mockClear()
+    const asked = vi.fn(window.fetch)
+    window.fetch = asked
 
     mountThreadStream()
-    // The stream lists the thread's runs once it has read the state.
-    await waitFor(() =>
-      expect(
-        original.mock.calls.some(([input]) =>
-          new URL(requestUrl(input)).pathname.endsWith("/runs")
-        )
-      ).toBe(true)
-    )
+    await waitFor(() => expect(runLookups(asked, "pending")).toHaveLength(1))
 
-    expect(requestsTo(original, STATE_PATH)).toHaveLength(1)
+    expect(
+      runLookups(asked, "running"),
+      "the stream's lookups, with the read and after it"
+    ).toHaveLength(2)
+    expect(
+      runLookups(network, "running"),
+      "only the lookup after the read reaches the server"
+    ).toHaveLength(1)
+    expect(requestsTo(network, STATE_PATH)).toHaveLength(0)
+  })
+
+  it("warms the running-run lookup as the thread stream sends it with its state read", async () => {
+    stubStreamPreference()
+    const own = stubAgentServer()
+    mountThreadStream()
+    await waitFor(() => expect(runLookups(own, "pending")).toHaveLength(1))
+    const [sentWithRead] = runLookups(own, "running")
+
+    setReadyState("loading")
+    const network = stubAgentServer()
+    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+
+    expect(runLookups(network, "running").map(asSent)).toEqual([
+      asSent(sentWithRead!),
+    ])
   })
 
   it("times a completed warmup from its start to its response, not its later handoff", async () => {
