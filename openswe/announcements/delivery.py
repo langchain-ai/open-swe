@@ -9,6 +9,8 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from runtime_api.slack import SlackNotice
+
 from openswe.announcements.models import Announcement, DeliveryStatus
 from openswe.jobs import queue
 from openswe.slack.dm import post_dm
@@ -28,6 +30,7 @@ def announcement_blocks(text: str) -> list[dict[str, Any]]:
         {"type": "section", "text": {"type": "mrkdwn", "text": text}},
         {
             "type": "context",
+            "block_id": SlackNotice(kind="announcement", key=text).block_id,
             "elements": [{"type": "mrkdwn", "text": "An update from the Robin team"}],
         },
     ]
