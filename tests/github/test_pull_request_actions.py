@@ -54,30 +54,27 @@ async def test_withdrawal_spares_only_the_live_head_and_reports_refusals(
 ) -> None:
     from openswe.review.approval_withdrawal import ApprovalWithdrawal
 
-    def review(review_id: int, login: str, state: str, commit: str) -> dict[str, object]:
-        return {
-            "id": review_id,
-            "user": {"id": review_id, "login": login},
-            "state": state,
-            "commit_id": commit,
-        }
-
-    reviews = [
-        review(1, "open-swe[bot]", "APPROVED", "old"),
-        review(2, "alice", "APPROVED", "old"),
-        review(3, "open-swe[bot]", "APPROVED", "new"),
-        review(4, "open-swe[bot]", "COMMENTED", "old"),
-        review(5, "Open-SWE-Preview[bot]", "APPROVED", "old"),
-        review(6, "openswe-dev[bot]", "APPROVED", "old"),
-        review(7, "open-swe[bot]", "APPROVED", "new"),
+    specs = [
+        (1, "open-swe[bot]", "APPROVED", "old"),
+        (2, "alice", "APPROVED", "old"),
+        (3, "open-swe[bot]", "APPROVED", "new"),
+        (4, "open-swe[bot]", "COMMENTED", "old"),
+        (5, "Open-SWE-Preview[bot]", "APPROVED", "old"),
+        (6, "openswe-dev[bot]", "APPROVED", "old"),
+        (7, "open-swe[bot]", "APPROVED", "new"),
     ]
+    reviews = [
+        {"id": i, "user": {"id": i, "login": login}, "state": state, "commit_id": commit}
+        for i, login, state, commit in specs
+    ]
+    approvals = [(login, commit) for _, login, state, commit in specs if state == "APPROVED"]
     dismissals: list[int] = []
 
     def github(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/graphql":
+            return httpx2.Response(200, json=_standing_approvals(approvals, head="new"))
         if request.method == "GET":
-            if request.url.path.endswith("/reviews"):
-                return httpx2.Response(200, json=reviews)
-            return httpx2.Response(200, json={"head": {"sha": "new"}})
+            return httpx2.Response(200, json=reviews)
         review_id = int(request.url.path.split("/")[-2])
         dismissals.append(review_id)
         # A submitted review can't be deleted, so a 404 is a refusal like a 403.
@@ -95,6 +92,44 @@ async def test_withdrawal_spares_only_the_live_head_and_reports_refusals(
             assert await withdrawal.run(pull) == "new"
 
     assert set(dismissals) == dismissed
+
+
+def _standing_approvals(approvals: list[tuple[str, str]], *, head: str) -> dict[str, object]:
+    """GraphQL's answer, which names an app author by its slug."""
+    nodes = [
+        {"author": {"login": login.removesuffix("[bot]")}, "commit": {"oid": commit}}
+        for login, commit in approvals
+    ]
+    return {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "headRefOid": head,
+                    "reviews": {"pageInfo": {"hasNextPage": False}, "nodes": nodes},
+                }
+            }
+        }
+    }
+
+
+@pytest.mark.parametrize("keep_head", [True, False])
+async def test_withdrawal_reads_once_when_robin_has_nothing_to_withdraw(keep_head: bool) -> None:
+    from openswe.review.approval_withdrawal import ApprovalWithdrawal
+
+    # Another reviewer's approval, plus Robin's of the head only when it is kept.
+    approvals = [("alice", "old")] + ([("robin-agent[bot]", "new")] if keep_head else [])
+    requests: list[str] = []
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        requests.append(f"{request.method} {request.url.path}")
+        return httpx2.Response(200, json=_standing_approvals(approvals, head="new"))
+
+    withdrawal = ApprovalWithdrawal(owner="acme", repo="app", number=9, keep_head=keep_head)
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(9)
+        assert await withdrawal.run(pull) == "new"
+
+    assert requests == ["POST /graphql"]
 
 
 @pytest.mark.parametrize("status,merged", [(200, True), (200, False), (409, False), (403, False)])

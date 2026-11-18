@@ -20,7 +20,7 @@ from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
 from openswe.github.ci import unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
 from openswe.github.metering import MeteredTransport
-from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
+from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS, OPEN_SWE_GITHUB_LOGINS
 from openswe.github.queue import QueuePull, Review, ReviewPage
 
 logger = logging.getLogger(__name__)
@@ -171,6 +171,19 @@ query PullRequestThreadCount($owner: String!, $repo: String!, $number: Int!, $cu
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes { isResolved }
+      }
+    }
+  }
+}
+"""
+_STANDING_APPROVALS_QUERY = """
+query PullRequestStandingApprovals($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      headRefOid
+      reviews(states: APPROVED, first: 100) {
+        pageInfo { hasNextPage }
+        nodes { author { login } commit { oid } }
       }
     }
   }
@@ -533,6 +546,21 @@ class ReviewState:
 
     unresolved_threads: int | None
     review_required: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class StandingApprovals:
+    """A pull request's head and the commits Robin's standing approvals of it are of.
+
+    A ``None`` commit is one GitHub no longer names, or the unread rest past the first page.
+    """
+
+    head: str
+    open_swe_commits: tuple[str | None, ...]
+
+    def any_besides(self, commit: str | None) -> bool:
+        """Whether Robin approves anything but ``commit``; ``None`` spares nothing."""
+        return any(approved is None or approved != commit for approved in self.open_swe_commits)
 
 
 class _GraphqlNode(BaseModel):
@@ -936,6 +964,33 @@ class PullRequestClient:
             f"repos/{self.repo.full_name}/pulls/{self.number}/reviews/{review_id}/dismissals",
             json={"message": message, "event": "DISMISS"},
         )
+
+    async def standing_approvals(self) -> StandingApprovals:
+        """The head and Robin's standing approvals, in one GraphQL read."""
+        pull = _graphql_pull(
+            await self.repo.graphql(_STANDING_APPROVALS_QUERY, {"number": self.number})
+        )
+        head = pull.get("headRefOid") if pull is not None else None
+        reviews = pull.get("reviews") if pull is not None else None
+        if (
+            not isinstance(head, str)
+            or not isinstance(reviews, Mapping)
+            or not isinstance(nodes := reviews.get("nodes"), list)
+        ):
+            raise ValueError("GitHub answered the pull request without its head or approvals")
+        commits: list[str | None] = []
+        for node in nodes:
+            author = node.get("author") if isinstance(node, Mapping) else None
+            login = author.get("login") if isinstance(author, Mapping) else None
+            if not isinstance(login, str) or login.lower() not in OPEN_SWE_AUTHOR_LOGINS:
+                continue
+            commit = node.get("commit")
+            oid = commit.get("oid") if isinstance(commit, Mapping) else None
+            commits.append(oid if isinstance(oid, str) else None)
+        page_info = reviews.get("pageInfo")
+        if not isinstance(page_info, Mapping) or page_info.get("hasNextPage") is not False:
+            commits.append(None)
+        return StandingApprovals(head=head, open_swe_commits=tuple(commits))
 
     async def withdraw_open_swe_approvals(
         self,

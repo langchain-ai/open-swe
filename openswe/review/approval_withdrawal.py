@@ -39,17 +39,17 @@ class ApprovalWithdrawal(BaseModel):
 
     async def run(self, pull: PullRequestClient) -> str:
         """Dismiss the approvals and return the live head; raises unless GitHub dismissed them all."""
-        head = (await pull.pull()).get("head")
-        if not isinstance(head, dict) or not isinstance(sha := head.get("sha"), str):
-            raise ValueError("GitHub answered the pull request without its head")
+        # One GraphQL read settles the common case, a pull request Robin has no stale approval on.
+        standing = await pull.standing_approvals()
+        keep = standing.head if self.keep_head else None
+        if not standing.any_besides(keep):
+            return standing.head
         refused = await pull.withdraw_open_swe_approvals(
-            reason=self.reason,
-            keep_commit=sha if self.keep_head else None,
-            scope_to_review_id=self.review_id,
+            reason=self.reason, keep_commit=keep, scope_to_review_id=self.review_id
         )
         if refused:
             raise RuntimeError(f"GitHub did not dismiss Robin reviews {refused}")
-        return sha
+        return standing.head
 
     async def attempt(self, *, token: str | None = None) -> str | None:
         """Run now, as ``token`` or else the App; the live head, or ``None`` once queued to retry."""
