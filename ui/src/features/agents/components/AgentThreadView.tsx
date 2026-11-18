@@ -906,37 +906,41 @@ export function AgentThreadView({
           </>
         )}
         {thread.status === "error" && !reconnect.label && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
+          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3 empty:hidden">
             <Banner
+              key={`${thread.id}:${thread.latestRunId ?? ""}`}
               intent="error"
-              action={
-                thread.traceUrl ? (
-                  <Button
-                    as={
-                      <a
-                        href={thread.traceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      />
-                    }
-                    color="secondary"
-                    variant="underlined"
-                    size="md"
-                  >
-                    Open trace
-                  </Button>
-                ) : undefined
-              }
+              icon={null}
+              dismissible
+              className="gap-space-4"
             >
-              <Text as="span" variant="sm" color="secondary">
-                The last run hit an error before it could finish. Send another
-                message to retry.
-              </Text>{" "}
-              <CopyErrorButton
-                error="The last run hit an error before it could finish."
-                details={{ Thread: thread.id, Trace: thread.traceUrl }}
-                className="-my-space-1 align-middle"
-              />
+              <div className="flex flex-wrap items-center justify-between gap-x-space-4 gap-y-space-2">
+                <Text as="p" variant="sm" color="secondary">
+                  The run failed. Send a message to retry.
+                </Text>
+                <div className="flex items-center gap-space-4">
+                  <CopyErrorButton
+                    error="The last run hit an error before it could finish."
+                    details={{ Thread: thread.id, Trace: thread.traceUrl }}
+                  />
+                  {thread.traceUrl && (
+                    <Button
+                      as={
+                        <a
+                          href={thread.traceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        />
+                      }
+                      color="secondary"
+                      variant="plain"
+                      size="xs"
+                    >
+                      Open trace
+                    </Button>
+                  )}
+                </div>
+              </div>
             </Banner>
           </div>
         )}
