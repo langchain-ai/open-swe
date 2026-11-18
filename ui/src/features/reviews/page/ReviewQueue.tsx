@@ -115,8 +115,7 @@ export function useReviewQueue(pr: PullRequestRef): ReviewQueue | null {
       },
       search: { queue },
     })
-  const exit = () =>
-    void navigate({ to: "/agents/reviews", search: { tab: "to-review" } })
+  const exit = () => void navigate({ to: "/agents/reviews", search: {} })
   return {
     position: index + 1,
     total: queue.length,

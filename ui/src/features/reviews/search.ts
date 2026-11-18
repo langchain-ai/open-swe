@@ -104,7 +104,9 @@ export function validateReviewsSearch(
     .slice(0, 100)
   return {
     tab:
-      search.tab === "all" || search.tab === "to-review"
+      search.tab === "mine" ||
+      search.tab === "all" ||
+      search.tab === "to-review"
         ? search.tab
         : undefined,
     github:

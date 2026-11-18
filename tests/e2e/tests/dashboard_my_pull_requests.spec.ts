@@ -90,12 +90,20 @@ test.describe("my pull requests", () => {
       expect(delivered.ok()).toBeTruthy();
     }
     await openMine(page);
+    await page.getByRole("button", { name: "To Review", exact: true }).click();
+    await page.getByRole("button", { name: "Mine", exact: true }).click();
     const search = page.getByRole("textbox", { name: "Search pull requests" });
     await search.fill("aardvark");
     await expect(card(page, own)).toContainText(
       "Improve deployment reliability",
     );
     await expect(card(page, theirs)).toHaveCount(0);
+    await page.goBack();
+    await expect(
+      page.getByRole("button", { name: "To Review", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await page.goForward();
+    await expect(search).toHaveValue("aardvark");
     await search.blur();
     await page.keyboard.press("Control+k");
     await page
@@ -147,6 +155,51 @@ test.describe("my pull requests", () => {
 
     await expect(card(page, theirs)).toHaveCount(0);
     await expect(page.getByText("Someone else's change")).toHaveCount(0);
+  });
+
+  test("returns to Mine from a PR with an automatic review queue", async ({
+    page,
+  }) => {
+    const mine = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "My authored change",
+      draft: true,
+      ...approved,
+    });
+    const assigned = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Assigned to Alice",
+      author: "bob",
+      ...approved,
+    });
+    await page.request.post(
+      `/fake-gh/repos/${assigned.repo}/pulls/${assigned.number}/requested_reviewers`,
+      { data: { reviewers: [SAME_USER.login] } },
+    );
+    await openMine(page);
+    await card(page, mine)
+      .getByText("My authored change", { exact: true })
+      .click();
+    await page.getByRole("link", { name: "Reviewer", exact: true }).click();
+    await expect(
+      page.getByRole("group", { name: "Review queue" }),
+    ).toBeVisible();
+    await page
+      .getByRole("link", { name: "Back to reviews", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Mine", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await card(page, mine)
+      .getByText("My authored change", { exact: true })
+      .click();
+    await page.getByRole("link", { name: "Reviewer", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Stop reviewing one by one" })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Mine", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   test("queues requested reviews before own drafts and keeps marked-ready PRs open", async ({

@@ -121,7 +121,7 @@ export function Header({
         variant="plain"
         className="max-sm:hidden"
       >
-        <Link to="/agents/reviews" search={queue ? { tab: "to-review" } : {}} />
+        <Link to="/agents/reviews" search={{}} />
       </IconButton>
       <div className="min-w-0 flex-1">
         <div className="flex min-h-7 min-w-0 items-center gap-space-2">

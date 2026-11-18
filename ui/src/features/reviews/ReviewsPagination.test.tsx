@@ -28,8 +28,72 @@ vi.mock("./OpenPullRequests", () => ({
 
 afterEach(() => {
   cleanup()
+  window.localStorage.clear()
   vi.resetAllMocks()
 })
+
+it.each([
+  ["mine", "Mine"],
+  ["to-review", "To Review"],
+  ["all", "All Reviews"],
+])(
+  "restores %s on a bare list visit and honors explicit tabs",
+  async (tab, label) => {
+    window.localStorage.setItem("open-swe.reviews.tab", tab)
+    window.localStorage.setItem("open-swe.reviews.repo", '["acme/app"]')
+    vi.mocked(api.listReviews).mockResolvedValue({
+      reviews: [],
+      page: 0,
+      has_more: false,
+    })
+    const root = createRootRoute({ component: Outlet })
+    const pageRoute = Route.update({
+      getParentRoute: () => root,
+      path: "/agents/reviews/",
+    } as never)
+    const router = createRouter({
+      isServer: false,
+      routeTree: root.addChildren([pageRoute]),
+      history: createMemoryHistory({ initialEntries: ["/agents/reviews/"] }),
+    })
+    await router.load()
+    expect(router.state.location.search).toMatchObject({
+      tab,
+      repo: ["acme/app"],
+    })
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    )
+    expect(
+      screen.getByRole("button", { name: label }).getAttribute("aria-pressed")
+    ).toBe("true")
+
+    fireEvent.click(screen.getByRole("button", { name: "To Review" }))
+    await waitFor(() =>
+      expect(window.localStorage.getItem("open-swe.reviews.tab")).toBe(
+        "to-review"
+      )
+    )
+    await router.navigate({ to: "/agents/reviews", search: {} })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ tab: "to-review" })
+    )
+
+    await router.navigate({ to: "/agents/reviews", search: { tab: "mine" } })
+    await waitFor(() =>
+      expect(window.localStorage.getItem("open-swe.reviews.tab")).toBe("mine")
+    )
+    expect(
+      screen.getByRole("button", { name: "Mine" }).getAttribute("aria-pressed")
+    ).toBe("true")
+  }
+)
 
 it("shows immediate progress and prevents double pagination during a slow request", async () => {
   const root = createRootRoute({ component: Outlet })

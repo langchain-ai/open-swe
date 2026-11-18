@@ -1,6 +1,6 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 import { useEffect } from "react"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -19,11 +19,29 @@ import {
 
 export const Route = createFileRoute("/agents/reviews/")({
   validateSearch: validateReviewsSearch,
+  ssr: false,
+  beforeLoad: ({ search }) => {
+    const stored = readStoredRepos()
+    const storedTab = validateReviewsSearch({
+      tab: window.localStorage.getItem(TAB_STORAGE_KEY),
+    }).tab
+    const changes: Partial<ReviewsSearch> = {
+      ...(!search.repo && stored ? { repo: stored } : {}),
+      ...(!search.tab ? { tab: storedTab ?? "mine" } : {}),
+    }
+    if (Object.keys(changes).length)
+      throw redirect({
+        to: "/agents/reviews",
+        search: { ...search, ...changes },
+        replace: true,
+      })
+  },
   head: () => ({ meta: [{ title: pageTitle("Pull Requests") }] }),
   component: ReviewsPage,
 })
 
 const REPO_STORAGE_KEY = "open-swe.reviews.repo"
+const TAB_STORAGE_KEY = "open-swe.reviews.tab"
 
 function readStoredRepos(): string[] | undefined {
   try {
@@ -61,6 +79,7 @@ function ReviewsPage() {
   const changeFilters = (changes: Partial<ReviewsSearch>, replace = false) => {
     if ("repo" in changes) storeRepos(changes.repo)
     void navigate({
+      replace,
       search: (previous) => ({
         ...previous,
         ...changes,
@@ -71,14 +90,11 @@ function ReviewsPage() {
           : {}),
         ...("pr" in changes ? { files: undefined, at: undefined } : {}),
       }),
-      replace,
     })
   }
   useEffect(() => {
-    const stored = readStoredRepos()
-    if (!filters.repo && stored) changeFilters({ repo: stored }, true)
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (filters.tab) window.localStorage.setItem(TAB_STORAGE_KEY, filters.tab)
+  }, [filters.tab])
   const selection = tab !== "all" ? parsePullRequestSelection(filters.pr) : null
 
   return (
@@ -110,7 +126,7 @@ function ReviewsPage() {
                   aria-pressed={tab === value}
                   onClick={() => {
                     changeFilters({
-                      tab: value === "mine" ? undefined : value,
+                      tab: value,
                       page: undefined,
                       pr: undefined,
                     })
