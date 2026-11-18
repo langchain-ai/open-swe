@@ -1,6 +1,5 @@
-import { CheckIcon, XIcon } from "@langchain/macaw-components/icons"
+import { ChatState } from "@langchain/macaw-components/ChatState"
 import { useToolCalls } from "@langchain/react"
-import { Spinner } from "@langchain/macaw-components/Spinner"
 
 import { humanizeToolName } from "@/features/agents/lib/toolNames"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
@@ -73,26 +72,18 @@ function ActivityLine({
 }) {
   return (
     <div className="mt-space-1 flex min-w-0 items-center gap-space-2 border-t border-default pt-space-1">
-      {status === "completed" ? (
-        <CheckIcon
-          size={12}
-          weight="bold"
-          className="shrink-0 text-icon-success"
-          aria-hidden
-        />
-      ) : status === "error" ? (
-        <XIcon
-          size={12}
-          weight="bold"
-          className="shrink-0 text-icon-error"
-          aria-hidden
-        />
-      ) : (
-        <Spinner size="xxs" className="shrink-0 text-icon-tertiary" />
-      )}
-      <span className="truncate text-xxs text-tertiary">
-        {humanizeToolName(name)}
-      </span>
+      <ChatState
+        announce={false}
+        status={
+          status === "completed"
+            ? "completed"
+            : status === "error"
+              ? "failed"
+              : "streaming"
+        }
+        label={`${humanizeToolName(name)} · ${status === "error" ? "failed" : status === "completed" ? "completed" : "running"}`}
+        className="min-w-0"
+      />
       <span className="ml-auto shrink-0 text-xxs text-tertiary tabular-nums">
         {steps} {steps === 1 ? "step" : "steps"}
       </span>

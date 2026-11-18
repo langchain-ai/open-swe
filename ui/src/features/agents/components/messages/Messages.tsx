@@ -1,3 +1,4 @@
+import { ChatMessage } from "@langchain/macaw-components/ChatMessage"
 import { Button } from "@langchain/macaw-components/Button"
 import { CaretDownIcon, XIcon } from "@langchain/macaw-components/icons"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -51,9 +52,16 @@ function QueuedMessages({
         const actionable =
           onRemove && message.mine !== false && !message.waitsForAgent
         return (
-          <div
+          <ChatMessage
             key={message.id}
-            className="ml-auto max-w-[85%] rounded-xl border border-dashed border-default bg-user-message px-space-3 py-space-2 text-sm text-primary shadow-sm"
+            message={{
+              id: message.id,
+              role: "user",
+              status: "queued",
+              content: [],
+            }}
+            contentClassName="rounded-xl border border-dashed border-default bg-surface-level-2 px-space-3 py-space-2 text-sm"
+            isLatest
             data-testid="queued-message"
             data-queued-pending={message.pending ? "true" : "false"}
             data-waits-for-agent={message.waitsForAgent ? "true" : undefined}
@@ -98,7 +106,7 @@ function QueuedMessages({
                 </div>
               )}
             </div>
-          </div>
+          </ChatMessage>
         )
       })}
     </div>
@@ -264,7 +272,6 @@ export const Messages = memo(function MessagesComponent({
               icon: event.failed ? "circle-alert" : "zap",
               heading: event.heading,
               preview: null,
-              tone: event.failed ? "error" : "info",
               status: "unknown",
               expandedText: event.detail ?? null,
               loadExpandedText: null,

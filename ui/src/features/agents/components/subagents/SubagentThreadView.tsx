@@ -2,10 +2,8 @@ import { LogoMark } from "@/components/Branding"
 import { ArrowLeftIcon } from "@langchain/macaw-components/icons"
 import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
-import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
-import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Badge } from "@langchain/macaw-components/Badge"
-import { Spinner } from "@langchain/macaw-components/Spinner"
+import { ChatState } from "@langchain/macaw-components/ChatState"
 
 import { LoadError } from "@/components/LoadError"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -140,27 +138,28 @@ export function SubagentThreadView({
                 {subagentType}
               </Badge>
             )}
-            {task?.status === "in_progress" ? (
-              <span role="img" aria-label="Subagent running" className="flex">
-                <Spinner size="xs" className="shrink-0 text-icon-secondary" />
-              </span>
-            ) : task?.status === "error" ? (
-              <WarningCircleIcon
-                size={14}
-                weight="regular"
-                className="shrink-0 text-icon-error"
-                role="img"
-                aria-label="Subagent failed"
+            {task && (
+              <ChatState
+                announce={false}
+                key={task.toolCallId}
+                variant="simple"
+                status={
+                  isRunning
+                    ? "streaming"
+                    : task.status === "error"
+                      ? "failed"
+                      : "completed"
+                }
+                label={
+                  isRunning
+                    ? "Subagent running"
+                    : task.status === "error"
+                      ? "Subagent failed"
+                      : "Subagent finished"
+                }
+                showElapsed={false}
               />
-            ) : task ? (
-              <CheckCircleIcon
-                size={14}
-                weight="regular"
-                className="shrink-0 text-icon-tertiary"
-                role="img"
-                aria-label="Subagent finished"
-              />
-            ) : null}
+            )}
           </div>
         </div>
       </header>

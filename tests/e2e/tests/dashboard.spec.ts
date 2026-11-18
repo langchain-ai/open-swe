@@ -364,7 +364,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         page.getByTestId("user-message").filter({ hasText: prompt }),
       ).toBeVisible();
       await expect(
-        page.getByRole("button", { name: "More composer options" }),
+        page.getByRole("button", { name: "Add attachments" }),
       ).toBeVisible();
       await waitForStateToContain(page, threadId, prompt);
       await existingChat.click();
@@ -1468,7 +1468,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBeVisible({ timeout: 30_000 });
   });
 
-  test("previews each collapsed reasoning block on its brain-icon toggle", async ({
+  test("previews each collapsed reasoning block on its toggle", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);

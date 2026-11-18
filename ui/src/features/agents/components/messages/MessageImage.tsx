@@ -1,8 +1,4 @@
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@langchain/macaw-components/Dialog"
+import { ImagePreviewDialog } from "@langchain/macaw-components/ImagePreviewDialog"
 import { FileTextIcon } from "@phosphor-icons/react/dist/ssr/FileText"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useEffect, useState } from "react"
@@ -125,19 +121,13 @@ function MessageImageContent({
           className={cn(className, "duration-slow animate-in fade-in")}
         />
       </button>
-      <Dialog open={expanded} onOpenChange={setExpanded}>
-        <DialogContent
-          className="h-[calc(100dvh-2rem)] w-[95vw] max-w-[95vw]"
-          childrenClassName="flex-1 items-center justify-center"
-        >
-          <DialogTitle className="sr-only">{label}</DialogTitle>
-          <img
-            src={src}
-            alt={label}
-            className="h-full min-h-0 w-full object-contain"
-          />
-        </DialogContent>
-      </Dialog>
+      <ImagePreviewDialog
+        open={expanded}
+        onOpenChange={setExpanded}
+        src={src}
+        altText={label}
+        title={label}
+      />
     </>
   )
 }

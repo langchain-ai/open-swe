@@ -204,9 +204,9 @@ test("an uploaded Claude Code session opens as a thread with its whole conversat
     for (let index = 0; index < foldLabels.length; index++) {
       await folds.nth(index).click();
     }
-    const rows = page.getByRole("button", { name: /^Shell / });
+    const rows = page.getByRole("button", { name: "Details for Shell" });
     await expect(rows).toHaveCount(toolUses.length);
-    const shown = (await rows.locator("p").allTextContents()).map((label) =>
+    const shown = (await rows.allTextContents()).map((label) =>
       label.replace(/^Shell\s*/, "").replace(/\.\.\.$/, ""),
     );
     for (const [index, use] of toolUses.entries()) {

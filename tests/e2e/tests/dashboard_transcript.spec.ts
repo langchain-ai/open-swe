@@ -62,7 +62,10 @@ test.describe("finished transcript (shared fixture thread)", () => {
       name: /^Worked(?: for .+)? · \d+ actions?$/,
     });
     const acknowledgement = page.getByText("On it!", { exact: true });
-    const edit = page.getByRole("button", { name: "Edited greet.py" });
+    const editCall = page
+      .getByRole("group", { name: "Edited tool call" })
+      .filter({ hasText: "greet.py" });
+    const edit = editCall.getByRole("button", { name: "Details for Edited" });
 
     // Folded: the acknowledgement shows, the individual tool calls do not.
     await expect(worked.first()).toBeVisible();
@@ -87,7 +90,7 @@ test.describe("finished transcript (shared fixture thread)", () => {
     await edit.click();
     await expect(edit).toHaveAttribute("aria-expanded", "true");
 
-    const inlineDiff = edit.locator("[data-diff]");
+    const inlineDiff = editCall.locator("[data-diff]");
     await expect(inlineDiff).toBeVisible();
     await expect(
       inlineDiff.locator('[data-line][data-line-type="change-deletion"]'),

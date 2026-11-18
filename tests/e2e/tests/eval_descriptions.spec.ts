@@ -29,17 +29,18 @@ test("labels each eval call with the description the model gave it", async ({
   await expect(worked.first()).toBeVisible({ timeout: 30_000 });
   for (const fold of await worked.all()) await fold.click();
 
-  const count = page.getByRole("button", {
-    name: /Eval\s*Count the files in the repository/,
-  });
-  const greeting = page.getByRole("button", {
-    name: /Eval\s*Check the greeting the helper returns/,
-  });
+  const evalCall = (description: string) =>
+    page
+      .getByRole("group", { name: "Eval tool call" })
+      .filter({ hasText: description })
+      .first();
+  const count = evalCall("Count the files in the repository");
+  const greeting = evalCall("Check the greeting the helper returns");
   await expect(count).toBeVisible();
   await expect(greeting).toBeVisible();
   await attachScreenshot(page, testInfo, "eval-descriptions");
 
-  await count.click();
+  await count.getByRole("button", { name: "Details for Eval" }).click();
   await expect(count).toContainText("2");
   await expect(count).not.toContainText("display_description");
   await attachScreenshot(page, testInfo, "eval-description-expanded");

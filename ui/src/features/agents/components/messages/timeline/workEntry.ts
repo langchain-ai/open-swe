@@ -25,8 +25,6 @@ export type WorkEntryIconName =
   | "wrench"
   | "zap"
 
-export type WorkEntryTone = "tool" | "thinking" | "error" | "info"
-
 export interface WorkEntryView {
   icon: WorkEntryIconName
   heading: string
@@ -36,7 +34,6 @@ export interface WorkEntryView {
   destinationHref?: string
   destinationLabel?: string
   diffStats?: { additions: number; deletions: number }
-  tone: WorkEntryTone
   status: AcpToolStatus | "unknown"
   /** The call's output as plain text, for rows that render nothing richer. */
   expandedText: string | null
@@ -74,12 +71,6 @@ function iconForChunk(chunk: ToolExecutionChunk): WorkEntryIconName {
     default:
       return "wrench"
   }
-}
-
-function toneForChunk(chunk: ToolExecutionChunk): WorkEntryTone {
-  if (chunk.status === "error") return "error"
-  if (chunk.toolKind === "think") return "thinking"
-  return "tool"
 }
 
 function firstLocationPath(
@@ -201,7 +192,6 @@ export function describeWorkEntry(
         diff.newContent,
         diff.filePath
       ),
-      tone: toneForChunk(chunk),
       status: chunk.status,
       // The diff itself is the body; a text dump alongside it would be noise.
       expandedText: null,
@@ -227,7 +217,6 @@ export function describeWorkEntry(
         : null,
     previewTooltip,
     destinationHref: routedMessageHref(chunk),
-    tone: toneForChunk(chunk),
     status: chunk.status,
     expandedText: expandedTextForChunk(chunk, repoPath),
     loadExpandedText: chunk.loadOutput ?? null,

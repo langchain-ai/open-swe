@@ -88,7 +88,7 @@ export function MessageTimestamp({
             )
           }
         }}
-        className="h-auto cursor-pointer rounded-xs border-0 px-0 leading-4 text-tertiary tabular-nums opacity-0 transition-opacity select-none group-hover/turn:opacity-100 hover:text-primary focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+        className="h-auto cursor-pointer rounded-xs border-0 px-0 leading-4 text-tertiary tabular-nums select-none hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
       >
         <time dateTime={date.toISOString()}>{shortTimestamp(date)}</time>
         {costUsd != null && ` · ${formatCost(costUsd)}`}

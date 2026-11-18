@@ -46,10 +46,11 @@ describe("LiveWorkTail", () => {
 
     expect(screen.queryByText("An earlier thought")).toBeNull()
     expect(screen.getByText("Checking the focused tests")).toBeTruthy()
-    const shell = screen.getByRole("button", { name: /Shell uv run pytest/ })
+    expect(screen.queryByRole("status")).toBeNull()
+    const shell = screen.getByRole("button", { name: "Details for Shell" })
     expect(shell.getAttribute("aria-expanded")).toBe("false")
     expect(loadOutput).not.toHaveBeenCalled()
-    fireEvent.keyDown(shell, { key: "Enter" })
+    fireEvent.click(shell)
     await waitFor(() =>
       expect(screen.getByText("Focused tests passed")).toBeTruthy()
     )
@@ -77,7 +78,7 @@ describe("LiveWorkTail", () => {
     expect(screen.queryByText("Focused tests passed")).toBeNull()
     expect(
       screen
-        .getByRole("button", { name: /Shell git diff/ })
+        .getByRole("button", { name: "Details for Shell" })
         .getAttribute("aria-expanded")
     ).toBe("false")
   })

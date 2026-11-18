@@ -40,6 +40,7 @@ function TailEntry({
     return (
       <WorkEntryRow
         entry={view}
+        showStatus={entry.chunk.status !== "in_progress"}
         timestamp={entry.chunk.timestamp}
         body={
           diff && entry.chunk.status !== "error" ? (

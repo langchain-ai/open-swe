@@ -84,7 +84,7 @@ describe("ConversationFind", () => {
   it("finds rendered phrases across formatting, skips hidden details, wraps and updates without jumping on streamed text", async () => {
     const root = document.createElement("div")
     root.innerHTML =
-      '<p>Version <strong>one</strong>, version one.</p><div style="display: none;">version one</div><button>version one</button>'
+      '<p>Version <strong>one</strong>, version one.</p><div style="display: none;">version one</div><button>version one</button><span role="status" class="sr-only">version one</span><span role="timer">version one</span><div hidden>version one</div><div inert>version one</div>'
     document.body.append(root)
     const previous = document.createElement("textarea")
     document.body.append(previous)

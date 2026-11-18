@@ -177,21 +177,21 @@ test("Desktop defaults cloud-first, allows opting out, and keeps This Mac thread
       page.getByRole("button", { name: /This Mac threads, \d+/ }),
     ).toHaveCount(0);
     const sidebar = page.locator("[data-sidebar-frame]");
-    const composer = page.getByTestId("composer-editor").locator("../../..");
+    const main = page.getByRole("main");
     await expect(
-      composer.getByRole("button", { name: "This Mac", exact: true }),
+      main.getByRole("button", { name: "This Mac", exact: true }),
     ).toBeVisible();
     // New threads start without a project (the agent gets a task folder), so
     // choose the registered one.
-    await composer
+    await main
       .getByRole("button", { name: "Choose project", exact: true })
       .click();
     await page.getByRole("option").filter({ hasText: "demo" }).click();
     await expect(
-      composer.getByRole("button", { name: "demo", exact: true }),
+      main.getByRole("button", { name: "demo", exact: true }),
     ).toBeVisible();
     await expect(
-      composer.getByRole("button", { name: "main", exact: true }),
+      main.getByRole("button", { name: "main", exact: true }),
     ).toBeVisible();
     const unifiedScreenshot = testInfo.outputPath(
       "desktop-unified-threads.png",

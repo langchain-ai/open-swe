@@ -1,12 +1,10 @@
 import { BrainIcon } from "@phosphor-icons/react/dist/ssr/Brain"
 import {
-  CaretDownIcon,
   CheckIcon,
   GlobeRegularIcon,
   WrenchRegularIcon,
-  XIcon,
 } from "@langchain/macaw-components/icons"
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useId, useState } from "react"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
 import { HammerIcon } from "@phosphor-icons/react/dist/ssr/Hammer"
@@ -20,11 +18,15 @@ import { Link } from "@langchain/macaw-components/Link"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 import { ToolResultBody } from "./ToolResultBody"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
-import type { KeyboardEvent, ReactNode } from "react"
+import type { ReactNode } from "react"
 
 import type { WorkEntryIconName, WorkEntryView } from "./workEntry"
 import { formatHoverTimestamp } from "@/features/agents/lib/messageTimestamps"
-import { cn } from "@/lib/utils"
+import {
+  ChatToolCall,
+  type ChatToolCallStatus,
+} from "@langchain/macaw-components/ChatToolCall"
+import { ExpandableMessageChip } from "../ExpandableMessageChip"
 
 const ICONS: Record<WorkEntryIconName, IconComponent> = {
   bot: RobotIcon,
@@ -41,163 +43,16 @@ const ICONS: Record<WorkEntryIconName, IconComponent> = {
   zap: LightningIcon,
 }
 
-function WorkEntryIcon({ name }: { name: WorkEntryIconName }) {
-  const Glyph = ICONS[name]
-  return (
-    <Glyph size={14} weight="regular" className="block shrink-0" aria-hidden />
-  )
-}
+const TOOL_STATUS = {
+  pending: "pending",
+  in_progress: "running",
+  completed: "succeeded",
+  error: "failed",
+} satisfies Record<
+  Exclude<WorkEntryView["status"], "unknown">,
+  ChatToolCallStatus
+>
 
-const stopRowToggle = (event: { stopPropagation: () => void }) =>
-  event.stopPropagation()
-
-function StatusIndicator({ status }: { status: WorkEntryView["status"] }) {
-  if (status === "error") {
-    return (
-      <Tooltip title="Failed">
-        <span
-          className="flex size-4 items-center justify-center"
-          aria-label="Tool call failed"
-        >
-          <XIcon
-            size={12}
-            weight="bold"
-            className="block shrink-0 text-icon-error"
-            aria-hidden
-          />
-        </span>
-      </Tooltip>
-    )
-  }
-
-  if (status === "completed") {
-    return (
-      <Tooltip title="Completed">
-        <span className="flex size-4 items-center justify-center">
-          <CheckIcon
-            size={12}
-            weight="bold"
-            className="block shrink-0"
-            aria-hidden
-          />
-        </span>
-      </Tooltip>
-    )
-  }
-
-  if (status === "unknown") return null
-
-  return (
-    <Tooltip title={status === "pending" ? "Waiting" : "Running"}>
-      <span className="flex size-4 items-center justify-center">
-        <span className="block size-1.5 shrink-0 animate-status-pulse rounded-full bg-current" />
-      </span>
-    </Tooltip>
-  )
-}
-
-/**
- * A work entry's single line: icon, heading, dimmed argument and status, with
- * `accessory` controls just before the status.
- */
-export function WorkEntryLine({
-  entry,
-  accessory,
-}: {
-  entry: WorkEntryView
-  accessory?: ReactNode
-}) {
-  const isError = entry.tone === "error"
-
-  return (
-    <div className="flex items-center gap-space-2 select-none">
-      <span
-        className={cn(
-          "flex size-5 shrink-0 items-center justify-center",
-          isError
-            ? "text-icon-error"
-            : entry.tone === "thinking"
-              ? "text-icon-primary"
-              : "text-icon-tertiary"
-        )}
-      >
-        <WorkEntryIcon name={entry.icon} />
-      </span>
-
-      <div className="flex min-w-0 flex-1 items-center gap-space-2">
-        <div className="min-w-0 flex-1 overflow-hidden">
-          <p className="flex w-full min-w-0 items-baseline gap-space-2 text-xs leading-5">
-            <span
-              title={entry.heading}
-              className={cn(
-                "min-w-0 truncate font-medium",
-                isError
-                  ? "text-error-secondary"
-                  : entry.status === "pending" || entry.status === "in_progress"
-                    ? "shimmer-text"
-                    : "text-primary"
-              )}
-            >
-              {entry.heading}
-            </span>
-            {entry.preview &&
-              (entry.previewTooltip ? (
-                <Tooltip
-                  title={entry.previewTooltip}
-                  tooltipClassName="max-w-md break-all text-primary"
-                >
-                  <span className="min-w-0 flex-1 truncate text-secondary">
-                    {entry.preview}
-                  </span>
-                </Tooltip>
-              ) : (
-                <span className="min-w-0 flex-1 truncate text-secondary">
-                  {entry.preview}
-                </span>
-              ))}
-            {entry.destinationHref && (
-              <Tooltip
-                title={entry.destinationLabel ?? "Open destination thread"}
-              >
-                <Link
-                  href={entry.destinationHref}
-                  aria-label={
-                    entry.destinationLabel ?? "Open destination thread"
-                  }
-                  className="shrink-0 text-icon-secondary"
-                  onClick={stopRowToggle}
-                  onKeyDown={stopRowToggle}
-                >
-                  <ArrowUpRightIcon size={14} weight="regular" aria-hidden />
-                </Link>
-              </Tooltip>
-            )}
-            {entry.diffStats && (
-              <span className="flex shrink-0 items-center gap-space-1 font-mono text-xxs text-secondary tabular-nums">
-                <span className="transition-colors group-focus-within/entry:text-success-secondary group-hover/entry:text-success-secondary">
-                  +{entry.diffStats.additions}
-                </span>
-                <span aria-hidden>/</span>
-                <span className="transition-colors group-focus-within/entry:text-error-secondary group-hover/entry:text-error-secondary">
-                  -{entry.diffStats.deletions}
-                </span>
-              </span>
-            )}
-          </p>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-space-1 text-secondary">
-          {accessory}
-          <span className="flex size-4 shrink-0 items-center justify-center">
-            <StatusIndicator status={entry.status} />
-          </span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/** What the row learned by expanding, for a body that renders output itself. */
 export interface WorkEntryBodyDetail {
   /** The call's full output, once the lazy fetch returned it. */
   loadedText: string | null
@@ -205,45 +60,30 @@ export interface WorkEntryBodyDetail {
   loadError: string | null
 }
 
-/**
- * A custom expanded body: either fixed content, or a function that also gets
- * the output fetched on expand — a body that renders the output itself has to
- * be handed it, or the row's own fallback would be the only thing that ever
- * showed more than the snapshot's preview.
- */
 export type WorkEntryBody =
   | ReactNode
   | ((detail: WorkEntryBodyDetail) => ReactNode)
 
-/**
- * One line in the agent's work log: icon, heading, dimmed argument, status.
- * Expanding reveals `body` when a tool has a richer renderer (a diff, terminal
- * output) and falls back to the entry's plain text otherwise.
- */
 export function WorkEntryRow({
   entry,
   timestamp,
   body,
-  trailing,
-  onActivate,
   defaultExpanded = false,
+  showStatus = true,
 }: {
   entry: WorkEntryView
   timestamp?: string
   body?: WorkEntryBody
-  trailing?: ReactNode
-  /** Clicking the row runs this instead of expanding it (e.g. reveal a file). */
-  onActivate?: () => void
   defaultExpanded?: boolean
+  showStatus?: boolean
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
-  const toggle = useCallback(() => setExpanded((value) => !value), [])
+  const id = useId()
   const [loadedText, setLoadedText] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const loadExpandedText = entry.loadExpandedText
 
-  // Expanding is what pays for the full output; the preview (if any) shows
-  // until it arrives, and a failure says so instead of hanging on a spinner.
+  // Fetch full output only when the reader opens the row.
   useEffect(() => {
     if (!expanded || !loadExpandedText) return
     if (loadedText !== null || loadError !== null) return
@@ -266,91 +106,116 @@ export function WorkEntryRow({
 
   const detailText = loadedText ?? entry.expandedText
   const canExpand =
-    onActivate == null &&
-    (body != null || detailText != null || loadExpandedText != null)
-  const activate = onActivate ?? (canExpand ? toggle : null)
+    body != null || detailText != null || loadExpandedText != null
   const hoverTimestamp = formatHoverTimestamp(timestamp)
-
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      if (event.key !== "Enter" && event.key !== " ") return
-      event.preventDefault()
-      activate?.()
-    },
-    [activate]
+  const Glyph = ICONS[entry.icon]
+  const details = canExpand
+    ? typeof body === "function"
+      ? body({ loadedText, loadError })
+      : (body ??
+        (detailText != null ? (
+          <ToolResultBody value={detailText} />
+        ) : (
+          <p className="text-xxs text-secondary">
+            {loadError ?? "Loading output…"}
+          </p>
+        )))
+    : null
+  const hasMetadata = Boolean(
+    hoverTimestamp || entry.diffStats || entry.destinationHref
   )
+  const meta = hasMetadata ? (
+    <>
+      {entry.diffStats && (
+        <span className="flex gap-space-1 font-mono text-xxs tabular-nums">
+          <span className="text-success-secondary">
+            +{entry.diffStats.additions}
+          </span>
+          <span className="text-error-secondary">
+            -{entry.diffStats.deletions}
+          </span>
+        </span>
+      )}
+      {hoverTimestamp && (
+        <time className="text-xxs text-tertiary tabular-nums opacity-0 transition-opacity duration-normal group-focus-within/entry:opacity-100 group-hover/entry:opacity-100">
+          {hoverTimestamp}
+        </time>
+      )}
+      {entry.destinationHref && (
+        <Tooltip title={entry.destinationLabel ?? "Open destination thread"}>
+          <Link
+            href={entry.destinationHref}
+            aria-label={entry.destinationLabel ?? "Open destination thread"}
+            className="shrink-0 text-icon-secondary"
+          >
+            <ArrowUpRightIcon size={14} weight="regular" aria-hidden />
+          </Link>
+        </Tooltip>
+      )}
+    </>
+  ) : null
 
-  const rowToggleProps = activate
-    ? {
-        role: "button" as const,
-        tabIndex: 0,
-        ...(canExpand ? { "aria-expanded": expanded } : {}),
-        "aria-label": entry.preview
-          ? `${entry.heading} ${entry.preview}`
-          : entry.heading,
-        onClick: activate,
-        onKeyDown: handleKeyDown,
-      }
-    : {}
+  if (entry.status === "unknown" || !showStatus) {
+    const label = (
+      <span className="inline-flex items-center gap-space-2">
+        <Glyph size={12} weight="regular" aria-hidden />
+        {entry.heading}
+        {entry.preview && (
+          <span className="text-secondary">{entry.preview}</span>
+        )}
+      </span>
+    )
+    return (
+      <div className="group/entry">
+        {details ? (
+          <ExpandableMessageChip
+            label={label}
+            actions={meta}
+            expanded={expanded}
+            onExpandedChange={setExpanded}
+            accessibleLabel={
+              entry.status === "unknown"
+                ? [entry.heading, entry.preview].filter(Boolean).join(" ")
+                : `Details for ${entry.heading}`
+            }
+          >
+            {details}
+          </ExpandableMessageChip>
+        ) : (
+          <div className="flex items-center gap-space-2 text-xs">
+            {label}
+            {meta}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
-    <div
-      className={cn(
-        "group/entry flex flex-col rounded-md px-0.5 py-0.5 transition-colors duration-normal",
-        activate &&
-          "cursor-pointer hover:bg-surface-level-1-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
-      )}
-      {...rowToggleProps}
-    >
-      <WorkEntryLine
-        entry={entry}
-        accessory={
-          <>
-            {trailing}
-            {hoverTimestamp && (
-              <time className="text-xxs text-tertiary tabular-nums opacity-0 transition-opacity duration-normal group-hover/entry:opacity-100">
-                {hoverTimestamp}
-              </time>
-            )}
-            <span
-              className="flex size-4 shrink-0 items-center justify-center"
-              aria-hidden={!canExpand}
-            >
-              {canExpand ? (
-                <CaretDownIcon
-                  size={12}
-                  weight="bold"
-                  className={cn(
-                    "shrink-0 text-icon-tertiary transition-transform duration-normal",
-                    expanded && "rotate-180"
-                  )}
-                  aria-hidden
-                />
-              ) : null}
-            </span>
-          </>
+    <div title={entry.heading} className="min-w-0 flex-1">
+      <ChatToolCall
+        toolCall={{
+          id,
+          name: entry.heading,
+          status: TOOL_STATUS[entry.status],
+        }}
+        icon={<Glyph size={12} weight="regular" aria-hidden />}
+        summary={
+          entry.previewTooltip ? (
+            <Tooltip title={entry.previewTooltip}>
+              <span>{entry.preview}</span>
+            </Tooltip>
+          ) : (
+            entry.preview
+          )
         }
-      />
-
-      {expanded && canExpand && (
-        <div
-          className="ms-space-5 mt-space-1 cursor-default border-s border-subtle ps-space-3 pt-0.5"
-          onClick={stopRowToggle}
-          onPointerDown={stopRowToggle}
-          onKeyDown={stopRowToggle}
-        >
-          {typeof body === "function"
-            ? body({ loadedText, loadError })
-            : (body ??
-              (detailText != null ? (
-                <ToolResultBody value={detailText} />
-              ) : (
-                <p className="text-xxs text-secondary">
-                  {loadError ?? "Loading output…"}
-                </p>
-              )))}
-        </div>
-      )}
+        meta={meta}
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+        className="group/entry min-w-0 flex-1"
+      >
+        {details}
+      </ChatToolCall>
     </div>
   )
 }

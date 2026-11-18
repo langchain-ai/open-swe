@@ -38,7 +38,9 @@ class ConversationSearch {
       if (
         !(node instanceof Text) ||
         !parent ||
-        parent.closest('button, time, svg, [hidden], [aria-hidden="true"]')
+        parent.closest(
+          'button, time, svg, [hidden], [inert], [aria-hidden="true"], .sr-only, [role="status"], [role="timer"]'
+        )
       )
         continue
       if (!parent.checkVisibility()) continue

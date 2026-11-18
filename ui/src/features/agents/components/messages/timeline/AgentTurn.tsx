@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { ChatMessage } from "@langchain/macaw-components/ChatMessage"
 import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 
 import { DiffView } from "../../chat/DiffView"
@@ -487,35 +488,36 @@ export function AgentTurn({
   }
 
   return (
-    <div
-      className="group/turn my-space-2 min-w-0 space-y-space-2"
+    <ChatMessage
+      message={{
+        id: message.id,
+        role: "assistant",
+        status: isStreaming ? "streaming" : "completed",
+        content: [],
+      }}
+      className="group/turn my-space-2"
       data-message-id={message.id}
+      footer={
+        <div className="mt-space-1 flex min-h-5 items-center gap-space-1">
+          {replyText && !isStreaming && (
+            <CopyIconButton copy={replyText} label="Copy message" size="xs" />
+          )}
+          {!message.timestampIsFallback && (
+            <MessageTimestamp
+              timestamp={message.timestamp}
+              startedAt={message.startedAt}
+              costUsd={costUsd}
+            />
+          )}
+        </div>
+      }
     >
       {segments.map((segment, index) =>
         segment.type === "reply"
           ? renderItem(segment.item)
           : renderWorkSegment(segment, index)
       )}
-
-      {/* As tall as the copy button, which only arrives once the run ends. */}
-      <div className="mt-space-1 flex min-h-5 items-center gap-space-1">
-        {replyText && !isStreaming && (
-          <CopyIconButton
-            copy={replyText}
-            label="Copy message"
-            size="xs"
-            className="opacity-0 transition-opacity duration-normal group-hover/turn:opacity-100 focus-visible:opacity-100"
-          />
-        )}
-        {!message.timestampIsFallback && (
-          <MessageTimestamp
-            timestamp={message.timestamp}
-            startedAt={message.startedAt}
-            costUsd={costUsd}
-          />
-        )}
-      </div>
-    </div>
+    </ChatMessage>
   )
 }
 

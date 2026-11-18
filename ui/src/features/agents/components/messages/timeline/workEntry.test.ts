@@ -99,7 +99,7 @@ describe("describeWorkEntry", () => {
     expect(entry.status).toBe("in_progress")
   })
 
-  it("marks failed calls with the error tone", () => {
+  it("preserves failed call status", () => {
     const entry = describeWorkEntry(
       chunk({
         title: "shell",
@@ -110,7 +110,7 @@ describe("describeWorkEntry", () => {
       repoPath
     )
 
-    expect(entry.tone).toBe("error")
+    expect(entry.status).toBe("error")
     expect(entry.icon).toBe("terminal")
     expect(entry.heading).toBe("Shell")
     expect(entry.preview).toBe("pnpm test")

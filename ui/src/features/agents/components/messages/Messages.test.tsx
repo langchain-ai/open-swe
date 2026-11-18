@@ -311,7 +311,7 @@ describe("Messages", () => {
         .getAttribute("href")
     ).toBe("/agents/7db1bbf5-0623-5a35-a5a4-db372cfc31d4")
     const result = screen.getByRole("button", {
-      name: "Worker result received Worker 2cfc31d4",
+      name: "Details for Worker result received",
     })
     expect(result.getAttribute("aria-expanded")).toBe("false")
     expect(container.textContent).not.toContain("Can I change")
@@ -440,7 +440,7 @@ describe("Messages", () => {
       wrapper,
     })
     const chip = screen.getByRole("button", {
-      name: "Worker · Started Worker 2cfc31d4",
+      name: "Details for Worker · Started",
     })
     const fold = screen.getByRole("button", { name: "Worked · 3 actions" })
     expect(fold.getAttribute("aria-expanded")).toBe("false")
@@ -513,7 +513,7 @@ describe("Messages", () => {
     render(<RouterProvider router={router} />, { wrapper })
     const fold = screen.getByRole("button", { name: "Worked · 2 actions" })
     const result = screen.getByRole("button", {
-      name: "Worker result received · Failed Investigation",
+      name: "Details for Worker result received · Failed",
     })
     expect(
       screen
@@ -629,7 +629,12 @@ describe("Messages", () => {
         { wrapper }
       )
       expect(
-        screen.getByRole("button", { name: `Worker · ${label}` })
+        screen.getByRole("button", {
+          name:
+            label === "Launch status unknown"
+              ? `Worker · ${label}`
+              : `Details for Worker · ${label}`,
+        })
       ).toBeTruthy()
       expect(screen.queryByRole("link")).toBeNull()
     }
@@ -793,7 +798,7 @@ describe("Messages", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Worked for 1m 0s · 2 actions" })
     )
-    expect(screen.getByLabelText("Tool call failed")).toBeTruthy()
+    expect(screen.getByText("Failed")).toBeTruthy()
   })
 
   it("does not present a subscription deadline as a failure", () => {
@@ -878,7 +883,7 @@ describe("Messages", () => {
   it("shows run activity while a stream is starting with no messages", () => {
     const { rerender } = render(<Messages messages={[]} isStreaming />)
 
-    expect(screen.getByRole("status").textContent).toBe("Working…0s")
+    expect(screen.getByRole("status").textContent).toBe("Working…")
     const wake: Message = {
       id: "wake",
       author: "user",
@@ -933,7 +938,7 @@ describe("Messages", () => {
     )
 
     expect(screen.getByRole("status").textContent).toBe(
-      "Reconnecting… 3/12 (retrying in 4s)0s"
+      "Reconnecting… 3/12 (retrying in 4s)"
     )
   })
 
@@ -1214,7 +1219,7 @@ describe("Messages", () => {
     )
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Report platform issue Sandbox disconnected",
+        name: "Details for Report platform issue",
       })
     )
     expect(container.textContent).toContain(

@@ -45,7 +45,6 @@ export function TaskEventMessage({
             preview: label,
             destinationHref: `/agents/${event.sender_thread_id}`,
             destinationLabel: `Open ${label} thread`,
-            tone: failed ? "error" : "info",
             status: failed ? "error" : "completed",
             expandedText: event.content,
             loadExpandedText: null,
@@ -157,7 +156,6 @@ export function WorkerLaunchMessage({ chunk }: { chunk: ToolExecutionChunk }) {
         preview: threadId ? label : null,
         destinationHref: threadId ? `/agents/${threadId}` : undefined,
         destinationLabel: `Open ${label} thread`,
-        tone: failed ? "error" : "info",
         status: failed
           ? "error"
           : pending

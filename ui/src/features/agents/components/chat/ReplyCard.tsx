@@ -1,6 +1,7 @@
 import { SlackLinks } from "@/lib/slack-links"
 import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 import { Button } from "@langchain/macaw-components/Button"
+import { ChatState } from "@langchain/macaw-components/ChatState"
 import { Link } from "@langchain/macaw-components/Link"
 import { createContext, memo, useContext, useState } from "react"
 import { toast } from "sonner"
@@ -271,11 +272,17 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
             {label}
           </Link>
         ) : (
-          <span
-            className={state === "failed" ? "text-error-secondary" : undefined}
-          >
-            {label}
-          </span>
+          <ChatState
+            key={chunk.toolCallId}
+            status={
+              state === "pending"
+                ? "streaming"
+                : state === "failed"
+                  ? "failed"
+                  : "completed"
+            }
+            label={label}
+          />
         )}
       </div>
       {isLinear ? (

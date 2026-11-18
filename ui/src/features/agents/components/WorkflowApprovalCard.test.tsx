@@ -15,7 +15,7 @@ import { WorkflowApprovalCard } from "./WorkflowApprovalCard"
 import type { WorkflowPushApproval } from "@/features/agents/lib/types"
 
 const mocks = vi.hoisted(() => ({
-  mutate: vi.fn(),
+  mutateAsync: vi.fn(),
   useWorkflowApprovals: vi.fn(),
   useWorkflowApprovalDecision: vi.fn(),
 }))
@@ -66,7 +66,7 @@ beforeEach(() => {
     data: { approvals: [approval] },
   })
   mocks.useWorkflowApprovalDecision.mockReturnValue({
-    mutate: mocks.mutate,
+    mutateAsync: mocks.mutateAsync,
     isPending: false,
   })
 })
@@ -171,7 +171,7 @@ describe("WorkflowApprovalCard", () => {
     fireEvent.click(
       screen.getAllByRole("button", { name: "Approve & continue push" })[0]!
     )
-    expect(mocks.mutate).toHaveBeenCalledWith({
+    expect(mocks.mutateAsync).toHaveBeenCalledWith({
       fingerprint: "fingerprint-2",
       decision: "approve",
     })
@@ -211,7 +211,7 @@ describe("WorkflowApprovalCard", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Approve & continue push" })
     )
-    expect(mocks.mutate).toHaveBeenCalledWith({
+    expect(mocks.mutateAsync).toHaveBeenCalledWith({
       fingerprint: approval.fingerprint,
       decision: "approve",
     })
@@ -238,7 +238,7 @@ describe("WorkflowApprovalCard", () => {
     )
 
     await waitFor(() =>
-      expect(mocks.mutate).toHaveBeenCalledWith({
+      expect(mocks.mutateAsync).toHaveBeenCalledWith({
         fingerprint: "fingerprint-1",
         decision: "approve",
       })

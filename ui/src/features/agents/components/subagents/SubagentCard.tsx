@@ -1,15 +1,13 @@
 import { memo } from "react"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
-import { RobotIcon } from "@phosphor-icons/react/dist/ssr/Robot"
 import { Link } from "@langchain/macaw-components/Link"
-import { Spinner } from "@langchain/macaw-components/Spinner"
+import { ChatState } from "@langchain/macaw-components/ChatState"
 
 import { SubagentActivity } from "./SubagentActivity"
 import type { ToolExecutionChunk } from "@/features/agents/lib/types"
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
 import { useOptionalThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
-import { cn } from "@/lib/utils"
 
 /** Coerce an unknown tool-argument value to a trimmed string, or `""`. */
 export function asString(value: unknown): string {
@@ -30,8 +28,6 @@ export const SubagentCard = memo(function SubagentCard({
   const input = chunk.input ?? {}
   const subagentType = asString(input.subagent_type) || "subagent"
   const description = asString(input.description)
-  const isRunning = chunk.status === "in_progress" || chunk.status === "pending"
-  const isError = chunk.status === "error"
   const namespace = chunk.subagentNamespace
   const activity =
     inLiveStream && namespace && namespace.length > 0 ? (
@@ -41,19 +37,26 @@ export const SubagentCard = memo(function SubagentCard({
   return (
     <div className="flex min-w-0 flex-col gap-space-2 overflow-hidden rounded-lg border border-default bg-surface-level-2 p-space-2">
       <div className="flex min-w-0 items-center gap-space-2">
-        {isRunning ? (
-          <Spinner size="xxs" className="shrink-0 text-icon-brand" />
-        ) : (
-          <RobotIcon
-            size={12}
-            weight="regular"
-            className={cn(
-              "shrink-0",
-              isError ? "text-icon-error" : "text-icon-brand"
-            )}
-            aria-hidden
-          />
-        )}
+        <ChatState
+          announce={false}
+          key={chunk.toolCallId}
+          variant="simple"
+          status={
+            chunk.status === "error"
+              ? "failed"
+              : chunk.status === "completed"
+                ? "completed"
+                : "streaming"
+          }
+          label={
+            chunk.status === "error"
+              ? `${subagentType} failed`
+              : chunk.status === "completed"
+                ? `${subagentType} finished`
+                : `${subagentType} running`
+          }
+          showElapsed={false}
+        />
         <span className="truncate text-xxs font-medium text-secondary">
           {subagentType}
         </span>

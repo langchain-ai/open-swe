@@ -1,15 +1,8 @@
-import { ArrowUpIcon } from "@langchain/macaw-components/icons"
+import { ChatComposerAction } from "@langchain/macaw-components/ChatComposer"
 import { useEffect, useRef, useState } from "react"
-import { IconButton } from "@langchain/macaw-components/IconButton"
-import { StopIcon } from "@phosphor-icons/react/dist/ssr/Stop"
 
 import { useIsInAgentThreadStream } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
-import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
-
-// A neutral, high-contrast disc instead of Macaw's brand fill, whose disabled
-// state is a pale outlined ring that reads as a focus state.
-const PRIMARY_ACTION_CLASS =
-  "shrink-0 enabled:border-transparent enabled:bg-text-primary enabled:text-(--bg-surface-level-1) enabled:hover:border-transparent enabled:hover:bg-text-primary/85 disabled:border-transparent disabled:bg-surface-level-4 disabled:text-(--icon-disabled)"
+import { useOptionalThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 
 export interface ActiveRun {
   threadId: string
@@ -17,11 +10,10 @@ export interface ActiveRun {
   running: boolean
 }
 
-export interface ComposerPrimaryActionsProps {
+export interface ComposerRunOptions {
   canSubmit: boolean
   submitting: boolean
-  onSubmit: () => void
-  /** Enables the stop button for the thread's live run. */
+  /** Enables the stop action for the thread's live run. */
   activeRun?: ActiveRun
   /**
    * Stop handler. Required outside a thread stream (desktop ACP, or before
@@ -34,6 +26,15 @@ export interface ComposerPrimaryActionsProps {
   stopOnEscape?: boolean
   /** Label of the send button while a run is live. */
   runningLabel?: string
+}
+
+export interface ComposerRun {
+  composer:
+    | { action: "send" | "sending"; onStop?: never }
+    | { action: "stopping"; onStop?: never }
+    | { action: "stop"; onStop: () => void }
+  label?: string
+  stopping: boolean
 }
 
 function useEscapeToStop(enabled: boolean, onStop: () => void) {
@@ -65,137 +66,63 @@ function useEscapeToStop(enabled: boolean, onStop: () => void) {
   }, [enabled])
 }
 
-function SendButton({
+export function useComposerRun({
   canSubmit,
   submitting,
-  onSubmit,
-  label = "Send message",
-}: ComposerPrimaryActionsProps & { label?: string }) {
-  return (
-    <IconButton
-      className={PRIMARY_ACTION_CLASS}
-      color="secondary"
-      disabled={!canSubmit}
-      icon={ArrowUpIcon}
-      iconWeight="bold"
-      label={label}
-      loading={submitting}
-      onClick={onSubmit}
-      round
-      size="md"
-    />
-  )
-}
-
-function StopButton({
-  disabled,
-  stopOnEscape = true,
+  activeRun,
   onStop,
-}: {
-  disabled: boolean
-  stopOnEscape?: boolean
-  onStop: () => void
-}) {
-  useEscapeToStop(stopOnEscape && !disabled, onStop)
-
-  return (
-    <IconButton
-      className={PRIMARY_ACTION_CLASS}
-      color="secondary"
-      disabled={disabled}
-      icon={StopIcon}
-      iconWeight="fill"
-      label="Stop run"
-      loading={disabled}
-      onClick={onStop}
-      round
-      size="md"
-      tooltipProps={{ title: "Stop run (Esc)" }}
-    />
-  )
-}
-
-function ThreadPrimaryActions(props: ComposerPrimaryActionsProps) {
-  const source = useThreadSource()
+  stoppable,
+  stopOnEscape = true,
+  runningLabel = "Queue message",
+}: ComposerRunOptions): ComposerRun {
+  const source = useOptionalThreadSource()
+  const threadSource = useIsInAgentThreadStream() ? source : null
   const [stopping, setStopping] = useState(false)
 
-  const handleStop = async () => {
+  const running =
+    stoppable !== false &&
+    (threadSource
+      ? Boolean(submitting || threadSource.isRunning || activeRun?.running)
+      : Boolean((submitting || activeRun?.running) && onStop))
+
+  const stop = async () => {
     if (stopping) return
     setStopping(true)
     try {
       // The view may wrap the stop, e.g. to return queued follow-ups to the
       // composer before the run is interrupted.
-      await (props.onStop ? props.onStop() : source.stop())
+      await (onStop ? onStop() : threadSource?.stop())
     } finally {
       setStopping(false)
     }
   }
 
-  const running =
-    props.stoppable !== false &&
-    (props.submitting || source.isRunning || props.activeRun?.running)
-  useEscapeToStop(
-    Boolean(running && props.canSubmit && props.stopOnEscape !== false),
-    () => void handleStop()
-  )
+  useEscapeToStop(running && !stopping && stopOnEscape, () => void stop())
 
-  // Server truth (`activeRun.running`) matters as much as the client's view of
-  // the run: this browser only sees a run it observed events for, so a run it
-  // never joined would otherwise render an unusable send button.
-  if (!running) return <SendButton {...props} />
+  if (stopping)
+    return { composer: { action: "stopping" }, label: "Stopping run", stopping }
 
-  return props.canSubmit ? (
-    <SendButton
-      {...props}
-      canSubmit={!stopping}
-      label={props.runningLabel ?? "Queue message"}
-    />
-  ) : (
-    <StopButton
-      disabled={stopping}
-      onStop={() => void handleStop()}
-      stopOnEscape={props.stopOnEscape}
-    />
-  )
-}
-
-function DirectPrimaryActions(props: ComposerPrimaryActionsProps) {
-  const [stopping, setStopping] = useState(false)
-  const running = Boolean(
-    (props.submitting || props.activeRun?.running) && props.onStop
-  )
-  const stop = async () => {
-    if (stopping) return
-    setStopping(true)
-    try {
-      await props.onStop?.()
-    } finally {
-      setStopping(false)
+  if (!running)
+    return {
+      composer: { action: submitting ? "sending" : "send" },
+      stopping,
     }
+  if (canSubmit)
+    return { composer: { action: "send" }, label: runningLabel, stopping }
+  return {
+    composer: { action: "stop", onStop: () => void stop() },
+    label: "Stop run",
+    stopping,
   }
-  useEscapeToStop(
-    Boolean(running && props.canSubmit && props.stopOnEscape !== false),
-    () => void stop()
-  )
-  if (!running) return <SendButton {...props} />
-  return props.canSubmit ? (
-    <SendButton
-      {...props}
-      canSubmit={!stopping}
-      label={props.runningLabel ?? "Queue message"}
-    />
-  ) : (
-    <StopButton
-      disabled={stopping}
-      onStop={() => void stop()}
-      stopOnEscape={props.stopOnEscape}
-    />
-  )
 }
 
-/** The composer's send button, which becomes a stop button while a run is live. */
-export function ComposerPrimaryActions(props: ComposerPrimaryActionsProps) {
-  const inAgentThreadStream = useIsInAgentThreadStream()
-  if (inAgentThreadStream) return <ThreadPrimaryActions {...props} />
-  return <DirectPrimaryActions {...props} />
+export function ComposerPrimaryAction({ run }: { run: ComposerRun }) {
+  return (
+    <ChatComposerAction
+      label={run.label}
+      tooltipProps={
+        run.composer.action === "stop" ? { title: "Stop run (Esc)" } : undefined
+      }
+    />
+  )
 }

@@ -26,7 +26,8 @@ const POPOVER = { width: 320, height: 96 }
 const GAP = 6
 /** Keeps the passage marked once focus moves to the reply field and the selection goes. */
 const HIGHLIGHT = "selection-reply"
-const CHROME = 'button, [role="button"], [aria-hidden="true"]'
+const CHROME =
+  'button, [role="button"], [hidden], [inert], [aria-hidden="true"], .sr-only, [role="status"], [role="timer"]'
 /** How far up from the selection to look for a line of context on each side. */
 const CONTEXT_ANCESTORS = 6
 

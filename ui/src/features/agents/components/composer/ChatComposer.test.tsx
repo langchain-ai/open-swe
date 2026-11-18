@@ -13,7 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatComposer, buildCommandItems } from "./ChatComposer"
 import { api } from "@/lib/api"
-import { ComposerPrimaryActions } from "./ComposerPrimaryActions"
 import { replaceTextRange } from "./composerTrigger"
 import type { ChatComposerProps } from "./ChatComposer"
 import { AgentThreadStreamBoundary } from "@/features/agents/lib/provider/useIsInAgentThreadStream"
@@ -248,34 +247,23 @@ describe("ChatComposer stop button", () => {
     expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
   })
 
-  it("shows stop while a run submission is dispatching", () => {
-    render(
-      <ComposerPrimaryActions
-        canSubmit={false}
-        onStop={vi.fn()}
-        onSubmit={vi.fn()}
-        submitting
-      />,
-      { wrapper: TooltipProvider }
-    )
-
-    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
+  it("keeps Stop available while a new thread is being created", async () => {
+    const onStop = vi.fn()
+    renderComposer(true, { disabled: true, onStop })
+    const stop = screen.getByRole("button", { name: "Stop run" })
+    expect(stop.hasAttribute("disabled")).toBe(false)
+    fireEvent.click(stop)
+    await waitFor(() => expect(onStop).toHaveBeenCalledOnce())
   })
 
   it("stops a direct run on Escape while steer is shown", () => {
     const onStop = vi.fn()
-    render(
-      <ComposerPrimaryActions
-        activeRun={{ threadId: "thread-1", running: true }}
-        canSubmit
-        onStop={onStop}
-        onSubmit={vi.fn()}
-        submitting={false}
-      />,
-      { wrapper: TooltipProvider }
-    )
+    renderComposer(true, {
+      onStop,
+      restoreDraft: { key: 99, text: "Please check the tests", images: [] },
+    })
 
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Steer agent" })).toBeTruthy()
     fireEvent.keyDown(document.body, { key: "Escape" })
 
     expect(onStop).toHaveBeenCalledOnce()
@@ -410,7 +398,7 @@ describe("ChatComposer drafts", () => {
     expect(onSubmit).not.toHaveBeenCalled()
     expect(screen.getByRole("textbox").textContent).toBe("Keep this draft")
     const remove = screen.getAllByRole("button", {
-      name: "Remove attachment",
+      name: "Remove large.png",
     })[0]
     if (!remove) throw new Error("Missing attachment removal button")
     fireEvent.click(remove)
@@ -545,13 +533,12 @@ describe("ChatComposer options", () => {
   it("offers attachments without a plan-mode toggle", async () => {
     renderComposer(false)
 
-    fireEvent.keyDown(
-      screen.getByRole("button", { name: "More composer options" }),
-      { key: "Enter" }
-    )
+    fireEvent.keyDown(screen.getByRole("button", { name: "Add attachments" }), {
+      key: "Enter",
+    })
 
     expect(
-      await screen.findByRole("menuitem", { name: "Attach files" })
+      await screen.findByRole("menuitem", { name: "Upload files" })
     ).toBeTruthy()
     expect(screen.queryByRole("menuitem", { name: /plan mode/i })).toBeNull()
   })

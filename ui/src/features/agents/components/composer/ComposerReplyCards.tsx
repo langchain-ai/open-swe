@@ -13,7 +13,9 @@ export interface PendingReply {
 export function ComposerReplyCards({
   replies,
   onRemove,
+  disabled = false,
 }: {
+  disabled?: boolean
   replies: ReadonlyArray<PendingReply>
   onRemove: (id: string) => void
 }) {
@@ -58,6 +60,7 @@ export function ComposerReplyCards({
             color="secondary"
             icon={XIcon}
             label="Remove reply"
+            disabled={disabled}
             onClick={() => onRemove(id)}
             round
             size="xs"

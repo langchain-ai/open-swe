@@ -3,9 +3,8 @@ import {
   CaretDownIcon,
   CaretRightIcon,
 } from "@langchain/macaw-components/icons"
-import { LoadingIndicator } from "@langchain/macaw-components/ThinkingState"
+import { ChatState } from "@langchain/macaw-components/ChatState"
 import { cn } from "@/lib/utils"
-import { ElapsedSeconds } from "@/features/agents/components/messages/ElapsedSeconds"
 
 /**
  * Collapses a settled turn's work log behind a single "Worked for …" line, so
@@ -47,11 +46,17 @@ export function TurnFoldRow({
         onClick={onToggle}
         className="h-auto max-w-full cursor-pointer justify-start gap-space-1 border-0 px-space-1 text-left text-secondary tabular-nums select-none hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
       >
-        {active && <LoadingIndicator className="mr-space-1 size-3 shrink-0" />}
-        <span className={cn("min-w-0 truncate", active && "shimmer-text")}>
-          {label}
-        </span>
-        {active && <ElapsedSeconds key={since} since={since} />}
+        {active ? (
+          <ChatState
+            status="streaming"
+            label={label}
+            showElapsed
+            startedAt={since}
+            announce={false}
+          />
+        ) : (
+          <span className="min-w-0 truncate">{label}</span>
+        )}
         {detail && (
           <span className="min-w-0 shrink-[2] truncate text-tertiary">
             · {detail}
