@@ -16,6 +16,8 @@ from openswe.middleware.record_run_usage import record_run_usage
 from openswe.middleware.transcript import TranscriptMiddleware
 from openswe.review.diff import compute_diff_line_set
 from openswe.review.events import ReviewEvents
+from openswe.review_apps.apps import ReviewApps
+from openswe.review_apps.outcomes import ReviewOutcomes
 from openswe.reviewer import (
     PrepareReviewerRunMiddleware,
     ensure_reviewer_github_token,
@@ -78,6 +80,17 @@ class ReviewerKind(RunKind):
     ) -> None:
         del settings, carried
         cfg = RunConfig.from_config(config)
+        try:
+            if started.run_id and cfg.head_sha and (apps := await ReviewApps.of(cfg)) is not None:
+                for app in apps.apps:
+                    outcomes = ReviewOutcomes(app.id, apps.repository, apps.number)
+                    if not await outcomes.closed():
+                        await outcomes.queued(started.run_id, cfg.head_sha, "")
+        except Exception:
+            logger.exception(
+                "Could not record pending review app work",
+                extra={"thread_id": cfg.thread_id, "run_id": started.run_id},
+            )
         events = ReviewEvents.from_config(cfg)
         if events is not None and started.run_id:
             run_id = started.run_id

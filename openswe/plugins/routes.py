@@ -98,6 +98,8 @@ from openswe.plugins.threads import (
     ThreadSource,
     ThreadSummaryModel,
 )
+from openswe.review_apps.outcomes import ReviewOutcome
+from openswe.review_apps.requests import PluginReviews
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.object_store import ObjectStoreError
@@ -1135,6 +1137,20 @@ async def api_plugin_search_pulls(
     return PullRequestSearch(
         pulls=[PullRequestSummary.of(pull) for pull in pulls], incomplete=incomplete
     )
+
+
+@router.post("/{installation_id}/github/{owner}/{repo}/pulls/{number}/review", status_code=202)
+async def api_plugin_request_review(
+    owner: str, repo: str, number: Annotated[int, Path(ge=1, le=2**31 - 1)], plugin: PluginDep
+) -> ReviewOutcome:
+    with _as_http():
+        try:
+            reviews = PluginReviews(plugin)
+            return await reviews.request(f"{owner}/{repo}", number)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/{installation_id}/github/{owner}/{repo}/pulls/{number}")

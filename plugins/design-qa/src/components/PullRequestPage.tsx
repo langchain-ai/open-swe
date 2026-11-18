@@ -32,6 +32,7 @@ import {
 } from "../lib/queries"
 import { useRouter } from "../lib/router"
 import { ReportView } from "./ReportView"
+import { CaptureAction } from "./CaptureAction"
 import { ShareRepositories } from "./ShareRepositories"
 
 /** One pull request's saved Design QA runs. */
@@ -116,10 +117,19 @@ export function PullRequestPage({
               Loading Design QA reviews…
             </p>
           )}
+          {runs.isSuccess && (
+            <CaptureAction
+              pr={pr}
+              outcome={runs.data.outcome}
+              currentHeadSha={current?.headSha}
+              hasCapture={runs.data.runs.length > 0}
+              disabled={current?.state !== "open"}
+            />
+          )}
           {empty && (
             <Card role="status" className="p-space-4 text-sm text-secondary">
-              No saved comparisons. Live capture is unavailable until browser
-              network isolation is in place.
+              No saved comparisons. Capture checks the deployed preview and the
+              workspace's base site, then saves matching screenshots here.
             </Card>
           )}
           {options.length > 1 && (

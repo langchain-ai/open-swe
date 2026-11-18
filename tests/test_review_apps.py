@@ -5,13 +5,14 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, Mock
 from uuid import UUID, uuid4
 
+import httpx2
 import pytest
 from deepagents.backends.protocol import FileDownloadResponse
 from langchain_core.tools import BaseTool, StructuredTool
 from PIL import Image
 from pydantic import JsonValue, ValidationError
 
-from openswe import reviewer
+from openswe import event_claims, reviewer
 from openswe.agent_api.reviewer import ReviewerKind
 from openswe.dashboard import workspace_settings as workspace_settings_module
 from openswe.dashboard import workspace_settings_cache
@@ -28,9 +29,11 @@ from openswe.prompts import prompt
 from openswe.review.diff import review_diff_range
 from openswe.review_apps import apps as review_apps_module
 from openswe.review_apps import browser as review_browser_module
+from openswe.review_apps import outcomes as review_outcomes_module
 from openswe.review_apps.apps import ReviewApp, ReviewApps, SandboxFile
 from openswe.review_apps.browser import ReviewBrowser
 from openswe.review_apps.cleanup import ReviewAppData
+from openswe.review_apps.outcomes import ReviewOutcome, ReviewOutcomes
 from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.threads import index as thread_index
@@ -402,6 +405,7 @@ class _Preview:
         auto_review: bool = True,
         allowed: bool = True,
         reviewed: bool = True,
+        review_drafts: bool = False,
         **pull: object,
     ) -> None:
         pinned = [{"app": str(uuid4()), "release": str(uuid4())}] if apps else []
@@ -428,6 +432,25 @@ class _Preview:
             webhook_common, "workspace_for_repo_config", AsyncMock(return_value="w")
         )
         self.reviewed = reviewed
+        monkeypatch.setattr(
+            webhook_common, "draft_review_enabled_for_author", AsyncMock(return_value=review_drafts)
+        )
+        self.outcomes: dict[tuple[UUID, str], ReviewOutcome] = {}
+        outcomes = self.outcomes
+
+        async def get(store: ReviewOutcomes, run_id: str) -> ReviewOutcome | None:
+            return outcomes.get((store.app, run_id))
+
+        async def put(
+            store: ReviewOutcomes, outcome: ReviewOutcome, *, create: bool = False
+        ) -> ReviewOutcome:
+            key = (store.app, outcome.id)
+            if not create or key not in outcomes:
+                outcomes[key] = outcome
+            return outcomes[key]
+
+        monkeypatch.setattr(ReviewOutcomes, "get", get)
+        monkeypatch.setattr(ReviewOutcomes, "put", put)
         monkeypatch.setattr(thread_index, "get", self._thread)
         monkeypatch.setattr(webhook_common, "get_thread_metadata_safe", self._thread_metadata)
         monkeypatch.setattr(
@@ -438,7 +461,7 @@ class _Preview:
             "draft": False,
             "html_url": "https://github.com/acme/widgets/pull/7",
             "head": {"sha": _HEAD, "ref": "feature"},
-            "base": {"sha": _BASE},
+            "base": {"sha": _BASE, "repo": {"private": True}},
             **pull,
         }
         monkeypatch.setattr(
@@ -466,7 +489,9 @@ class _Preview:
         clock.now.side_effect = lambda _tz: self.now
         monkeypatch.setattr(github_webhook, "datetime", clock)
         # The checks GitHub lists on the head, for the watch.
-        self.repository = Mock(check_runs=AsyncMock(return_value=[]))
+        self.repository = Mock(
+            check_runs=AsyncMock(return_value=[]), workflow_ids=AsyncMock(return_value={})
+        )
         self.repository.pull_request.return_value.pull = AsyncMock(side_effect=lambda: self.pull)
         github = MagicMock()
         github.__aenter__.return_value = Mock(repo=Mock(return_value=self.repository))
@@ -510,9 +535,15 @@ class _Preview:
         self.runs.insert(0, run)
         return run
 
-    def settle(self, status: str) -> None:
-        """The newest run reaches ``status``."""
+    def settle(self, status: str, *, recorded: bool = True) -> None:
+        """The newest run stops, normally after recording a legitimate skip."""
         self.runs[0]["status"] = status
+        if status == "success" and recorded:
+            for key, outcome in self.outcomes.items():
+                if outcome.id == self.runs[0]["run_id"]:
+                    self.outcomes[key] = outcome.model_copy(
+                        update={"status": "skipped", "reason": "No visual frontend changes."}
+                    )
 
     async def _schedule(
         self,
@@ -647,6 +678,66 @@ async def test_watching_the_head_finds_a_preview_whose_completion_never_came(
 
 
 @pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+@pytest.mark.parametrize(
+    ("workflow", "again", "workflow_error", "starts"),
+    [
+        # Editing or labelling the pull request starts the preview's workflow again, only
+        # to skip its deploy.
+        pytest.param(1, "skipped", None, True, id="rerun-skipped"),
+        pytest.param(1, "failure", None, False, id="redeploy-failed"),
+        # Another workflow reporting a check of the same name.
+        pytest.param(2, "failure", None, True, id="another-workflow-failed"),
+        pytest.param(
+            1, "failure", httpx2.HTTPError("Cannot read Actions"), False, id="actions-unavailable"
+        ),
+        pytest.param(
+            1, "failure", ValueError("Invalid workflow run"), False, id="invalid-workflow"
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "check_name", [_PREVIEW_CHECK, f"advisory / frontend-preview / {_PREVIEW_CHECK}"]
+)
+async def test_the_watch_judges_a_preview_by_each_workflows_latest_deploy_that_ran(
+    monkeypatch: pytest.MonkeyPatch,
+    check_name: str,
+    workflow: int,
+    again: str,
+    workflow_error: Exception | None,
+    starts: bool,
+) -> None:
+    preview = _Preview(monkeypatch)
+    app = {"id": 15368, "slug": "github-actions"}
+    preview.repository.check_runs.return_value = [
+        {
+            "id": 2,
+            "name": check_name,
+            "conclusion": again,
+            "app": app,
+            "check_suite": {"id": 20},
+        },
+        {
+            "id": 1,
+            "name": check_name,
+            "conclusion": "success",
+            "app": app,
+            "check_suite": {"id": 10},
+        },
+    ]
+    preview.repository.workflow_ids.return_value = {10: 1, 20: workflow}
+    preview.repository.workflow_ids.side_effect = workflow_error
+    await preview.open()
+
+    await preview.work()
+    if preview.jobs:
+        await preview.work()
+
+    assert preview.dispatch.await_count == int(starts)
+    if not starts:
+        assert any(job.kind == PreviewReady.RECONCILE for job in preview.jobs.values())
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
 @pytest.mark.parametrize("change", [{"state": "closed"}, {"head": {"sha": "c" * 40}}])
 async def test_the_watch_stops_once_the_pull_request_moves_on(
     monkeypatch: pytest.MonkeyPatch, change: dict[str, object]
@@ -750,15 +841,41 @@ async def test_a_run_queued_on_a_successor_thread_is_cancelled_where_it_runs(
 
 
 @pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+@pytest.mark.parametrize(
+    ("watch", "workflow_error"),
+    [
+        pytest.param(False, None, id="webhook"),
+        pytest.param(True, None, id="watch"),
+        pytest.param(True, httpx2.HTTPError("Cannot read Actions"), id="actions-unavailable"),
+        pytest.param(True, ValueError("Invalid workflow run"), id="invalid-workflow"),
+    ],
+)
 async def test_each_named_check_starts_its_own_run_once_its_preview_is_up(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, watch: bool, workflow_error: Exception | None
 ) -> None:
     preview = _Preview(monkeypatch, checks=("wait-for-dns", "wait-for-api"))
 
-    # A job in a called workflow is named by its job.
-    await PreviewReady.run(_check_passed(name="advisory / frontend-preview / wait-for-dns"))
-    await PreviewReady.run(_check_passed(name="wait-for-api"))
-    await PreviewReady.run(_check_passed(name="wait-for-api"))
+    if watch:
+        preview.repository.workflow_ids.side_effect = workflow_error
+        preview.repository.check_runs.return_value = [
+            {
+                "id": index,
+                "name": name,
+                "conclusion": "success",
+                "app": {"id": 1, "slug": "preview-provider"},
+                "check_suite": {"id": 10},
+            }
+            for index, name in enumerate(
+                ("advisory / frontend-preview / wait-for-dns", "wait-for-api"), start=1
+            )
+        ]
+        await preview.open()
+        await preview.work()
+        preview.repository.workflow_ids.assert_awaited_once_with(_HEAD)
+    else:
+        await PreviewReady.run(_check_passed(name="advisory / frontend-preview / wait-for-dns"))
+        await PreviewReady.run(_check_passed(name="wait-for-api"))
+        await PreviewReady.run(_check_passed(name="wait-for-api"))
     await preview.work()
     await preview.work()
 
@@ -821,6 +938,73 @@ async def test_a_commit_gets_a_bounded_number_of_preview_runs(
 
 
 @pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_success_without_a_saved_result_is_failed_and_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch)
+    await PreviewReady.run(_check_passed())
+    for _ in range(PreviewReady.MOST_RUNS):
+        await preview.work()
+        preview.settle("success", recorded=False)
+    await preview.drain()
+    assert preview.dispatch.await_count == PreviewReady.MOST_RUNS
+    assert all(
+        outcome.status == "failed" and outcome.reason for outcome in preview.outcomes.values()
+    )
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_recovery_does_not_restart_an_expired_watch(monkeypatch: pytest.MonkeyPatch) -> None:
+    preview = _Preview(monkeypatch)
+    pull = Mock(id=uuid4(), owner="acme", repo="widgets", number=7)
+    monkeypatch.setattr(
+        github_webhook.PullRequest, "preview_candidates", AsyncMock(return_value=[pull])
+    )
+    monkeypatch.setattr(event_claims, "defer", AsyncMock())
+    await preview.open()
+    await PreviewReady.recover(Mock(payload={}))
+    await preview.drain()
+    assert not await event_claims.held(PreviewReady.RECOVER, str(pull.id))
+
+    await PreviewReady.recover(Mock(payload={}))
+    watch = next(iter(preview.jobs.values()))
+    assert datetime.fromisoformat(str(watch.payload["deadline"])) == (
+        preview.now + PreviewReady.WINDOW
+    )
+    await preview.drain()
+    requests = preview.repository.pull_request.return_value.pull.await_count
+
+    await PreviewReady.recover(Mock(payload={}))
+
+    assert not preview.jobs
+    assert preview.repository.pull_request.return_value.pull.await_count == requests
+    preview.dispatch.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_recovery_waits_when_its_capture_budget_is_spent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch)
+    monkeypatch.setattr(event_claims, "claim_within_limit", AsyncMock(return_value="limited"))
+    await PreviewReady.enqueue("acme", "widgets", 7, _HEAD, _PREVIEW_CHECK, None, recovery=True)
+    await preview.work()
+    preview.dispatch.assert_not_awaited()
+    assert len(preview.jobs) == 1
+    assert next(iter(preview.jobs.values())).due_at > preview.now
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+async def test_preview_capture_honors_enabled_draft_reviews(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview = _Preview(monkeypatch, draft=True, review_drafts=True)
+    await PreviewReady.run(_check_passed())
+    await preview.work()
+    assert preview.dispatch.await_count == 1
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
 async def test_a_retried_job_never_starts_a_second_run(monkeypatch: pytest.MonkeyPatch) -> None:
     preview = _Preview(monkeypatch)
     await PreviewReady.run(_check_passed())
@@ -866,12 +1050,18 @@ async def _published(
     return await PluginApps.publish(owner.id, html, origin={})
 
 
-async def _reviewing(monkeypatch: pytest.MonkeyPatch, files: dict[str, bytes]) -> UUID:
+async def _reviewing(
+    monkeypatch: pytest.MonkeyPatch, files: dict[str, bytes], *, writes: list[str] | None = None
+) -> UUID:
     """A review of acme/widgets#7 working for a published Design QA; returns the app's id."""
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "ada")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "")
     release = await _published(
-        {"instructions": "Capture.", "writes": ["captures"], "browser": True}
+        {
+            "instructions": "Capture.",
+            "writes": ["captures"] if writes is None else writes,
+            "browser": True,
+        }
     )
     pinned = {"app": str(release.app), "release": str(release.id)}
     settings = WorkspaceSettings({"review_apps": [pinned]})
@@ -881,9 +1071,55 @@ async def _reviewing(monkeypatch: pytest.MonkeyPatch, files: dict[str, bytes]) -
     monkeypatch.setattr(
         review_apps_module.Repository, "get", AsyncMock(return_value=Mock(private=True))
     )
-    monkeypatch.setattr(RunConfig, "from_runtime", lambda: _review())
+    monkeypatch.setattr(RunConfig, "from_runtime", lambda: _review(run_id="capture-run"))
     _Sandbox(monkeypatch, files)
     return release.app
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("writes", [[], ["captures"]])
+async def test_app_completion_honors_its_write_contract(
+    monkeypatch: pytest.MonkeyPatch, writes: list[str]
+) -> None:
+    app = await _reviewing(monkeypatch, {}, writes=writes)
+    result = await review_app_tools.record_app_review_outcome(
+        str(app), "complete", "Checked keyboard navigation. No issues found."
+    )
+    assert result["success"] is (not writes)
+    if not writes:
+        assert await ReviewOutcomes(app, "acme/widgets", 7).settled("capture-run", _HEAD, "")
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("status", ["success", "error", "interrupted"])
+async def test_regular_review_completion_settles_unfinished_saved_work(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    app = await _reviewing(monkeypatch, {})
+    result = await review_app_tools.save_app_document(
+        str(app), "captures", "pulls/7/latest", {"status": "complete"}
+    )
+    assert result["success"] is True
+    monkeypatch.setattr(
+        review_outcomes_module.THREADS,
+        "get",
+        AsyncMock(
+            return_value=Mock(
+                metadata={
+                    "kind": "reviewer",
+                    "pr": {"owner": "acme", "name": "widgets", "number": 7},
+                }
+            )
+        ),
+    )
+    await ReviewOutcomes.completed("review-thread", "capture-run", status)
+    outcomes = ReviewOutcomes(app, "acme/widgets", 7)
+    outcome = await outcomes.get("capture-run")
+    assert outcome is not None and outcome.status == "failed"
+    await outcomes.finish("capture-run", _HEAD, "blocked", "The comparison base is unavailable.")
+    await ReviewOutcomes.completed("review-thread", "capture-run", status)
+    outcome = await outcomes.get("capture-run")
+    assert outcome is not None and outcome.status == "blocked"
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -911,6 +1147,13 @@ async def test_a_review_saves_a_document_and_its_files_to_an_app(
     saved = await documents.attachment("captures", scope, key, "home-before.png")
     assert saved is not None and saved.content_type == "image/webp"
     assert _pixels(saved.content) == _pixels(before)
+    outcomes = ReviewOutcomes(app, "acme/widgets", 7)
+    await outcomes.finish("capture-run", _HEAD, "complete", "")
+    assert await outcomes.settled("capture-run", _HEAD, _PREVIEW_CHECK)
+    await documents.delete("captures", scope, key)
+    assert not await outcomes.settled("capture-run", _HEAD, _PREVIEW_CHECK)
+    outcome = await outcomes.get("capture-run")
+    assert outcome is not None and outcome.status == "failed"
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -942,6 +1185,10 @@ async def test_a_save_that_cannot_finish_keeps_nothing(
         "captures", DocumentScope(repository="acme/widgets"), "pulls/7/latest"
     )
     assert stored is None
+    if failure == "closed":
+        outcome = await review_app_tools.record_app_review_outcome(str(app), "blocked", "PR closed")
+        assert outcome["success"] is False
+        assert await ReviewOutcomes(app, "acme/widgets", 7).get("capture-run") is None
 
 
 @pytest.mark.usefixtures("registry_db", "saved_thread_scope")

@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 from uuid import UUID
 
 import pytest
@@ -15,9 +15,16 @@ from starlette.types import Message
 
 from openswe.client_tools import ClientToolSpec
 from openswe.dashboard import repo_access
-from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_instance_settings
+from openswe.dashboard.workspace_settings import (
+    WorkspaceSettings,
+    WorkspaceSettingsUpdate,
+    upsert_instance_settings,
+)
 from openswe.database import postgres
 from openswe.github import repos as github_repos
+from openswe.github.http import GitHubClient
+from openswe.github.webhook import PreviewReady
+from openswe.jobs import queue
 from openswe.plugins import records as records_module
 from openswe.plugins import routes as plugin_routes
 from openswe.plugins.featured import FeaturedApps
@@ -43,11 +50,14 @@ from openswe.plugins.records import (
 )
 from openswe.plugins.rooms import Room
 from openswe.plugins.routes import DocumentWrite, RoomJoin, _RoomStream
+from openswe.review_apps import requests as review_requests
+from openswe.review_apps.outcomes import ReviewOutcomes
 from openswe.ui_invalidations.topics import _readable_plugin_documents
 from openswe.users import User
 from openswe.users.models import UserIdentity
 from openswe.utils import ttl_cache
 from openswe.utils.object_store import ObjectStore, StoredObject
+from openswe.webhooks import common as webhook_common
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -63,8 +73,9 @@ def _bundle(
     permissions: list[str] | None = None,
     body: str = "<p>docs</p>",
     collections: dict[str, dict[str, str]] | None = None,
+    review: dict[str, object] | None = None,
 ) -> str:
-    manifest = {
+    manifest: dict[str, object] = {
         "name": name,
         "displayName": "Docs",
         "version": "1.0.0",
@@ -72,6 +83,8 @@ def _bundle(
         "permissions": permissions if permissions is not None else ["storage"],
         "collections": collections or {},
     }
+    if review is not None:
+        manifest["review"] = review
     return f'<script type="application/openswe-plugin+json">{json.dumps(manifest)}</script>{body}'
 
 
@@ -630,6 +643,73 @@ async def test_plugin_reaches_only_repositories_the_person_shared_and_can_read(
         await plugin.room("draft", "acme/app")
 
 
+@pytest.mark.parametrize(
+    ("permissions", "shared", "readable"),
+    [
+        (["github:read"], True, True),
+        (["agent"], True, True),
+        (["agent", "github:read"], False, True),
+        (["agent", "github:read"], True, False),
+    ],
+)
+async def test_requesting_app_reviews_requires_both_grants_and_repository_access(
+    monkeypatch: pytest.MonkeyPatch, permissions: list[str], shared: bool, readable: bool
+) -> None:
+    ada = await _person("ada", "1")
+    installation = await _install(ada, _bundle(permissions=permissions))
+    if shared:
+        await PluginInstallations.share(installation, ada, ["acme/app"])
+    monkeypatch.setattr(User, "can_read_repository", AsyncMock(return_value=readable))
+    plugin = await _installed(await PluginInstallations.get(installation, ada), ada)
+    with pytest.raises(HTTPException) as refused:
+        await plugin_routes.api_plugin_request_review("acme", "app", 7, plugin)
+    assert refused.value.status_code == 403
+
+
+async def test_review_requests_use_one_job_and_require_workspace_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada = await _person("ada", "1")
+    release = await PluginApps.publish(
+        ada,
+        _bundle(
+            name="qa",
+            permissions=["storage", "agent", "github:read"],
+            collections={"captures": {"write": "app"}},
+            review={"instructions": "Capture.", "writes": ["captures"], "browser": True},
+        ),
+        origin={},
+    )
+    installation = await PluginInstallations.install(release, user_id=ada)
+    await PluginInstallations.share(installation, ada, ["acme/app"])
+    plugin = await _installed(await PluginInstallations.get(installation, ada), ada)
+    monkeypatch.setattr(User, "can_read_repository", AsyncMock(return_value=True))
+    repository = Mock(info=AsyncMock(return_value={"id": 1, "private": True}))
+    repository.pull_request.return_value.pull = AsyncMock(
+        return_value={"state": "open", "head": {"sha": "abc"}}
+    )
+    github = MagicMock()
+    github.__aenter__.return_value = Mock(repo=Mock(return_value=repository))
+    monkeypatch.setattr(GitHubClient, "as_user", Mock(return_value=github))
+    monkeypatch.setattr(webhook_common, "workspace_for_repo_config", AsyncMock(return_value=None))
+    settings = AsyncMock(return_value=WorkspaceSettings({}))
+    monkeypatch.setattr(review_requests, "cached_workspace_settings", settings)
+    monkeypatch.setattr(PreviewReady, "checks", AsyncMock(return_value=frozenset({"preview"})))
+    with pytest.raises(HTTPException) as refused:
+        await plugin_routes.api_plugin_request_review("acme", "app", 7, plugin)
+    assert refused.value.status_code == 403
+    settings.return_value = WorkspaceSettings(
+        {"review_apps": [{"app": str(release.app), "release": str(release.id)}]}
+    )
+    first = await plugin_routes.api_plugin_request_review("acme", "app", 7, plugin)
+    second = await plugin_routes.api_plugin_request_review("acme", "app", 7, plugin)
+    job = await queue.get(f"{PreviewReady.JOB}:acme/app#7@abc:preview")
+    assert first.status == second.status == "queued"
+    assert job is not None and job.payload["request_id"] == first.id
+    outcomes = ReviewOutcomes(release.app, "acme/app", 7)
+    assert await outcomes.get(first.id) is not None
+
+
 def _upload(content_type: str, body: bytes) -> Request:
     """An attachment upload as it reaches the route, ``body`` its bytes."""
 
@@ -675,6 +755,10 @@ async def test_people_cannot_change_a_collection_the_app_writes_even_over_http(
         plugin = await _installed(await PluginInstallations.get(installation, person), person)
         forged = DocumentWrite(repository="acme/app", document={"status": "forged"})
         writes = [
+            plugin_routes.api_put_plugin_document("review_outcomes", "pulls/7/run", forged, plugin),
+            plugin_routes.api_delete_plugin_document(
+                "review_outcomes", "pulls/7/run", plugin, "acme/app"
+            ),
             plugin_routes.api_put_plugin_document("captures", "pulls/7/c1", forged, plugin),
             plugin_routes.api_put_plugin_document(
                 "captures", "pulls/7/c2", forged, plugin, if_absent=True

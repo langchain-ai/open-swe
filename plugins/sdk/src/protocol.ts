@@ -604,7 +604,18 @@ export interface CollectionApi extends RpcTarget {
   watch(onChange: () => void): Promise<Subscription>
 }
 
+/** A durable outcome of an approved app's work on one pull-request commit. */
+export interface ReviewOutcome {
+  id: string
+  head_sha: string
+  status: "queued" | "complete" | "blocked" | "failed" | "skipped"
+  reason: string
+  created_at: string
+}
+
 export interface GitHubRepositoryApi extends RpcTarget {
+  /** Request this app's review work; requires agent and GitHub access and workspace approval. */
+  requestReview(number: number): Promise<ReviewOutcome>
   info(): Promise<RepositoryInfo>
   /** The commit a branch, tag or SHA names; `null` when there is none. */
   ref(name: string): Promise<string | null>

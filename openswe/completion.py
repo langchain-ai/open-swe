@@ -37,6 +37,7 @@ from openswe.github.comments import post_github_comment
 from openswe.invocation import resolve_invocation_id
 from openswe.review.findings import REVIEWER_SHADOW_THREAD_KIND, REVIEWER_THREAD_KIND
 from openswe.review.run_failure import ReviewRunFailure
+from openswe.review_apps.outcomes import ReviewOutcomes
 from openswe.slack.client import (
     SANDBOX_UNREACHABLE_NOTICE,
     SlackNotice,
@@ -463,6 +464,13 @@ async def handle_run_completion(payload: dict[str, Any]) -> dict[str, str]:
     from openswe.review.events import ReviewEvents
 
     await ReviewEvents.completed(thread_id, run_id, status)
+    try:
+        await ReviewOutcomes.completed(thread_id, run_id, status)
+    except Exception:
+        logger.exception(
+            "Could not settle review app work",
+            extra={"thread_id": thread_id, "run_id": run_id},
+        )
     is_worker = False
     if run_id and isinstance(status, str) and status in _TERMINAL_RUN_STATUSES:
         from openswe.tasks.events import worker_finished

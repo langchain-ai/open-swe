@@ -1347,13 +1347,7 @@ class RepoClient:
         if len(names) == len(set(names)):
             return runs
         try:
-            payloads = await self.pages(
-                "actions/runs", key="workflow_runs", params={"head_sha": sha}
-            )
-            workflows = {
-                workflow.check_suite_id: workflow
-                for workflow in map(_WorkflowRun.model_validate, payloads)
-            }
+            workflows = await self._workflow_runs(sha)
         except httpx2.HTTPError, ValueError:
             logger.warning(
                 "Could not identify superseded check runs",
@@ -1375,6 +1369,18 @@ class RepoClient:
             for index, run in enumerate(runs)
             if index not in identities or orders[index] == latest[identities[index]]
         ]
+
+    async def _workflow_runs(self, sha: str) -> dict[int, _WorkflowRun]:
+        """The Actions workflow runs on ``sha``, by the check suite each reports to."""
+        payloads = await self.pages("actions/runs", key="workflow_runs", params={"head_sha": sha})
+        return {
+            workflow.check_suite_id: workflow
+            for workflow in map(_WorkflowRun.model_validate, payloads)
+        }
+
+    async def workflow_ids(self, sha: str) -> dict[int, int]:
+        """The workflow behind each Actions check suite on ``sha``, by suite id."""
+        return {suite: run.workflow_id for suite, run in (await self._workflow_runs(sha)).items()}
 
     async def workflow_for_suite(self, suite_id: int) -> WorkflowRun:
         runs = await self.pages(

@@ -258,6 +258,19 @@ class PullRequest(Base):
             return list(rows)
 
     @classmethod
+    async def preview_candidates(cls, after: UUID | None) -> list[Self]:
+        """A bounded recovery page of private, open PRs with a review thread."""
+        query = (
+            select(cls)
+            .join(cls.repository)
+            .where(Repository.private.is_(True), cls.state == "open", cls.reviews.any())
+        )
+        if after is not None:
+            query = query.where(cls.id > after)
+        async with postgres.session() as session:
+            return list(await session.scalars(query.order_by(cls.id).limit(50)))
+
+    @classmethod
     async def review_candidates(
         cls, repositories: Collection[str], user_id: UUID, *, limit: int
     ) -> list[Self]:

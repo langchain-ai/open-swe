@@ -597,3 +597,24 @@ Elsewhere, upload each build in **Settings → Apps** and press **Update** on yo
 A local web UI works the same way; [local development](DEVELOPMENT.md) covers running one.
 
 Bump `version` with each release so people can tell what they run.
+
+## Review outcomes and retries
+
+For apps with an administrator-approved browser review step, `host.github(repository).requestReview(number)` queues a retry on an open private PR.
+It requires the installed app's `agent` and `github:read` (or `github:write`) grants and the person's current repository access.
+Workspace automatic-review and preview-check gates still apply.
+Duplicate queued work is reused; requests are limited to three per app and PR per hour.
+The call returns a `ReviewOutcome`, including an actionable blocked reason when preview reviews are not configured.
+
+Apps with storage access may read the reserved `review_outcomes` collection in their repository scope.
+Keys are `pulls/<number>/<run-or-request-id>`; documents contain `id`, `head_sha`, `created_at`, `status` (`queued`, `complete`, `blocked`, `failed`, `skipped`) and `reason`.
+Only the host writes this collection.
+Order by `created_at` when selecting the latest attempt: runtime run IDs are not necessarily time ordered.
+
+Reviewers must call `record_app_review_outcome` for each approved app.
+Completion requires a successfully saved app document when the app declares write collections; a read-only app instead records a summary of its completed work.
+Other terminal statuses require a reason.
+Preview follow-ups check that the referenced result still exists before marking the work done.
+The host bounds retries for missing outcomes and gives existing open, reviewed PRs one recovery window.
+Automatic recovery starts at most five app reviews per repository per hour; a manual retry can proceed independently.
+Regular reviews also settle unfinished outcomes when their run ends, including failure and cancellation.

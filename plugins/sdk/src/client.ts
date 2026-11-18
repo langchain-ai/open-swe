@@ -486,6 +486,9 @@ export class GitHubRepository {
       })
     )
   }
+  requestReview(number: number) {
+    return settle(this.stub.requestReview(number))
+  }
   /** The pull request numbered `number` as GitHub has it now; `null` when there is none. */
   pull(number: number) {
     return settle(this.stub.pull(number))

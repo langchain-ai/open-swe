@@ -4,12 +4,15 @@ The run's own repository and pull request bind every write; no argument can name
 Files are read from the run's sandbox under ``/workspace/``.
 """
 
+from typing import Literal
+
 from langchain_core.tools import BaseTool
 from pydantic import JsonValue, ValidationError
 
 from openswe.prompts import apply_tool_descriptions
 from openswe.review_apps.apps import ReviewApps, SandboxFile
 from openswe.review_apps.browser import ReviewBrowser
+from openswe.review_apps.outcomes import ReviewOutcomes
 from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.utils.json_types import JsonObject
@@ -22,8 +25,8 @@ class ReviewAppTools:
 
     def __init__(self, apps: ReviewApps) -> None:
         self.apps = apps
-        self.tools: list[BaseTool] = (
-            apply_tool_descriptions([save_app_document]) if apps.writes else []
+        self.tools: list[BaseTool] = apply_tool_descriptions(
+            [record_app_review_outcome, *([save_app_document] if apps.writes else [])]
         )
 
     @staticmethod
@@ -68,6 +71,30 @@ async def save_app_document(
         stored = await apps.save(
             app, collection, key, document, {name: found[path] for name, path in named.items()}
         )
+        if cfg.run_id and cfg.head_sha:
+            await ReviewOutcomes(apps.app(app).id, apps.repository, apps.number).saved(
+                cfg.run_id, cfg.head_sha, collection, stored
+            )
     except (ValueError, ValidationError) as exc:
         return {"success": False, "error": str(exc)}
     return {"success": True, "key": stored}
+
+
+async def record_app_review_outcome(
+    app: str,
+    status: Literal["complete", "blocked", "failed", "skipped"],
+    reason: str = "",
+) -> dict[str, JsonValue]:
+    """Record the outcome of this run's work for an app."""
+    cfg = RunConfig.from_runtime()
+    try:
+        apps = await ReviewApps.of(cfg)
+        if apps is None or not cfg.run_id or not cfg.head_sha:
+            raise ValueError("This run has no app review to finish")
+        approved = apps.app(app)
+        await ReviewOutcomes(approved.id, apps.repository, apps.number).finish(
+            cfg.run_id, cfg.head_sha, status, reason, requires_result=bool(approved.step.writes)
+        )
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    return {"success": True}

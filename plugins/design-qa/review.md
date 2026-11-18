@@ -1,13 +1,15 @@
-Design QA keeps before and after screenshots of a pull request's frontend, which reviewers compare side by side.
+Design QA saves matched before/after screenshots for visual review.
 
-Capture only when the diff changes what people see in a web frontend and a preview of this pull request serves its head commit: a deployment for that commit, or a bot's comment on the pull request saying the preview is deployed, links it.
-A link while the preview is still building or deploying doesn't count: it can still serve an earlier commit, or nothing.
-Otherwise do nothing for Design QA, and don't mention it.
+Capture only visual frontend changes, once a successful deployment or deployment-bot comment links a preview serving the reviewed head commit.
+A building or deploying preview may serve an earlier commit and does not count.
+If the diff has no visual frontend changes, record `skipped` with that reason.
+If a current preview cannot be verified, record `blocked` with the missing prerequisite.
+Always record an outcome with `record_app_review_outcome`; never silently skip capture work.
 
 1. Find the latest successful preview deployment for the reviewed head commit, using current deployment records or the latest updated deployment-bot comment, not an older comment or a guessed URL.
    Open its link and verify it loads before capturing.
    Find its base: the site built from the default branch that shares the preview's data.
-   The workspace's review guidelines name the base when there is one; without a base, don't capture.
+   The workspace's review guidelines name the base when there is one; without a base, record `blocked` and explain that the workspace needs a base URL.
 1. If the pages need a sign-in, sign the browser in to the base's host and to the preview's host.
 1. Pick the pages and interaction states the diff changes, at most ten.
    For each, open the same route on the base and on the preview at one viewport size, such as 1440×900, reach the same state, and take a viewport screenshot of each with `shoot`, below, one side per run: `return await shoot('settings-before')` saves `/workspace/design-qa/settings-before.png`.
@@ -45,7 +47,10 @@ Otherwise do nothing for Design QA, and don't mention it.
 }
 ```
 
-with `files` such as `{"settings-before.png": "/workspace/design-qa/settings-before.png", "settings-after.png": "/workspace/design-qa/settings-after.png"}`.
+Use `files` such as `{"settings-before.png": "/workspace/design-qa/settings-before.png", "settings-after.png": "/workspace/design-qa/settings-after.png"}`.
+
+Record `complete` only after saving at least one matched pair and its files.
+Record `blocked` for missing prerequisites or `failed` for a capture/save error, with a concrete reason.
 
 - Save `base_url` and `head_url` as the verified site origins.
   Save each scenario's `path` as the actual browser pathname, query and fragment, including any organization prefix, not a route inferred from source code.
@@ -57,9 +62,9 @@ with `files` such as `{"settings-before.png": "/workspace/design-qa/settings-bef
 - `actions` are the steps that reached an interaction state, such as opening a menu; leave them out for a page as it loads.
 - `annotations` are at most three areas of the after screenshot a reviewer should look at, in its pixels, each with a short `title` and a `body`; leave them out when nothing stands out.
 - When the two sides of a pair can't reach the same state or size, or something on them keeps moving, add `"layout_warnings": ["<why>"]`, saying what moves and if you hid it.
-- When the preview or the base won't load, or wants a sign-in you can't do, save a capture with `"status": "blocked"`, an `"error"` saying why, and no scenarios.
+- When the preview or the base won't load, or wants a sign-in you can't do, record `blocked` with the specific reason; never report an empty capture as complete.
 
-Screenshots taken at different moments can differ when nothing changed: an image, icon or font loaded on one side only, a skeleton or spinner still showing, an animation, transition or carousel caught at another point, or data that moved on, such as a count or relative time.
+Loading images or fonts, skeletons, spinners, animations and live data can create differences unrelated to the diff.
 `shoot` keeps most of that out, so put it in each run that shoots: it waits for fonts, images in view and loading indicators, pauses videos, freezes CSS and web animations, and shoots again until two takes in a row match.
 
 ```js

@@ -1202,6 +1202,16 @@ class RepositoryTarget extends RpcTarget implements GitHubRepositoryApi {
     this.#release = release
   }
 
+  requestReview(number: number) {
+    return this.#budget.run(() =>
+      pluginsApi.requestReview(
+        this.#plugin,
+        this.#repository,
+        pullNumber(number)
+      )
+    )
+  }
+
   info() {
     return this.#budget.run(() =>
       pluginsApi.repository(this.#plugin, this.#repository)

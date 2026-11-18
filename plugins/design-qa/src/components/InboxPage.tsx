@@ -17,6 +17,7 @@ import {
   errorMessage,
   isForbidden,
   useInbox,
+  useInboxChanges,
   useMedia,
   useRepositories,
   useShareRepositories,
@@ -28,14 +29,16 @@ import {
 import { RouteLink } from "../lib/router"
 import { OpenPullRequestInput } from "./OpenPullRequestInput"
 import { ShareRepositories } from "./ShareRepositories"
+import { CaptureAction } from "./CaptureAction"
 
-/** Open pull requests with saved Design QA runs, as cards. */
+/** Open pull requests and their capture status, as cards. */
 export function InboxPage() {
   useTitle(null)
   const repositories = useRepositories()
   const share = useShareRepositories()
   const [scope, setScope] = useState<InboxScope>("review-requested")
   const shared = repositories.data?.map((one) => one.fullName) ?? []
+  useInboxChanges(shared)
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-space-5 px-space-5 py-space-6 sm:px-space-6">
@@ -121,8 +124,8 @@ function PullRequests({ scope }: { scope: InboxScope }) {
     >
       <p className="mb-space-3 text-xs text-secondary">
         {scope === "mine"
-          ? "Your open PRs with saved Design QA runs, in the repositories you shared."
-          : "Open PRs with saved Design QA runs and a GitHub review request for you or a team you belong to, in the repositories you shared. Comment mentions are not included."}
+          ? "Your open PRs and their capture status, in the repositories you shared."
+          : "Open PRs with a GitHub review request for you or a team you belong to, in the repositories you shared. Comment mentions are not included."}
       </p>
       <div className="mb-space-4 flex flex-wrap items-center gap-space-3">
         <Input
@@ -189,15 +192,15 @@ function PullRequests({ scope }: { scope: InboxScope }) {
             {filter
               ? "No loaded PRs match your filter"
               : scope === "mine"
-                ? "No saved Design QA reviews in your PRs"
-                : "No saved reviews in your review requests"}
+                ? "No open PRs in your shared repositories"
+                : "No open PRs requesting your review"}
           </h2>
           <p className="max-w-sm text-sm text-secondary">
             {filter
               ? "Try a different title, repository, or PR number."
               : scope === "mine"
-                ? "Your open PRs appear here after Design QA runs on them. Open any PR above to view its QA page."
-                : "PRs appear here after Design QA runs and you or a team you belong to are requested as reviewers. Open any PR above to view its QA page."}
+                ? "Your open PRs appear here, including those without captures. Open any PR above to view its QA page."
+                : "PRs appear here when you or a team you belong to are requested as reviewers. Open any PR above to view its QA page."}
           </p>
         </Card>
       ) : (
@@ -237,41 +240,49 @@ function reviewStatus(run: FrontendReviewRun, stale: boolean) {
 function PullRequestCard({ item, login }: { item: InboxItem; login: string }) {
   const { pull: pr, run } = item
   const repository = splitRepository(item.repository)
-  const stale = Boolean(pr.headSha && run.head_sha !== pr.headSha)
-  const status = reviewStatus(run, stale)
-  const overview = runOverview(run)
+  const stale = Boolean(
+    run && "headSha" in pr && pr.headSha && run.head_sha !== pr.headSha
+  )
+  const status = run
+    ? reviewStatus(run, stale)
+    : { label: "Not captured", color: "secondary" as const }
+  const overview = run ? runOverview(run) : null
   const requested = [
-    ...(pr.requestedReviewers.some(
+    ...("requestedReviewers" in pr &&
+    pr.requestedReviewers.some(
       (reviewer) => reviewer.toLowerCase() === login.toLowerCase()
     )
       ? ["you"]
       : []),
-    ...pr.requestedTeams.map((team) => `@${team}`),
+    ...("requestedTeams" in pr
+      ? pr.requestedTeams.map((team) => `@${team}`)
+      : []),
   ]
   const summary =
-    run.error ||
-    run.report?.summary ||
+    item.outcome?.reason ||
+    run?.error ||
+    run?.report?.summary ||
     "Open this PR to inspect its capture details."
   if (!repository) return null
 
   return (
-    <RouteLink
-      to={{
-        page: "pull",
-        pr: { ...repository, number: pr.number },
-        run: run.id,
-      }}
-      className="block min-w-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-focus"
-    >
-      <Card className="flex h-full min-w-0 flex-col overflow-hidden p-0 transition-colors hover:border-strong">
+    <Card className="flex h-full min-w-0 flex-col overflow-hidden p-0">
+      <RouteLink
+        to={{
+          page: "pull",
+          pr: { ...repository, number: pr.number },
+          run: run?.id ?? null,
+        }}
+        className="flex h-full min-w-0 flex-col rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
         <div className="flex aspect-[16/6] items-center justify-center overflow-hidden border-b border-default bg-surface-level-3">
           <Thumbnail
             media={{
               repository: item.repository,
               pull: pr.number,
-              run: run.id,
+              run: run?.id ?? "",
             }}
-            name={overview.cover?.after_url ?? null}
+            name={overview?.cover?.after_url ?? null}
           />
         </div>
         <div className="flex flex-1 flex-col gap-space-2 p-space-4">
@@ -305,8 +316,8 @@ function PullRequestCard({ item, login }: { item: InboxItem; login: string }) {
             </p>
           )}
           <p className="text-xs text-secondary">
-            {overview.total
-              ? `${overview.paired}/${overview.total} states captured on both sides · ${overview.interactions} interaction${overview.interactions === 1 ? "" : "s"}`
+            {overview?.total
+              ? `${overview.paired}/${overview?.total} states captured on both sides · ${overview.interactions} interaction${overview.interactions === 1 ? "" : "s"}`
               : "No states captured"}
           </p>
           <p className="line-clamp-3 text-xs leading-relaxed text-secondary">
@@ -318,19 +329,25 @@ function PullRequestCard({ item, login }: { item: InboxItem; login: string }) {
             </p>
           )}
           <p className="text-xs text-tertiary">
-            Run{" "}
-            {new Date(run.created_at).toLocaleDateString(undefined, {
-              month: "short",
-              day: "numeric",
-            })}
+            {run
+              ? `Run ${new Date(run.created_at).toLocaleDateString()}`
+              : "No saved screenshots yet"}
           </p>
           <span className="mt-auto flex items-center justify-between pt-space-2 text-xs font-medium text-primary">
             Open Design QA
             <ArrowUpRightIcon size={16} aria-hidden="true" />
           </span>
         </div>
-      </Card>
-    </RouteLink>
+      </RouteLink>
+      <div className="mt-auto p-space-4 pt-0">
+        <CaptureAction
+          pr={{ ...repository, number: pr.number }}
+          outcome={item.outcome}
+          currentHeadSha={"headSha" in pr ? pr.headSha : undefined}
+          hasCapture={Boolean(run)}
+        />
+      </div>
+    </Card>
   )
 }
 

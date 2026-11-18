@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Any
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 
@@ -206,15 +207,20 @@ async def test_finding_events_capture_changes_without_duplicate_or_noop_events()
 
 @pytest.mark.usefixtures("registry_db")
 @pytest.mark.parametrize("status", ["success", "error", "timeout", "interrupted"])
-@pytest.mark.parametrize("carried", [False, True])
-async def test_review_run_events_are_linked_and_deduplicated(status: str, carried: bool) -> None:
+@pytest.mark.parametrize(("carried", "closed"), [(False, False), (True, False), (False, True)])
+async def test_review_run_events_are_linked_and_deduplicated(
+    monkeypatch: pytest.MonkeyPatch, status: str, carried: bool, closed: bool
+) -> None:
     from runtime_api.loop import RunStarted
     from sqlalchemy import text
 
     from openswe.agent_api.reviewer import ReviewerKind
     from openswe.agent_api.tokens import RunSettings
     from openswe.database import connection
+    from openswe.plugins.manifest import ReviewStep
     from openswe.review.events import ReviewEvents
+    from openswe.review_apps.apps import ReviewApp, ReviewApps
+    from openswe.review_apps.outcomes import ReviewOutcomes
     from openswe.threads import index
 
     with patch("openswe.review.findings.get_client", return_value=_metadata_client()):
@@ -225,6 +231,11 @@ async def test_review_run_events_are_linked_and_deduplicated(status: str, carrie
         metadata={"kind": "reviewer", "pr": {"owner": "acme", "name": "app", "number": 1}},
     )
     parts = ReviewerKind()
+    app = ReviewApp(uuid4(), uuid4(), "design-qa", "Design QA", ReviewStep(instructions="Capture."))
+    monkeypatch.setattr(ReviewApps, "of", AsyncMock(return_value=ReviewApps((app,), "acme/app", 1)))
+    monkeypatch.setattr(ReviewOutcomes, "closed", AsyncMock(return_value=closed))
+    queued = AsyncMock(side_effect=ValueError("The pull request closed during the write"))
+    monkeypatch.setattr(ReviewOutcomes, "queued", queued)
     for _ in range(2):
         await parts.started(
             {
@@ -234,6 +245,7 @@ async def test_review_run_events_are_linked_and_deduplicated(status: str, carrie
                     "invocation_id": "invocation-1",
                     "repo": {"owner": "acme", "name": "app"},
                     "pr_number": 1,
+                    "head_sha": "a" * 40,
                 }
             },
             RunSettings(),
@@ -264,6 +276,8 @@ async def test_review_run_events_are_linked_and_deduplicated(status: str, carrie
     assert [row["event_type"] for row in rows] == ["run.started", terminal]
     assert all(row["payload"]["run_id"] == "run-1" for row in rows)
     assert all(row["pull_request_id"] is not None for row in rows)
+    if closed:
+        queued.assert_not_awaited()
 
 
 @pytest.mark.usefixtures("registry_db")

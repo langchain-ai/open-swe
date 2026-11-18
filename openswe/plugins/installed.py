@@ -116,6 +116,8 @@ class InstalledPlugin:
         install still pinned to a version or preview without it.
         """
         scope = await self.document_scope(repository)
+        if collection == "review_outcomes":
+            raise CollectionWrittenByApp(collection)
         if self.installation.manifest.app_writes(collection):
             raise CollectionWrittenByApp(collection)
         release = await PluginApps.newest_release(self.installation.plugin)

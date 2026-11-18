@@ -230,6 +230,11 @@ async def _approval_evaluate(job: Job) -> None:
     await PullRequestApproval.evaluate_job(job)
 
 
+@WORKER.register(PreviewReady.RECOVER)
+async def _recover_review_apps(job: Job) -> None:
+    await PreviewReady.recover(job)
+
+
 @WORKER.register(PreviewReady.RECONCILE)
 async def _review_apps_preview_reconcile(job: Job) -> None:
     await PreviewReady.reconcile(job)
@@ -237,7 +242,15 @@ async def _review_apps_preview_reconcile(job: Job) -> None:
 
 @WORKER.register(PreviewReady.JOB)
 async def _review_apps_on_preview(job: Job) -> None:
-    await PreviewReady.start_job(job)
+    try:
+        await PreviewReady.start_job(job)
+    except Exception:
+        await PreviewReady.request_status(
+            job,
+            "failed",
+            "Capture work could not start. Retry capture if the automatic retry does not recover.",
+        )
+        raise
 
 
 @WORKER.register(HUMAN_REVIEW_SETTLE)
@@ -348,6 +361,7 @@ async def start_jobs() -> None:
         import_agent_server_crons,
         import_agent_server_threads,
         start_queue,
+        lambda: queue.schedule(PreviewReady.RECOVER, cron="17 * * * *", key=PreviewReady.RECOVER),
         ensure_directory_sync,
         # Retired: MDA's Slack channel builds its turns from the event, and nothing is
         # remembered for it to miss.

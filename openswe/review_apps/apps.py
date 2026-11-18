@@ -257,6 +257,8 @@ class ReviewApps:
         for a reason the review could not see.
         """
         app = self.app(app_id)
+        if collection == "review_outcomes":
+            raise ValueError("Review outcomes are recorded by the review, not written as documents")
         if collection not in app.step.writes:
             raise ValueError(f"{app.name} has reviews write only {', '.join(app.step.writes)}")
         stored_key = self.key(key)

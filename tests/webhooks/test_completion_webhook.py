@@ -356,6 +356,9 @@ async def test_leftover_follow_ups_get_one_pickup_run(
         runs, "_build_dashboard_configurable", AsyncMock(return_value={"github_login": "owner"})
     )
     monkeypatch.setattr(runs, "dispatch_agent_run", dispatch)
+    monkeypatch.setattr(
+        completion.ReviewOutcomes, "completed", AsyncMock(side_effect=RuntimeError("storage down"))
+    )
 
     await completion.handle_run_completion(
         {"thread_id": "t1", "run_id": "run-1", "status": status, "metadata": metadata}

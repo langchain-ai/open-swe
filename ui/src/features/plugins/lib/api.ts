@@ -8,6 +8,7 @@ import type {
   PullRequestRole,
   PullRequestSearch,
   RepositoryInfo,
+  ReviewOutcome,
   RepositoryTree,
   StoredAttachment,
   SlackBot,
@@ -636,6 +637,13 @@ export const pluginsApi = {
         }),
       })
     ).sha,
+  requestReview: (id: string, repository: string, number: number) =>
+    agentsRequest<ReviewOutcome>(
+      `${repo(id, repository)}/pulls/${number}/review`,
+      {
+        method: "POST",
+      }
+    ),
   pull: async (id: string, repository: string, number: number) => {
     const found = await orNull(
       agentsRequest<PullRequestWire>(`${repo(id, repository)}/pulls/${number}`)

@@ -39,7 +39,7 @@ class ReviewAppData:
         for app, collection in await PluginDocuments.collections_under(scope, prefix):
             if app not in writes:
                 writes[app] = await PluginApps.review_writes(app)
-            if collection in writes[app]:
+            if collection in writes[app] or collection == "review_outcomes":
                 deleted += await PluginDocuments(app).delete_unattended_under(
                     collection, scope, prefix
                 )
