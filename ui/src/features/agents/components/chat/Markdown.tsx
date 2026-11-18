@@ -10,6 +10,7 @@ import {
   memo,
   use,
   useMemo,
+  useRef,
   useState,
 } from "react"
 import { ChatCenteredTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCenteredText"
@@ -31,6 +32,11 @@ import {
   PreviewablePullRequestLink,
 } from "@/features/agents/components/PullRequestPreview"
 import { CodeBlock } from "./CodeBlock"
+import { useCopyAction } from "@langchain/macaw-components/CopyButton"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { ArrowsOutSimpleIcon } from "@phosphor-icons/react/dist/ssr/ArrowsOutSimple"
+import { CheckIcon } from "@phosphor-icons/react/dist/ssr/Check"
+import { CopySimpleIcon } from "@phosphor-icons/react/dist/ssr/CopySimple"
 import { MermaidDiagram } from "./MermaidDiagram"
 import { TableScroll } from "./TableScroll"
 import {
@@ -179,6 +185,71 @@ function ExternalLink({
   )
 }
 
+function MarkdownTable({ children, ...props }: ComponentProps<"table">) {
+  const [open, setOpen] = useState(false)
+  const inline = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const { copied, onCopy } = useCopyAction()
+  const table = <table {...props}>{children}</table>
+  const copy = (
+    <IconButton
+      icon={copied ? CheckIcon : CopySimpleIcon}
+      label={copied ? "Copied" : "Copy table"}
+      size="xs"
+      color="secondary"
+      variant="plain"
+      onClick={() =>
+        onCopy(inline.current?.querySelector("table")?.innerText ?? "")
+      }
+    />
+  )
+
+  return (
+    <>
+      <div
+        ref={inline}
+        className="chat-markdown-table flex items-start gap-space-2"
+      >
+        <TableScroll className="min-w-0 flex-1">{table}</TableScroll>
+        <div className="flex shrink-0 gap-space-1 pt-space-1">
+          {copy}
+          <IconButton
+            ref={trigger}
+            icon={ArrowsOutSimpleIcon}
+            label="Expand table"
+            size="xs"
+            color="secondary"
+            variant="plain"
+            aria-haspopup="dialog"
+            onClick={() => setOpen(true)}
+          />
+        </div>
+      </div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent
+          title="Table"
+          className="h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-none"
+          childrenClassName="min-h-0 flex-1 overflow-auto"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            trigger.current?.focus({ preventScroll: true })
+          }}
+        >
+          <div className="flex justify-end">{copy}</div>
+          <div className="chat-markdown min-h-0 min-w-0">
+            <TableScroll
+              className="chat-markdown-table"
+              viewportClassName="max-h-full"
+            >
+              {table}
+            </TableScroll>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 const COMPONENTS: Components = {
   h1: passthrough("h1"),
   h2: passthrough("h2"),
@@ -282,15 +353,10 @@ const COMPONENTS: Components = {
       </div>
     )
   },
-  table: ({
-    node: _node,
-    children,
-    ...props
-  }: ExtraProps & ComponentProps<"table">) => (
-    <TableScroll className="chat-markdown-table">
-      <table {...props}>{children}</table>
-    </TableScroll>
+  table: ({ node: _node, ...props }: ExtraProps & ComponentProps<"table">) => (
+    <MarkdownTable {...props} />
   ),
+  thead: passthrough("thead"),
   inlineCode: ({
     node: _node,
     ...props

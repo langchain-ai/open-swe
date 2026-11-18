@@ -331,7 +331,7 @@ export const Messages = memo(function MessagesComponent({
           ref={scrollRef}
           // Gutter on both edges: the centered column keeps its position when the
           // scrollbar appears, so it stays aligned with the composer below it.
-          className="h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-space-5 text-sm leading-[1.6] antialiased"
+          className="[container-type:inline-size] h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-space-5 text-sm leading-[1.6] antialiased"
         >
           <div
             ref={contentRef}

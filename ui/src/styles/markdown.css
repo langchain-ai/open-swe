@@ -212,9 +212,33 @@
    characters, which the root's `overflow-wrap: anywhere` would otherwise do. */
 .chat-markdown .chat-markdown-table {
   margin: 0.65rem 0;
-  max-width: 100%;
-  border: 1px solid var(--border-default);
-  border-radius: 0.5rem;
+  min-width: 0;
+}
+
+[data-transcript-scroll] .chat-markdown-table {
+  width: max(100%, calc(50cqw + 50% - 1.25rem));
+}
+
+.chat-markdown-table [data-table-scroll-edge] {
+  display: none;
+}
+
+.chat-markdown-table:has([data-table-scroll-edge="left"]) {
+  --table-fade-left: transparent;
+}
+
+.chat-markdown-table:has([data-table-scroll-edge="right"]) {
+  --table-fade-right: transparent;
+}
+
+.chat-markdown-table [role="region"] {
+  mask-image: linear-gradient(
+    to right,
+    var(--table-fade-left, var(--text-primary)),
+    var(--text-primary) 2rem,
+    var(--text-primary) calc(100% - 2rem),
+    var(--table-fade-right, var(--text-primary))
+  );
 }
 
 .chat-markdown table {
@@ -231,6 +255,7 @@
   padding: 0.45rem 0.75rem;
   text-align: left;
   max-width: 24rem;
+  overflow-wrap: anywhere;
 }
 
 .chat-markdown thead th {

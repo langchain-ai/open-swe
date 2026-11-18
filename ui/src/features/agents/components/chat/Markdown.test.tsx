@@ -1,6 +1,14 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { afterEach, expect, it, vi } from "vitest"
 
 import { Markdown } from "./Markdown"
@@ -16,7 +24,44 @@ vi.mock("@/features/agents/components/PullRequestPreview", () => ({
 const attachment =
   "https://github.com/user-attachments/assets/a1e89096-2c71-48cb-b93e-7559b9667c64"
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
+it("expands a table without removing its inline copy and returns focus on Escape", async () => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    }
+  )
+  render(
+    <Markdown
+      content={
+        "| Finding | Evidence |\n| --- | --- |\n| Queue | Worker saturation |"
+      }
+    />,
+    {
+      wrapper: TooltipProvider,
+    }
+  )
+
+  const trigger = screen.getByRole("button", { name: "Expand table" })
+  trigger.focus()
+  fireEvent.click(trigger)
+  const dialog = screen.getByRole("dialog", { name: "Table" })
+  expect(
+    within(dialog).getByRole("cell", { name: "Worker saturation" })
+  ).not.toBeNull()
+  expect(screen.getAllByRole("table", { hidden: true })).toHaveLength(2)
+
+  fireEvent.keyDown(dialog, { key: "Escape" })
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  expect(screen.getAllByRole("table")).toHaveLength(1)
+  expect(document.activeElement).toBe(trigger)
+})
 
 it("embeds a standalone GitHub attachment and restores its link if playback fails", () => {
   render(
