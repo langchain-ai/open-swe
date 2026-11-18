@@ -8,6 +8,7 @@ from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
+import httpx2
 from pydantic import BaseModel, Field
 
 from openswe.github.http import RepoClient
@@ -40,11 +41,14 @@ class NativeQueueRuntime:
         repository_id: int,
         open_repo: Callable[[MergeQueue], AbstractAsyncContextManager[RepoClient]],
         *,
+        open_recovery_repo: Callable[[MergeQueue], AbstractAsyncContextManager[RepoClient]]
+        | None = None,
         config: QueueConfiguration | None = None,
         dispatcher: DispatchGateway | None = None,
     ):
         self.queue_id, self.repository_id, self.open_repo = queue_id, repository_id, open_repo
         self.config, self.dispatcher = config, dispatcher
+        self.open_recovery_repo = open_recovery_repo
 
     async def _timeout(self, repo: RepoClient, policy: QueuePolicy | None = None) -> int:
         config = self.config
@@ -200,6 +204,76 @@ class NativeQueueRuntime:
                     workflow_digest=workflow_digest,
                 )
 
+    async def _recover(
+        self,
+        queue: MergeQueue,
+        repo: RepoClient,
+        snapshot: NativeQueueSnapshot,
+        lease: Lease,
+    ) -> bool:
+        decision = await queue.pending_native_recovery(lease)
+        if decision is None:
+            return False
+        if decision.status == "applying":
+            # A previous worker may have sent the mutation. Read the outcome; never resend it.
+            await queue.settle_native_deferral(decision, snapshot, lease)
+            return True
+        try:
+            if self.open_recovery_repo is None:
+                raise ValueError("Native deferral transport is unavailable")
+            history = await queue.history(decision.proposal.batch_id)
+            if self.config is None or history.batch.policy.get("trust") != self.config.native_trust:
+                raise ValueError("Recovery policy changed")
+            if history.batch.state != "active" or history.batch.deadline <= datetime.now(UTC):
+                raise ValueError("Recovery batch is inactive or expired")
+            if decision.proposal.candidate_sha not in snapshot.candidates:
+                raise ValueError("Recovery candidate changed")
+            policy = QueuePolicy.model_validate(history.batch.policy["policy"])
+            if await self._timeout(repo, policy) != history.batch.policy.get("timeout_seconds"):
+                raise ValueError("Native queue deadline changed")
+            await decision.check_dependencies(repo, snapshot)
+            async with self.open_recovery_repo(queue) as writer:
+                current = await writer.native_queue(queue.target_branch)
+                if current.repository_id != self.repository_id:
+                    raise ValueError("Native queue repository identity changed")
+                if current != snapshot:
+                    raise ValueError(
+                        "Queue changed during dependency checks; operator review required"
+                    )
+                await queue.renew(lease, timedelta(seconds=60))
+                await queue.start_native_deferral(decision, current, lease)
+                member = decision.proposal.member
+                assert member is not None and current.queue is not None
+                entry = next(
+                    entry for entry in current.queue.entries.nodes if entry.id == member.entry_id
+                )
+                # Serialize this short mutation with human pause and configuration changes.
+                try:
+                    async with queue.native_publication(lease):
+                        await writer.dequeue_native_pull(entry, str(decision.proposal.request_key))
+                except httpx2.HTTPError:
+                    logger.warning(
+                        "Reconciling ambiguous native dequeue response",
+                        extra={"queue_id": str(queue.id)},
+                        exc_info=True,
+                    )
+                after = await writer.native_queue(queue.target_branch)
+                if after.repository_id != self.repository_id:
+                    raise ValueError("Native queue repository identity changed")
+                await queue.settle_native_deferral(decision, after, lease)
+        except LeaseLost:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "Native deferral requires operator review", extra={"queue_id": str(queue.id)}
+            )
+            # Save the ambiguity and stop new work. A timeout outside this block leaves the
+            # applying intent for the next reconciliation, which also never repeats removal.
+            await queue.settle_native_deferral(
+                decision, snapshot, lease, error=f"{type(exc).__name__}: {exc}"
+            )
+        return True
+
     async def _reconcile_checks(self, queue: MergeQueue, repo: RepoClient, lease: Lease) -> None:
         assert self.dispatcher is not None
         snapshot = await repo.native_queue(queue.target_branch)
@@ -240,7 +314,8 @@ class NativeQueueRuntime:
                 await queue.record_native_snapshot(snapshot, lease)
                 if self.dispatcher is not None:
                     try:
-                        await self._validate(queue, repo, snapshot, lease)
+                        if not await self._recover(queue, repo, snapshot, lease):
+                            await self._validate(queue, repo, snapshot, lease)
                     finally:
                         try:
                             async with asyncio.timeout(8):

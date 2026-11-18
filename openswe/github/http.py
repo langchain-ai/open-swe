@@ -42,6 +42,7 @@ from openswe.github.queue import (
     Artifact,
     CommitComparison,
     GitReference,
+    NativeEntry,
     NativeQueueSnapshot,
     ValidationJob,
     ValidationRun,
@@ -1015,6 +1016,54 @@ class RepoClient:
         if snapshot.repository.lower() != self.full_name.lower() or snapshot.branch != branch:
             raise ValueError("Native queue repository or target changed")
         return snapshot
+
+    async def dequeue_native_pull(self, entry: NativeEntry, request_key: str) -> NativeEntry:
+        """One mutation only: callers persist intent and reconcile an ambiguous response."""
+        pull = await self.pull_request(entry.pull.number).pull()
+        node_id = pull.get("node_id")
+        head = pull.get("head")
+        if (
+            not isinstance(node_id, str)
+            or not isinstance(head, dict)
+            or head.get("sha") != entry.pull.head_sha
+            or pull.get("state") != "open"
+        ):
+            raise ValueError("PR changed before dequeue")
+        # GitHub has no expected-head precondition; never retry this mutation against a requeue.
+        response = await self.github.request(
+            "POST",
+            GITHUB_GRAPHQL,
+            max_retries=0,
+            json={
+                "query": """mutation($input:DequeuePullRequestInput!) {
+              dequeuePullRequest(input:$input) {
+                mergeQueueEntry {
+                  id position state enqueuedAt
+                  pullRequest {
+                    number headRefOid state reviewDecision isDraft baseRefName
+                    headRepository { nameWithOwner }
+                  }
+                }
+              }
+            }""",
+                "variables": {"input": {"id": node_id, "clientMutationId": request_key}},
+            },
+        )
+        payload = response.json()
+        if payload.get("errors"):
+            raise GraphQLError(payload["errors"])
+        removed = NativeEntry.model_validate(
+            payload["data"]["dequeuePullRequest"]["mergeQueueEntry"]
+        )
+        if (removed.id, removed.pull.number, removed.pull.head_sha) != (
+            entry.id,
+            entry.pull.number,
+            entry.pull.head_sha,
+        ):
+            raise ValueError(
+                "GitHub removed a different queue entry or head; operator review required"
+            )
+        return removed
 
     async def labels(self) -> list[dict[str, Any]]:
         return await self.pages("labels")

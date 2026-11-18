@@ -40,6 +40,7 @@ from openswe.merge_queue.models import (
     MergeRequest,
     Record,
 )
+from openswe.merge_queue.recovery import RecoveryDecision, RecoveryMember, RecoveryProposal
 from openswe.merge_queue.validation_contract import (
     SERVICE_JOBS,
     ValidationDispatch,
@@ -506,7 +507,7 @@ class MergeQueue(Record):
             assert validation is not None
             attempt = Attempt(
                 batch_id=batch.id,
-                request_key=f"{candidate.head_sha}:{trust}",
+                request_key=f"{candidate.head_sha}:{trust}:{len(attempts) + 1}",
                 number=len(attempts) + 1,
                 deadline=min(batch.deadline, now + timedelta(seconds=validation.deadline_seconds)),
             )
@@ -1305,6 +1306,253 @@ class MergeQueue(Record):
             attempt.finished_at, attempt.updated_by = now, None
             return True
 
+    async def bind_native_recovery(self, batch_id: UUID, thread_id: str, lease: Lease) -> None:
+        """Called by the trusted failure hook, never from a model-supplied thread ID."""
+        async with self._locked(lease) as (session, queue, now):
+            batch = await self._batch(session, batch_id)
+            if queue.mode != "native" or batch.state != "active" or batch.deadline <= now:
+                raise ValueError("Recovery requires an active native batch")
+            existing = batch.policy.get("recovery_thread_id")
+            if not thread_id or (existing is not None and existing != thread_id):
+                raise ValueError("Recovery thread cannot be replaced")
+            batch.policy = {**batch.policy, "recovery_thread_id": thread_id}
+
+    async def _recovery_attempt(
+        self,
+        session: AsyncSession,
+        proposal: RecoveryProposal,
+        snapshot: NativeQueueSnapshot,
+        now: datetime,
+    ) -> tuple[Batch, Attempt]:
+        batch = await self._batch(session, proposal.batch_id)
+        latest = await session.scalar(
+            select(Attempt)
+            .where(Attempt.batch_id == batch.id)
+            .order_by(Attempt.number.desc())
+            .limit(1)
+        )
+        candidate = NativeSelection.model_validate(batch.candidate).candidate(snapshot)
+        reference = await session.scalar(
+            select(Evidence).where(
+                Evidence.attempt_id == proposal.attempt_id, Evidence.key == "native-request"
+            )
+        )
+        superseded = batch.policy.get("superseded_attempts", 0)
+        if (
+            batch.state != "active"
+            or batch.deadline <= now
+            or snapshot.branch != self.target_branch
+            or snapshot.main_sha != batch.base_sha
+            or latest is None
+            or latest.id != proposal.attempt_id
+            or latest.state not in {"failed", "timed_out"}
+            or type(superseded) is not int
+            or latest.number <= superseded
+            or reference is None
+            or reference.reference.get("repository") != snapshot.repository
+            or reference.reference.get("candidate_sha") != proposal.candidate_sha
+            or candidate is None
+            or candidate.head_sha != proposal.candidate_sha
+        ):
+            raise ValueError("Recovery does not match the current failed candidate")
+        if proposal.action in {"retry", "defer"} and latest.number >= batch.max_attempts:
+            raise ValueError("Validation attempt budget exhausted")
+        if proposal.member is not None:
+            selected = NativeSelection.model_validate(batch.candidate)
+            current = snapshot.queue.entries.nodes if snapshot.queue else ()
+            if not any(
+                [await proposal.member.matches(entry) for entry in selected.entries]
+            ) or not any([await proposal.member.matches(entry) for entry in current]):
+                raise ValueError("Deferral does not match a current selected PR head")
+        return batch, latest
+
+    async def decide_native_recovery(
+        self,
+        proposal: RecoveryProposal,
+        thread_id: str,
+        snapshot: NativeQueueSnapshot,
+        lease: Lease,
+        *,
+        trust: str,
+    ) -> RecoveryDecision:
+        """Caller supplies the authenticated thread; a proposal cannot grant its own authority."""
+        async with self._locked(lease) as (session, queue, now):
+            batch = await self._batch(session, proposal.batch_id)
+            if queue.mode != "native" or batch.policy.get("recovery_thread_id") != thread_id:
+                raise PermissionError("Only the bound recovery thread may decide for this batch")
+            decisions = list(
+                await session.scalars(select(Decision).where(Decision.batch_id == batch.id))
+            )
+            for row in decisions:
+                if row.request_key == str(proposal.request_key):
+                    saved = RecoveryDecision.model_validate(row.plan)
+                    if saved.proposal != proposal or saved.thread_id != thread_id:
+                        raise ValueError("Recovery key was already used with different input")
+                    return saved
+            if queue.paused:
+                raise ValueError("Queue is paused; operator resumption is required")
+            if batch.policy.get("trust") != trust:
+                raise ValueError("Recovery policy changed")
+            batch, attempt = await self._recovery_attempt(session, proposal, snapshot, now)
+            if len(decisions) >= batch.max_plans:
+                raise ValueError("Recovery decision budget exhausted")
+            if any(
+                row.plan.get("kind") == "native-recovery"
+                and row.plan.get("status") in {"pending", "applying"}
+                for row in decisions
+            ):
+                raise ValueError("A recovery action is already pending")
+            selected_ids = {
+                entry.id for entry in NativeSelection.model_validate(batch.candidate).entries
+            }
+            saved = RecoveryDecision(
+                proposal=proposal,
+                members=tuple(
+                    RecoveryMember(
+                        entry_id=entry.id, number=entry.pull.number, head_sha=entry.pull.head_sha
+                    )
+                    for entry in (snapshot.queue.entries.nodes if snapshot.queue else ())
+                    if entry.id in selected_ids
+                ),
+                thread_id=thread_id,
+                generation=lease.configuration_generation,
+                status="pending" if proposal.action == "defer" else "applied",
+            )
+            session.add(
+                Decision(
+                    batch_id=batch.id,
+                    request_key=str(proposal.request_key),
+                    plan=saved.model_dump(mode="json"),
+                    lease_owner=lease.owner,
+                    fence=lease.fence,
+                )
+            )
+            if proposal.action == "retry":
+                batch.policy = {**batch.policy, "superseded_attempts": attempt.number}
+            elif proposal.action in {"pause", "escalate"}:
+                queue.paused = True
+            return saved
+
+    async def pending_native_recovery(self, lease: Lease) -> RecoveryDecision | None:
+        async with self._locked(lease) as (session, _, _):
+            row = await session.scalar(
+                select(Decision)
+                .join(Batch)
+                .where(
+                    Batch.queue_id == self.id,
+                    Decision.plan["kind"].astext == "native-recovery",
+                    Decision.plan["status"].astext.in_(("pending", "applying")),
+                )
+                .order_by(Decision.id)
+                .limit(1)
+            )
+            return RecoveryDecision.model_validate(row.plan) if row is not None else None
+
+    async def start_native_deferral(
+        self,
+        decision: RecoveryDecision,
+        snapshot: NativeQueueSnapshot,
+        lease: Lease,
+    ) -> None:
+        async with self._locked(lease) as (session, queue, now):
+            batch, _ = await self._recovery_attempt(session, decision.proposal, snapshot, now)
+            row = (
+                await session.scalars(
+                    select(Decision).where(
+                        Decision.batch_id == batch.id,
+                        Decision.request_key == str(decision.proposal.request_key),
+                    )
+                )
+            ).one()
+            if (
+                queue.paused
+                or RecoveryDecision.model_validate(row.plan) != decision
+                or decision.status != "pending"
+                or decision.generation != lease.configuration_generation
+                or batch.policy.get("recovery_thread_id") != decision.thread_id
+            ):
+                raise ValueError("Deferral authority changed")
+            row.plan = decision.model_copy(update={"status": "applying"}).model_dump(mode="json")
+
+    async def settle_native_deferral(
+        self,
+        decision: RecoveryDecision,
+        snapshot: NativeQueueSnapshot,
+        lease: Lease,
+        *,
+        error: str | None = None,
+    ) -> RecoveryDecision:
+        async with self._locked(lease) as (session, queue, now):
+            batch = await self._batch(session, decision.proposal.batch_id)
+            row = (
+                await session.scalars(
+                    select(Decision).where(
+                        Decision.batch_id == batch.id,
+                        Decision.request_key == str(decision.proposal.request_key),
+                    )
+                )
+            ).one()
+            saved = RecoveryDecision.model_validate(row.plan)
+            if saved.status not in {"pending", "applying"}:
+                return saved
+            member = saved.proposal.member
+            assert member is not None
+            entries = snapshot.queue.entries.nodes if snapshot.queue else ()
+            original = {
+                entry.entry_id: entry
+                for entry in saved.members
+                if entry.entry_id != member.entry_id
+            }
+            survivors = [entry for entry in entries if entry.id in original]
+            if error is None:
+                target = [
+                    entry
+                    for entry in entries
+                    if entry.id == member.entry_id or entry.pull.number == member.number
+                ]
+                if (
+                    saved.status != "applying"
+                    or batch.state != "active"
+                    or saved.generation != lease.configuration_generation
+                    or snapshot.queue is None
+                    or snapshot.main_sha != batch.base_sha
+                    or len(survivors) != len(original)
+                    or any([not await original[entry.id].matches(entry) for entry in survivors])
+                ):
+                    error = "Surviving membership or authority changed; operator review required"
+                elif target:
+                    if (
+                        len(target) == 1
+                        and await member.matches(target[0])
+                        and now < min(batch.deadline, row.updated_at + timedelta(minutes=2))
+                    ):
+                        # GitHub can lag a dequeue. Reconcile again without rewriting the
+                        # applying timestamp or resending the mutation, including after restart.
+                        return saved
+                    error = "Removal outcome is ambiguous; operator review required"
+            result = saved.model_copy(
+                update={
+                    "status": "escalated" if error is not None else "applied",
+                    "detail": (error or "Deferral outcome could not be verified")
+                    if error is not None
+                    else "Selected queue entry is absent; replacement must pass validation",
+                }
+            )
+            row.plan = result.model_dump(mode="json")
+            attempt = await self._attempt(session, saved.proposal.attempt_id)
+            await self._save_evidence(
+                session,
+                attempt,
+                f"deferral:{saved.proposal.request_key}",
+                {
+                    "snapshot": snapshot.model_dump(mode="json"),
+                    "error": error,
+                },
+            )
+            if error is not None:
+                queue.paused = True
+            return result
+
     async def record_plan(
         self,
         batch_id: UUID,
@@ -1313,6 +1561,8 @@ class MergeQueue(Record):
         lease: Lease,
     ) -> Decision:
         """Save a proposal for deterministic validation; this authorizes no action."""
+        if plan.get("kind") == "native-recovery":
+            raise ValueError("Executable recovery requires the bound-thread validation path")
         async with self._locked(lease) as (session, _, now):
             batch = await self._batch(session, batch_id)
             existing = await session.scalar(

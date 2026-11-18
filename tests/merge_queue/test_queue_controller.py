@@ -12,11 +12,12 @@ import httpx2
 import pytest
 
 from openswe.github.http import GitHubClient, RepoClient
-from openswe.github.queue import NativeQueueSnapshot
+from openswe.github.queue import NativeEntry, NativeQueueSnapshot
 from openswe.github.repositories import Repository
 from openswe.merge_queue.admission import CheckSource, QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.controller import QueueController
+from openswe.merge_queue.recovery import RecoveryDecision, RecoveryMember, RecoveryProposal
 from openswe.merge_queue.store import MergeQueue
 from openswe.merge_queue.validation_contract import ValidationPolicy
 
@@ -232,3 +233,85 @@ async def test_controller_rejects_changed_trusted_inputs(
     else:
         async with controller.open_repo(queue) as repo:
             assert isinstance(repo, RepoClient) and repo.full_name == "acme/widgets"
+
+
+class TestNativeDequeue:
+    fault: str
+    mutations: int
+    entry: NativeEntry
+
+    async def respond(self, request: httpx2.Request) -> httpx2.Response:
+        if request.method == "GET":
+            return httpx2.Response(
+                200,
+                json={
+                    "node_id": "PR_2",
+                    "state": "open",
+                    "head": {
+                        "sha": "f" * 40
+                        if self.fault == "changed_head"
+                        else self.entry.pull.head_sha
+                    },
+                },
+            )
+        self.mutations += 1
+        assert json.loads(request.content)["variables"]["input"]["id"] == "PR_2"
+        if self.fault == "transport":
+            raise httpx2.ReadTimeout("Lost mutation response", request=request)
+        if self.fault == "unavailable":
+            return httpx2.Response(503)
+        removed = self.entry.model_dump(mode="json")
+        if self.fault == "requeued":
+            removed["id"] = "replacement-entry"
+        return httpx2.Response(
+            200, json={"data": {"dequeuePullRequest": {"mergeQueueEntry": removed}}}
+        )
+
+    @pytest.mark.parametrize(
+        "fault", ["none", "transport", "unavailable", "changed_head", "requeued"]
+    )
+    async def test_removal_checks_head_and_never_replays_ambiguous_write(self, fault: str):
+        snapshot = NativeQueueSnapshot.model_validate(native_response())
+        assert snapshot.queue is not None
+        self.entry = snapshot.queue.entries.nodes[1]
+        self.fault, self.mutations = fault, 0
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(self.respond)) as http:
+            repo = GitHubClient(http).repo("acme", "widgets")
+            if fault == "none":
+                assert await repo.dequeue_native_pull(self.entry, "decision-key") == self.entry
+            else:
+                with pytest.raises((httpx2.HTTPError, ValueError)):
+                    await repo.dequeue_native_pull(self.entry, "decision-key")
+        assert self.mutations == (0 if fault == "changed_head" else 1)
+
+    @pytest.mark.parametrize("shared_unmerged", [False, True])
+    async def test_deferral_refuses_shared_unmerged_ancestry(self, shared_unmerged):
+        snapshot = NativeQueueSnapshot.model_validate(native_response())
+        assert snapshot.queue is not None
+        members = tuple(
+            RecoveryMember(entry_id=e.id, number=e.pull.number, head_sha=e.pull.head_sha)
+            for e in snapshot.queue.entries.nodes
+        )
+        decision = RecoveryDecision(
+            proposal=RecoveryProposal(
+                request_key=uuid7(),
+                batch_id=uuid7(),
+                attempt_id=uuid7(),
+                candidate_sha=list(snapshot.candidates)[-1],
+                action="defer",
+                member=members[1],
+                reason="PR introduces the regression",
+            ),
+            members=members,
+            thread_id="thread",
+            generation=None,
+            status="pending",
+        )
+        repo = AsyncMock(spec=RepoClient)
+        repo.merge_base.side_effect = ["b" * 40, snapshot.main_sha] if shared_unmerged else None
+        repo.merge_base.return_value = snapshot.main_sha
+        if shared_unmerged:
+            with pytest.raises(ValueError, match="share unmerged"):
+                await decision.check_dependencies(repo, snapshot)
+        else:
+            await decision.check_dependencies(repo, snapshot)

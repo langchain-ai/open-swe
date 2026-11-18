@@ -33,9 +33,11 @@ from openswe.merge_queue.models import (
     Lease,
     MergeRequest,
 )
+from openswe.merge_queue.native import NativeQueueRuntime
+from openswe.merge_queue.recovery import RecoveryMember, RecoveryProposal
 from openswe.merge_queue.runtime import QueueJob, QueueRuntime
 from openswe.merge_queue.scheduler import BatchScheduler
-from openswe.merge_queue.store import LeaseLost, MergeQueue
+from openswe.merge_queue.store import LeaseLost, MergeQueue, NativeWork
 from openswe.merge_queue.validation_contract import ValidationPolicy
 from openswe.users.models import User
 from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
@@ -2171,3 +2173,292 @@ async def test_native_check_expiry_does_not_cancel_live_policy_replacements(queu
         async with queue.native_check_update(native_snapshot(()), lease) as cleanup:
             assert cleanup is not None and cleanup.state == "cancelled"
     assert (await queue.history(work.batch.id)).attempts[0].state == "timed_out"
+
+
+class TestNativeRecovery:
+    @staticmethod
+    async def failed(
+        queue: MergeQueue,
+    ) -> tuple[QueuePolicy, Lease, User, NativeQueueSnapshot, NativeWork, RecoveryProposal]:
+        policy, lease, operator = await enable_native_validation(queue)
+        snapshot = native_snapshot((1, 2, 3, 4, 5, 6))
+        work = await queue.prepare_native_validation(
+            snapshot, 600, lease, policy=policy, trust="trusted-policy"
+        )
+        assert work is not None
+        await queue.finish_native_validation(
+            work, {"error": "test fixture failure"}, lease, succeeded=False
+        )
+        await queue.bind_native_recovery(work.batch.id, "recovery-thread", lease)
+        proposal = RecoveryProposal(
+            request_key=uuid7(),
+            batch_id=work.batch.id,
+            attempt_id=work.attempt.id,
+            candidate_sha=work.request.candidate_sha,
+            action="retry",
+            reason="Transient runner failure",
+        )
+        return policy, lease, operator, snapshot, work, proposal
+
+    async def test_retry_is_fresh_idempotent_and_keeps_budgets(self, queue):
+        policy, lease, _, snapshot, work, proposal = await self.failed(queue)
+        saved = await queue.decide_native_recovery(
+            proposal, "recovery-thread", snapshot, lease, trust="trusted-policy"
+        )
+        with pytest.raises(ValueError, match="bound-thread"):
+            await queue.record_plan(work.batch.id, "forged", saved.model_dump(mode="json"), lease)
+        restarted = await MergeQueue.load(queue.id, queue.workspace_id)
+        assert restarted is not None
+        retry = await restarted.prepare_native_validation(
+            snapshot, 600, lease, policy=policy, trust="trusted-policy"
+        )
+        assert retry is not None and retry.dispatch
+        assert retry.request.attempt_id != work.request.attempt_id
+        assert retry.request.candidate_sha == work.request.candidate_sha
+        assert retry.request.expected_jobs == work.request.expected_jobs
+        assert retry.request.workflow_sha == work.request.workflow_sha
+        assert retry.attempt.number == 2 and retry.batch.deadline == work.batch.deadline
+        assert retry.batch.max_attempts == work.batch.max_attempts
+        assert retry.batch.max_plans == work.batch.max_plans
+        assert (
+            await restarted.decide_native_recovery(
+                proposal, "recovery-thread", snapshot, lease, trust="trusted-policy"
+            )
+            == saved
+        )
+        history = await restarted.history(work.batch.id)
+        assert len(history.decisions) == 1 and len(history.attempts) == 2
+        with pytest.raises(ValueError, match="different input"):
+            await restarted.decide_native_recovery(
+                proposal.model_copy(update={"reason": "changed"}),
+                "recovery-thread",
+                snapshot,
+                lease,
+                trust="trusted-policy",
+            )
+        with pytest.raises(ValueError, match="current failed"):
+            await restarted.decide_native_recovery(
+                proposal.model_copy(update={"request_key": uuid7()}),
+                "recovery-thread",
+                snapshot,
+                lease,
+                trust="trusted-policy",
+            )
+        with pytest.raises(PermissionError):
+            await restarted.decide_native_recovery(
+                proposal, "other-thread", snapshot, lease, trust="trusted-policy"
+            )
+
+    @pytest.mark.parametrize(
+        "fault",
+        [
+            "candidate",
+            "attempt",
+            "head",
+            "base",
+            "attempt_budget",
+            "plan_budget",
+            "deadline",
+            "lease",
+            "policy",
+        ],
+    )
+    async def test_stale_or_exhausted_recovery_changes_nothing(self, queue, fault):
+        _, lease, _, snapshot, work, proposal = await self.failed(queue)
+        if fault == "candidate":
+            proposal = proposal.model_copy(update={"candidate_sha": "b" * 40})
+        elif fault == "attempt":
+            proposal = proposal.model_copy(update={"attempt_id": uuid7()})
+        elif fault == "head":
+            proposal = proposal.model_copy(
+                update={
+                    "action": "defer",
+                    "member": RecoveryMember(entry_id="entry-2", number=2, head_sha="f" * 40),
+                }
+            )
+        elif fault == "base":
+            snapshot = native_snapshot(main="b" * 40)
+        elif fault == "lease":
+            await queue.release(lease)
+        elif fault == "policy":
+            history = await queue.history(work.batch.id)
+            async with postgres.session() as session:
+                await session.execute(
+                    update(Batch)
+                    .where(Batch.id == work.batch.id)
+                    .values(policy={**history.batch.policy, "trust": "changed-policy"})
+                )
+        else:
+            changes = (
+                {"max_attempts": 1}
+                if fault == "attempt_budget"
+                else (
+                    {"max_plans": 0}
+                    if fault == "plan_budget"
+                    else {"deadline": datetime.now(UTC) - timedelta(seconds=1)}
+                )
+            )
+            async with postgres.session() as session:
+                await session.execute(
+                    update(Batch).where(Batch.id == work.batch.id).values(**changes)
+                )
+        with pytest.raises(ValueError):
+            await queue.decide_native_recovery(
+                proposal, "recovery-thread", snapshot, lease, trust="trusted-policy"
+            )
+        history = await queue.history(work.batch.id)
+        assert not history.decisions and len(history.attempts) == 1
+        assert "superseded_attempts" not in history.batch.policy
+
+    @pytest.mark.parametrize(
+        "outcome",
+        ["removed", "still_present", "deadline", "requeued", "survivor_changed", "timeout"],
+    )
+    async def test_crashed_deferral_reconciles_without_removing_twice(self, queue, outcome):
+        policy, lease, _, snapshot, work, proposal = await self.failed(queue)
+        proposal = proposal.model_copy(
+            update={
+                "action": "defer",
+                "member": RecoveryMember(entry_id="entry-2", number=2, head_sha=f"{2:040x}"),
+            }
+        )
+        decision = await queue.decide_native_recovery(
+            proposal, "recovery-thread", snapshot, lease, trust="trusted-policy"
+        )
+        await queue.start_native_deferral(decision, snapshot, lease)
+        after = native_snapshot((1, 3, 4, 5, 6))
+        if outcome in {"still_present", "deadline"}:
+            after = snapshot
+        elif outcome == "requeued":
+            after = native_snapshot((1, 3, 4, 5, 6, 2))
+            assert after.queue is not None
+            nodes = list(after.queue.entries.nodes)
+            nodes[-1] = nodes[-1].model_copy(update={"id": "new-entry-2"})
+            after = after.model_copy(
+                update={
+                    "queue": after.queue.model_copy(
+                        update={
+                            "entries": after.queue.entries.model_copy(
+                                update={"nodes": tuple(nodes)}
+                            )
+                        }
+                    )
+                }
+            )
+        elif outcome == "survivor_changed":
+            after = native_snapshot((1, 4, 5, 6))
+        if outcome in {"removed", "still_present", "deadline"}:
+            waiting = await queue.settle_native_deferral(decision, snapshot, lease)
+            assert waiting.status == "applying"
+            assert not (await queue.snapshot(limit=1))[0]
+        await queue.release(lease)
+        restarted = await MergeQueue.load(queue.id, queue.workspace_id)
+        assert restarted is not None
+        lease = await claim(restarted)
+        repo = Mock(spec=RepoClient)
+        writer = Mock(
+            side_effect=AssertionError("Must never repeat removal after an applying intent")
+        )
+        runner = NativeQueueRuntime(queue.id, 42, writer, open_recovery_repo=writer)
+        if outcome in {"removed", "still_present", "deadline"}:
+            assert await runner._recover(restarted, repo, snapshot, lease)
+            pending = await restarted.pending_native_recovery(lease)
+            assert pending is not None and pending.status == "applying"
+            assert not (await restarted.snapshot(limit=1))[0]
+        if outcome in {"still_present", "deadline"}:
+            async with postgres.session() as session:
+                if outcome == "still_present":
+                    await session.execute(
+                        update(Decision)
+                        .where(Decision.batch_id == work.batch.id)
+                        .values(updated_at=func.clock_timestamp() - timedelta(minutes=3))
+                    )
+                else:
+                    await session.execute(
+                        update(Batch)
+                        .where(Batch.id == work.batch.id)
+                        .values(deadline=func.clock_timestamp() - timedelta(seconds=1))
+                    )
+        if outcome == "timeout":
+            await restarted.settle_native_deferral(
+                decision, after, lease, error=str(TimeoutError())
+            )
+        else:
+            assert await runner._recover(restarted, repo, after, lease)
+        assert await restarted.pending_native_recovery(lease) is None
+        history = await restarted.history(work.batch.id)
+        status = history.decisions[0].plan["status"]
+        if outcome == "removed":
+            assert status == "applied"
+            replacement = await restarted.prepare_native_validation(
+                after, 600, lease, policy=policy, trust="trusted-policy"
+            )
+            assert replacement is not None and replacement.dispatch
+            assert replacement.batch.id == work.batch.id
+            assert replacement.batch.deadline == work.batch.deadline
+            assert replacement.request.candidate_sha == list(after.candidates)[1]
+            assert replacement.request.attempt_id != work.request.attempt_id
+            await restarted.finish_native_validation(
+                replacement, {"error": "second failure"}, lease, succeeded=False
+            )
+            second = proposal.model_copy(
+                update={
+                    "request_key": uuid7(),
+                    "attempt_id": replacement.attempt.id,
+                    "candidate_sha": replacement.request.candidate_sha,
+                    "member": RecoveryMember(entry_id="entry-3", number=3, head_sha=f"{3:040x}"),
+                }
+            )
+            decision = await restarted.decide_native_recovery(
+                second, "recovery-thread", after, lease, trust="trusted-policy"
+            )
+            await restarted.start_native_deferral(decision, after, lease)
+            remaining = native_snapshot((1, 4, 5, 6))
+            assert (
+                await restarted.settle_native_deferral(decision, remaining, lease)
+            ).status == "applied"
+            final = await restarted.prepare_native_validation(
+                remaining, 600, lease, policy=policy, trust="trusted-policy"
+            )
+            assert final is not None and final.attempt.number == 3
+            assert final.batch.deadline == work.batch.deadline
+        else:
+            assert status == "escalated"
+            assert (await restarted.snapshot(limit=1))[0]
+            assert (
+                await restarted.prepare_native_validation(
+                    after, 600, lease, policy=policy, trust="trusted-policy"
+                )
+                is None
+            )
+
+    @pytest.mark.parametrize("action", ["pause", "escalate"])
+    async def test_pause_keeps_deadlines_and_requires_human_resume(self, queue, action):
+        policy, lease, operator, snapshot, work, proposal = await self.failed(queue)
+        proposal = proposal.model_copy(update={"action": action})
+        await queue.decide_native_recovery(
+            proposal, "recovery-thread", snapshot, lease, trust="trusted-policy"
+        )
+        assert (await queue.snapshot(limit=1))[0]
+        assert (
+            await queue.prepare_native_validation(
+                snapshot, 600, lease, policy=policy, trust="trusted-policy"
+            )
+            is None
+        )
+        with pytest.raises(LeaseLost, match="paused"):
+            async with queue.native_publication(lease):
+                pytest.fail("Paused recovery must not publish success")
+        retry = proposal.model_copy(update={"request_key": uuid7(), "action": "retry"})
+        with pytest.raises(ValueError, match="operator resumption"):
+            await queue.decide_native_recovery(
+                retry, "recovery-thread", snapshot, lease, trust="trusted-policy"
+            )
+        await queue.set_paused(False, actor=operator.id)
+        await queue.decide_native_recovery(
+            retry, "recovery-thread", snapshot, lease, trust="trusted-policy"
+        )
+        next_work = await queue.prepare_native_validation(
+            snapshot, 600, lease, policy=policy, trust="trusted-policy"
+        )
+        assert next_work is not None and next_work.batch.deadline == work.batch.deadline
