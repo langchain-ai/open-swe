@@ -1511,7 +1511,15 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   test("stops a Slack-started run from the web app", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/mock/slack");
-    await page.locator("#reset").click();
+    const [reset] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/control/reset",
+      ),
+      page.locator("#reset").click(),
+    ]);
+    expect(reset.ok()).toBeTruthy();
 
     const send = await page.request.post("/mock/slack/send", {
       data: {
@@ -1554,7 +1562,15 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
   test("stops a run with Escape from inside the composer", async ({ page }) => {
     await loginAs(page, SAME_USER);
     await page.goto("/mock/slack");
-    await page.locator("#reset").click();
+    const [reset] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/control/reset",
+      ),
+      page.locator("#reset").click(),
+    ]);
+    expect(reset.ok()).toBeTruthy();
 
     const send = await page.request.post("/mock/slack/send", {
       data: {
