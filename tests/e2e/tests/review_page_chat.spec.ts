@@ -135,6 +135,53 @@ test.describe("review page", () => {
     await forgetReviewThreads(page, pr);
   });
 
+  test("refreshes an unavailable pull request without reloading the page", async ({
+    page,
+  }) => {
+    let recovered = false;
+    let message = "GitHub API rate limit exceeded";
+    await page.route(`**${reviewApi(pr)}`, async (route) => {
+      if (recovered) {
+        await route.continue();
+      } else {
+        await route.fulfill({ status: 403, json: { detail: message } });
+      }
+    });
+    await page.goto(`/agents/reviews/${OWNER}/${REPO}/${pr.number}`);
+    const alert = page.getByRole("alert");
+    await expect(alert).toContainText(message);
+    const timeOrigin = await page.evaluate(() => performance.timeOrigin);
+    const refresh = alert.getByRole("button", { name: "Refresh", exact: true });
+
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect(refresh).toBeInViewport();
+    message = "GitHub is still rate limited";
+    await refresh.focus();
+    await refresh.press("Enter");
+    await expect(alert).toContainText(message);
+    await expect(refresh).toBeEnabled();
+    await page.setViewportSize({ width: 1280, height: 720 });
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(`**${reviewApi(pr)}`, async (route) => {
+      await gate;
+      await route.fallback();
+    });
+    recovered = true;
+    await refresh.click();
+    await expect(refresh).toBeDisabled();
+    await expect(refresh).toHaveAttribute("aria-busy", "true");
+    release();
+    await expect(alert).toBeHidden();
+    await expect(
+      page.getByRole("heading", { name: "Changes", exact: true }),
+    ).toBeVisible();
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+  });
+
   test("opens a review from a pasted or typed pull request link", async ({
     page,
   }) => {

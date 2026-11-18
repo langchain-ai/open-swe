@@ -1,7 +1,7 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useLayoutEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import { useIsHydrated } from "@/lib/hydration"
 import { useMediaQuery } from "@/lib/useIsMobile"
@@ -29,6 +29,8 @@ import { useReviewPageTools } from "./useReviewPageTools"
 export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+  const errorMessage = detail.error?.message ?? refreshError
   const chatThreadId = useReviewChat(pr).data?.thread_id
   const open = useReviewPage((state) => state.open)
   const leave = useReviewPage((state) => state.leave)
@@ -107,8 +109,16 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
     <ChatDraftsProvider>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary">
         <Header pr={pr} leftInset={leftInset} compactRail={!wide} />
-        {detail.isError ? (
-          <PullRequestUnavailable pr={pr} message={detail.error.message} />
+        {errorMessage !== null ? (
+          <PullRequestUnavailable
+            pr={pr}
+            message={errorMessage}
+            refreshing={detail.isFetching}
+            onRefresh={() => {
+              setRefreshError(errorMessage)
+              void detail.refetch().finally(() => setRefreshError(null))
+            }}
+          />
         ) : (
           <div className="flex min-h-0 flex-1">
             {navigatorInline && (
@@ -186,9 +196,13 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
 function PullRequestUnavailable({
   pr,
   message,
+  refreshing,
+  onRefresh,
 }: {
   pr: PullRequestRef
   message: string
+  refreshing: boolean
+  onRefresh: () => void
 }) {
   return (
     <div
@@ -202,7 +216,16 @@ function PullRequestUnavailable({
         It doesn&apos;t exist, or your GitHub account can&apos;t see it. GitHub
         said: {message}.
       </p>
-      <div className="flex gap-space-2">
+      <div className="flex flex-wrap gap-space-2">
+        <Button
+          size="sm"
+          loading={refreshing}
+          disabled={refreshing}
+          aria-busy={refreshing}
+          onClick={onRefresh}
+        >
+          Refresh
+        </Button>
         <Button
           size="sm"
           color="secondary"
