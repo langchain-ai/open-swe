@@ -91,8 +91,9 @@ def test_the_runtime_builds_each_model_with_the_backends_settings(
     ] == [(expected_id, {k: v for k, v in expected.items() if k not in fresh})]
 
 
-def test_an_openai_model_has_the_window_codex_serves_it_at() -> None:
-    model = build_model(_spec("openai:gpt-6.1-sol", "xhigh"))
+@pytest.mark.parametrize("model_id", ["openai:gpt-6.1-sol", "openai:gpt-6.2-sol"])
+def test_an_openai_model_has_the_window_codex_serves_it_at(model_id: str) -> None:
+    model = build_model(_spec(model_id, "xhigh"))
 
     assert isinstance(model, ChatOpenAI)
     assert model.profile is not None and model.profile["max_input_tokens"] == 272_000

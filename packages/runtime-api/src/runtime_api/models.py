@@ -85,6 +85,14 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "context_window": 272_000,
     },
     {
+        "id": "openai:gpt-6.2-sol",
+        "label": "GPT-6.2 Sol",
+        "efforts": ["none", "low", "medium", "high", "xhigh"],
+        "default_effort": "xhigh",
+        "supports_images": True,
+        "context_window": 272_000,
+    },
+    {
         "id": "openai:gpt-6.1-sol",
         "label": "GPT-6.1 Sol",
         "efforts": ["none", "low", "medium", "high", "xhigh"],
