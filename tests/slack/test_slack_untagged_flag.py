@@ -23,6 +23,7 @@ from openswe.slack.request import SlackRequest
 from openswe.users import User, UserIdentity
 from openswe.webhooks import common as webhook_common
 from openswe.workspaces import routing
+from tests.support.slack_api import SlackAPI
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -121,6 +122,13 @@ def _delivered(triggering_user_id: str = "U1", agent_thread_id: str = "t1") -> S
 
 @pytest.fixture(autouse=True)
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "langgraph_api.cache.cache_get",
+        AsyncMock(
+            side_effect=lambda key: False if key.startswith("openswe:slack-root-origin:") else None
+        ),
+    )
+    monkeypatch.setattr("langgraph_api.cache.cache_set", AsyncMock())
     slack_events.reset_slack_event_claims()
     monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
@@ -224,6 +232,42 @@ async def test_kitchen_messages_preserve_explicit_mentions(
     assert request.treat_all_messages_as_mentions is (event_type == "message")
     assert request.kitchen_channel
     assert request.explicit_mention is (event_type == "app_mention")
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("unknown_origin", [False, True])
+async def test_other_robins_breakout_does_not_take_untagged_kitchen_replies(
+    monkeypatch: pytest.MonkeyPatch, slack_api: SlackAPI, explicit: bool, unknown_origin: bool
+) -> None:
+    monkeypatch.setattr(
+        "langgraph_api.cache.cache_get",
+        AsyncMock(return_value="unknown" if unknown_origin else None),
+    )
+    monkeypatch.setattr("langgraph_api.cache.cache_set", AsyncMock())
+    monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=True))
+    slack_api.respond(
+        {
+            "ok": True,
+            "messages": [
+                {
+                    "ts": "1786573300.000000",
+                    "user": "PROD_BOT",
+                    "bot_id": "BPROD",
+                    "text": "Breakout <https://robin.example.com/agents/thread-1|Open in Robin>",
+                }
+            ],
+        }
+    )
+    payload = _message_payload("<@BOT> help" if explicit else "please fix it", "Ev-breakout")
+    background_tasks = _FakeBackgroundTasks()
+
+    response = await slack_routes.slack_webhook(
+        cast(Request, _FakeRequest(payload)), cast(BackgroundTasks, background_tasks)
+    )
+
+    assert response["status"] == ("accepted" if explicit else "ignored")
+    assert bool(background_tasks.tasks) is explicit
 
 
 @pytest.mark.parametrize("kitchen", [False, True])

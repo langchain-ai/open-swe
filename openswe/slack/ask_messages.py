@@ -17,6 +17,7 @@ from openswe.slack.client import (
     slack_ts_time,
 )
 from openswe.slack.payloads import SlackChannelContext, SlackMessage
+from openswe.slack.records import SlackThread
 from openswe.utils.jev import JEV, JevUnavailable
 from openswe.webhooks import common
 from openswe.workspaces.store import WORKSPACES
@@ -85,7 +86,13 @@ class AskChannelMessage:
 
     @classmethod
     async def for_robin(cls, *, channel_id: str, thread_ts: str, message_ts: str) -> bool:
-        """Whether Robin answers the message: always outside Ask channels, else Jev decides."""
+        """Whether an untagged message is for this Robin, with Jev deciding in Ask channels."""
+        if thread_ts != message_ts:
+            other_robin = await SlackThread.another_robin_started(
+                channel_id, thread_ts, bot_user_id=common.SLACK_BOT_USER_ID
+            )
+            if other_robin is not False:
+                return False
         try:
             ask_channel = await WORKSPACES.is_ask_channel(channel_id)
         except Exception:
