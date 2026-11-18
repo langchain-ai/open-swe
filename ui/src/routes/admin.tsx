@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 
 import { SettingsPage } from "@/components/AppShell"
+import { ExecutionDefaultsSettings } from "@/features/settings/components/ExecutionDefaultsSettings"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
 import { FeaturedAppsSection } from "@/features/settings/components/FeaturedAppsSettings"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
@@ -26,8 +27,11 @@ function AdminDefaultsPage() {
     <SettingsPage
       adminOnly
       title="Defaults"
-      description="Settings every environment inherits. Open an environment to override one there."
+      description="Robin-wide execution defaults, model routing, and review settings."
     >
+      <ExecutionDefaultsSettings
+        repositories={repos.data?.repositories ?? []}
+      />
       <ModelDefaultsSection
         scope={INSTANCE_SCOPE}
         models={(modelOptions.data?.models ?? []).filter(

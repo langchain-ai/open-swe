@@ -68,18 +68,46 @@ export function WorkspaceProxySection({
   canEdit: boolean
   onSaved: (saved: WorkspaceRecord) => void
 }) {
-  const original = JSON.stringify(
-    record.create_params?.proxy_config ?? {},
-    null,
-    2
+  return (
+    <SandboxProxySection
+      createParams={record.create_params ?? {}}
+      canEdit={canEdit}
+      description="Configure cloud workload identity, LangSmith access, host-matched headers, and environment variables for new LangSmith sandboxes. Existing sandboxes are unchanged; recreate explicitly to apply changes."
+      identityDescription="Cloud trust and least-privilege permissions must be configured in AWS, GCP, or Azure first. Identity settings and tags belong to this environment even when its image is inherited. Never enter cloud keys or secrets."
+      onSave={async (createParams) => {
+        onSaved(
+          await api.updateWorkspace(record.slug, {
+            create_params: createParams,
+          })
+        )
+      }}
+    />
   )
+}
+
+export function SandboxProxySection({
+  createParams,
+  canEdit,
+  onSave,
+  silentErrors = false,
+  description = "Configure cloud workload identity, LangSmith access, host-matched headers, and environment variables for sandboxes. Never enter keys or secrets.",
+  identityDescription = "Cloud trust and least-privilege permissions must be configured in AWS, GCP, or Azure first. Only configure access you intend to grant to code in the sandbox. Never enter cloud keys or secrets.",
+}: {
+  createParams: Record<string, JsonValue>
+  canEdit: boolean
+  onSave: (params: Record<string, JsonValue>) => Promise<void>
+  silentErrors?: boolean
+  description?: string
+  identityDescription?: string
+}) {
+  const original = JSON.stringify(createParams.proxy_config ?? {}, null, 2)
   const [draft, setDraft] = useState(original)
   const [view, setView] = useState<"form" | "json">("form")
-  const originalTags = Array.isArray(record.create_params?.tag_value_ids)
-    ? record.create_params.tag_value_ids.join(", ")
+  const originalTags = Array.isArray(createParams.tag_value_ids)
+    ? createParams.tag_value_ids.join(", ")
     : ""
   const [tags, setTags] = useState(originalTags)
-  const grant = record.create_params?.access_delegation
+  const grant = createParams.access_delegation
   const originalPermissions =
     grant &&
     typeof grant === "object" &&
@@ -114,7 +142,10 @@ export function WorkspaceProxySection({
       rules.map((rule, position) => (position === index ? next : rule))
     )
   const save = useMutation({
-    meta: { errorTitle: "Couldn't save sandbox proxy configuration" },
+    meta: {
+      errorTitle: "Couldn't save sandbox proxy configuration",
+      silent: silentErrors,
+    },
     mutationFn: () => {
       const parsed: JsonValue = JSON.parse(draft)
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -123,36 +154,35 @@ export function WorkspaceProxySection({
       if ("rules" in parsed && !Array.isArray(parsed.rules)) {
         throw new Error("Proxy rules must be a JSON array.")
       }
-      const createParams: Record<string, JsonValue> = {
-        ...record.create_params,
+      const next: Record<string, JsonValue> = {
+        ...createParams,
         proxy_config: parsed,
       }
       const tagValueIds = tags
         .split(",")
         .map((tag) => tag.trim())
         .filter(Boolean)
-      if (tagValueIds.length > 0) createParams.tag_value_ids = tagValueIds
-      else delete createParams.tag_value_ids
+      if (tagValueIds.length > 0) next.tag_value_ids = tagValueIds
+      else delete next.tag_value_ids
       const delegated = permissions
         .split(",")
         .map((permission) => permission.trim())
         .filter(Boolean)
       if (delegated.length > 0)
-        createParams.access_delegation = {
+        next.access_delegation = {
+          ...(grant && typeof grant === "object" && !Array.isArray(grant)
+            ? grant
+            : {}),
           mode: "EXPLICIT",
           permissions: delegated,
         }
-      else delete createParams.access_delegation
-      return api.updateWorkspace(record.slug, { create_params: createParams })
+      else delete next.access_delegation
+      return onSave(next)
     },
-    onSuccess: onSaved,
   })
 
   return (
-    <SettingsSection
-      title="Sandbox Proxy"
-      description="Configure cloud workload identity, LangSmith access, host-matched headers, and environment variables for new LangSmith sandboxes. Existing sandboxes are unchanged; recreate explicitly to apply changes."
-    >
+    <SettingsSection title="Sandbox Proxy" description={description}>
       <div className="space-y-space-3 px-space-4 py-space-3 text-primary">
         <div
           role="tablist"
@@ -567,12 +597,7 @@ export function WorkspaceProxySection({
           onChange={setPermissions}
           disabled={!canEdit || save.isPending}
         />
-        <p className="text-xs text-secondary">
-          Cloud trust and least-privilege permissions must be configured in AWS,
-          GCP, or Azure first. Identity settings and tags belong to this
-          environment even when its image is inherited. Never enter cloud keys
-          or secrets.
-        </p>
+        <p className="text-xs text-secondary">{identityDescription}</p>
         <p id="workspace-proxy-help" className="text-xs text-secondary">
           Use rules with name, match_hosts, headers (name, type, value), and
           env_vars. Headers match hosts; environment variables are sandbox-wide.

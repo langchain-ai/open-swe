@@ -26,6 +26,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.workspaces",
     "openswe.tools.organization_skills",
     "openswe.tools.manage_feature_flags",
+    "openswe.tools.execution_defaults",
     "openswe.tools.manage_review_apps",
     "openswe.tools.manage_review_approval_mode",
     "openswe.tools.manage_review_shadow",

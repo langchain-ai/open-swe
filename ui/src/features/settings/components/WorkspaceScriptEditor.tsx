@@ -37,12 +37,14 @@ export function WorkspaceScriptEditor({
   repos,
   value,
   onChange,
+  repositoryLabel = "Bound repositories",
   description = "Edit the shell script, then choose Save scripts on the settings page to apply your changes.",
 }: {
   label: string
   repos: string[]
   value: string
   onChange: (value: string) => void
+  repositoryLabel?: string
   description?: string
 }) {
   const [open, setOpen] = useState(false)
@@ -73,7 +75,7 @@ export function WorkspaceScriptEditor({
           childrenClassName="gap-0 p-0"
         >
           <p className="border-b border-default px-space-4 pb-space-4 text-sm text-secondary">
-            Bound repositories are available in{" "}
+            {repositoryLabel} are available in{" "}
             <WorkspaceReposPopover repos={repos} /> to preload; runs clone any
             other repository on demand.
           </p>

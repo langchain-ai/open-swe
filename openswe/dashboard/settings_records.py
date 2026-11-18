@@ -1,4 +1,4 @@
-"""Instance and workspace settings records in PostgreSQL: the instance's under ``""``, a workspace's under its slug."""
+"""PostgreSQL settings records: global records under ``""`` and workspace overrides under their slug."""
 
 from datetime import datetime
 from typing import Literal
@@ -26,7 +26,7 @@ class SettingsRecord(Base):
 class SettingsRecords:
     """Every settings record of one tier."""
 
-    def __init__(self, tier: Literal["instance", "workspace"]) -> None:
+    def __init__(self, tier: Literal["instance", "workspace", "execution"]) -> None:
         self.tier = tier
 
     def _where(self, key: str) -> ColumnElement[bool]:
@@ -45,6 +45,32 @@ class SettingsRecords:
                     set_={"value": value, "updated_at": func.clock_timestamp()},
                 )
             )
+
+    async def patch(self, key: str, value: JsonObject) -> tuple[JsonObject, JsonObject]:
+        async with postgres.session() as session:
+            await session.execute(
+                insert(SettingsRecord)
+                .values(tier=self.tier, key=key, value={})
+                .on_conflict_do_nothing(index_elements=[SettingsRecord.tier, SettingsRecord.key])
+            )
+            before = (
+                await session.scalars(
+                    select(SettingsRecord.value).where(self._where(key)).with_for_update()
+                )
+            ).one()
+            upsert = insert(SettingsRecord).values(tier=self.tier, key=key, value=value)
+            saved = await session.scalar(
+                upsert.on_conflict_do_update(
+                    index_elements=[SettingsRecord.tier, SettingsRecord.key],
+                    set_={
+                        "value": SettingsRecord.value.op("||")(upsert.excluded.value),
+                        "updated_at": func.clock_timestamp(),
+                    },
+                ).returning(SettingsRecord.value)
+            )
+            if saved is None:
+                raise RuntimeError("Settings update did not return a record")
+            return before, saved
 
     async def delete(self, key: str) -> None:
         async with postgres.session() as session:

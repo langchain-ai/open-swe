@@ -961,6 +961,20 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue }
 
+export interface ExecutionDefaults {
+  prompt: string
+  repos: string[]
+  setup_script: string
+  update_script: string
+  snapshot_id: string | null
+  snapshot_name: string | null
+  base_snapshot_id: string | null
+  vcpus: number | null
+  mem_bytes: number | null
+  fs_capacity_bytes: number | null
+  create_params: Record<string, JsonValue>
+}
+
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
 export interface WorkspaceUpdate {
   inherit_default_sandbox?: boolean
@@ -1757,6 +1771,12 @@ export const api = {
         .join("/")}`,
       { method: "PUT", body: JSON.stringify(settings) }
     ),
+  getExecutionDefaults: () => request<ExecutionDefaults>("/settings/execution"),
+  updateExecutionDefaults: (changes: Partial<ExecutionDefaults>) =>
+    request<ExecutionDefaults>("/settings/execution", {
+      method: "PATCH",
+      body: JSON.stringify(changes),
+    }),
   /** The instance record every workspace inherits. */
   getInstanceSettings: () => request<WorkspaceSettings>("/settings"),
   getWorkspaceSettings: (slug: string) =>

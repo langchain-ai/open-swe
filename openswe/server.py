@@ -266,6 +266,7 @@ from openswe.tools.admin_gate import (
     actor_has_admin_context,
     participant_is_admin,
 )
+from openswe.tools.execution_defaults import configure_execution_defaults, read_execution_defaults
 from openswe.tools.manage_feature_flags import manage_feature_flags
 from openswe.tools.manage_review_approval_mode import manage_review_approval_mode
 from openswe.tools.manage_review_apps import manage_review_apps
@@ -593,6 +594,7 @@ INCIDENT_KICKOFF_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "delete_automation",
         "configure_repository",
         "configure_workspace",
+        "configure_execution_defaults",
         "delete_workspace",
         "publish_workspace",
         "snapshotctl",
@@ -667,6 +669,8 @@ ADMIN_TOOLS = (
     snapshotctl,
     configure_repository,
     configure_workspace,
+    read_execution_defaults,
+    configure_execution_defaults,
     delete_workspace,
     save_organization_skill,
     delete_organization_skill,

@@ -44,7 +44,7 @@ class AuditLogEnrichments(BaseModel):
     workspace: str | None = None
     thread_id: str | None = None
     delegated_from_sandbox_id: str | None = None
-    settings_scope: Literal["instance", "workspace"] | None = None
+    settings_scope: Literal["instance", "workspace", "execution"] | None = None
     settings_changes: dict[str, SettingsChange] | None = None
     expedited_exclusions: ExpeditedExclusions | None = None
 

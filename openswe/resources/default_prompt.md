@@ -15,6 +15,9 @@ Apps in reviews have reviews of private repositories also do an app's review ste
 Their **Preview checks**, set in the same places or with `manage_review_apps` (`set_preview_checks`), are the checks whose success means a pull request's preview serves its head commit: when one passes, Robin does the apps' review steps against that preview, publishing only problems that work turns up.
 Only an instance admin sets where their browser signs in, the domains and the tool of Robin's bot kit that signs it in, under **Review browser** in **Defaults** (`/admin`); no workspace overrides it, and no tool changes it.
 An instance admin adds a listed app to everyone's sidebar under **Apps for everyone** in **Defaults** (`/admin`), approving its permissions for them and sharing the repositories they name with each person who can read them; people can't remove it while it's on, and no tool changes it.
+Admins also save Robin-wide instructions, preloaded repositories, image IDs, sandbox resources, setup/update scripts and proxy/cloud configuration under **Defaults** (`/admin`), or with `configure_execution_defaults`; `read_execution_defaults` requires a private admin surface, while writes also support verified sole-writer shared threads and return only an acknowledgement there.
+These fields are stored separately from the live environment configuration; saving them does not build images or change runs, routing or environment inheritance.
+Do not copy, activate or apply them to environments unless separately requested.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work; rename a thread with `manage_thread(action="rename", title=...)` in cloud or desktop.
   Workspace editors let admins bind Slack channels and choose Mention-only, Kitchen, or Ask mode; Ask channels investigate bug reports, search related work, and recommend next steps without automatically tagging teammates.

@@ -1,10 +1,19 @@
 """Workspace settings resolve by tier: hardcoded defaults, the instance record, then a workspace's overrides."""
 
-import pytest
-from fastapi import HTTPException, Request
+import asyncio
+from collections.abc import Awaitable, Callable
+from unittest.mock import AsyncMock
 
+import httpx2
+import pytest
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import ValidationError
+
+from openswe.audit_logs import tools as audit_tools
+from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.models import AuditLog
-from openswe.dashboard import workspace_settings, workspace_settings_cache
+from openswe.dashboard import oauth, routes, workspace_settings, workspace_settings_cache
+from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS, ExecutionDefaults
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettingsUpdate,
     get_instance_settings,
@@ -12,7 +21,13 @@ from openswe.dashboard.workspace_settings import (
     upsert_instance_settings,
     upsert_workspace_overrides,
 )
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from openswe.sandboxes.lifecycle import SandboxCreateConfig
+from openswe.tools import access as tool_access
+from openswe.tools.access import Access
+from openswe.tools.execution_defaults import configure_execution_defaults, read_execution_defaults
+from openswe.tools.mcp_exposure import EXPOSED_TOOLS
+from openswe.utils.json_types import JsonObject
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate
 
 
 async def test_an_override_applies_to_its_workspace_only(registry_db) -> None:
@@ -170,3 +185,181 @@ async def test_workspace_settings_api_round_trips_overrides(registry_db) -> None
     assert (await workspace_settings.api_get_instance_settings(_session={"sub": "alice"}))[
         "review_draft_prs"
     ] is True
+
+
+async def test_execution_defaults_persist_without_changing_live_environments(registry_db) -> None:
+    await WORKSPACES.apply_update("default", WorkspaceUpdate(prompt="Live instructions", vcpus=2))
+    environment = await WORKSPACES.get("default")
+    sandbox = await SandboxCreateConfig.resolve()
+    live = await get_workspace_settings()
+    assert await EXECUTION_DEFAULTS.load() == ExecutionDefaults()
+
+    await EXECUTION_DEFAULTS.update(
+        ExecutionDefaults(
+            prompt="  Shared instructions  ",
+            repos=["acme/api", "ACME/API"],
+            snapshot_id="  image:stable  ",
+            vcpus=4,
+            setup_script="  echo setup  ",
+            create_params={"proxy_config": {"rules": []}},
+        )
+    )
+    await asyncio.gather(
+        EXECUTION_DEFAULTS.update(ExecutionDefaults(update_script="echo update")),
+        EXECUTION_DEFAULTS.update(ExecutionDefaults(mem_bytes=8 * 1024**3)),
+    )
+    saved = await EXECUTION_DEFAULTS.load()
+    assert saved.prompt == "Shared instructions"
+    assert saved.repos == ["acme/api"]
+    assert saved.snapshot_id == "image:stable"
+    assert saved.setup_script == "echo setup"
+    assert saved.update_script == "echo update"
+    assert saved.mem_bytes == 8 * 1024**3
+    assert saved.create_params == {"proxy_config": {"rules": []}}
+    assert await WORKSPACES.get("default") == environment
+    assert await SandboxCreateConfig.resolve() == sandbox
+    assert await get_workspace_settings() == live
+
+    await upsert_instance_settings(WorkspaceSettingsUpdate(org_guidelines="Live review policy"))
+    await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(pr_summaries=False))
+    assert await EXECUTION_DEFAULTS.load() == saved
+    await EXECUTION_DEFAULTS.update(ExecutionDefaults(snapshot_id=None, repos=[]))
+    cleared = await EXECUTION_DEFAULTS.load()
+    assert cleared.snapshot_id is None
+    assert cleared.repos == []
+    assert cleared.prompt == saved.prompt
+
+
+@pytest.mark.parametrize("existing", [False, True])
+async def test_execution_defaults_audit_tracks_concurrent_overwrites(
+    registry_db, monkeypatch: pytest.MonkeyPatch, existing: bool
+) -> None:
+    if existing:
+        await EXECUTION_DEFAULTS.update(ExecutionDefaults(prompt="Original"))
+    patch = EXECUTION_DEFAULTS.records.patch
+    both_started = asyncio.Event()
+    first_committed = asyncio.Event()
+
+    async def ordered_patch(key: str, changes: JsonObject) -> tuple[JsonObject, JsonObject]:
+        if changes["prompt"] == "First":
+            await both_started.wait()
+            saved = await patch(key, changes)
+            first_committed.set()
+            return saved
+        both_started.set()
+        await first_committed.wait()
+        return await patch(key, changes)
+
+    async def save(prompt: str) -> AuditLog:
+        entry = AuditLog(operation_name="patch_execution_defaults")
+        token = current_audit_log.set(entry)
+        try:
+            await EXECUTION_DEFAULTS.update(ExecutionDefaults(prompt=prompt))
+        finally:
+            current_audit_log.reset(token)
+        return entry
+
+    monkeypatch.setattr(EXECUTION_DEFAULTS.records, "patch", ordered_patch)
+    async with asyncio.timeout(10):
+        entries = await asyncio.gather(save("First"), save("Original"))
+    for entry in entries:
+        assert entry.enrichments.settings_scope == "execution"
+        assert entry.enrichments.settings_changes == {
+            "prompt": {"before": "[REDACTED]", "after": "[REDACTED]"}
+        }
+    assert (await EXECUTION_DEFAULTS.load()).prompt == "Original"
+    assert (await save("Original")).enrichments.settings_changes == {}
+
+
+@pytest.mark.parametrize("actor,status", [(None, 401), ("member", 403), ("admin", 200)])
+async def test_execution_defaults_api_is_admin_only_and_round_trips(
+    registry_db, monkeypatch: pytest.MonkeyPatch, actor: str | None, status: int
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
+    monkeypatch.delenv("DASHBOARD_BASE_URL", raising=False)
+    monkeypatch.delenv("DASHBOARD_ALLOWED_ORIGINS", raising=False)
+    app = FastAPI()
+    app.include_router(routes.router)
+    if actor:
+        app.dependency_overrides[oauth.require_session] = lambda: {"sub": actor}
+    entry = AuditLog(operation_name="patch_execution_defaults")
+    token = current_audit_log.set(entry)
+    try:
+        async with httpx2.AsyncClient(
+            transport=httpx2.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.patch(
+                "/dashboard/api/settings/execution",
+                json={"prompt": "Private instructions", "create_params": {"region": "us"}},
+            )
+            assert response.status_code == status, response.text
+            fetched = await client.get("/dashboard/api/settings/execution")
+            assert fetched.status_code == status, fetched.text
+            if status == 200:
+                assert fetched.json() == response.json()
+                assert fetched.json()["prompt"] == "Private instructions"
+    finally:
+        current_audit_log.reset(token)
+    if status != 200:
+        assert await EXECUTION_DEFAULTS.load() == ExecutionDefaults()
+        assert entry.enrichments.settings_changes is None
+    else:
+        assert entry.enrichments.settings_scope == "execution"
+        assert entry.enrichments.settings_changes == {
+            "prompt": {"before": "[REDACTED]", "after": "[REDACTED]"},
+            "create_params": {"before": "[REDACTED]", "after": "[REDACTED]"},
+        }
+        assert "Private instructions" not in entry.model_dump_json()
+        assert "region" not in entry.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"slack_channel_ids": ["C123"]},
+        {"vcpus": 0},
+        {"create_params": {"api_key": "must-not-persist"}},
+        {"create_params": {"proxy_config": {"rules": "invalid"}}},
+        {
+            "create_params": {
+                "proxy_config": {
+                    "rules": [{"headers": [{"name": "Authorization", "value": "secret"}]}]
+                }
+            }
+        },
+        {"create_params": {"access_delegation": {"permissions": "invalid"}}},
+    ],
+)
+def test_execution_defaults_reuse_sandbox_validation(changes: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        ExecutionDefaults.model_validate(changes)
+
+
+@pytest.mark.parametrize(
+    "configure",
+    [configure_execution_defaults, EXPOSED_TOOLS["configure_execution_defaults"][0]],
+    ids=["agent", "mcp"],
+)
+async def test_execution_defaults_tool_rechecks_admin_access_and_redacts_shared_results(
+    registry_db,
+    monkeypatch: pytest.MonkeyPatch,
+    configure: Callable[[ExecutionDefaults], Awaitable[dict[str, object]]],
+) -> None:
+    entries: list[AuditLog] = []
+    monkeypatch.setattr(audit_tools, "_enrich", AsyncMock())
+    monkeypatch.setattr(audit_tools, "append_safely", AsyncMock(side_effect=entries.append))
+    access = AsyncMock(return_value=Access(admin=True, admin_surface=True))
+    monkeypatch.setattr(tool_access, "resolve_access", access)
+    await configure(ExecutionDefaults(prompt="Private instructions"))
+    assert (await read_execution_defaults())["prompt"] == "Private instructions"
+    access.return_value = Access(admin=True, sole=True)
+    assert await configure(ExecutionDefaults(vcpus=6)) == {
+        "ok": True,
+        "scope": "execution",
+    }
+    assert (await read_execution_defaults())["ok"] is False
+    access.return_value = Access(sole=True)
+    assert (await configure(ExecutionDefaults(vcpus=1)))["ok"] is False
+    assert (await EXECUTION_DEFAULTS.load()).vcpus == 6
+    assert [entry.operation_succeeded for entry in entries] == [True, True, False]
+    assert all("Private instructions" not in entry.model_dump_json() for entry in entries)

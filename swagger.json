@@ -941,7 +941,8 @@
               {
                 "enum": [
                   "instance",
-                  "workspace"
+                  "workspace",
+                  "execution"
                 ],
                 "type": "string"
               },
@@ -2935,6 +2936,216 @@
           "reason"
         ],
         "title": "Exclusion",
+        "type": "object"
+      },
+      "ExecutionDefaults-Input": {
+        "additionalProperties": false,
+        "properties": {
+          "base_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Snapshot Id"
+          },
+          "create_params": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/pydantic__types__JsonValue"
+            },
+            "title": "Create Params",
+            "type": "object"
+          },
+          "fs_capacity_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fs Capacity Bytes"
+          },
+          "mem_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Bytes"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repos",
+            "type": "array"
+          },
+          "setup_script": {
+            "default": "",
+            "title": "Setup Script",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "snapshot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Name"
+          },
+          "update_script": {
+            "default": "",
+            "title": "Update Script",
+            "type": "string"
+          },
+          "vcpus": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vcpus"
+          }
+        },
+        "title": "ExecutionDefaults",
+        "type": "object"
+      },
+      "ExecutionDefaults-Output": {
+        "additionalProperties": false,
+        "properties": {
+          "base_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Snapshot Id"
+          },
+          "create_params": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "title": "Create Params",
+            "type": "object"
+          },
+          "fs_capacity_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fs Capacity Bytes"
+          },
+          "mem_bytes": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Bytes"
+          },
+          "prompt": {
+            "default": "",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "repos": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repos",
+            "type": "array"
+          },
+          "setup_script": {
+            "default": "",
+            "title": "Setup Script",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "snapshot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Name"
+          },
+          "update_script": {
+            "default": "",
+            "title": "Update Script",
+            "type": "string"
+          },
+          "vcpus": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vcpus"
+          }
+        },
+        "title": "ExecutionDefaults",
         "type": "object"
       },
       "ExpeditedExclusions": {
@@ -24354,6 +24565,78 @@
           }
         ],
         "summary": "Api Put Instance Settings",
+        "tags": [
+          "dashboard",
+          "settings"
+        ]
+      }
+    },
+    "/dashboard/api/settings/execution": {
+      "get": {
+        "operationId": "api_get_execution_defaults_dashboard_api_settings_execution_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionDefaults-Output"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Get Execution Defaults",
+        "tags": [
+          "dashboard",
+          "settings"
+        ]
+      },
+      "patch": {
+        "operationId": "api_patch_execution_defaults_dashboard_api_settings_execution_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionDefaults-Input"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionDefaults-Output"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Patch Execution Defaults",
         "tags": [
           "dashboard",
           "settings"
