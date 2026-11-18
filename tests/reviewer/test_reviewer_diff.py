@@ -1,10 +1,15 @@
 """Unit tests for the unified-diff parsing helpers."""
 
+from unittest.mock import AsyncMock
+
+import httpx2
 import pytest
 
+from openswe.github import http as github_http
 from openswe.review.diff import (
     compute_diff_line_set,
     extract_diff_hunk,
+    fetch_pr_metadata,
     is_range_in_diff,
 )
 
@@ -80,3 +85,29 @@ async def test_compute_diff_in_sandbox_uses_three_dot_for_merge_base() -> None:
     assert "base...head" in cmd
     assert "base..head" not in cmd.replace("base...head", "")
     assert "--no-prefix" not in cmd  # invalid flag must not appear
+
+
+@pytest.mark.parametrize("body", ["Why it changed", None])
+async def test_pr_metadata_is_read_over_graphql_not_rest(
+    monkeypatch: pytest.MonkeyPatch, body: str | None
+) -> None:
+    # The installation's REST quota runs out; a review's title and body must not spend it.
+    request = AsyncMock(
+        return_value=httpx2.Response(
+            200,
+            json={"data": {"repository": {"pullRequest": {"title": "Fix it", "body": body}}}},
+            request=httpx2.Request("POST", github_http.GITHUB_GRAPHQL),
+        )
+    )
+    monkeypatch.setattr(github_http, "github_request", request)
+
+    metadata = await fetch_pr_metadata(owner="acme", repo="widgets", pr_number=7, token="t")
+
+    assert metadata == ("Fix it", body or "")
+    request.assert_awaited_once()
+    assert request.await_args.args[1:] == ("POST", github_http.GITHUB_GRAPHQL)
+    assert request.await_args.kwargs["json"]["variables"] == {
+        "owner": "acme",
+        "repo": "widgets",
+        "number": 7,
+    }

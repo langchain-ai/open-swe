@@ -266,7 +266,7 @@ async def fetch_pr_metadata(
     token: str,
     timeout: float = 30.0,
 ) -> tuple[str, str] | None:
-    """Fetch the PR's title and body from the GitHub REST API.
+    """Fetch the PR's title and body from GitHub's GraphQL API.
 
     Returns ``(title, body)`` or ``None`` if the request fails. Always
     fetched fresh per run (never cached) so an edited title/description is
@@ -275,23 +275,15 @@ async def fetch_pr_metadata(
     """
     import httpx2
 
-    from openswe.github.http import github_client, github_request
+    from openswe.github.http import GitHubClient
+    from openswe.github.pull_request_status import PullRequestClient
 
-    url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}"
     try:
-        async with github_client(token=token) as client:
-            response = await github_request(client, "GET", url, timeout=timeout)
-            response.raise_for_status()
-            payload = response.json()
-    except httpx2.HTTPError:
+        async with GitHubClient.connect(token=token, timeout=timeout) as github:
+            return await PullRequestClient(github.repo(owner, repo), pr_number).title_and_body()
+    except httpx2.HTTPError, ValueError:
         logger.exception("Failed to fetch PR metadata for %s/%s#%s", owner, repo, pr_number)
         return None
-    except ValueError:
-        logger.exception("Failed to parse PR metadata for %s/%s#%s", owner, repo, pr_number)
-        return None
-    title = payload.get("title")
-    body = payload.get("body")
-    return (title if isinstance(title, str) else "", body if isinstance(body, str) else "")
 
 
 def review_diff_range(

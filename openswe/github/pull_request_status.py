@@ -83,6 +83,13 @@ query PullRequestTips($owner: String!, $repo: String!, $number: Int!) {
   }
 }
 """
+_TITLE_AND_BODY_QUERY = """
+query PullRequestTitleAndBody($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) { title body }
+  }
+}
+"""
 _REVIEW_THREADS_QUERY = """
 query PullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $repo) {
@@ -1551,6 +1558,18 @@ class PullRequestClient:
 
     async def reviews(self) -> list[dict[str, Any]]:
         return await self.repo.pages(f"pulls/{self.number}/reviews")
+
+    async def title_and_body(self) -> tuple[str, str]:
+        """The title and description as written, read over GraphQL to spare the REST quota.
+
+        ``body`` is ``""`` when the pull request has no description.
+        """
+        pull = _graphql_pull(
+            await self.repo.graphql(_TITLE_AND_BODY_QUERY, {"number": self.number})
+        )
+        if pull is None:
+            raise ValueError("GitHub answered without the pull request")
+        return _as_str(pull.get("title"), ""), _as_str(pull.get("body"), "")
 
     async def mergeability(self) -> Mergeability | None:
         """Mergeability over GraphQL.

@@ -1830,6 +1830,9 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
+    if "PullRequestTitleAndBody" in query:
+        title_and_body = {"title": pr["title"], "body": pr["body"]}
+        return JSONResponse({"data": {"repository": {"pullRequest": title_and_body}}})
     if "PullRequestTips" in query:
         tips = {"baseRefOid": fakes.base_sha(pr), "headRefOid": pr["head_sha"]}
         return JSONResponse({"data": {"repository": {"pullRequest": tips}}})
