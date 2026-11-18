@@ -30,6 +30,7 @@ from openswe.slack.blocks import (
 )
 from openswe.slack.client import (
     SlackNotice,
+    format_slack_web_link_footer,
     get_active_slack_thread,
     get_slack_permalink,
     post_slack_ephemeral_reply,
@@ -52,6 +53,7 @@ from openswe.slack.routed_work import RoutedWork
 from openswe.slack.thinking import restore_slack_thinking_status, settle_slack_thread_status
 from openswe.slack.tools.read_thread_messages import fetch_and_format_thread
 from openswe.threads.store import THREADS
+from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.http import DEFAULT_HTTP_TIMEOUT
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.multimodal import fetch_image_block, vision_not_supported_warning
@@ -96,6 +98,8 @@ async def slack_reply(
         result = await send_slack_reply(
             message, response_type, options, blocks, state, option_user_id=option_user_id
         )
+    result.pop("channel_id", None)
+    result.pop("footer", None)
     image_urls = result.pop("image_urls", None)
     if not image_urls:
         return result
@@ -301,6 +305,10 @@ async def send_slack_reply(
         await restore_slack_thinking_status(str(channel_id), str(thread_ts))
     return {
         "success": True,
+        "channel_id": str(channel_id),
+        "footer": format_slack_web_link_footer(
+            dashboard_thread_url(agent_thread_id) if agent_thread_id else None, usage
+        ),
         "message_ts": message_ts,
         "message_url": await get_slack_permalink(str(channel_id), message_ts)
         if message_ts

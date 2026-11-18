@@ -9,7 +9,6 @@ from openswe.credential_scope import private_credential_login
 from openswe.mcp.cards import ConnectCard
 from openswe.mcp.managed import (
     LangSmithNotConnected,
-    ManagedServer,
     ManagedToolsError,
     PersonalTools,
 )
@@ -31,33 +30,6 @@ def _langsmith_blocks(card: ConnectCard) -> list[Block]:
             "then ask me again to connect the services they need."
         ),
         actions(button("Sign in with LangSmith", action_id="connect_langsmith", url=url)),
-    ]
-
-
-def _slack_blocks(card: ConnectCard, offered: list[ManagedServer]) -> list[Block]:
-    oauth = [server for server in offered if server.kind == "oauth"]
-    secret = [server for server in offered if server.kind == "secret"]
-    then = (
-        "I'll continue here once they're connected."
-        if not secret
-        else "Once they're set up, ask me to continue."
-    )
-    return [
-        section(
-            "Connect these services to use them with your own accounts. Each button opens "
-            "the service's consent or API key page for your account only; sign in to Robin "
-            f"in your browser first. {then}"
-        ),
-        actions(
-            *(
-                button(
-                    f"{'Connect' if server.kind == 'oauth' else 'Set up'} {server.name}",
-                    action_id=f"connect_managed_tool:{index}",
-                    url=card.button_url(server.id),
-                )
-                for index, server in enumerate([*oauth, *secret][:25])
-            )
-        ),
     ]
 
 
@@ -95,6 +67,12 @@ async def connect_managed_tools(
         )
         if posted.get("success") is not True:
             return {"success": False, "error": posted.get("error", "Could not reply")}
+        channel_id, message_ts = posted.get("channel_id"), posted.get("message_ts")
+        if card.services and isinstance(channel_id, str) and isinstance(message_ts, str):
+            card.slack_channel_id, card.slack_message_ts = channel_id, message_ts
+            footer = posted.get("footer")
+            card.slack_footer = footer if isinstance(footer, str) else None
+            await card.save()
         return None
 
     card = ConnectCard(thread_id=cfg.thread_id, card_id=tool_call_id, login=login)
@@ -117,7 +95,7 @@ async def connect_managed_tools(
         }
     card.services = [server.id for server in offered]
     await card.save()
-    if failed := await post("Connect your managed tools", _slack_blocks(card, offered)):
+    if failed := await post("Connect your managed tools", card.slack_blocks(offered)):
         return failed
     return {
         "success": True,

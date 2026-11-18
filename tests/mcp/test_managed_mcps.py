@@ -534,9 +534,18 @@ async def test_the_bot_kit_view_is_off_without_a_bot_profile(monkeypatch):
     assert (await routes.api_bot_managed_tools({"sub": "alice"})).configured is False
 
 
-async def test_card_resumes_once_its_own_services_are_connected(monkeypatch, lmt, card_store):
+@pytest.mark.parametrize("slack_fails", [False, True])
+async def test_card_resumes_once_its_own_services_are_connected(
+    monkeypatch, lmt, card_store, slack_fails
+):
     card = cards.ConnectCard(
-        thread_id="t", card_id="call-1", login="alice", services=[NOTION_ID, "exa"]
+        thread_id="t",
+        card_id="call-1",
+        login="alice",
+        services=[NOTION_ID, "exa"],
+        slack_channel_id="D123",
+        slack_message_ts="123.456",
+        slack_footer="<https://example.com/agents/t|Open in Robin> · $0.02",
     )
     await card.save()
     monkeypatch.setattr(
@@ -557,6 +566,8 @@ async def test_card_resumes_once_its_own_services_are_connected(monkeypatch, lmt
     monkeypatch.setattr(cards, "claim", claim)
     dispatch = AsyncMock()
     monkeypatch.setattr(cards, "dispatch_agent_run", dispatch)
+    update = AsyncMock(side_effect=RuntimeError("Slack unavailable") if slack_fails else None)
+    monkeypatch.setattr(cards, "update_slack_message", update)
     alice = lmt.servers["alice"]
 
     def waiting(auth_id):
@@ -568,13 +579,39 @@ async def test_card_resumes_once_its_own_services_are_connected(monkeypatch, lmt
     alice[1] = server(NOTION_ID, "Notion", connected=True)
     await waiting("notion-auth").poll()
     dispatch.assert_not_awaited()
+    update.assert_awaited_once()
+    assert update.await_args.args[:2] == ("D123", "123.456")
+    blocks = update.await_args.kwargs["blocks"]
+    assert blocks[0]["text"]["text"] == "Connected: Notion"
+    assert [element["text"]["text"] for element in blocks[-2]["elements"]] == ["Set up Exa"]
+    assert blocks[-1] == {
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": card.slack_footer}],
+    }
+    assert card.slack_footer in update.await_args.args[2]
     alice[2] = server("exa", "Exa", connected=True, kind="secret")
     await asyncio.gather(waiting("exa-auth").poll(), waiting("exa-again").poll())
     assert dispatch.await_count == 1
+    blocks = update.await_args.kwargs["blocks"]
+    assert blocks[:-1] == [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "Connected: Notion, Exa"}}
+    ]
+    assert blocks[-1]["elements"][0]["text"] == card.slack_footer
     configurable = dispatch.await_args.args[2]
     assert configurable["github_login"] == "alice"
     assert configurable["workspace"] == "eng"
     assert "Notion, Exa" in dispatch.await_args.args[1]
+
+
+async def test_removed_service_does_not_block_the_connected_cards_resume(monkeypatch, lmt):
+    card = cards.ConnectCard(
+        thread_id="t", card_id="removed", login="alice", services=[LINEAR_ID, "removed"]
+    )
+    resume = AsyncMock()
+    monkeypatch.setattr(cards, "claim", AsyncMock(return_value=True))
+    monkeypatch.setattr(cards.ConnectCard, "_resume", resume)
+    await card.resume_if_ready()
+    resume.assert_awaited_once_with(["Linear"])
 
 
 async def test_only_the_card_owner_can_mint_its_consent_links(monkeypatch, card_store):
@@ -670,7 +707,14 @@ async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, ca
         lambda: {"configurable": {"source": "slack", "thread_id": "t", "github_login": "alice"}},
     )
     monkeypatch.setattr(tool, "private_credential_login", AsyncMock(return_value="alice"))
-    post = AsyncMock(return_value={"success": True})
+    post = AsyncMock(
+        return_value={
+            "success": True,
+            "channel_id": "D123",
+            "message_ts": "123.456",
+            "footer": "Open in Robin · $0.02",
+        }
+    )
     monkeypatch.setattr(tool, "send_slack_reply", post)
 
     result = await tool.connect_managed_tools(["notion"], {"reply_surface": "slack"}, "call-1")
@@ -685,7 +729,10 @@ async def test_slack_card_links_to_open_swe_not_the_consent_link(monkeypatch, ca
         f"/dashboard/api/my-managed-tools/connect/{NOTION_ID}",
     )
     assert parse_qs(parsed.query) == {"thread_id": ["t"], "card": ["call-1"]}
-    assert (await cards.ConnectCard.load("t", "call-1", "alice")).services == [NOTION_ID]
+    saved = await cards.ConnectCard.load("t", "call-1", "alice")
+    assert saved.services == [NOTION_ID]
+    assert (saved.slack_channel_id, saved.slack_message_ts) == ("D123", "123.456")
+    assert saved.slack_footer == "Open in Robin · $0.02"
     assert result["continues_automatically"] is True
 
     # The Slack call ends the turn, so "already connected" must still reach the person.

@@ -33,10 +33,13 @@ from openswe.mcp.managed import (
     PersonalTools,
 )
 from openswe.prompts import prompt
+from openswe.slack.blocks import Block, actions, block_payload, button, context, section
+from openswe.slack.channels import SlackChannel
+from openswe.slack.client import format_slack_web_link_footer, update_slack_message
 from openswe.source_context import SourceContext
 from openswe.users.models import User
 from openswe.users.records import UnknownUser, user_id_for_login
-from openswe.utils.dashboard_links import dashboard_api_base_url
+from openswe.utils.dashboard_links import dashboard_api_base_url, dashboard_thread_url
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
 
@@ -146,6 +149,11 @@ class ConnectCardRow(Base):
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     services: Mapped[list[str]] = mapped_column(ARRAY(Text), default_factory=list)
     proposed_server: Mapped[dict[str, JsonValue] | None] = mapped_column(JSONB, default=None)
+    slack_channel_id: Mapped[str | None] = mapped_column(
+        ForeignKey("slack_channel.id", ondelete="SET NULL"), default=None
+    )
+    slack_message_ts: Mapped[str | None] = mapped_column(Text, default=None)
+    slack_footer: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
 
 
@@ -157,6 +165,9 @@ class ConnectCard(BaseModel):
     login: str
     services: list[str] = Field(default_factory=list)
     """IDs of the LMT servers the card offers."""
+    slack_channel_id: str | None = None
+    slack_message_ts: str | None = None
+    slack_footer: str | None = None
     proposed: NewServer | None = None
     """A personal server the agent proposed, registered only when the owner confirms."""
 
@@ -178,10 +189,47 @@ class ConnectCard(BaseModel):
             card_id=row.card_id,
             login=login.strip().lower(),
             services=row.services,
+            slack_channel_id=row.slack_channel_id,
+            slack_message_ts=row.slack_message_ts,
+            slack_footer=row.slack_footer,
             proposed=(
                 NewServer.model_validate(row.proposed_server) if row.proposed_server else None
             ),
         )
+
+    def slack_blocks(self, offered: list[ManagedServer]) -> list[Block]:
+        connected = [server for server in offered if server.usable]
+        offered = [server for server in offered if not server.usable]
+        status: list[Block] = []
+        if connected:
+            status.append(section("Connected: " + ", ".join(server.name for server in connected)))
+        if not offered:
+            return status
+        oauth = [server for server in offered if server.kind == "oauth"]
+        secret = [server for server in offered if server.kind == "secret"]
+        then = (
+            "I'll continue here once they're connected."
+            if not secret
+            else "Once they're set up, ask me to continue."
+        )
+        return [
+            *status,
+            section(
+                "Connect these services to use them with your own accounts. Each button opens "
+                "the service's consent or API key page for your account only; sign in to Robin "
+                f"in your browser first. {then}"
+            ),
+            actions(
+                *(
+                    button(
+                        f"{'Connect' if server.kind == 'oauth' else 'Set up'} {server.name}",
+                        action_id=f"connect_managed_tool:{index}",
+                        url=self.button_url(server.id),
+                    )
+                    for index, server in enumerate([*oauth, *secret][:25])
+                )
+            ),
+        ]
 
     @property
     def tools(self) -> PersonalTools:
@@ -192,7 +240,12 @@ class ConnectCard(BaseModel):
             user_id = await session.scalar(select(user_id_for_login(self.login)))
             if user_id is None:
                 raise UnknownUser(self.login)
+            if self.slack_channel_id:
+                await SlackChannel.ensure(session, self.slack_channel_id)
             values = {
+                "slack_channel_id": self.slack_channel_id,
+                "slack_message_ts": self.slack_message_ts,
+                "slack_footer": self.slack_footer,
                 "user_id": user_id,
                 "services": self.services,
                 "proposed_server": self.proposed.model_dump(mode="json") if self.proposed else None,
@@ -279,6 +332,23 @@ class ConnectCard(BaseModel):
         """Queue the thread's one follow-up run once every service the card offers works."""
         # Another of the card's services may still be missing; its consent resumes.
         servers = {server.id: server for server in await self.tools.servers()}
+        if self.slack_channel_id and self.slack_message_ts:
+            try:
+                offered = [servers[service] for service in self.services if service in servers]
+                footer = self.slack_footer or format_slack_web_link_footer(
+                    dashboard_thread_url(self.thread_id)
+                )
+                blocks = self.slack_blocks(offered)
+                if footer:
+                    blocks.append(context(footer))
+                await update_slack_message(
+                    self.slack_channel_id,
+                    self.slack_message_ts,
+                    f"Managed tools connection status {footer}".rstrip(),
+                    blocks=block_payload(blocks),
+                )
+            except Exception:
+                logger.warning("Could not update managed tools Slack card", exc_info=True)
         if any(not servers[service].usable for service in self.services if service in servers):
             return
         names = [servers[service].name for service in self.services if service in servers]
