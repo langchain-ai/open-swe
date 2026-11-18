@@ -780,6 +780,30 @@ async def test_the_runtime_runs_only_the_backends_own_tools_that_read_nothing_of
     }
 
 
+async def test_a_starting_run_describes_its_tools_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tool set and the catalog list the same specs, which a run with hundreds of
+    integrations would otherwise work out twice as it starts."""
+    from openswe.agent_api.run_catalog import RunCatalog
+    from openswe.tools import fetch_url, web_search
+
+    surface = ToolSurface(base_tools=[web_search, fetch_url])
+    await surface.prepare()
+    described = 0
+    catalog_of = ToolSurface.catalog
+
+    def counted(self: ToolSurface):
+        nonlocal described
+        described += 1
+        return catalog_of(self)
+
+    monkeypatch.setattr(ToolSurface, "catalog", counted)
+    catalog = RunCatalog(RunKind(), RUN, surface, {})
+
+    assert catalog.tool_set().tools == RunCatalog(RunKind(), RUN, surface, {}).tool_set().tools
+    catalog.tool_set()
+    assert described == 2
+
+
 @pytest.mark.usefixtures("registry_db")
 async def test_a_report_is_recorded_once_however_often_it_arrives(
     monkeypatch: pytest.MonkeyPatch,

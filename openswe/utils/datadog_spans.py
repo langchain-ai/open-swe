@@ -39,8 +39,10 @@ class DatadogSpans:
     _lock: ClassVar[threading.Lock] = threading.Lock()
     # The LangSmith run each marker or posted span is, by Datadog trace and span id.
     _runs: ClassVar[dict[tuple[int, int], RunTree]] = {}
-    # Finished spans waiting for their parent's run, by Datadog trace id.
-    _waiting: ClassVar[dict[int, dict[int, Span]]] = {}
+    # Finished spans waiting for their parent's run, by Datadog trace id and then the
+    # parent's span id. A send's trace holds thousands of spans, so a span's waiting
+    # children are found by their parent, never by scanning every span that waits.
+    _waiting: ClassVar[dict[int, dict[int | None, list[Span]]]] = {}
     # How many markers of each Datadog trace have not finished yet.
     _open: ClassVar[dict[int, int]] = {}
     # Posting a run writes it into the LangSmith client's compressed buffer under a
@@ -109,10 +111,9 @@ class DatadogSpans:
         with cls._lock:
             try:
                 for span in trace:
-                    if span.trace_id in cls._waiting and span.name != _MARKER:
-                        cls._waiting[span.trace_id][span.span_id] = span
-                for trace_id in {span.trace_id for span in trace}:
-                    cls._post_ready(trace_id, cls._waiting.get(trace_id, {}))
+                    waiting = cls._waiting.get(span.trace_id)
+                    if waiting is not None and span.name != _MARKER:
+                        cls._post_ready(span, waiting)
             except Exception:
                 logger.debug("Could not post Datadog's spans to LangSmith", exc_info=True)
             for span in trace:
@@ -126,17 +127,22 @@ class DatadogSpans:
                         cls._runs = {k: r for k, r in cls._runs.items() if k[0] != span.trace_id}
 
     @classmethod
-    def _post_ready(cls, trace_id: int, waiting: dict[int, Span]) -> None:
-        ready = [span for span in waiting.values() if (trace_id, span.parent_id) in cls._runs]
+    def _post_ready(cls, span: Span, waiting: dict[int | None, list[Span]]) -> None:
+        """Post ``span`` once its parent's run is known, and then the children that waited
+        for it; until then it waits for its parent."""
+        trace_id = span.trace_id
+        if (trace_id, span.parent_id) not in cls._runs:
+            waiting.setdefault(span.parent_id, []).append(span)
+            return
+        ready = [span]
         while ready:
             span = ready.pop()
-            del waiting[span.span_id]
             run = cls._post(span, cls._runs[trace_id, span.parent_id])
             if run is None:
                 # Dropped: its children wait for a run that never comes, and go with the trace.
                 continue
             cls._runs[trace_id, span.span_id] = run
-            ready.extend(child for child in waiting.values() if child.parent_id == span.span_id)
+            ready.extend(waiting.pop(span.span_id, ()))
 
     @classmethod
     def _post(cls, span: Span, parent: RunTree) -> RunTree | None:

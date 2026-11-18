@@ -44,9 +44,8 @@ class _DatadogSpan:
         return None
 
 
-def test_datadogs_spans_of_a_runs_work_are_posted_under_it_off_the_event_loop(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _install(monkeypatch: pytest.MonkeyPatch) -> object:
+    """Install the processor on a stand-in for Datadog's tracer, and return it."""
     processors: list[object] = []
 
     class TraceFilter:
@@ -63,6 +62,14 @@ def test_datadogs_spans_of_a_runs_work_are_posted_under_it_off_the_event_loop(
     monkeypatch.setitem(sys.modules, "ddtrace.trace", module)
     monkeypatch.setattr(DatadogSpans, "_installed", False)
     DatadogSpans.install()
+    (processor,) = processors
+    return processor
+
+
+def test_datadogs_spans_of_a_runs_work_are_posted_under_it_off_the_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    processor = _install(monkeypatch)
     posted: list[dict[str, object]] = []
     posting_threads: set[str] = set()
 
@@ -74,7 +81,6 @@ def test_datadogs_spans_of_a_runs_work_are_posted_under_it_off_the_event_loop(
 
     with DatadogSpans.under(run):
         pass
-    (processor,) = processors
     # Children finish first: the query waits for the request it was made in.
     processor.process_trace([_DatadogSpan(12, 11, "postgres.query")])  # type: ignore[attr-defined]
     processor.process_trace(  # type: ignore[attr-defined]
@@ -91,3 +97,41 @@ def test_datadogs_spans_of_a_runs_work_are_posted_under_it_off_the_event_loop(
     assert names["http.request https://x.test/a"]["parent_run_id"] == run.id
     assert names["postgres.query"]["parent_run_id"] == names["http.request https://x.test/a"]["id"]
     assert threading.current_thread().name not in posting_threads
+
+
+def test_each_span_is_posted_under_its_parent_however_late_the_parent_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    processor = _install(monkeypatch)
+    posted: list[dict[str, object]] = []
+    run = RunTree(
+        name="start_run", ls_client=SimpleNamespace(create_run=lambda **r: posted.append(r))
+    )
+
+    with DatadogSpans.under(run):
+        pass
+    # A send's trace holds thousands of spans, which arrive in chunks, deepest first.
+    renders = [_DatadogSpan(100 + i, 11, "jinja2.render") for i in range(500)]
+    processor.process_trace([*renders, _DatadogSpan(13, 12, "postgres.query")])  # type: ignore[attr-defined]
+    processor.process_trace([_DatadogSpan(12, 11, "http.request")])  # type: ignore[attr-defined]
+    # Outside the run: it waits, and is never posted.
+    processor.process_trace([_DatadogSpan(14, 2, "redis.command")])  # type: ignore[attr-defined]
+    processor.process_trace(  # type: ignore[attr-defined]
+        [_DatadogSpan(11, 10, "catalog"), _DatadogSpan(10, 1, "langsmith.run")]
+    )
+
+    DatadogSpans.drain(timeout=5)
+    by_name: dict[str, list[dict[str, object]]] = {}
+    for posted_run in posted:
+        by_name.setdefault(str(posted_run["name"]), []).append(posted_run)
+    assert set(by_name) == {"catalog", "http.request", "postgres.query", "jinja2.render"}
+    (catalog,), (request,), (query,) = (
+        by_name["catalog"],
+        by_name["http.request"],
+        by_name["postgres.query"],
+    )
+    assert catalog["parent_run_id"] == run.id
+    assert request["parent_run_id"] == catalog["id"]
+    assert query["parent_run_id"] == request["id"]
+    assert len(by_name["jinja2.render"]) == 500
+    assert {r["parent_run_id"] for r in by_name["jinja2.render"]} == {catalog["id"]}

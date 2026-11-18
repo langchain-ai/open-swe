@@ -33,6 +33,7 @@ from openswe.threads.index import IndexedThread, ThreadStatus
 from openswe.threads.runtimes import RUNTIMES, ChannelThreadError, ChannelWrite, now_ms
 from openswe.threads.start_request import RunRefused, StartRequest
 from openswe.transcript.mirror import mirror_thread_metadata
+from openswe.utils.startup_trace import apm_span
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 
 logger = logging.getLogger(__name__)
@@ -211,7 +212,8 @@ class ThreadStore:
         rewritten = await RUNTIMES.mda_runtime.run_payload(
             thread_id, payload, thread_metadata=thread_metadata, graph_id=graph_id
         )
-        await self.copies.settled(thread_id)
+        with apm_span("start_run.copies_settled", {"thread_id": thread_id}):
+            await self.copies.settled(thread_id)
         return rewritten
 
     async def archive_task_workers(

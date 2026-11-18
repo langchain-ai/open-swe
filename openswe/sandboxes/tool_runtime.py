@@ -57,20 +57,6 @@ def tool_parameters(tool: BaseTool) -> dict[str, JsonValue]:
     return parameters
 
 
-def describe_tool(name: str, tool: BaseTool) -> ToolDescription:
-    provenance = (tool.metadata or {}).get("mcp_provenance")
-    if not isinstance(provenance, MCPToolProvenance):
-        return ToolDescription(
-            name=name, description=tool.description, parameters=tool_parameters(tool)
-        )
-    return ToolDescription(
-        name=name,
-        description=f"{tool.description}\n\n{provenance.note()}",
-        parameters=tool_parameters(tool),
-        mcp_provenance=provenance,
-    )
-
-
 # The file and shell tools deepagents' FilesystemMiddleware gives every deep agent.
 FILESYSTEM_TOOL_NAMES: tuple[str, ...] = (
     "ls",
@@ -161,7 +147,28 @@ class ToolSurface:
     def catalog(self) -> list[ToolDescription]:
         """Every tool the run offers, the disabled ones too, by name."""
         offered = {**{name: self.always_offered[name] for name in self.disabled()}, **self.tools}
-        return [describe_tool(name, tool) for name, tool in sorted(offered.items())]
+        notes: dict[str, str] = {}
+        catalog: list[ToolDescription] = []
+        for name, tool in sorted(offered.items()):
+            provenance = (tool.metadata or {}).get("mcp_provenance")
+            description = tool.description
+            if isinstance(provenance, MCPToolProvenance):
+                key = provenance.model_dump_json()
+                note = notes.get(key)
+                if note is None:
+                    note = notes[key] = provenance.note()
+                description = f"{description}\n\n{note}"
+            else:
+                provenance = None
+            catalog.append(
+                ToolDescription(
+                    name=name,
+                    description=description,
+                    parameters=tool_parameters(tool),
+                    mcp_provenance=provenance,
+                )
+            )
+        return catalog
 
     async def prepare(self) -> None:
         tools = {

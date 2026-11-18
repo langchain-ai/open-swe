@@ -52,6 +52,7 @@ from openswe.threads.start_request import RunRefused, StartRequest
 from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS, RunOrigin
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.langsmith import resolve_tenant_id
+from openswe.utils.startup_trace import apm_span
 
 logger = logging.getLogger(__name__)
 
@@ -616,7 +617,8 @@ class MdaRuntime:
                 "channel" if dispatch.channel_of(thread_metadata) else "system"
             )
             try:
-                user = await User.get(UUID(actor))
+                with apm_span("start_run.acting_user", {}):
+                    user = await User.get(UUID(actor))
                 if user is not None:
                     run_metadata.update(user.billing_trace_metadata())
             except Exception:
@@ -629,7 +631,8 @@ class MdaRuntime:
         sender = run_metadata.get(SENDER_USER_KEY)
         if sender is not None and (sender != billed or actor not in (None, sender)):
             run_metadata.pop(SENDER_USER_KEY)
-        owner_ls_user_id = await self.owner_ls_user_id(thread_id)
+        with apm_span("start_run.owner_ls_user_id", {}):
+            owner_ls_user_id = await self.owner_ls_user_id(thread_id)
         run_metadata["owner_ls_user_id"] = owner_ls_user_id
         raw_config_metadata = config.get("metadata")
         if isinstance(raw_config_metadata, dict):
@@ -666,7 +669,8 @@ class MdaRuntime:
             rewritten["config"] = config
         else:
             rewritten.pop("config", None)
-        return _object.validate_python(rewritten)
+        with apm_span("start_run.validate_payload", {}):
+            return _object.validate_python(rewritten)
 
     @staticmethod
     def run_body(

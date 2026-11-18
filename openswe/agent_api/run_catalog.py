@@ -10,6 +10,7 @@ the context names only: every tool is kept by digest (``run_tool_sets``), which
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Final
 
 from langchain_core.runnables import RunnableConfig
@@ -51,6 +52,7 @@ from openswe.server import (
 )
 from openswe.threads.access import agent_version_metadata
 from openswe.trace_metadata import RunOrigin
+from openswe.utils.startup_trace import apm_span
 from openswe.utils.thread_reads import shared_thread_reads
 
 # The model a person picked, which the planner records on the run's config.
@@ -110,9 +112,13 @@ class RunCatalog:
 
     async def start(self) -> RunStart:
         """What MDA builds the run from, and the settings its calls read."""
-        tools, catalog = await asyncio.gather(self.tool_set().keep(), self.granted())
+        tools, catalog = await asyncio.gather(self._keep_tool_set(), self.granted())
         settings = self.settings().model_copy(update={"tools": tools})
         return RunStart(catalog=catalog.model_copy(update={"tool_set": tools}), settings=settings)
+
+    async def _keep_tool_set(self) -> str:
+        with apm_span("start_run.catalog.tool_set", {}):
+            return await self.tool_set().keep()
 
     def _backend_tools(self) -> dict[str, BaseTool]:
         return {name: tool for name, tool in self.surface.tools.items() if name not in _MDA_TOOLS}
@@ -133,6 +139,7 @@ class RunCatalog:
             - self.surface.disabled()
         )
 
+    @cached_property
     def _specs(self) -> list[ToolSpec]:
         surface = self.surface
         tools = {
@@ -160,7 +167,7 @@ class RunCatalog:
 
     def tool_set(self) -> ToolSet:
         """Every tool the run may call, which the backend keeps for the run to read."""
-        return ToolSet(self._specs(), self._excluded())
+        return ToolSet(self._specs, self._excluded())
 
     def models(self) -> RunModels:
         models = self.surface.models
@@ -214,7 +221,7 @@ class RunCatalog:
         # Code mode calls tools past the model's list, so what the run excludes stays out.
         from_code = offered - excluded if surface.code_mode else frozenset()
         return Catalog(
-            operations=[spec for spec in self._specs() if spec.name not in withheld],
+            operations=[spec for spec in self._specs if spec.name not in withheld],
             mcp_servers=list(surface.mcp_servers),
             subagents=[
                 SubagentSpec(
@@ -260,18 +267,20 @@ class RunCatalog:
         """The catalog, with who the run acts for, the sandbox MDA creates for it, and the
         grant of each operation to the run."""
         run_sandbox = RunSandbox(self.config, reviews=self.kind.reviews)
-        sandbox = await run_sandbox.managed()
-        spec = (
-            None
-            if sandbox is None
-            else SandboxSpec.model_validate(
-                {
-                    **sandbox.model_dump(mode="json"),
-                    "git_identity": await run_sandbox.git_identity(),
-                }
+        with apm_span("start_run.catalog.sandbox", {}):
+            sandbox = await run_sandbox.managed()
+            spec = (
+                None
+                if sandbox is None
+                else SandboxSpec.model_validate(
+                    {
+                        **sandbox.model_dump(mode="json"),
+                        "git_identity": await run_sandbox.git_identity(),
+                    }
+                )
             )
-        )
-        catalog = self.build()
+        with apm_span("start_run.catalog.build", {}):
+            catalog = self.build()
         metadata = self.config.get("metadata") or {}
         return catalog.model_copy(
             update={

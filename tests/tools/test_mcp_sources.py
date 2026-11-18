@@ -75,7 +75,9 @@ async def test_each_tier_replaces_the_same_named_connection_from_the_tier_before
     kit = source(
         ("managed_tools", "alice"),
         {
-            "docs": record("docs", url="https://personal-docs.example/mcp"),
+            "docs": record(
+                "docs", url="https://personal-docs.example/mcp", allowed_tools=["search", "fetch"]
+            ),
             **(
                 {"linear": record(url="https://personal-linear.example/mcp")}
                 if personal_override
@@ -87,6 +89,7 @@ async def test_each_tier_replaces_the_same_named_connection_from_the_tier_before
     assert sorted([(await tool.ainvoke({}))[0]["text"] for tool in tools]) == sorted(
         [
             "https://personal-docs.example/mcp",
+            "https://personal-docs.example/mcp",
             "https://incident.example/mcp",
             "https://personal-linear.example/mcp"
             if personal_override
@@ -94,7 +97,13 @@ async def test_each_tier_replaces_the_same_named_connection_from_the_tier_before
         ]
     )
     catalog = ToolSurface(tools={tool.name: tool for tool in tools}).catalog()
+    assert all(
+        entry.mcp_provenance is not None
+        and entry.description.endswith(f"\n\n{entry.mcp_provenance.note()}")
+        for entry in catalog
+    )
     assert [entry.model_dump()["mcp_provenance"] for entry in catalog] == [
+        {"connection_name": "docs", "scope": "managed", "overridden_scopes": ["managed"]},
         {"connection_name": "docs", "scope": "managed", "overridden_scopes": ["managed"]},
         {"connection_name": "incident", "scope": "managed", "overridden_scopes": []},
         {
