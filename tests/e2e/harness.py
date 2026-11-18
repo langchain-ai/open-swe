@@ -1824,6 +1824,9 @@ def gh_graphql(request: Request, body: _JsonBody) -> JSONResponse:
     pr = fakes.find_pull(number, owner, repo)
     if pr is None:
         return JSONResponse({"errors": [{"message": "Pull request not found"}]})
+    if "PullRequestTips" in query:
+        tips = {"baseRefOid": fakes.base_sha(pr), "headRefOid": pr["head_sha"]}
+        return JSONResponse({"data": {"repository": {"pullRequest": tips}}})
     if "fullDatabaseId" in query and "reviewThreads" in query:
         threads = {
             "nodes": fakes.review_threads_graphql(pr, viewer),

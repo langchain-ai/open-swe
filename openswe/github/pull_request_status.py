@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any, ClassVar, Literal, Self
 from urllib.parse import quote
 
@@ -16,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from pydantic.alias_generators import to_camel
 
 from openswe.github.branch_config import BranchConfig
+from openswe.github.changed_files import CHANGED_FILES, FileList, PullRequestTips
 from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
 from openswe.github.ci import unreported_required_checks
 from openswe.github.http import GITHUB_API_BASE, GitHubClient, GraphQLError, RepoClient, or_none
@@ -25,6 +27,7 @@ from openswe.github.queue import QueuePull, Review, ReviewPage
 
 logger = logging.getLogger(__name__)
 
+_FILE_LIST = TypeAdapter(FileList)
 _OWNER_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _SEARCH_PAGE_SIZE = 100
@@ -44,6 +47,13 @@ query PullRequestMergeability($owner: String!, $repo: String!, $number: Int!) {
       mergeable
       mergeStateStatus
     }
+  }
+}
+"""
+_TIPS_QUERY = """
+query PullRequestTips($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) { baseRefOid headRefOid }
   }
 }
 """
@@ -805,12 +815,50 @@ class PullRequestClient:
             raise ValueError("GitHub answered the pull request without its base")
         return await self.repo.merge_base(against, head_sha)
 
-    async def files(self, *, max_pages: int = 1, count: int | None = None) -> list[dict[str, Any]]:
+    async def tips(self) -> PullRequestTips | None:
+        """The base and head commits as GitHub has them now, or ``None`` when unreadable.
+
+        Read over GraphQL, whose quota is separate from the REST one the file list spends.
+        """
+        try:
+            pull = _graphql_pull(await self.repo.graphql(_TIPS_QUERY, {"number": self.number}))
+        except httpx2.HTTPError, ValueError, GraphQLError:
+            logger.warning(
+                "Could not read the pull request's tips", extra=self._log_extra, exc_info=True
+            )
+            return None
+        base_sha = pull.get("baseRefOid") if pull is not None else None
+        head_sha = pull.get("headRefOid") if pull is not None else None
+        if not isinstance(base_sha, str) or not base_sha:
+            return None
+        if not isinstance(head_sha, str) or not head_sha:
+            return None
+        return PullRequestTips(base_sha, head_sha)
+
+    async def files(self, *, max_pages: int = 1, count: int | None = None) -> FileList:
         """Changed files, up to ``max_pages`` pages of 100.
 
         ``count``, the pull's ``changed_files``, lets those pages load at once.
+        A list already read at the same base and head commits is served without
+        asking GitHub; a retarget or a push changes them, so the list is read again.
         """
-        return await self.repo.pages(f"pulls/{self.number}/files", max_pages=max_pages, total=count)
+        tips = await self.tips()
+        if tips is None:
+            return await self._listed_files(max_pages=max_pages, count=count)
+        return await CHANGED_FILES.read(
+            self.repo.full_name,
+            self.number,
+            tips,
+            max_pages,
+            partial(self._listed_files, max_pages=max_pages, count=count),
+            self.tips,
+        )
+
+    async def _listed_files(self, *, max_pages: int, count: int | None) -> FileList:
+        """Validate the GitHub file payload without dropping fields."""
+        return _FILE_LIST.validate_python(
+            await self.repo.pages(f"pulls/{self.number}/files", max_pages=max_pages, total=count)
+        )
 
     async def issue_comments(self) -> list[dict[str, Any]]:
         """Top-level conversation comments."""

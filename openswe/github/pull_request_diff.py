@@ -17,6 +17,7 @@ from typing import Any
 import httpx2
 from fastapi import HTTPException
 
+from openswe.github.changed_files import PullRequestTips
 from openswe.github.http import GitHubError, RepoClient, UnsafeRepoPath
 from openswe.github.pull_request_status import PullRequestClient
 
@@ -171,18 +172,15 @@ async def _pull_files(pull: PullRequestClient) -> tuple[str, str, list[dict[str,
     """The pull's base branch tip, its head, and every file it changes."""
     with _github_answers("pull request not found"):
         payload = await pull.pull()
-        base = payload.get("base")
-        head = payload.get("head")
-        base_sha = base.get("sha") if isinstance(base, dict) else None
-        head_sha = head.get("sha") if isinstance(head, dict) else None
-        if not isinstance(base_sha, str) or not isinstance(head_sha, str):
+        tips = await PullRequestTips.of(payload)
+        if tips is None:
             raise ValueError("GitHub answered the pull request without its branches")
         changed = payload.get("changed_files")
         files = await pull.files(
             max_pages=GITHUB_MAX_LISTED_FILES // _FILES_PAGE_SIZE,
             count=changed if isinstance(changed, int) else None,
         )
-    return base_sha, head_sha, files
+    return tips.base_sha, tips.head_sha, files
 
 
 async def pull_request_patches(pull: PullRequestClient) -> dict[str, Any]:

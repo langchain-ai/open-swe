@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from openswe.dashboard import langsmith_api_keys
 from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dashboard.principal import DashboardPrincipal
+from openswe.github.changed_files import CHANGED_FILES
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SANDBOX_CONNECTIONS
 from openswe.slack.allowed_bots import AllowedSlackBot
 from openswe.threads import access, diffs, handlers, index, listing, proxy, runs, summary
@@ -489,21 +490,22 @@ async def _close_http_pool() -> AsyncIterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _reset_ttl_cache() -> Iterator[None]:
-    """Keep the process-global caches from leaking settings and MCP catalogs between tests."""
+async def _reset_ttl_cache() -> AsyncIterator[None]:
+    """Keep the process-global caches from leaking settings, MCP catalogs and PR files between tests."""
     from langgraph_api import cache
     from langgraph_api.feature_flags import IS_POSTGRES_OR_GRPC_BACKEND
 
-    def clear() -> None:
+    async def clear() -> None:
         ttl_cache.clear()
+        await CHANGED_FILES.clear()
         langsmith_api_keys.LANGSMITH_API_KEYS.clear()
         # The postgres edition caches over gRPC and has no in-process store to clear.
         if not IS_POSTGRES_OR_GRPC_BACKEND:
             cache._CACHE.clear()
 
-    clear()
+    await clear()
     yield
-    clear()
+    await clear()
 
 
 @pytest.fixture(autouse=True)
