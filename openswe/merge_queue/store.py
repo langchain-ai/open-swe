@@ -40,7 +40,13 @@ from openswe.merge_queue.models import (
     MergeRequest,
     Record,
 )
-from openswe.merge_queue.recovery import RecoveryDecision, RecoveryMember, RecoveryProposal
+from openswe.merge_queue.recovery import (
+    RecoveryDecision,
+    RecoveryMember,
+    RecoveryProposal,
+    RecoverySettings,
+    RecoveryThread,
+)
 from openswe.merge_queue.validation_contract import (
     SERVICE_JOBS,
     ValidationDispatch,
@@ -147,6 +153,9 @@ class MergeQueue(Record):
         JSONB(none_as_null=True), default=None
     )
     paused: Mapped[bool] = mapped_column(default=True)
+    recovery_pause_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("merge_queue_decision.id", ondelete="SET NULL", use_alter=True), default=None
+    )
     fence: Mapped[int] = mapped_column(BigInteger, default=0)
     lease_owner: Mapped[UUID | None] = mapped_column(default=None)
     lease_until: Mapped[datetime | None] = mapped_column(default=None)
@@ -915,9 +924,12 @@ class MergeQueue(Record):
                 raise ValueError("Only unbatched requests can be reordered")
             request.priority, request.updated_by = priority, actor
 
-    async def set_paused(self, paused: bool, *, actor: UUID) -> None:
+    async def set_paused(self, paused: bool, *, actor: UUID, manual_hold: bool = False) -> None:
         async with self._locked() as (_, queue, _):
+            if paused and queue.paused and not manual_hold:
+                return
             queue.paused, queue.updated_by = paused, actor
+            queue.recovery_pause_id = None
 
     async def withdraw(
         self, request_id: UUID, *, actor: UUID | None = None, operator: bool = False
@@ -1319,6 +1331,143 @@ class MergeQueue(Record):
                 raise ValueError("Recovery thread cannot be replaced")
             batch.policy = {**batch.policy, "recovery_thread_id": thread_id}
 
+    async def recovery_batches(self, lease: Lease) -> list[UUID]:
+        async with self._locked(lease) as (session, queue, _):
+            owns_pause = (
+                select(Decision.id)
+                .where(Decision.batch_id == Batch.id, Decision.id == queue.recovery_pause_id)
+                .exists()
+            )
+            return list(
+                await session.scalars(
+                    select(Batch.id)
+                    .where(
+                        Batch.queue_id == self.id,
+                        (
+                            Batch.policy["recovery"].is_not(None)
+                            & (
+                                (Batch.state == "active")
+                                | owns_pause
+                                | Batch.policy["recovery"]["settled"].as_boolean().is_not(True)
+                            )
+                        )
+                        | (
+                            (Batch.state == "active")
+                            & select(Attempt.id)
+                            .where(
+                                Attempt.batch_id == Batch.id,
+                                Attempt.state.in_(("failed", "timed_out")),
+                            )
+                            .exists()
+                        ),
+                    )
+                    .order_by(owns_pause.desc(), (Batch.state == "active").desc(), Batch.created_at)
+                    .limit(100)
+                )
+            )
+
+    async def ensure_recovery_thread(
+        self, batch_id: UUID, settings: RecoverySettings, lease: Lease
+    ) -> RecoveryThread:
+        async with self._locked(lease) as (session, _, _):
+            batch = await self._batch(session, batch_id)
+            if saved := batch.policy.get("recovery"):
+                result = RecoveryThread.model_validate(saved)
+                if result.settings != settings:
+                    raise PermissionError("Recovery destination or operator changed")
+                return result
+            failed = await session.scalar(
+                select(Attempt.id)
+                .where(Attempt.batch_id == batch_id, Attempt.state.in_(("failed", "timed_out")))
+                .limit(1)
+            )
+            if failed is None:
+                raise ValueError("Recovery requires a failed validation")
+            if batch.policy.get("recovery_thread_id") is not None:
+                raise PermissionError("Recovery thread cannot be replaced")
+            result = RecoveryThread(settings=settings, thread_id=str(uuid7()))
+            batch.policy = {
+                **batch.policy,
+                "recovery_thread_id": result.thread_id,
+                "recovery": result.model_dump(mode="json"),
+            }
+            return result
+
+    async def recovery_for_thread(self, thread_id: str) -> BatchHistory:
+        async with self._read_snapshot() as (session, _):
+            batch_id = await session.scalar(
+                select(Batch.id).where(
+                    Batch.queue_id == self.id,
+                    Batch.policy["recovery_thread_id"].astext == thread_id,
+                )
+            )
+        if batch_id is None:
+            raise PermissionError("Only the bound recovery thread may act")
+        return await self.history(batch_id)
+
+    async def update_recovery_thread(
+        self, batch_id: UUID, state: RecoveryThread, lease: Lease
+    ) -> None:
+        async with self._locked(lease) as (session, _, _):
+            batch = await self._batch(session, batch_id)
+            saved = RecoveryThread.model_validate(batch.policy.get("recovery"))
+            if saved.thread_id != state.thread_id or saved.settings != state.settings:
+                raise PermissionError("Recovery thread binding changed")
+            batch.policy = {**batch.policy, "recovery": state.model_dump(mode="json")}
+
+    async def resume_native_recovery(
+        self,
+        batch_id: UUID,
+        thread_id: str,
+        pause_id: UUID,
+        reason: str,
+        lease: Lease,
+        *,
+        trust: str,
+    ) -> None:
+        async with self._locked(lease) as (session, queue, now):
+            batch = await self._batch(session, batch_id)
+            if batch.policy.get("recovery_thread_id") != thread_id:
+                raise PermissionError("Only the bound recovery thread may resume its pause")
+            if queue.mode != "native":
+                raise ValueError("Recovery policy changed")
+            resumed = batch.policy.get("recovery_resumes", {})
+            if not isinstance(resumed, dict):
+                raise ValueError("Invalid recovery resume history")
+            if str(pause_id) in resumed:
+                return
+            if not queue.paused or queue.recovery_pause_id != pause_id:
+                raise PermissionError("This pause belongs to an operator or another incident")
+            decision = await session.scalar(
+                select(Decision).where(Decision.id == pause_id, Decision.batch_id == batch_id)
+            )
+            if decision is None:
+                raise ValueError("Recovery pause no longer exists")
+            saved = RecoveryDecision.model_validate(decision.plan)
+            if saved.thread_id != thread_id or saved.proposal.action != "pause":
+                raise PermissionError("Only Robin's own outage pause can be resumed")
+            latest = await session.scalar(
+                select(Attempt)
+                .where(Attempt.batch_id == batch_id)
+                .order_by(Attempt.number.desc())
+                .limit(1)
+            )
+            policy = {
+                **batch.policy,
+                "recovery_resumes": {**resumed, str(pause_id): reason},
+            }
+            if (
+                batch.state == "active"
+                and batch.deadline > now
+                and latest is not None
+                and batch.policy.get("trust") == trust
+                and latest.state in {"failed", "timed_out"}
+                and latest.number < batch.max_attempts
+            ):
+                policy["superseded_attempts"] = latest.number
+            batch.policy = policy
+            queue.paused, queue.recovery_pause_id = False, None
+
     async def _recovery_attempt(
         self,
         session: AsyncSession,
@@ -1420,19 +1569,20 @@ class MergeQueue(Record):
                 generation=lease.configuration_generation,
                 status="pending" if proposal.action == "defer" else "applied",
             )
-            session.add(
-                Decision(
-                    batch_id=batch.id,
-                    request_key=str(proposal.request_key),
-                    plan=saved.model_dump(mode="json"),
-                    lease_owner=lease.owner,
-                    fence=lease.fence,
-                )
+            recorded = Decision(
+                batch_id=batch.id,
+                request_key=str(proposal.request_key),
+                plan=saved.model_dump(mode="json"),
+                lease_owner=lease.owner,
+                fence=lease.fence,
             )
+            session.add(recorded)
+            await session.flush()
             if proposal.action == "retry":
                 batch.policy = {**batch.policy, "superseded_attempts": attempt.number}
-            elif proposal.action in {"pause", "escalate"}:
+            elif proposal.action == "pause":
                 queue.paused = True
+                queue.recovery_pause_id = recorded.id
             return saved
 
     async def pending_native_recovery(self, lease: Lease) -> RecoveryDecision | None:
@@ -1553,6 +1703,7 @@ class MergeQueue(Record):
             )
             if error is not None:
                 queue.paused = True
+                queue.recovery_pause_id = None
             return result
 
     async def record_plan(
@@ -1636,7 +1787,7 @@ class MergeQueue(Record):
         """
         if before.tzinfo is None or limit < 1 or limit > 1000:
             raise ValueError("Expected an aware cutoff and a limit between 1 and 1000")
-        async with self._locked(lease, check_configuration=False) as (session, _, now):
+        async with self._locked(lease, check_configuration=False) as (session, queue, now):
             if before > now:
                 raise ValueError("Retention cutoff cannot be in the future")
             batches = list(
@@ -1645,6 +1796,16 @@ class MergeQueue(Record):
                     .where(
                         Batch.queue_id == self.id,
                         Batch.finished_at < before,
+                        ~select(Decision.id)
+                        .where(
+                            Decision.batch_id == Batch.id,
+                            Decision.id == queue.recovery_pause_id,
+                        )
+                        .exists(),
+                        or_(
+                            Batch.policy["recovery"].is_(None),
+                            Batch.policy["recovery"]["settled"].as_boolean().is_(True),
+                        ),
                         true()
                         if self.mode == "native"
                         else or_(Batch.candidate.is_(None), Batch.ref_deleted_at.is_not(None)),

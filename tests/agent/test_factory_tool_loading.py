@@ -15,6 +15,7 @@ from openswe.mcp.runtime import MCPTools
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.server import agent_catalog
+from openswe.threads import index
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -67,6 +68,7 @@ async def test_mcp_tools_load_for_non_admins_with_legacy_plan_state(
     )
 
     thread_id = "thread-factory-tools"
+    await index.create(thread_id, runtime="mda", metadata={"visibility": "public"})
     SANDBOX_BACKENDS.pop(thread_id, None)
     with (
         patch(

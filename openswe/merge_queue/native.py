@@ -331,6 +331,19 @@ class NativeQueueRuntime:
                                 extra={"queue_id": str(queue.id)},
                             )
         finally:
+            if self.config is not None and self.config.recovery is not None:
+                from openswe.merge_queue.diagnosis import QueueRecovery
+
+                try:
+                    async with asyncio.timeout(8):
+                        current = await MergeQueue.load(queue.id, queue.workspace_id)
+                        if current is not None:
+                            recovery = QueueRecovery(self.config, current)
+                            await recovery.reconcile(lease)
+                except Exception:
+                    logger.exception(
+                        "Queue recovery delivery deferred", extra={"queue_id": str(queue.id)}
+                    )
             try:
                 async with asyncio.timeout(10):
                     await queue.prune_history(

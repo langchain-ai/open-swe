@@ -272,6 +272,13 @@ from openswe.tools.manage_review_approval_mode import manage_review_approval_mod
 from openswe.tools.manage_review_apps import manage_review_apps
 from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.manage_review_shadow import manage_review_shadow
+from openswe.tools.merge_queue import (
+    merge_queue_follow_up,
+    merge_queue_notify,
+    merge_queue_recover,
+    merge_queue_recovery_status,
+    merge_queue_resume,
+)
 from openswe.tools.note_on_diff import note_on_diff
 from openswe.tools.page_commands import PageTools
 from openswe.tools.propose_pr_review import propose_pr_review
@@ -678,9 +685,18 @@ ADMIN_TOOLS = (
 )
 
 
+MERGE_QUEUE_RECOVERY_TOOLS: Final = (
+    merge_queue_recovery_status,
+    merge_queue_recover,
+    merge_queue_resume,
+    merge_queue_follow_up,
+    merge_queue_notify,
+)
+
 # Every tool the agent may offer; each run's plan offers those it keeps (``agent_catalog``),
 # and a call answered without the plan finds its tool here by name.
 AGENT_TOOLS: Final = (
+    *MERGE_QUEUE_RECOVERY_TOOLS,
     http_request,
     fetch_url,
     web_search,
@@ -2047,7 +2063,12 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_search,
         slack_breakout_thread,
     ]
+    indexed_thread = await THREADS.get(thread_id)
+    recovery_thread = (
+        indexed_thread is not None and indexed_thread.metadata.get("merge_queue_recovery") is True
+    )
     withheld = [
+        *(() if recovery_thread else MERGE_QUEUE_RECOVERY_TOOLS),
         *(() if task_coordination else (task_status, message_task_thread, control_worker)),
         *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
         *(

@@ -4,11 +4,11 @@ import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import DashboardReadDep
@@ -47,6 +47,13 @@ class PriorityChange(RequestBody):
 
 class PauseChange(RequestBody):
     paused: bool = Field(strict=True)
+    manual_hold: bool = Field(default=False, strict=True)
+
+    @model_validator(mode="after")
+    def hold_requires_pause(self) -> Self:
+        if self.manual_hold and not self.paused:
+            raise ValueError("Manual hold requires paused=true")
+        return self
 
 
 class RequestView(BaseModel):
@@ -256,4 +263,4 @@ async def set_priority(
 async def set_paused(body: PauseChange, access: QueueAccess = ACCESS) -> None:
     access.require_operator()
     await access.require_writer()
-    await access.queue.set_paused(body.paused, actor=access.user.id)
+    await access.queue.set_paused(body.paused, actor=access.user.id, manual_hold=body.manual_hold)

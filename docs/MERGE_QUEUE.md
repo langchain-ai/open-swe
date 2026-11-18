@@ -115,6 +115,55 @@ Failed delivery can consume an attempt without starting a run; discovery and the
 
 ## Human controls
 
+### Automatic diagnosis and recovery
+
+Native validation can opt into a continuing Robin investigation by adding `recovery` to the workspace's existing `merge_queue_config`:
+
+```json
+{
+  "recovery": {
+    "channel_id": "C0CJM2ZGB9C",
+    "operator_id": "<linked Robin users.id UUID>"
+  }
+}
+```
+
+`C0CJM2ZGB9C` is `#alerts-merge-queue`.
+Invite Robin before enabling this setting.
+The channel must allow internal operations, have Robin as a member, and be readable with the existing Slack integration.
+Choose a linked GitHub/Slack user whose verified email is in `operator_emails` and who can access the queue repository.
+Apply the additive pause-ownership migration before deploying.
+Omitting `recovery` preserves existing configuration hashes and disables automatic diagnosis.
+
+A failed validation binds one durable MDA/Slack thread to its sequence.
+The dashboard investigation is private to its configured operator; outcome notices are posted to the configured Slack channel.
+The minute reconciler recovers missed job deliveries; keyed jobs deliver changes and scheduled investigations to the same owner.
+The `merge-queue-recovery` skill uses read tools for diagnosis and guarded tools for full retry, exact-PR deferral, outage pause/resume, and rare escalation.
+Homebase continues to dispatch validation and independently verify passing checks.
+Robin's controller uses its narrowly scoped GitHub App token to dequeue.
+
+Only confirmed removals generate author-tagged notices.
+Missing author mappings route to the configured operator.
+Notices include attribution, evidence, a suggested fix, and requeue instructions; pending notices and receipts live with the sequence.
+Slack metadata and a stable client message ID reconcile uncertain sends.
+Delivery failures retry through the existing job queue and remain eligible for reconciliation; inspect worker errors if Slack access needs restoring.
+Routine waiting produces no notifications.
+
+Robin can resume only its exact current outage pause.
+Repeating `paused=true` preserves the current pause ownership.
+An explicit `manual_hold=true` revokes Robin's ownership and requires a human to resume.
+Pausing a running queue through the operator endpoint always creates a manual hold.
+Follow-ups use their own scheduling cadence (1–60 minutes) and survive batch expiry; they do not spend validation attempts.
+Resume preserves original deadlines and budgets and never requeues ejected PRs.
+Escalation alone does not pause other work; an ambiguous dequeue still pauses for operator review.
+Failed tests remain strict: no test exception, passing-check override, force merge, or automatic fix PR is enabled here.
+
+Removing `recovery` stops automated work.
+Changing its channel/operator invalidates old thread authority; an operator must handle any existing recovery sequence before changing that binding.
+Existing pause/resume controls remain available.
+
+### Operator endpoints
+
 All endpoints use dashboard session cookies and the dashboard mutation-origin check.
 Bearer/API-key credentials do not authenticate these endpoints.
 Access is limited to the configured workspace and current GitHub repository access.
@@ -133,9 +182,12 @@ Under `/dashboard/api/merge-queue/{workspace_id}`:
 - `DELETE /requests/{request_id}` withdraws the caller's intent.
   Operators may withdraw another person's intent.
   Withdrawal invalidates an affected batch.
-- `PATCH /pause` accepts `paused`; `PATCH /requests/{request_id}/priority` accepts `priority`.
-  Both require an operator email from the current stored user identity and repository write access.
-  Priority changes only affect unbatched requests.
+- `PATCH /pause` accepts `paused` and optional `manual_hold` (default `false`).
+  Repeating `{"paused": true}` preserves automatic recovery; `{"paused": true, "manual_hold": true}` takes manual control of an existing pause.
+  A new operator pause is always manual, and `{"paused": false}` resumes it.
+  `manual_hold=true` requires `paused=true`.
+- `PATCH /requests/{request_id}/priority` accepts `priority` and only affects unbatched requests.
+  Both mutations require an operator email from the current stored user identity and repository write access.
 
 Registration starts paused.
 An operator resumes explicitly.

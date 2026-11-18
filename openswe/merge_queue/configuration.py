@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from openswe.database import postgres
 from openswe.merge_queue.admission import QueuePolicy, digest
 from openswe.merge_queue.dispatch import WorkflowPolicy
+from openswe.merge_queue.recovery import RecoverySettings
 from openswe.workspaces.rows import WorkspaceRow
 
 
@@ -28,6 +29,7 @@ class QueueConfiguration(BaseModel):
     operator_emails: frozenset[str] = Field(min_length=1)
     policy: QueuePolicy = Field(default_factory=lambda: QueuePolicy(checks={}))
     retention_days: int = Field(default=90, ge=7, le=365)
+    recovery: RecoverySettings | None = None
 
     @classmethod
     async def load(
@@ -52,6 +54,8 @@ class QueueConfiguration(BaseModel):
     @property
     def generation(self) -> str:
         settings = self.model_dump(mode="json")
+        if self.recovery is None:
+            settings.pop("recovery")
         if not self.sync_workflow_policy and self.workflow_policy_revision == 0:
             settings.pop("sync_workflow_policy")
             settings.pop("workflow_policy_revision")
@@ -130,6 +134,8 @@ class QueueConfiguration(BaseModel):
 
     @model_validator(mode="after")
     def validate_controller(self) -> Self:
+        if self.recovery is not None and (self.mode != "native" or self.check_app_id is None):
+            raise ValueError("Automatic recovery requires a native validation gate")
         if self.sync_workflow_policy and (self.mode != "native" or self.check_app_id is None):
             raise ValueError("Workflow policy synchronization requires a native validation gate")
         if self.mode == "custom" and (

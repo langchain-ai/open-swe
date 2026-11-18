@@ -52,6 +52,8 @@ from openswe.mcp.cards import CONSENT_JOB as MANAGED_TOOLS_CONSENT
 from openswe.mcp.cards import RESUME_JOB as MANAGED_TOOLS_CARD_RESUME
 from openswe.mcp.cards import ConnectCard, ConsentWait
 from openswe.merge_queue.controller import start_queue
+from openswe.merge_queue.diagnosis import JOB as MERGE_QUEUE_RECOVERY
+from openswe.merge_queue.diagnosis import QueueRecovery
 from openswe.merge_queue.runtime import JOB_KIND as MERGE_QUEUE_RECONCILE
 from openswe.merge_queue.runtime import reconcile_queue
 from openswe.monitors.delivery import POLL_JOB_KIND as MONITOR_POLL
@@ -108,6 +110,7 @@ _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 SEGMENT_WORKER: Final = JobWorker(max_in_flight=2)
 SEGMENT_WORKER.register(SEGMENT_JOB)(SegmentDelivery.deliver)
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
+WORKER.register(MERGE_QUEUE_RECOVERY)(QueueRecovery.run)
 WORKER.register(PERSONAL_KITCHEN_JOB)(SlackChannel.reconcile_personal_kitchen)
 WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
 WORKER.register(GITHUB_QUOTA_SAMPLE)(InstallationQuota.sample)

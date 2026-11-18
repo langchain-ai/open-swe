@@ -16,6 +16,7 @@ from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
 from openswe.schedules.policy import AutomationPolicy
 from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, agent_catalog
+from openswe.threads import index
 from openswe.threads.inbox import ThreadInbox
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -48,7 +49,6 @@ def saved_thread_scope(monkeypatch):
 async def test_force_code_mode_follows_thread_owner(
     owner_type: str | None, enabled: bool, caplog: pytest.LogCaptureFixture
 ) -> None:
-    from openswe.threads import index
     from openswe.users import User
 
     owner = User(preferences={"experimental_force_code_mode": enabled})
@@ -248,6 +248,7 @@ async def _agent_catalog(
     surface = ToolSurface()
     config = config or _base_config()
     thread_id = str((config.get("configurable") or {}).get("thread_id"))
+    await index.create(thread_id, runtime="mda", metadata={}, if_exists="do_nothing")
 
     SANDBOX_BACKENDS.pop(thread_id, None)
     with (
@@ -1039,3 +1040,21 @@ async def test_anthropic_title_model_omits_thinking_without_affecting_agent() ->
     main = _main_model(captured)
     assert main.model_id == "anthropic:claude-opus-5-5"
     assert main.kwargs["thinking"] == {"type": "adaptive", "display": "summarized"}
+
+
+class TestRecoveryToolCatalog:
+    @pytest.mark.parametrize("recovery_thread", [False, True])
+    async def test_recovery_tools_are_only_offered_in_recovery_threads(self, recovery_thread):
+        from openswe.server import MERGE_QUEUE_RECOVERY_TOOLS
+
+        await index.create(
+            "thread-ctx",
+            runtime="mda",
+            metadata={"merge_queue_recovery": recovery_thread},
+        )
+        config = _base_config()
+        config["metadata"] = {"merge_queue_recovery": True}
+        captured = await _agent_catalog(config)
+        names = _tool_names(captured["tools"])
+        recovery_names = {_registered_tool_name(tool) for tool in MERGE_QUEUE_RECOVERY_TOOLS}
+        assert names & recovery_names == (recovery_names if recovery_thread else set())

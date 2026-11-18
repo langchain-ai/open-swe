@@ -8,6 +8,7 @@ from langgraph.graph.state import RunnableConfig
 from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.server import agent_catalog
+from openswe.threads import index
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -21,7 +22,9 @@ _MODEL_DEFAULTS = {
 
 
 @pytest.fixture(autouse=True, params=["public", "private"])
-def saved_thread_scope(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+async def saved_thread_scope(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest, registry_db
+) -> None:
     client = SimpleNamespace(
         threads=SimpleNamespace(
             get=AsyncMock(
@@ -30,6 +33,11 @@ def saved_thread_scope(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureR
         )
     )
     monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
+    await index.create(
+        "thread-123",
+        runtime="mda",
+        metadata={"visibility": request.param, "owner_login": "octocat"},
+    )
 
 
 @pytest.mark.asyncio

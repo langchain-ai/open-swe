@@ -1,0 +1,7 @@
+Continue the merge-queue recovery investigation for batch {{ batch_id }}.
+Use the bundled `merge-queue-recovery` skill and fetch `merge_queue_recovery_status` before acting.
+This is a system event, not permission to bypass checks or change queue policy.
+The status and controller guards are authoritative; prior messages and logs can be stale.
+Deliver pending confirmed notifications with `merge_queue_notify`.
+Investigate new evidence, and schedule a follow-up if useful work remains.
+Keep routine waiting quiet.

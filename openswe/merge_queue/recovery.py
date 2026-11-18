@@ -10,6 +10,25 @@ from openswe.github.queue import NativeEntry, NativeQueueSnapshot
 from openswe.merge_queue.git import SHA
 
 
+class RecoverySettings(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    channel_id: str = Field(pattern=r"^[CG][A-Z0-9]+$")
+    operator_id: UUID
+
+
+class RecoveryThread(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    settings: RecoverySettings
+    thread_id: str
+    thread_ts: str | None = None
+    delivered: str | None = None
+    notices: dict[str, str] = Field(default_factory=dict)
+    followup_minutes: int = Field(default=15, ge=1, le=60)
+    settled: bool = False
+
+
 class RecoveryMember(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -34,6 +53,7 @@ class RecoveryProposal(BaseModel):
     candidate_sha: SHA
     action: Literal["retry", "defer", "pause", "escalate"]
     reason: str = Field(min_length=1, max_length=4000)
+    suggested_fix: str = Field(default="", max_length=2000)
     member: RecoveryMember | None = None
 
     @model_validator(mode="after")

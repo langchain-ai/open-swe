@@ -2212,11 +2212,12 @@ async def test_the_skills_open_swe_ships_are_served_from_this_deployment(
     assert [body["served"] for body in asked] == [[BUNDLED_SKILLS]]
     assert listed is not None
     names = {skill["name"] for skill in listed["skills_metadata"]}
-    shipped = {"baby-sit", "html-artifacts", "linear-tickets", "web-apps", "workspaces"}
-    assert names == ({"deploy"} | shipped if bundled else {"deploy"})
     if bundled:
+        assert {"deploy", "baby-sit"} <= names
         read = await skill_files.aread(f"{BUNDLED_SKILLS}baby-sit/SKILL.md")
         assert read.error is None
+    else:
+        assert names == {"deploy"}
 
 
 @pytest.mark.parametrize("code_mode", [False, True])

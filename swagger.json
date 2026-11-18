@@ -4734,6 +4734,11 @@
       "PauseChange": {
         "additionalProperties": false,
         "properties": {
+          "manual_hold": {
+            "default": false,
+            "title": "Manual Hold",
+            "type": "boolean"
+          },
           "paused": {
             "title": "Paused",
             "type": "boolean"
