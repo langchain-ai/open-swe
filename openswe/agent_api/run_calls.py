@@ -196,6 +196,7 @@ from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.inbox import ThreadInbox
 from openswe.threads.interjections import RunInterjections
 from openswe.threads.store import THREADS
+from openswe.utils.model_usage_metrics import ModelUsageMetrics
 from openswe.utils.thread_reads import shared_thread_reads
 
 logger = logging.getLogger(__name__)
@@ -468,6 +469,15 @@ class TokenRun:
         )
         if request.mid_turn and request.run_id and self.kind.assistant_id == "agent":
             RunInterjections(self.run.thread_id, request.run_id).steered(humans)
+        # Once recorded: a report that failed is delivered again.
+        ModelUsageMetrics.record(
+            response,
+            position="subagent"
+            if request.namespace
+            else "first"
+            if request.first_in_thread
+            else "followup",
+        )
         return Done()
 
     async def prepare(self, request: Prepare) -> Prepared:

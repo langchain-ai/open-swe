@@ -854,6 +854,7 @@ class ReportRepliesMiddleware(AgentMiddleware):
                 # A subagent's own messages are its task, never something a person said.
                 humans=[] if inside else human_messages(since_last_reply(request.messages)),
                 mid_turn=not inside and answered.yet,
+                first_in_thread=not inside and self._first_in_thread(request.state),
                 model_route=route,
                 offloading=_json_object.validate_python(offloading)
                 if isinstance(offloading, Mapping)
@@ -862,6 +863,19 @@ class ReportRepliesMiddleware(AgentMiddleware):
         )
         if not inside:
             answered.yet = True
+
+    @staticmethod
+    def _first_in_thread(state: Mapping[str, object]) -> bool:
+        """Whether no model has answered on the thread yet, in any of its runs.
+
+        Only a provider's reply carries usage: a failed call's stand-in leaves the next
+        call first. Summarization keeps the messages it hides in state.
+        """
+        messages = state.get("messages")
+        return not any(
+            isinstance(message, AIMessage) and message.usage_metadata
+            for message in (messages if isinstance(messages, list) else [])
+        )
 
 
 async def reported(

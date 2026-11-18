@@ -224,6 +224,9 @@ class ModelResult(Report):
     # Whether the run's model answered before this call, so ``humans`` reached a turn
     # already under way and steered it.
     mid_turn: bool = False
+    # Whether this is the agent's first model call on the thread: its prompt cache can be
+    # served only by what other threads wrote, which the backend's usage metrics tell apart.
+    first_in_thread: bool = False
     # The route the call took, which usage tags the reply with.
     model_route: str | None = None
     # A conversation offload's status, which the transcript notes once.

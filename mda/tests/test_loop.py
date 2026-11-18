@@ -782,7 +782,7 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-    from langchain_core.messages import ToolCall
+    from langchain_core.messages import ToolCall, UsageMetadata
     from langchain_core.tools import tool
     from rt.middleware import ReportRepliesMiddleware, RuntimeToolsMiddleware
     from runtime_api.loop import ModelResult
@@ -803,11 +803,16 @@ async def test_reports_carry_what_they_report_never_the_conversation(
         """Look around."""
         return "seen"
 
+    usage = UsageMetadata(input_tokens=10, output_tokens=1, total_tokens=11)
     called = AIMessage(
-        content="", id="ai-1", tool_calls=[ToolCall(name="look", args={}, id="call-1")]
+        content="",
+        id="ai-1",
+        tool_calls=[ToolCall(name="look", args={}, id="call-1")],
+        usage_metadata=usage,
     )
+    done = AIMessage(content="done", id="ai-2", usage_metadata=usage)
     graph = create_agent(
-        model=GenericFakeChatModel(messages=iter([called, AIMessage(content="done", id="ai-2")])),
+        model=GenericFakeChatModel(messages=iter([called, done])),
         tools=[look],
         middleware=[
             ReportRepliesMiddleware(backend),
@@ -837,6 +842,8 @@ async def test_reports_carry_what_they_report_never_the_conversation(
     ]
     # Only a call after the model answered once can carry a person steering the turn.
     assert [r.mid_turn for r in replies] == [False, True]
+    # Only the thread's first call can read nothing but what other threads cached.
+    assert [r.first_in_thread for r in replies] == [True, False]
     [started] = [body for name, body in calls if name == "tool_started"]
     assert started["message_id"] == "ai-1"
 
