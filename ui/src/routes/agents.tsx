@@ -6,6 +6,7 @@ import {
   useMatch,
   useRouterState,
 } from "@tanstack/react-router"
+import { ThreadCacheProvider } from "@langchain/react"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { PluginTabs } from "@/features/plugins/components/PluginTabs"
@@ -67,7 +68,10 @@ function AgentsLayout() {
       user={session.data}
       activeThreadId={activeThreadId ?? activeReviewThreadId}
     >
-      <Outlet />
+      {/* Keyed by user, so a new sign-in starts with nothing another user read. */}
+      <ThreadCacheProvider key={session.data.user_id}>
+        <Outlet />
+      </ThreadCacheProvider>
       <PluginTabs />
     </AgentsShell>
   )
