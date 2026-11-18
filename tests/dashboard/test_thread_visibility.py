@@ -113,6 +113,16 @@ def test_private_readable_by_owner_and_admin_but_promptable_by_owner_only(privat
     assert summary.thread_is_promptable({"source": "dashboard"}, "bob")
 
 
+def test_historical_mirrored_session_stays_private_and_read_only(private_thread):
+    thread, _ = private_thread
+    metadata = {**thread["metadata"], "source": "claude_code"}
+    assert summary.thread_is_readable(metadata, "alice")
+    assert summary.thread_is_readable(metadata, "admin")
+    assert not summary.thread_is_readable(metadata, "bob")
+    for login in ("alice", "admin", "bob"):
+        assert not summary.thread_is_promptable(metadata, login)
+
+
 @pytest.mark.parametrize("github_linked", [True, False])
 async def test_personal_automation_owner_can_reply_after_automation_is_deleted(
     monkeypatch: pytest.MonkeyPatch, langsmith_users: LangSmithUsers, github_linked: bool
@@ -276,7 +286,6 @@ async def test_private_routes_deny_nonowner_before_side_effects(private_thread, 
 async def test_thread_lookup_does_not_disclose_private_existence(private_thread, monkeypatch):
     _, client = private_thread
     monkeypatch.setattr(tools, "_actor", AsyncMock(return_value=tools._Actor("bob", None, "bob")))
-    monkeypatch.setattr(tools._Actor, "mirror_of", AsyncMock(return_value=None))
     monkeypatch.setattr(
         tools, "get_open_swe_thread_id_from_langsmith", AsyncMock(return_value=None)
     )

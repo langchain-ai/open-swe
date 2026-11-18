@@ -28,7 +28,7 @@ export interface ComposerPrimaryActionsProps {
    * LangGraph assigns a thread id); inside one it replaces the source's stop.
    */
   onStop?: () => void | Promise<void>
-  /** False when this viewer may not stop the live run, such as a mirrored Claude Code session. */
+  /** False when this viewer may not stop the live run. */
   stoppable?: boolean
   /** Set false while the composer owns Escape (an open command menu or model picker). */
   stopOnEscape?: boolean

@@ -1,8 +1,8 @@
 {
   "name": "robin",
   "displayName": "Robin",
-  "version": "0.1.0",
-  "description": "Mirror Claude Code sessions into Robin threads, use Robin's MCP tools, and find a session's thread",
+  "version": "0.2.0",
+  "description": "Use Robin's MCP tools from Claude Code",
   "author": {
     "name": "LangChain"
   },

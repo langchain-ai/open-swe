@@ -31,7 +31,6 @@ import {
   type ContextUsage,
   contextUsageFromUsageMetadata,
 } from "@/features/agents/lib/contextUsage"
-import { CLAUDE_CODE_SOURCE } from "@/features/agents/lib/sidebarFilter"
 import { attachmentUrl, fetchToolOutput } from "./api"
 import type { StructuredEntity } from "@/features/agents/lib/structuredInputMessages"
 import type {
@@ -1029,7 +1028,7 @@ const CLAUDE_CODE_CONTEXT =
   /<(system-reminder|local-command-caveat|local-command-stdout|local-command-stderr|task-notification|ci-monitor-event|side-sessions-event|agent-message|cross-session-message|artifact-view-context|ide_opened_file|ide_selection)\b[^>]*>[\s\S]*?<\/\1>\s*/g
 
 function shownText(row: TranscriptMessageState): string {
-  return row.senderKind === CLAUDE_CODE_SOURCE
+  return row.senderKind === "claude_code"
     ? row.text.replace(CLAUDE_CODE_CONTEXT, "")
     : row.text
 }

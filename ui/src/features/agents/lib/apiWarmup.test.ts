@@ -95,7 +95,6 @@ function asSent([input, init]: Parameters<typeof window.fetch>) {
 async function requestSidebarPage({
   includeAutomations = false,
   includeResolved = false,
-  includeClaudeCode = true,
   includeSlack = true,
   owned = true,
   repoMode = false,
@@ -103,7 +102,6 @@ async function requestSidebarPage({
 }: {
   includeAutomations?: boolean
   includeResolved?: boolean
-  includeClaudeCode?: boolean
   includeSlack?: boolean
   owned?: boolean
   repoMode?: boolean
@@ -116,7 +114,6 @@ async function requestSidebarPage({
         repoMode,
         includeAutomations,
         includeResolved,
-        includeClaudeCode,
         includeSlack,
         sort,
       }),
@@ -381,8 +378,8 @@ describe("apiWarmupScript", () => {
       prefs: { filters: { includeResolved: true } },
     },
     {
-      name: "Claude Code sessions hidden",
-      expected: { includeClaudeCode: false },
+      name: "retired source preference ignored",
+      expected: {},
       prefs: { filters: { includeClaudeCode: false } },
     },
     {
@@ -394,11 +391,6 @@ describe("apiWarmupScript", () => {
       name: "Slack threads hidden",
       expected: { includeSlack: false },
       prefs: { filters: { includeSlack: false } },
-    },
-    {
-      name: "Slack and Claude Code hidden",
-      expected: { includeSlack: false, includeClaudeCode: false },
-      prefs: { filters: { includeSlack: false, includeClaudeCode: false } },
     },
   ])(
     "hands the warmed sidebar page to the app's request ($name)",

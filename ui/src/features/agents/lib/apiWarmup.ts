@@ -29,7 +29,6 @@ function warmApiRequests(
     let includeAutomations = false
     let includeResolved = false
     let owned = true
-    let includeClaudeCode = true
     let includeSlack = true
     let repoMode = false
     let sortByActivity = true
@@ -46,7 +45,6 @@ function warmApiRequests(
             filters.sources.indexOf("schedule") !== -1)
         includeResolved = filters.includeResolved === true
         owned = filters.ownedOnly !== false
-        includeClaudeCode = filters.includeClaudeCode !== false
         includeSlack = filters.includeSlack !== false
       }
     } catch {
@@ -62,7 +60,6 @@ function warmApiRequests(
     search.set("scope", includeAutomations ? "all" : "interactive")
     if (repoMode) search.set("ownerless", "true")
     if (owned) search.set("owned", "true")
-    if (!includeClaudeCode) search.append("exclude_source", "claude_code")
     if (!includeSlack) search.append("exclude_source", "slack")
     search.set("sort_by", sortByActivity ? "updated_at" : "created_at")
     targets.push({

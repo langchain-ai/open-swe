@@ -193,7 +193,7 @@ export interface ThreadsPageParams {
   project?: string
   ownerless?: boolean
   owned?: boolean
-  /** Thread sources to leave out, such as `claude_code`. */
+  /** Thread sources to leave out, such as `slack`. */
   excludeSources?: Array<string>
   sortBy?: ThreadSortBy
 }

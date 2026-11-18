@@ -13,7 +13,7 @@ Existing deployments still need these administrator and release checks before ro
 - [ ] Review repository rulesets and branch protection **before** deploying the `Robin Review` check name; replace any required `Open SWE Review` context with `Robin Review`, verify the app source, and confirm a fresh-head check satisfies the rule
 - [ ] Update any required monorepo CI contexts that refer to the renamed `Robin:` jobs or `Robin CI Final Results` before merging
 - [ ] Check integrations that parse PR attribution; new PRs use `Made by [Robin]`, while historical footers remain valid
-- [ ] Disable or uninstall the Claude Code plugin `open-swe@open-swe`, remove the old marketplace (`claude plugin marketplace remove open-swe`), then re-add `langchain-ai/open-swe` to register the `robin` marketplace and install `robin@robin`; use `/robin:connect` and `/robin:thread`, and avoid duplicate hooks or MCP tools.
+- [ ] Disable or uninstall the Claude Code plugin `open-swe@open-swe`, remove the old marketplace (`claude plugin marketplace remove open-swe`), then re-add `langchain-ai/open-swe` to register the `robin` marketplace and install `robin@robin` for MCP tools; remove mirroring hooks pointing to `/dashboard/api/claude-code/hooks` from `~/.claude/settings.json`.
       The previous `/oswe/mcp` endpoint is no longer served; update clients to `/robin/mcp` and sign in again
 
 ## Desktop release and IT

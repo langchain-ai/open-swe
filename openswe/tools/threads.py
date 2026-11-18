@@ -17,7 +17,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from runtime_api.provenance import Provenance
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.claude_code.hooks import mirror_thread_id
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
@@ -141,20 +140,6 @@ class _Actor:
             and ThreadIdentity(self.login).github_login is not None
             and is_admin(self.email, login=self.login)
         )
-
-    async def mirror_of(self, session_id: str) -> tuple[str, Mapping[str, Any]] | None:
-        """The thread mirroring this person's Claude Code session, if it has one."""
-        owner = await User.for_login("github", self.login)
-        if owner is None:
-            return None
-        thread_id = mirror_thread_id(owner.id, session_id)
-        try:
-            summary = await get_dashboard_thread(thread_id, self.login, email=self.email)
-        except HTTPException as exc:
-            if exc.status_code == 404:
-                return None
-            raise
-        return thread_id, summary
 
 
 def _config() -> dict[str, Any]:
@@ -869,18 +854,15 @@ async def _authorized_locator(
     except HTTPException as exc:
         if exc.status_code != 404 or langsmith_locator or not _looks_uuid(locator):
             raise
-        if mirror := await actor.mirror_of(locator):
-            thread_id, summary = mirror
-        else:
-            resolved = await get_open_swe_thread_id_from_langsmith(locator)
-            if not resolved or resolved == thread_id:
-                raise
-            thread_id = resolved
-            summary = await get_dashboard_thread(
-                thread_id,
-                actor.login,
-                email=actor.email,
-            )
+        resolved = await get_open_swe_thread_id_from_langsmith(locator)
+        if not resolved or resolved == thread_id:
+            raise
+        thread_id = resolved
+        summary = await get_dashboard_thread(
+            thread_id,
+            actor.login,
+            email=actor.email,
+        )
     if (
         summary.get("visibility") == "private"
         and not admin_override

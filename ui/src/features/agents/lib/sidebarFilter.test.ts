@@ -39,11 +39,12 @@ describe("filterThreads", () => {
   it("returns ordinary threads with default filters", () => {
     const threads = [
       makeThread(),
+      makeThread({ source: "claude_code" }),
       makeThread({ source: "schedule", threadCategory: "automation" }),
     ]
     expect(
       filterThreads(threads, DEFAULT_SIDEBAR_FILTERS, undefined, "alice-id")
-    ).toHaveLength(1)
+    ).toHaveLength(2)
   })
 
   it("keeps the actively viewed thread visible despite source filters", () => {
@@ -137,23 +138,6 @@ describe("filterThreads", () => {
     ).toEqual(threads)
   })
 
-  it("hides the active Claude Code thread until Show Claude Code is enabled", () => {
-    const active = makeThread({ source: "claude_code", status: "running" })
-    const ordinary = makeThread()
-    const threads = [active, ordinary]
-    expect(
-      filterThreads(
-        threads,
-        filters({ includeClaudeCode: false }),
-        active.id,
-        "alice-id"
-      )
-    ).toEqual([ordinary])
-    expect(filterThreads(threads, filters(), active.id, "alice-id")).toEqual(
-      threads
-    )
-  })
-
   it("filters active automations before grouping threads by activity", () => {
     const active = makeThread({ source: "schedule", status: "running" })
     const delegated = makeThread({
@@ -201,12 +185,12 @@ describe("filterThreads", () => {
       taskWorkers: [worker],
       waitingForDelegatedWork: true,
     })
-    const hiddenWorker = makeThread({ source: "claude_code" })
+    const hiddenWorker = makeThread({ source: "slack" })
     const visible = makeThread({ taskWorkers: [worker, hiddenWorker] })
     expect(
       filterThreads(
         [hidden, visible],
-        filters({ includeSlack: false, includeClaudeCode: false }),
+        filters({ includeSlack: false }),
         worker.id,
         "alice-id"
       )

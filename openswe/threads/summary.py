@@ -40,7 +40,6 @@ from openswe.utils.timing import phase
 logger = logging.getLogger(__name__)
 
 DASHBOARD_SOURCE = "dashboard"
-# A thread mirroring a person's local Claude Code session, which only its hooks write.
 CLAUDE_CODE_SOURCE = "claude_code"
 # Set on a thread the upload_session tool reserved until its transcript is posted.
 SESSION_UPLOAD_PENDING_KEY = "session_upload_pending"
@@ -68,9 +67,7 @@ SLACK_BOT_TRIGGER_KIND = "slack_bot"
 TRIGGERING_BOT_KEY = "triggering_bot"
 """Metadata key holding the starting bot's ``{team_id}:{bot_id}`` allowlist key."""
 BOT_THREAD_READ_ONLY = "This thread was started by a Slack bot. Reply in Slack to steer it."
-MIRRORED_SESSION_READ_ONLY = (
-    "This thread mirrors a Claude Code session. Continue it in Claude Code."
-)
+MIRRORED_SESSION_READ_ONLY = "This historical Claude Code session is read-only."
 
 
 def _now_ms() -> int:
@@ -174,8 +171,8 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
     """Only the owner may prompt, approve, or open a shell into a private thread.
 
     Nor may anyone else drive a thread that runs on its owner's machine, even one
-    shared before such threads were kept private. Nobody prompts a mirrored
-    Claude Code session here: it runs in Claude Code.
+    shared before such threads were kept private. Historical Claude Code
+    sessions remain read-only.
     """
     if login and ThreadIdentity(login).user_id is not None:
         return (

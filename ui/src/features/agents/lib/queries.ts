@@ -42,7 +42,6 @@ import type {
   WorkflowPushApprovalsResponse,
 } from "./types"
 import { pendingSenderName } from "./queuedMessages"
-import { CLAUDE_CODE_SOURCE } from "./sidebarFilter"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
@@ -61,7 +60,6 @@ export const agentThreadKeys = {
     includeResolved: boolean
     includeAutomations: boolean
     owned: boolean
-    includeClaudeCode: boolean
     includeSlack: boolean
   }) => ["agent-threads", "lists", "repos", params] as const,
   sidebarActive: (threadId: string) =>
@@ -713,29 +711,15 @@ export function useSeedAgentThreadDetails(
 
 export const SIDEBAR_PAGE_SIZE = 25
 
-/** The sources the sidebar asks the server to leave out. */
-function excludedSources(
-  includeClaudeCode: boolean,
-  includeSlack: boolean
-): Pick<ThreadsPageParams, "excludeSources"> {
-  const excludeSources = [
-    ...(!includeClaudeCode ? [CLAUDE_CODE_SOURCE] : []),
-    ...(!includeSlack ? ["slack" as const] : []),
-  ]
-  return excludeSources.length ? { excludeSources } : {}
-}
-
 function sidebarPageParams({
   includeAutomations,
   includeResolved,
   owned,
-  includeClaudeCode,
   includeSlack,
 }: {
   includeAutomations: boolean
   includeResolved: boolean
   owned: boolean
-  includeClaudeCode: boolean
   includeSlack: boolean
 }): Omit<ThreadsPageParams, "offset"> {
   return {
@@ -744,7 +728,7 @@ function sidebarPageParams({
     ...(includeResolved ? {} : { resolved: false }),
     scope: includeAutomations ? "all" : "interactive",
     ...(owned ? { owned } : {}),
-    ...excludedSources(includeClaudeCode, includeSlack),
+    ...(!includeSlack ? { excludeSources: ["slack"] } : {}),
   }
 }
 
@@ -784,7 +768,6 @@ export function useSidebarRepos({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
-  includeClaudeCode = true,
   includeSlack = true,
   enabled = true,
 }: {
@@ -792,7 +775,6 @@ export function useSidebarRepos({
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
-  includeClaudeCode?: boolean
   includeSlack?: boolean
   enabled?: boolean
 }) {
@@ -802,7 +784,6 @@ export function useSidebarRepos({
   const queryClient = useQueryClient()
   const reposKey = agentThreadKeys.repos({
     ...params,
-    includeClaudeCode,
     includeSlack,
   })
   const query = useQuery({
@@ -819,7 +800,7 @@ export function useSidebarRepos({
       agentsApi.listThreadRepos(
         {
           ...params,
-          ...excludedSources(includeClaudeCode, includeSlack),
+          ...(!includeSlack ? { excludeSources: ["slack"] } : {}),
         },
         !queryClient.getQueryState(queryKey)?.dataUpdatedAt
       ),
@@ -829,7 +810,7 @@ export function useSidebarRepos({
   })
   useThreadListLoad({
     scope: "repositories",
-    identity: JSON.stringify({ ...params, includeClaudeCode, includeSlack }),
+    identity: JSON.stringify({ ...params, includeSlack }),
     enabled: enabled && measure,
     pending: query.isPending,
     failed: query.isError,
@@ -958,7 +939,6 @@ export function sidebarRecentsParams({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
-  includeClaudeCode = true,
   includeSlack = true,
   sort = "created",
 }: {
@@ -966,7 +946,6 @@ export function sidebarRecentsParams({
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
-  includeClaudeCode?: boolean
   includeSlack?: boolean
   sort?: ChatSort
 }): Omit<ThreadsPageParams, "offset"> {
@@ -975,7 +954,6 @@ export function sidebarRecentsParams({
       includeAutomations,
       includeResolved,
       owned,
-      includeClaudeCode,
       includeSlack,
     }),
     ...(repoMode ? { ownerless: true } : {}),
@@ -988,7 +966,6 @@ export function useSidebarRecents({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
-  includeClaudeCode = true,
   includeSlack = true,
   sort = "created",
   enabled = true,
@@ -997,7 +974,6 @@ export function useSidebarRecents({
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
-  includeClaudeCode?: boolean
   includeSlack?: boolean
   sort?: ChatSort
   enabled?: boolean
@@ -1008,7 +984,6 @@ export function useSidebarRecents({
       includeAutomations,
       includeResolved,
       owned,
-      includeClaudeCode,
       includeSlack,
       sort,
     }),
@@ -1022,7 +997,6 @@ export function useSidebarRepoThreads({
   includeAutomations = false,
   includeResolved = false,
   owned = false,
-  includeClaudeCode = true,
   includeSlack = true,
   sort = "created",
   enabled = true,
@@ -1033,7 +1007,6 @@ export function useSidebarRepoThreads({
   includeAutomations?: boolean
   includeResolved?: boolean
   owned?: boolean
-  includeClaudeCode?: boolean
   includeSlack?: boolean
   sort?: ChatSort
   enabled?: boolean
@@ -1044,7 +1017,6 @@ export function useSidebarRepoThreads({
         includeAutomations,
         includeResolved,
         owned,
-        includeClaudeCode,
         includeSlack,
       }),
       ...(projectId

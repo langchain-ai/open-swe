@@ -164,8 +164,7 @@ export function AgentThreadView({
   const moving = moveThread.isPending ? moveThread.variables : null
   // A Slack bot's thread is steered from its Slack thread, never from here.
   const botThread = thread.triggerKind === "slack_bot"
-  // A mirrored Claude Code session runs in Claude Code; this is a window onto it.
-  const mirroredSession = thread.source === "claude_code"
+  const historicalSession = thread.source === "claude_code"
   const ownsThread = Boolean(
     thread.ownerLogin &&
     session.data &&
@@ -175,7 +174,7 @@ export function AgentThreadView({
     !runsElsewhere &&
     moving === null &&
     !botThread &&
-    !mirroredSession &&
+    !historicalSession &&
     // Whoever posts in a thread on someone's machine runs commands there.
     (!thread.sandboxBridgeClient || ownsThread) &&
     (thread.threadCategory !== "automation" ||
@@ -1098,8 +1097,8 @@ export function AgentThreadView({
                       ? "This thread's Mac isn't serving it right now"
                       : botThread
                         ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
-                        : mirroredSession
-                          ? "Mirrored from Claude Code. Continue this session there"
+                        : historicalSession
+                          ? "This historical Claude Code session is read-only"
                           : canPost
                             ? reviewChat
                               ? "Review with Robin"
@@ -1117,7 +1116,7 @@ export function AgentThreadView({
                 busy={isStreaming}
                 activeRun={activeRun}
                 onStop={stopRun}
-                stoppable={!mirroredSession}
+                stoppable={!historicalSession}
                 onSubmit={submitWithExcerpts}
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}

@@ -73,10 +73,6 @@ function sanitizeFilters(value: unknown): SidebarFilters {
       typeof raw.includeSlack === "boolean"
         ? raw.includeSlack
         : DEFAULT_SIDEBAR_FILTERS.includeSlack,
-    includeClaudeCode:
-      typeof raw.includeClaudeCode === "boolean"
-        ? raw.includeClaudeCode
-        : DEFAULT_SIDEBAR_FILTERS.includeClaudeCode,
   }
 }
 

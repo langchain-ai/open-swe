@@ -8,7 +8,7 @@
     {
       "name": "robin",
       "source": "./claude-code-plugin",
-      "description": "Mirror Claude Code sessions into Robin threads, use Robin's MCP tools, and find a session's thread"
+      "description": "Use Robin's MCP tools from Claude Code"
     }
   ]
 }

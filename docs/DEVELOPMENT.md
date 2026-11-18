@@ -252,12 +252,6 @@ The reviews list and each PR's preview read as you, so they work.
 
 The `local-gh-dev` skill in `.claude/skills/` walks through the whole loop, including the port and Postgres conflicts between worktrees.
 
-## Mirror your Claude Code sessions
-
-Connect Claude Code from **Settings → Claude Code** on your local dashboard, then run a session with the settings it gives you (`claude --settings ./open-swe-hooks.json`).
-Each hook event lands on the local backend, and the session shows up as a read-only thread.
-See [Mirroring Claude Code sessions](reference/claude-code-sync.md).
-
 ## Dashboard on the Vite dev server directly
 
 `make dev-ui` is the simple way to develop the UI.

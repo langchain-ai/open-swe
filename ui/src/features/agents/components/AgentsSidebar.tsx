@@ -278,7 +278,6 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
-    includeClaudeCode: prefs.filters.includeClaudeCode,
     includeSlack: prefs.filters.includeSlack,
     sort: "updated",
     enabled: true,
@@ -292,7 +291,6 @@ export function AgentsSidebar({
     includeAutomations,
     includeResolved: prefs.filters.includeResolved,
     owned: prefs.filters.ownedOnly,
-    includeClaudeCode: prefs.filters.includeClaudeCode,
     includeSlack: prefs.filters.includeSlack,
     enabled: repoMode,
   })
@@ -685,14 +683,6 @@ export function AgentsSidebar({
           Show Slack
         </MenuCheckItem>
         <MenuCheckItem
-          checked={prefs.filters.includeClaudeCode}
-          onCheckedChange={(checked) =>
-            setFilters({ ...prefs.filters, includeClaudeCode: checked })
-          }
-        >
-          Show Claude Code
-        </MenuCheckItem>
-        <MenuCheckItem
           checked={prefs.filters.ownedOnly}
           onCheckedChange={(checked) =>
             setFilters({ ...prefs.filters, ownedOnly: checked })
@@ -779,7 +769,6 @@ export function AgentsSidebar({
       includeResolved={prefs.filters.includeResolved}
       includeAutomations={includeAutomations}
       owned={prefs.filters.ownedOnly}
-      includeClaudeCode={prefs.filters.includeClaudeCode}
       includeSlack={prefs.filters.includeSlack}
       activeThreadId={activeThreadId}
       openThread={openThread}
@@ -1265,7 +1254,6 @@ function RepoGroup({
   includeResolved,
   includeAutomations,
   owned,
-  includeClaudeCode,
   includeSlack,
   activeThreadId,
   openThread,
@@ -1290,7 +1278,6 @@ function RepoGroup({
   includeResolved: boolean
   includeAutomations: boolean
   owned: boolean
-  includeClaudeCode: boolean
   includeSlack: boolean
   activeThreadId?: string
   openThread: (threadId: string) => void
@@ -1314,7 +1301,6 @@ function RepoGroup({
     includeResolved,
     includeAutomations,
     owned,
-    includeClaudeCode,
     includeSlack,
     sort: "created",
     // A This Mac folder has no repository to ask for: its threads are filed in.
