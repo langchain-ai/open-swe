@@ -23,7 +23,6 @@ dependencies = [
     "markdownify>=1.2.3",
     "markdown-it-py==4.3.0",
     "langchain-anthropic>=1.7.10",
-    "langgraph-cli[inmem]>=0.4.40,<0.4.43",
     "langsmith>=0.14.17",
     "langchain-openai>=1.8.0,<2.0.0",
     "openai>=3.10.0",
@@ -52,6 +51,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "langgraph-cli[inmem]>=0.4.40,<0.4.43",
     "ty==0.0.95",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

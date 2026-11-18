@@ -117,7 +117,7 @@ Poke at it by hand (from the repo root), each server in its own terminal:
 
 ```bash
 tests/e2e/mda-dev.sh
-uv run langgraph dev --config tests/e2e/langgraph.e2e.json --port 2024 \
+uv run --extra dev langgraph dev --config tests/e2e/langgraph.e2e.json --port 2024 \
   --no-browser --allow-blocking --no-reload
 # open http://127.0.0.1:2024/mock/slack  and  /mock/github
 ```

@@ -71,7 +71,7 @@ export default defineConfig({
       // Real langgraph dev: the backend's graphs, hooks and webhook routes + the
       // harness http app (fake GitHub/Slack + mock UIs). Only the LLM is faked.
       command:
-        "uv run langgraph dev --config tests/e2e/langgraph.e2e.json " +
+        "uv run --extra dev langgraph dev --config tests/e2e/langgraph.e2e.json " +
         `--port ${PORT} --no-browser --allow-blocking --no-reload`,
       cwd: repoRoot,
       url: `${harnessURL}/mock/github/data`,

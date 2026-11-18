@@ -17,7 +17,7 @@ dev: $(if $(POSTGRES_URI),,postgres)
 	@if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:2024 -sTCP:LISTEN >/dev/null 2>&1; then \
 		echo 'Port 2024 is already in use (a stale container or another backend?):' >&2; \
 		lsof -nP -iTCP:2024 -sTCP:LISTEN >&2; exit 1; fi
-	uv run langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
+	uv run --extra dev langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
 
 # The Managed Deep Agents runtime `make dev` sends every agent run to (mda/README.md).
 dev-mda: mda-cli

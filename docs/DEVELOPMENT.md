@@ -6,7 +6,7 @@ Deploying it for a team is the [installation guide](INSTALLATION.md).
 ## Prerequisites
 
 - **Python 3.14+** and [uv](https://docs.astral.sh/uv/)
-- [LangGraph CLI](https://docs.langchain.com/langsmith/cli) (installed by `uv sync`)
+- [LangGraph CLI](https://docs.langchain.com/langsmith/cli) (installed by `uv sync --extra dev`)
 - Node 26+ and [pnpm](https://pnpm.io/) for the dashboard
 - Rust (`cargo`, e.g. via [rustup](https://rustup.rs/)): `make dev-mda` builds the `mda` CLI from the vendored Managed Deep Agents SDK ([vendor/README.md](../vendor/README.md))
 - A free [ngrok](https://ngrok.com/) account, so GitHub and Slack can reach your local backend (step 3)
