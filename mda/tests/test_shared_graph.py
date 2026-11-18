@@ -33,10 +33,12 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool, tool
+from langchain_core.tracers.langchain import LangChainTracer
 from langchain_quickjs._repl import EvalOutcome, _Registry, _ThreadREPL
 from langchain_quickjs.middleware import REPLState
 from langgraph.config import get_config
 from langgraph.errors import NodeCancelledError
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.runtime import Runtime
@@ -44,6 +46,7 @@ from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.auth.types import AuthContext, BaseUser, ThreadsCreate, ThreadsRead
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
 from langsmith import Client, tracing_context
+from langsmith.run_trees import RunTree
 from langsmith.sandbox import (
     ResourceCreationError,
     ResourceNameConflictError,
@@ -2377,3 +2380,53 @@ async def test_a_tool_result_the_interpreter_cannot_take_fails_the_eval_not_the_
         assert (await repl.eval_async("kept")).result == "1"
     finally:
         await registry.aevict("nest")
+
+
+@pytest.mark.parametrize("explicit_tracer", [False, True])
+@pytest.mark.parametrize("managed", [False, True])
+async def test_a_distributed_parent_keeps_graph_nodes_under_the_graph_run(
+    monkeypatch: pytest.MonkeyPatch, explicit_tracer: bool, managed: bool
+) -> None:
+    from langchain_core.runnables import RunnableConfig
+    from managed_deepagents._run_input import ManagedCompiledAgent
+
+    client = MagicMock(spec=Client)
+    monkeypatch.setattr("langchain_core.tracers.langchain.get_client", lambda: client)
+    monkeypatch.setattr("langsmith.run_trees.get_cached_client", lambda: client)
+    parent = RunTree(name="dashboard_send", run_type="chain", ls_client=client)
+    config: RunnableConfig = {
+        "configurable": {
+            "langsmith-trace": parent.dotted_order,
+            "langsmith-metadata": {"ls_nest_under_parent": True},
+        },
+    }
+    if explicit_tracer:
+        config["callbacks"] = [LangChainTracer(client=client, project_name="test")]
+
+    class State(BaseModel):
+        answer: str = ""
+
+    async def step(state: State) -> dict[str, str]:
+        return {"answer": state.answer + "done"}
+
+    graph = StateGraph(State)
+    graph.add_node("first", step)
+    graph.add_node("second", step)
+    graph.add_edge(START, "first")
+    graph.add_edge("first", "second")
+    graph.add_edge("second", END)
+    compiled = graph.compile()
+    if managed:
+        compiled.__class__ = ManagedCompiledAgent
+    with tracing_context(enabled=True), mda_runtime._parent_trace(config):
+        assert await compiled.ainvoke(State(), config) == {"answer": "donedone"}
+
+    runs = {call.kwargs["id"]: call.kwargs for call in client.create_run.call_args_list}
+    [root] = [run for run in runs.values() if run["name"] == "LangGraph"]
+    assert root["parent_run_id"] == parent.id
+    assert {run["name"] for run in runs.values()} >= {"first", "second"}
+    for run in runs.values():
+        assert run["trace_id"] == parent.trace_id
+        ancestor = run
+        while ancestor["id"] != root["id"]:
+            ancestor = runs[ancestor["parent_run_id"]]

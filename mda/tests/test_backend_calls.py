@@ -67,7 +67,7 @@ from managed_deepagents import (
 from managed_deepagents._memory.layers import MemoryLayers
 from managed_deepagents._memory_instructions import create_memory_instructions_middleware
 from managed_deepagents._run_input import ManagedTurnTracer
-from managed_deepagents.runtime import compile_managed_agent_async, parent_run
+from managed_deepagents.runtime import _parent_trace, compile_managed_agent_async
 from pydantic import BaseModel, JsonValue, SecretStr
 from rt.backend import (
     BackendCallError,
@@ -3054,7 +3054,12 @@ async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_
         "langsmith-metadata": {async_subagents._NEST_UNDER_PARENT: True},
     }
     traced: dict[str, list[tuple[bool, object]]] = {}
-    for run, headers in [("launched", nested), ("own", {})]:
+    for run, headers, metadata in [
+        ("dashboard", nested, {}),
+        ("launched", {**nested, "deepagents_parent": {"thread_id": "lead"}}, {}),
+        ("forwarded context", nested, {"parent_thread_id": "lead"}),
+        ("own", {}, {}),
+    ]:
         client.create_run.reset_mock()
         model = _ScriptedAnthropic(
             model_name="claude-test",
@@ -3067,11 +3072,11 @@ async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_
         graph = create_agent(model=model, tools=[look], middleware=[RootAgentTraceMiddleware()])
         config: RunnableConfig = {
             "configurable": {"thread_id": "worker", **headers},
+            "metadata": metadata,
             "callbacks": [LangChainTracer(client=client, project_name="test")],
         }
-        with tracing_context(enabled=True):
-            async with parent_run(config):
-                await graph.ainvoke({"messages": [HumanMessage("Look into it.")]}, config)
+        with tracing_context(enabled=True), _parent_trace(config):
+            await graph.ainvoke({"messages": [HumanMessage("Look into it.")]}, config)
         traced[run] = [
             (
                 str(created.kwargs["trace_id"]) == str(launch.trace_id),
@@ -3081,8 +3086,13 @@ async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_
             if created.kwargs["run_type"] == "llm"
         ]
 
-    assert traced == {"launched": [(True, "subagent")] * 2, "own": [(False, "root")] * 2}
-    assert in_tool == ["subagent", None]
+    assert traced == {
+        "dashboard": [(True, "root")] * 2,
+        "launched": [(True, "subagent")] * 2,
+        "forwarded context": [(True, "subagent")] * 2,
+        "own": [(False, "root")] * 2,
+    }
+    assert in_tool == [None, "subagent", "subagent", None]
 
 
 async def test_a_subagent_keeps_its_own_tag_though_it_inherits_the_root_agent_middleware() -> None:

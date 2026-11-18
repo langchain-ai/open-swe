@@ -1,18 +1,21 @@
 # Upstream as-is.
 
-`packages/pypi/src/managed_deepagents/runtime.py`: `_parent_trace` traces a run
-it nests under the async subagent call that launched it with
-`ls_agent_type: subagent`.
+`packages/pypi/src/managed_deepagents/runtime.py`: `_parent_trace` nests a
+marked run under its distributed parent. Only a run with an async worker
+reference (`configurable.deepagents_parent.thread_id`, or the Agent Server's
+`metadata.parent_thread_id` fallback) receives `ls_agent_type: subagent`.
+The nesting marker alone does not identify a worker: dashboard sends use it too.
+Those sends keep their parent without receiving a subagent type.
 
 Robin tags its agent's own model calls `ls_agent_type: root`
-(`RootAgentTraceMiddleware` in `mda/rt/tracing.py`), so LangSmith keeps a
-thread's turns in one main conversation across summaries. A worker's first run
-is traced inside its coordinator's trace, and without a type of its own it
-would be tagged `root` too and join the coordinator's conversation. The
-middleware keeps a type a call already has.
+(`RootAgentTraceMiddleware` in `mda/rt/tracing.py`), so dashboard turns remain
+in the main conversation across summaries. The middleware preserves the
+`subagent` type on actual workers nested inside their coordinator's trace.
 
-Upstream: this is the Python half of langchain-ai/langchainplus#66339, which MDA
-merged and exports to the SDK's `main`. Drop this change once
-`uv run scripts/vendor.py` reaches that export;
+This corrects the blanket classification introduced in
+langchain-ai/langchainplus#64173. The matching canonical Python and TypeScript
+SDK fix is tracked in https://github.com/langchain-ai/langchainplus/pull/67122.
+Drop this vendored change once `uv run scripts/vendor.py` reaches that export.
 `test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_subagents`
-holds the behavior.
+and `test_a_distributed_parent_keeps_graph_nodes_under_the_graph_run` hold the
+classification and parenting behavior.

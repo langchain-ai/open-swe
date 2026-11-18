@@ -721,20 +721,18 @@ async def parent_run(config: Mapping[str, object]) -> AsyncGenerator[None]:
 
 @contextmanager
 def _parent_trace(config: Mapping[str, object]) -> Generator[None]:
-    """Nest this run's trace under the async subagent call that launched it.
-
-    Only acts on runs deepagents marked as launched by an async subagent tool,
-    and only when tracing is on. The run is traced as a ``subagent`` agent type,
-    as deepagents traces its in-process subagents, so LangSmith does not show
-    its model calls as the launcher's own conversation.
-    """
+    """Nest marked traces, classifying only async worker runs as subagents."""
     configurable = config.get("configurable")
     parent = _launching_parent(configurable) if isinstance(configurable, Mapping) else None
     if parent is None or not tracing_is_enabled():
         yield
         return
-    with tracing_context(parent=parent, metadata={"ls_agent_type": "subagent"}):
-        yield
+    if _lead_thread(config) is None:
+        with tracing_context(parent=parent):
+            yield
+    else:
+        with tracing_context(parent=parent, metadata={"ls_agent_type": "subagent"}):
+            yield
 
 
 def _launching_parent(configurable: Mapping[str, object]) -> RunTree | None:
