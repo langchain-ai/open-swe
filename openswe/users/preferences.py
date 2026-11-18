@@ -31,7 +31,10 @@ class KitchenChannelPreference(BaseModel):
             raise ValueError("Link your Slack account before choosing a personal kitchen channel")
         channel = await SlackChannel.load(self.personal_kitchen_channel_id, use_cache=False)
         if channel is None or not channel.can_be_kitchen:
-            raise ValueError("Choose an internal Slack channel that Open SWE has joined")
+            raise ValueError("Choose an internal Slack channel that Robin has joined")
+        if channel.details.creator != user.slack_user_id:
+            raise ValueError("Choose a Slack channel you created for your personal kitchen")
+        await channel.personal_kitchen_purpose(enabled=True)
 
 
 class UserPreferences(BaseModel):

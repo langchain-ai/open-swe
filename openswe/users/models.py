@@ -33,6 +33,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.input_messages import PersonIdentity, split_person_id
+from openswe.jobs import queue
 from openswe.users.authorization import (
     AccountConflict,
     UnauthorizedUser,
@@ -423,13 +424,36 @@ class User(Base):
             else cls.preferences.op("||")(incoming)
         )
         async with postgres.session() as session:
+            previous = (
+                await session.scalar(
+                    select(cls.preferences).where(cls.id == user.id).with_for_update()
+                )
+                if patch.personal_kitchen_channel_id is not None
+                else user.preferences
+            )
             stored = await session.scalar(
                 update(cls)
                 .where(cls.id == user.id)
                 .values(preferences=merged)
                 .returning(cls.preferences)
             )
-        return UserPreferences.model_validate(stored or {})
+        preferences = UserPreferences.model_validate(stored or {})
+        if patch.personal_kitchen_channel_id is not None:
+            from openswe.slack.channels import PERSONAL_KITCHEN_JOB
+
+            for channel_id in sorted(
+                {
+                    UserPreferences.model_validate(previous or {}).personal_kitchen_channel_id,
+                    preferences.personal_kitchen_channel_id,
+                }
+                - {""}
+            ):
+                await queue.coalesce(
+                    PERSONAL_KITCHEN_JOB,
+                    {"channel_id": channel_id},
+                    key=f"{PERSONAL_KITCHEN_JOB}:{channel_id}",
+                )
+        return preferences
 
     @classmethod
     async def known_logins(cls, logins: Iterable[str]) -> frozenset[str]:

@@ -29,7 +29,7 @@ Do not copy, activate or apply them to environments unless separately requested.
   Listing requires a private admin surface; writes also work in verified sole-writer shared threads and are audited with the affected bot ID.
 - **Projects** (sidebar folders and the composer's project picker): named folders of threads, personal or shared with teammates, each in a workspace and optionally bound to one repository whose threads then file under it.
   Use `list_projects`, `create_project`, `update_project`, `share_project`, `unshare_project` and `move_thread_to_project`; deleting a project stays in the dashboard.
-- **Settings → General** (`/my-settings`): theme, thread defaults (visibility, workspace, follow-up behavior), whether the Changes panel opens when a run that edited files finishes, personal kitchen channel (your untagged messages in one internal Slack channel), and notifications.
+- **Settings → General** (`/my-settings`): theme, thread defaults (visibility, workspace, follow-up behavior), whether the Changes panel opens when a run that edited files finishes, personal kitchen channel (your untagged messages in one internal Slack channel you created; Robin labels its description), and notifications.
 - **Settings → Agent** (`/my-settings/agent`): automatic human-review assignment preferences.
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.

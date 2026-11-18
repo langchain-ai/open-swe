@@ -82,6 +82,7 @@ from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_ag
 from openswe.session_cost import run_session_cost_refresh
 from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
 from openswe.slack.channel_options import ensure_directory_sync, sync_directory
+from openswe.slack.channels import PERSONAL_KITCHEN_JOB, SlackChannel
 from openswe.slack.mda_forwarding import RETIRED_SWEEP_JOB as SLACK_LOST_REQUESTS
 from openswe.slack.tools.search import PURGE_JOB as SLACK_SEARCH_GRANT_PURGE
 from openswe.slack.tools.search import PURGE_SCHEDULE as SLACK_SEARCH_GRANT_SCHEDULE
@@ -107,6 +108,7 @@ _FIRE_CLAIM_TTL: Final = timedelta(days=2)
 SEGMENT_WORKER: Final = JobWorker(max_in_flight=2)
 SEGMENT_WORKER.register(SEGMENT_JOB)(SegmentDelivery.deliver)
 WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
+WORKER.register(PERSONAL_KITCHEN_JOB)(SlackChannel.reconcile_personal_kitchen)
 WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
 WORKER.register(GITHUB_QUOTA_SAMPLE)(InstallationQuota.sample)
 WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)

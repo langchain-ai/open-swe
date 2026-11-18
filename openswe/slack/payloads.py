@@ -495,6 +495,7 @@ class SlackChannelPayload(SlackPayload):
     id: str = ""
     name: str = ""
     name_normalized: str = ""
+    creator: str = ""
     topic: str = ""
     purpose: str = ""
     is_channel: bool | None = None

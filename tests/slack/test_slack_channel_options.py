@@ -5,13 +5,16 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import uuid7
 
 import pytest
 from slack_sdk.errors import SlackApiError
 
 from openswe.jobs import queue
 from openswe.slack import channel_options, channels, dashboard_routes
-from openswe.slack.channels import ChannelLookupUnavailable, SlackChannel
+from openswe.slack.channels import PERSONAL_KITCHEN_JOB, ChannelLookupUnavailable, SlackChannel
+from openswe.slack.http import SlackRequestError
+from openswe.users import User, UserIdentity, UserPreferencesPatch
 
 
 def _rate_limited(retry_after: str) -> SlackApiError:
@@ -324,3 +327,81 @@ async def test_private_channels_are_listed_for_admins_only(
     assert [channel.id for channel in listed.channels] == (
         ["C0PUBLIC", "G0PRIVATE"] if admin else ["C0PUBLIC"]
     )
+
+
+@pytest.mark.parametrize("creator", ["", "UOTHER", "UADA"])
+async def test_personal_kitchen_requires_the_linked_channel_creator(
+    monkeypatch: pytest.MonkeyPatch, creator: str
+) -> None:
+    person = User(identities=[UserIdentity(provider="slack", external_id="UADA")])
+    channel = SlackChannel(
+        id="C0PERSONAL",
+        payload={
+            "creator": creator,
+            "is_member": True,
+            "is_ext_shared": False,
+            "is_pending_ext_shared": False,
+        },
+    )
+    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=channel))
+    patch = UserPreferencesPatch(personal_kitchen_channel_id=channel.id)
+
+    if creator == "UADA":
+        await patch.validate_channel(person)
+    else:
+        with pytest.raises(ValueError, match="you created"):
+            await patch.validate_channel(person)
+
+
+async def test_personal_kitchen_description_reconciles_current_settings_without_losing_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = " Repository: langchain-ai/deepagents \n"
+    channel = SlackChannel(
+        id="C0PERSONAL",
+        payload={
+            "id": "C0PERSONAL",
+            "creator": "UADA",
+            "is_member": True,
+            "is_ext_shared": False,
+            "is_pending_ext_shared": False,
+            "purpose": {"value": original},
+        },
+    )
+    person = User(preferences={"personal_kitchen_channel_id": channel.id})
+    monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=person))
+    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=channel))
+    monkeypatch.setattr(SlackChannel, "save_all", AsyncMock())
+    client = _FakeClient([], [])
+    set_purpose = AsyncMock(return_value={"ok": True})
+    monkeypatch.setattr(client, "conversations_setPurpose", set_purpose, raising=False)
+    _install(monkeypatch, client)
+    now = datetime.now(UTC)
+    job = queue.Job(
+        id=uuid7(),
+        kind=PERSONAL_KITCHEN_JOB,
+        payload={"channel_id": channel.id},
+        due_at=now,
+        cron=None,
+        timezone="UTC",
+        key=None,
+        metadata={},
+        attempts=0,
+        created_at=now,
+    )
+
+    await SlackChannel.reconcile_personal_kitchen(job)
+    labeled = await channel.personal_kitchen_purpose(enabled=True)
+    assert labeled.startswith(original + "\n")
+    set_purpose.assert_awaited_once_with(channel=channel.id, purpose=labeled)
+    await SlackChannel.reconcile_personal_kitchen(job)
+    assert set_purpose.await_count == 1
+
+    channel.payload["purpose"] = labeled + "\nKeep these notes."
+    person.preferences = {"personal_kitchen_channel_id": "C0ELSEWHERE"}
+    await SlackChannel.reconcile_personal_kitchen(job)
+    set_purpose.assert_awaited_with(channel=channel.id, purpose=original + "\nKeep these notes.")
+    person.preferences = {"personal_kitchen_channel_id": channel.id}
+    set_purpose.side_effect = TimeoutError()
+    with pytest.raises(SlackRequestError, match="http_error: TimeoutError"):
+        await SlackChannel.reconcile_personal_kitchen(job)

@@ -7,7 +7,8 @@ from fastapi import HTTPException
 
 from openswe.dashboard.personal_settings import patch_personal_settings
 from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
-from openswe.slack.channels import SlackChannel
+from openswe.jobs import queue
+from openswe.slack.channels import PERSONAL_KITCHEN_JOB, SlackChannel
 from openswe.users import User, UserPreferences
 from openswe.users.records import UnknownUser
 from openswe.workspaces.routing import is_kitchen_channel
@@ -65,6 +66,23 @@ async def test_personal_kitchen_validates_round_trips_and_clears(
         assert error.value.status_code == 422
     assert not await is_kitchen_channel(channel.id, slack_user_id="UADA")
     channel.payload = {"is_member": True, "is_ext_shared": False, "is_pending_ext_shared": False}
+    for creator in ("", "UOTHER"):
+        channel.payload["creator"] = creator
+        if via_tool:
+            with pytest.raises(ValueError, match="you created"):
+                await patch_personal_settings("ada", {"personal_kitchen_channel_id": channel.id})
+        else:
+            with pytest.raises(HTTPException) as error:
+                await put_my_profile(
+                    ProfileUpdate(personal_kitchen_channel_id=channel.id), _SESSION
+                )
+            assert error.value.status_code == 422
+    channel.payload["creator"] = "UADA"
+    channel.payload["purpose"] = {"value": "x" * 250}
+    with pytest.raises(ValueError, match="250 characters"):
+        await patch_personal_settings("ada", {"personal_kitchen_channel_id": channel.id})
+    assert await queue.claim_due(10) == []
+    channel.payload["purpose"] = {"value": "Repository: langchain-ai/deepagents"}
     if via_tool:
         await patch_personal_settings("ada", {"personal_kitchen_channel_id": " c0personal "})
     else:
@@ -75,7 +93,22 @@ async def test_personal_kitchen_validates_round_trips_and_clears(
     assert await is_kitchen_channel(channel.id, slack_user_id="UADA")
     assert not await is_kitchen_channel(channel.id, slack_user_id="UOTHER")
     assert not await is_kitchen_channel("C0ELSEWHERE", slack_user_id="UADA")
+    [label] = await queue.claim_due(10)
+    assert label.kind == PERSONAL_KITCHEN_JOB
+    assert label.payload == {"channel_id": channel.id}
+    await label.finish()
     await put_my_profile(ProfileUpdate(), _SESSION)
     assert await is_kitchen_channel(channel.id, slack_user_id="UADA")
+    assert await queue.claim_due(10) == []
+    elsewhere = SlackChannel(id="C0ELSEWHERE", payload=channel.payload)
+    monkeypatch.setattr(SlackChannel, "load", AsyncMock(return_value=elsewhere))
+    await patch_personal_settings("ada", {"personal_kitchen_channel_id": elsewhere.id})
+    assert await is_kitchen_channel("C0ELSEWHERE", slack_user_id="UADA")
+    relabel = await queue.claim_due(10)
+    assert {job.payload["channel_id"] for job in relabel} == {channel.id, "C0ELSEWHERE"}
+    for job in relabel:
+        await job.finish()
     await patch_personal_settings("ada", {"personal_kitchen_channel_id": ""})
-    assert not await is_kitchen_channel(channel.id, slack_user_id="UADA")
+    assert not await is_kitchen_channel("C0ELSEWHERE", slack_user_id="UADA")
+    [cleanup] = await queue.claim_due(10)
+    assert cleanup.payload == {"channel_id": "C0ELSEWHERE"}

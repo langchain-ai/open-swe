@@ -355,11 +355,13 @@ The app posts events to your deployment's URL, so it needs the same public URL a
                 "channels:history",
                 "channels:read",
                 "channels:join",
+                "channels:write.topic",
                 "chat:write",
                 "files:read",
                 "files:write",
                 "groups:history",
                 "groups:read",
+                "groups:write.topic",
                 "im:history",
                 "im:read",
                 "im:write",
@@ -428,6 +430,10 @@ Robin refuses Slack Connect channels (`is_ext_shared`) and fails closed when it 
 
 `files:read` lets Robin download files attached to a message (images, archives, logs, CSVs) and stage them in the thread's sandbox, where the agent reads them by path; images also reach the model as vision input.
 Existing installations must add the scope in **OAuth & Permissions** and reinstall the app before attachments reach the agent; without it, uploads stay invisible and only the message text is used.
+
+`channels:write.topic` and `groups:write.topic` let Robin label personal kitchen channel descriptions in public and private channels without granting broader channel-management permissions.
+Existing installations must add both bot scopes in **OAuth & Permissions** and reinstall or reauthorize the Slack app before description updates can work; deploying Robin or changing the manifest alone does not grant them to an existing token.
+After reauthorization, save the personal kitchen setting again to retry any label update that exhausted its retries.
 
 Slack verifies the events Request URL the first time it can reach it; if the backend is not up yet when you create the app, use **Retry** under **Event Subscriptions** after step 7.
 
