@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from openswe import incidents
 from openswe.dashboard import oauth, routes
 from openswe.threads import handlers, listing, proxy
+from openswe.threads import index as thread_index
 from tests.conftest import ThreadStoreOverClient, patch_thread_module
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -169,26 +170,28 @@ async def test_thread_stream_preflight_rejects_incidents_before_opening_stream(
 async def test_generic_thread_lists_exclude_incidents_for_owners_and_admins(
     monkeypatch, source, include_all
 ) -> None:
-    thread = {
-        "thread_id": "i1",
-        "status": "idle",
-        "metadata": {
-            "source": source,
-            "github_login": "admin",
-            "title": "Restricted incident finding",
-            "latest_run_status": "success",
-            "repo_owner": "secret",
-            "repo_name": "service",
-        },
-    }
-    client = SimpleNamespace(threads=SimpleNamespace(search=AsyncMock(return_value=[thread])))
-    patch_thread_module(monkeypatch, "langgraph_client", lambda: client)
+    for thread_id, thread_source, repo in (
+        ("i1", source, "service"),
+        ("t1", "dashboard", "visible"),
+    ):
+        await thread_index.create(
+            thread_id,
+            runtime="mda",
+            metadata={
+                "source": thread_source,
+                "participant_logins": {"admin": True},
+                "title": f"Thread {thread_id}",
+                "latest_run_status": "success",
+                "repo_owner": "secret",
+                "repo_name": repo,
+            },
+        )
 
     page = await listing.list_dashboard_threads_page("admin", include_all=include_all)
     repos = await listing.list_dashboard_thread_repos("admin", include_all=include_all)
 
-    assert page["items"] == []
-    assert repos == []
+    assert [item["id"] for item in page["items"]] == ["t1"]
+    assert [repo["repoFullName"] for repo in repos] == ["secret/visible"]
 
 
 @pytest.mark.parametrize("source", ["incidents_agent"])

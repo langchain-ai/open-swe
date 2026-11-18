@@ -356,7 +356,7 @@ async def test_private_candidates_filtered_before_pagination(private_thread, mon
         scanned: int = 0
 
         async def page(
-            self, client: object, metadata: object, *, limit: int, offset: int, **kwargs: object
+            self, metadata: object, *, limit: int, offset: int, **kwargs: object
         ) -> list[ThreadLike]:
             self.calls += 1
             self.scanned += len(threads[offset : offset + limit])
@@ -404,7 +404,7 @@ async def test_filtered_hierarchy_bounds_run_summaries(
         summarized: int = 0
 
         async def page(
-            self, client: object, metadata: object, *, limit: int, offset: int, **kwargs: object
+            self, metadata: object, *, limit: int, offset: int, **kwargs: object
         ) -> list[ThreadLike]:
             return threads[offset : offset + limit]
 

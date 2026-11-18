@@ -236,7 +236,6 @@ def _search_metadata_filter(
 
 
 async def _search_threads_batch(
-    client: Any,
     metadata: JsonObject,
     *,
     limit: int,
@@ -249,30 +248,19 @@ async def _search_threads_batch(
     The thread index narrows to and ranks ``text`` matches in SQL; callers still
     match each thread exactly with :func:`_metadata_matches_filters`.
     """
-    if client is None:
-        return [
-            thread.as_langgraph()
-            for thread in await THREADS.search(
-                index.ThreadSearch(
-                    metadata=metadata,
-                    limit=limit,
-                    offset=offset,
-                    sort_by=sort_by,
-                    activity_order=sort_by == "updated_at",
-                    text=text,
-                )
+    return [
+        thread.as_langgraph()
+        for thread in await THREADS.search(
+            index.ThreadSearch(
+                metadata=metadata,
+                limit=limit,
+                offset=offset,
+                sort_by=sort_by,
+                activity_order=sort_by == "updated_at",
+                text=text,
             )
-        ]
-    batch = await client.threads.search(
-        metadata=metadata,
-        limit=limit,
-        offset=offset,
-        sort_by=sort_by,
-        sort_order="desc",
-        select=_THREAD_LIST_SELECT,
-        params={"text": text} if text else None,
-    )
-    return [thread for thread in batch or [] if isinstance(thread, Mapping)]
+        )
+    ]
 
 
 def _search_rank(thread: ThreadLike) -> float:
@@ -550,7 +538,6 @@ async def _summarize_threads(
 
 
 async def _readable_threads_by_id(
-    client: LangGraphClient,
     thread_ids: Sequence[str],
     login: str,
     email: str | None,
@@ -561,9 +548,8 @@ async def _readable_threads_by_id(
     threads_by_id: dict[str, ThreadLike] = {}
     for offset in range(0, len(thread_ids), _PINNED_THREADS_BATCH_SIZE):
         ids = thread_ids[offset : offset + _PINNED_THREADS_BATCH_SIZE]
-        for thread in await client.threads.search(
-            ids=list(ids), limit=len(ids), select=_THREAD_LIST_SELECT
-        ):
+        for indexed in await THREADS.search(index.ThreadSearch(ids=list(ids), limit=len(ids))):
+            thread = indexed.as_langgraph()
             metadata = _thread_metadata(thread)
             thread_id = _thread_id(thread)
             if (
@@ -643,7 +629,6 @@ async def attach_task_workers(
         children = await sidebar_memberships(coordinator_ids, workers_of=True, session=session)
     parent_ids = list({membership.coordinator_thread_id for membership in memberships.values()})
     related = await _readable_threads_by_id(
-        client,
         [*parent_ids, *children],
         login,
         email,
@@ -709,7 +694,6 @@ async def _task_hierarchy_page(
         if membership.role == "worker" and thread_id in matches
     }
     parents = await _readable_threads_by_id(
-        client,
         list(parent_ids),
         login,
         email,
@@ -841,7 +825,6 @@ async def _collect_thread_candidates(
         while offset < _THREADS_PAGE_SCAN_CAP:
             batch_limit = min(batch_limit, _THREADS_PAGE_SCAN_CAP - offset)
             batch = await _search_threads_batch(
-                client,
                 metadata_filter,
                 limit=batch_limit,
                 offset=offset,
@@ -929,7 +912,6 @@ async def _collect_thread_candidates(
                 } - checked_parents
                 readable_parents.update(
                     await _readable_threads_by_id(
-                        client,
                         list(parent_ids),
                         viewer_login or "",
                         viewer_email,
@@ -972,12 +954,11 @@ async def _collect_thread_candidates(
 async def list_unresolved_dashboard_threads(
     login: str, *, email: str | None = None
 ) -> list[ThreadLike]:
-    client = langgraph_client()
     seen: dict[str, ThreadLike] = {}
     for metadata in _participant_search_filters(login, email=email):
         offset = 0
         while batch := await _search_threads_batch(
-            client, metadata, limit=_THREADS_SEARCH_PAGE, offset=offset
+            metadata, limit=_THREADS_SEARCH_PAGE, offset=offset
         ):
             for thread in batch:
                 thread_metadata = _thread_metadata(thread)
@@ -1076,7 +1057,7 @@ async def list_dashboard_thread_repos(
     """
     filing = await PROJECTS.filing_for(login)
     candidates = await _collect_thread_candidates(
-        langgraph_client(),
+        None,
         _participant_search_filters(login, email=email, include_all=include_all),
         viewer_login=login,
         viewer_email=email,

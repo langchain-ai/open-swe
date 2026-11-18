@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from openswe.threads import handlers, listing, plan_api, summary, workflow_approval_api
+from openswe.threads import handlers, index, listing, plan_api, summary, workflow_approval_api
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -167,18 +167,21 @@ async def test_summary_names_the_starting_bot(bot_thread, monkeypatch):
 
 async def test_bot_scope_lists_bot_threads_for_any_user(bot_thread, monkeypatch):
     thread, _ = bot_thread
-    person = {"thread_id": "person-thread", "metadata": {"source": "slack"}}
-    other_bot = {
-        "thread_id": "other-bot-thread",
-        "metadata": {**thread["metadata"], "triggering_bot": "T123:B999"},
-    }
-    searches: list[dict] = []
+    await index.create("bot-thread", runtime="mda", metadata=thread["metadata"])
+    await index.create("person-thread", runtime="mda", metadata={"source": "slack"})
+    await index.create(
+        "other-bot-thread",
+        runtime="mda",
+        metadata={**thread["metadata"], "triggering_bot": "T123:B999"},
+    )
+    searches: list[index.ThreadSearch] = []
+    search = listing.THREADS.search
 
-    async def search(_client, metadata, **_kwargs):
-        searches.append(metadata)
-        return [thread, person, other_bot]
+    async def record(query: index.ThreadSearch) -> list[index.IndexedThread]:
+        searches.append(query)
+        return await search(query)
 
-    monkeypatch.setattr(listing, "_search_threads_batch", search)
+    monkeypatch.setattr(listing.THREADS, "search", record)
     monkeypatch.setattr(
         listing,
         "_summarize_threads",
@@ -187,10 +190,12 @@ async def test_bot_scope_lists_bot_threads_for_any_user(bot_thread, monkeypatch)
         ),
     )
     page = await listing.list_dashboard_threads_page("bob", scope="bot")
-    assert searches == [{"trigger_kind": "slack_bot"}]
+    assert [query.metadata for query in searches] == [{"trigger_kind": "slack_bot"}]
     assert {item["id"] for item in page["items"]} == {"bot-thread", "other-bot-thread"}
 
     searches.clear()
     page = await listing.list_dashboard_threads_page("bob", scope="bot", bot="T123:B123")
-    assert searches == [{"trigger_kind": "slack_bot", "triggering_bot": "T123:B123"}]
+    assert [query.metadata for query in searches] == [
+        {"trigger_kind": "slack_bot", "triggering_bot": "T123:B123"}
+    ]
     assert [item["id"] for item in page["items"]] == ["bot-thread"]
