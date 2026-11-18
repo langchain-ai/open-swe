@@ -105,6 +105,33 @@ Existing paths are left untouched for the script to validate; a clone failure fa
 Any other repository is cloned on demand to the same place by the run that needs it.
 A refresh writes only snapshot and refresh state and an edit writes only the definition, so neither reverts the other.
 
+### Command environment and installed tools
+
+Snapshots preserve installed files, not exports made by a provisioning shell.
+An `export PATH=...` in a setup or update script affects that script and its children, not later sandbox commands.
+Commands are non-interactive, so installing mise, Rust, or Python tools in a user directory and activating them only in `.bashrc` is insufficient.
+
+Configure persistent, nonsecret command defaults through `create_params.run_config.env_vars`.
+For example, a root-owned image with mise shims under `/root/.local/share/mise/shims` can set:
+
+```json
+{
+  "run_config": {
+    "env_vars": {
+      "PATH": "/root/.local/bin:/root/.cargo/bin:/root/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    }
+  }
+}
+```
+
+Use a complete literal PATH appropriate to the command user; JSON values do not expand `$PATH`, `$HOME`, or `~`.
+Preserve other creation settings when editing the workspace.
+These defaults apply when a sandbox is created; changing them does not update an existing thread's sandbox, and inheriting an image does not inherit its creation settings.
+
+Before publishing an image, verify tool lookup and versions in the target repository from a separate command without inline activation or exports.
+When changing creation settings, use a disposable sandbox created with those settings to verify them rather than reproducing the exports inside the check.
+Include tools used by commit hooks: a successful dependency installation or image capture alone does not prove that later commands can find them.
+
 ### Sandbox cloud workload identity
 
 Admins configure AWS, GCP, and Azure workload identity in **Workspaces → Sandbox Proxy**.

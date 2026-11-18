@@ -1,6 +1,6 @@
 ---
 name: workspaces
-description: How a Robin workspace's sandbox image works and how to change it — create one, edit or fork an existing one, start from scratch, what setup_script and update_script are for, why a nightly refresh failed, where the build logs are, and how to read a rebuild in progress. Read this whenever someone asks about workspaces, snapshots, sandbox images, or a refresh, whether or not this is an admin thread.
+description: How a Robin workspace's sandbox image works and how to change it — create one, edit or fork an existing one, start from scratch, what setup_script and update_script are for, why a nightly refresh failed, where the build logs are, and how to read a rebuild in progress. Read this whenever someone asks about workspaces, snapshots, sandbox images, a refresh, or sandbox commands failing to find preinstalled tools, whether or not this is an admin thread.
 ---
 
 # Workspaces
@@ -24,6 +24,39 @@ That captures **this sandbox** as the image and writes the record only after the
 Nothing is half-written on failure, and the image is usable the moment the call returns.
 
 Everything on the sandbox filesystem is captured, so provision it fully and leave no tokens, credentials, or proxy secrets on disk.
+
+## Installed tools must work in later commands
+
+A successful provisioning command does not prove a usable image.
+Snapshots keep files, not the shell process that installed them: an `export PATH=...` in `setup_script`, `update_script`, or one `execute` call does not carry into the next call.
+Commands are non-interactive; do not rely on `.bashrc` or a login shell to activate tools.
+
+For durable command defaults, use the workspace's existing `create_params.run_config.env_vars` setting when publishing or configuring it.
+For example, a root-owned image with mise and Rust installed under `/root` can use:
+
+```json
+{
+  "run_config": {
+    "env_vars": {
+      "PATH": "/root/.local/bin:/root/.cargo/bin:/root/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    }
+  }
+}
+```
+
+Use paths appropriate to the image's command user, keep its required system paths, and supply a complete literal value: `$PATH`, `$HOME`, and `~` are not shell-expanded in this JSON.
+Preserve existing creation settings when changing them; never store credentials here.
+Creation settings apply to new sandboxes, not existing ones, and image inheritance does not inherit them.
+Read the current settings on a private admin surface before editing, and confirm provisioning changes to `default` first.
+Do not recreate a sandbox just to apply them without the user's explicit request.
+
+Before publishing, check tool lookup and versions from a **separate `execute` call** with no inline exports or activation, in the repository where they will run.
+If using new creation settings, verify in a disposable sandbox created with those settings; exporting the same PATH in the build command does not test them.
+Check representative tools needed by the repository, including its commit hooks, not just package installation exit codes.
+
+When an existing run reports a missing tool, inspect its PATH, repository tool configuration, and documented installation locations first.
+If the tool is already installed, use the documented PATH or tool-manager execution context for the command; do not rerun installation or bypass a hook.
+A genuinely absent dependency still follows repository rules for setup and approval.
 
 ## Which image to start from
 
