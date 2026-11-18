@@ -722,7 +722,8 @@ async def get_dashboard_thread_state(
     timings: dict[str, float] | None = None,
     principal: Principal | None = None,
 ) -> dict[str, JsonValue]:
-    """The thread's state, narrowed by its runtime to the ``select`` fields when given."""
+    """The thread's state as a client reads it, narrowed by its runtime to the ``select``
+    fields when given."""
     record = timings if timings is not None else {}
     with phase(record, "thread_get"):
         thread = await THREADS.get(thread_id)
@@ -734,4 +735,4 @@ async def get_dashboard_thread_state(
         assert_thread_readable(thread.metadata, login, email)
 
     with phase(record, "get_state"):
-        return await THREADS.state_of(thread, select=select)
+        return await THREADS.client_state_of(thread, select=select)

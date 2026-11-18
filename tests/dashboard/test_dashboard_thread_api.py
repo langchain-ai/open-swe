@@ -1544,6 +1544,33 @@ async def test_thread_state_sends_select_to_the_threads_runtime_as_given(
     assert sent == [select]
 
 
+async def test_thread_state_reaches_a_client_without_openai_encrypted_reasoning(
+    monkeypatch,
+) -> None:
+    openai = {"type": "reasoning", "id": "rs_1", "reasoning": "Checking the tests"}
+    anthropic = {"type": "reasoning", "reasoning": "Reading the diff", "extras": {"signature": "s"}}
+    answer = {"type": "text", "text": "Done"}
+
+    def agent_server(request: httpx.Request | httpx2.Request) -> httpx.Response | httpx2.Response:
+        response = httpx2.Response if isinstance(request, httpx2.Request) else httpx.Response
+        if request.url.path.endswith("/state"):
+            encrypted = {**openai, "extras": {"content": [], "encrypted_content": "gAAAAB"}}
+            message = {"type": "ai", "content": [encrypted, anthropic, answer]}
+            return response(200, json={"values": {"messages": [message]}})
+        return response(200, json=[])
+
+    response = await _read_thread_state(
+        monkeypatch, "mda", agent_server, select=["values.messages"]
+    )
+
+    assert response.status_code == 200
+    assert response.json()["values"]["messages"][0]["content"] == [
+        {**openai, "extras": {"content": []}},
+        anthropic,
+        answer,
+    ]
+
+
 @pytest.mark.parametrize("runtime", ["mda", "local"])
 async def test_thread_state_refuses_a_select_the_threads_runtime_refuses(
     monkeypatch, runtime: Runtime

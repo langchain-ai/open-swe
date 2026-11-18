@@ -310,6 +310,24 @@ class ThreadStore:
         await runtime.create(thread.thread_id, for_mda(thread.metadata))
         return await runtime.state(thread.thread_id, select=select)
 
+    async def client_state_of(
+        self, thread: IndexedThread, *, select: list[str] | None = None
+    ) -> dict[str, JsonValue]:
+        """:meth:`state_of` as a client reads it, without the encrypted reasoning OpenAI
+        returns for the model's next call: no client reads it, and on a long thread it is
+        megabytes gzip can't shrink. The thread's own state keeps it."""
+        state = await self.state_of(thread, select=select)
+        values = state.get("values")
+        messages = values.get("messages") if isinstance(values, dict) else None
+        for message in messages if isinstance(messages, list) else []:
+            content = message.get("content") if isinstance(message, dict) else None
+            for block in content if isinstance(content, list) else []:
+                if isinstance(block, dict) and block.get("type") == "reasoning":
+                    extras = block.get("extras")
+                    if isinstance(extras, dict):
+                        extras.pop("encrypted_content", None)
+        return state
+
     async def with_latest_run(self, thread: IndexedThread) -> IndexedThread:
         """The thread with its latest run's id and status in its metadata, as its runtime reports them.
 
