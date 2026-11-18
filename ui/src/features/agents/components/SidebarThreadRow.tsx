@@ -63,6 +63,9 @@ import { parsePullRequestReference } from "@/features/reviews/search"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { useSidebarThreadSelection } from "@/features/agents/components/SidebarThreadSelection"
 import { DropdownMenuItem } from "@/components/MenuItem"
+import { threadStateUrl } from "@/features/agents/lib/apiWarmup"
+import { earlyReads } from "@/lib/earlyReads"
+import { readPreference } from "@/lib/streamPreference"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
 import {
   markReviewViewed,
@@ -545,6 +548,22 @@ export function SidebarThreadRow({
     deleteThread.mutate(item.id, { onSuccess: () => setDeleteOpen(false) })
   }
 
+  // A press that opens the thread comes about 80 ms before its click. A touch
+  // may only start a scroll, and a press on a control in the row opens nothing.
+  const startStateRead = (event: React.PointerEvent<HTMLAnchorElement>) => {
+    if (event.pointerType !== "mouse" || event.button !== 0) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    if (isActive || contextMenuOpen || moreMenuOpen) return
+    const control =
+      event.target instanceof Element &&
+      event.target.closest("button, [role=button]")
+    if (control && event.currentTarget.contains(control)) return
+    // Only the stream reads the state, and a thread the transcript log serves
+    // opens in it only under the setting.
+    if (thread.transcript === "v2" && !readPreference()) return
+    earlyReads.start(threadStateUrl(item.id))
+  }
+
   const handleNavigate = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (contextMenuOpen || moreMenuOpen) {
       event.preventDefault()
@@ -675,6 +694,7 @@ export function SidebarThreadRow({
         ref={activeRowRef}
         to="/agents/$threadId"
         params={{ threadId: item.id }}
+        onPointerDown={startStateRead}
         onClick={handleNavigate}
         onKeyDown={openContextMenuFromKeyboard}
         {...rowProps}

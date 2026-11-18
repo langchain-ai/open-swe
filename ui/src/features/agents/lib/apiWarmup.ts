@@ -213,7 +213,7 @@ const THREAD_STATE_SELECT = [
   "values.messages",
 ]
 
-function threadStateUrl(threadId: string): string {
+export function threadStateUrl(threadId: string): string {
   const search = new URLSearchParams()
   for (const field of THREAD_STATE_SELECT) search.append("select", field)
   return `${agentsLangGraphApiUrl}/threads/${threadId}/state?${search}`
