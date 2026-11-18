@@ -111,6 +111,7 @@ async def test_a_turn_traces_each_step_and_hands_the_trace_to_its_run(
         "thread_id": "thread-2",
         "slack_channel_id": "C1",
         "slack_message_ts": POSTED_TS,
+        "origin": "slack",
         "invocation_id": "inv-1",
     }
     assert str(root.id) not in {str(update["id"]) for update in langsmith.patched}

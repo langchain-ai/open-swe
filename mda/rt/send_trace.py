@@ -78,6 +78,8 @@ class SlackSendTrace:
                         "thread_id": thread_id,
                         "slack_channel_id": channel_id,
                         "slack_message_ts": message_ts,
+                        # Matches the origin the backend records on the run it starts.
+                        "origin": "slack",
                     }
                 },
             )
