@@ -52,7 +52,7 @@ from langgraph_sdk.errors import (
     PermissionDeniedError,
     RateLimitError,
 )
-from langsmith import Client, agent_address, tracing_context
+from langsmith import Client, agent_address, get_tracing_context, tracing_context
 from langsmith.run_trees import RunTree
 from managed_deepagents import (
     ConnectionNotFoundError,
@@ -66,7 +66,7 @@ from managed_deepagents import (
 from managed_deepagents._memory.layers import MemoryLayers
 from managed_deepagents._memory_instructions import create_memory_instructions_middleware
 from managed_deepagents._run_input import ManagedTurnTracer
-from managed_deepagents.runtime import compile_managed_agent_async
+from managed_deepagents.runtime import compile_managed_agent_async, parent_run
 from pydantic import BaseModel, JsonValue
 from rt.backend import (
     BackendCallError,
@@ -85,7 +85,7 @@ from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import MODEL_OUTAGE_MESSAGE, model_call_guards
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from rt.tools import STATE_KEY, called, operation_tool
-from rt.tracing import TurnTrace
+from rt.tracing import RootAgentTraceMiddleware, TurnTrace
 from runtime_api.catalog import (
     JOINED_TASK_CONTEXT,
     Catalog,
@@ -2941,3 +2941,88 @@ def test_the_backend_hears_where_summarization_cut_the_conversation() -> None:
     }
 
     assert held_state(state) == {"reply_surface": "slack", "visible_from": 4}
+
+
+class _ScriptedAnthropic(ChatAnthropic):
+    replies: list[AIMessage] = []
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: object,
+    ) -> ChatResult:
+        return ChatResult(generations=[ChatGeneration(message=self.replies.pop(0))])
+
+
+async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_subagents() -> None:
+    """Robin traces the calls an agent answers with as LangSmith's root agent, and not the calls
+    a tool makes. A worker's run that MDA nests in its coordinator's trace is a subagent there,
+    so its calls stay out of the coordinator's conversation."""
+    from deepagents.middleware import async_subagents
+
+    in_tool: list[object] = []
+
+    @tool
+    def look() -> str:
+        """Look into it."""
+        in_tool.append((get_tracing_context()["metadata"] or {}).get("ls_agent_type"))
+        return "found it"
+
+    client = MagicMock(spec=Client)
+    launch = RunTree(name="start_async_task", run_type="tool", ls_client=client)
+    # deepagents' trace headers for a launched run, as the Agent Server keeps them.
+    nested = {
+        "langsmith-trace": launch.dotted_order,
+        "langsmith-metadata": {async_subagents._NEST_UNDER_PARENT: True},
+    }
+    traced: dict[str, list[tuple[bool, object]]] = {}
+    for run, headers in [("launched", nested), ("own", {})]:
+        client.create_run.reset_mock()
+        model = _ScriptedAnthropic(
+            model_name="claude-test",
+            api_key="test",
+            replies=[
+                AIMessage(content="", tool_calls=[ToolCall(name="look", args={}, id="call-1")]),
+                AIMessage(content="done"),
+            ],
+        )
+        graph = create_agent(model=model, tools=[look], middleware=[RootAgentTraceMiddleware()])
+        config: RunnableConfig = {
+            "configurable": {"thread_id": "worker", **headers},
+            "callbacks": [LangChainTracer(client=client, project_name="test")],
+        }
+        with tracing_context(enabled=True):
+            async with parent_run(config):
+                await graph.ainvoke({"messages": [HumanMessage("Look into it.")]}, config)
+        traced[run] = [
+            (
+                str(created.kwargs["trace_id"]) == str(launch.trace_id),
+                _run_metadata(created.kwargs).get("ls_agent_type"),
+            )
+            for created in client.create_run.call_args_list
+            if created.kwargs["run_type"] == "llm"
+        ]
+
+    assert traced == {"launched": [(True, "subagent")] * 2, "own": [(False, "root")] * 2}
+    assert in_tool == ["subagent", None]
+
+
+async def test_a_subagent_keeps_its_own_tag_though_it_inherits_the_root_agent_middleware() -> None:
+    """deepagents runs a forked subagent with a copy of its parent's middleware, inside a
+    tracing context that tags it ``subagent``; its calls must not join the root conversation."""
+    client = MagicMock(spec=Client)
+    model = _ScriptedAnthropic(
+        model_name="claude-test", api_key="test", replies=[AIMessage(content="done")]
+    )
+    graph = create_agent(model=model, middleware=[RootAgentTraceMiddleware()])
+    config: RunnableConfig = {"callbacks": [LangChainTracer(client=client, project_name="test")]}
+    with tracing_context(enabled=True, metadata={"ls_agent_type": "subagent"}):
+        await graph.ainvoke({"messages": [HumanMessage("Look into it.")]}, config)
+
+    assert [
+        _run_metadata(created.kwargs).get("ls_agent_type")
+        for created in client.create_run.call_args_list
+        if created.kwargs["run_type"] == "llm"
+    ] == ["subagent"]

@@ -43,6 +43,7 @@ from langgraph.runtime import Runtime
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.auth.types import AuthContext, BaseUser, ThreadsCreate, ThreadsRead
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
+from langsmith import Client, tracing_context
 from langsmith.sandbox import (
     ResourceCreationError,
     ResourceNameConflictError,
@@ -1895,6 +1896,52 @@ async def test_each_run_compacts_a_long_conversation_with_its_own_model(
     # One graph per model, shared by every run on it.
     assert again.nodes["model"] is first.nodes["model"]
     assert second.nodes["model"] is not first.nodes["model"]
+
+
+@pytest.mark.parametrize("graph", ["agent", "reviewer"])
+async def test_each_runs_own_turn_calls_are_traced_as_the_root_agent(
+    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, graph: str
+) -> None:
+    """LangSmith's thread view shows the calls traced as the root agent as the thread's main
+    conversation: the agent's own turn calls, not the summary deepagents compacts its
+    history with."""
+
+    async def generate(
+        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+
+    def build(spec: ModelSpec, **kwargs: object) -> GenericFakeChatModel:
+        return GenericFakeChatModel(
+            messages=iter([]), name=spec.model_id, profile={"max_input_tokens": 40_000}
+        )
+
+    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
+    monkeypatch.setattr(agent, "build_model", build)
+    monkeypatch.setattr("rt.middleware.build_model", build)
+    monkeypatch.setattr("rt.run_tools.build_model", build)
+    monkeypatch.setattr(
+        agent, "_DEFAULT_MODEL", build(ModelSpec(model_id="placeholder", kwargs={}))
+    )
+    created: list[dict[str, object]] = []
+    monkeypatch.setattr(Client, "create_run", lambda self, **run: created.append(run))
+    monkeypatch.setattr(Client, "update_run", lambda self, *args, **kwargs: None)
+    model = ModelSpec(model_id="openai:gpt-test", kwargs={})
+    catalog = _catalog("web_search", "grant").model_copy(
+        update={"models": RunModels(model=model, subagent_model=model)}
+    )
+    history: list[tuple[str, str]] = [("user", "history " * 600) for _ in range(40)]
+
+    with tracing_context(enabled=True):
+        await _run(InMemoryStore(), "thread", _context(graph, "token-0", catalog), history)
+
+    traced = set[tuple[str, object]]()
+    for run in created:
+        if run["run_type"] == "llm":
+            metadata = cast(dict[str, dict[str, object]], run["extra"])["metadata"]
+            kind = "summary" if metadata.get("lc_source") == "summarization" else "turn"
+            traced.add((kind, metadata.get("ls_agent_type")))
+    assert traced == {("summary", None), ("turn", "root")}
 
 
 async def test_a_shared_factory_builds_once_per_inputs_and_never_sees_the_run(

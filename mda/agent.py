@@ -81,7 +81,7 @@ from rt.skills import RunSkillsMiddleware, SkillFiles
 from rt.slack_move import SlackMoveMiddleware
 from rt.task_retry import task_retry
 from rt.tools import run_id
-from rt.tracing import MIDDLEWARE_TRACE_POLICY
+from rt.tracing import MIDDLEWARE_TRACE_POLICY, RootAgentTraceMiddleware
 from runtime_api.catalog import Catalog, ModelSpec
 
 if TYPE_CHECKING:
@@ -290,6 +290,8 @@ def _parts(graph: Graph) -> _Parts:
             ThreadPromptMiddleware(),
             RunModelCallLimit(backend, _MODEL_CALL_LIMIT),
             *model_call_guards(),
+            # Innermost, so only the agent's own model calls are its thread's main conversation.
+            RootAgentTraceMiddleware(),
         ],
     )
     timing.lap("middleware")

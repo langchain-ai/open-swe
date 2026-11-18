@@ -6,10 +6,12 @@ import os
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Final
 
-from langchain.agents.middleware import TracePolicy, omit_payload
+from langchain.agents.middleware import AgentMiddleware, TracePolicy, omit_payload
+from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.callbacks import AsyncCallbackManager, CallbackManager
 from langchain_core.runnables.config import ensure_config
 from langchain_core.tracers.langchain import LangChainTracer
+from langsmith import get_tracing_context, tracing_context
 from langsmith.run_trees import RunTree
 from pydantic import JsonValue
 
@@ -236,3 +238,27 @@ class TurnTrace:
             await asyncio.to_thread(patch)
         except Exception:
             logger.warning("Could not reconcile turn trace metadata", exc_info=True)
+
+
+class RootAgentTraceMiddleware(AgentMiddleware):
+    """Trace the agent's own model calls as LangSmith's root agent (``ls_agent_type: root``).
+
+    LangSmith shows the calls so tagged as a thread's main conversation, across the
+    summaries that restart its history. Installed innermost, it leaves out the summary's
+    model call and the calls a tool makes. A call whose trace already names an agent type
+    keeps it: deepagents tags a forked subagent ``subagent``, and MDA tags a worker's run
+    that it nests in its coordinator's trace ``subagent``.
+    """
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        tracing = get_tracing_context()
+        metadata = tracing["metadata"] or {}
+        if "ls_agent_type" in metadata:
+            return await handler(request)
+        tracing["metadata"] = {**metadata, "ls_agent_type": "root"}
+        with tracing_context(**tracing):
+            return await handler(request)
