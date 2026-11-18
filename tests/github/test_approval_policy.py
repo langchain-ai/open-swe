@@ -110,7 +110,8 @@ def _client(
         reviews=AsyncMock(return_value=[]),
         contribution_commits=AsyncMock(return_value=[]),
         issue_comments=AsyncMock(return_value=[]),
-        comment=AsyncMock(),
+        comment=AsyncMock(return_value={"id": 99}),
+        edit_comment=AsyncMock(),
     )
 
     @asynccontextmanager
@@ -120,6 +121,7 @@ def _client(
     monkeypatch.setattr(PullRequestClient, "as_app", as_app)
     monkeypatch.setattr(PullRequest, "get", AsyncMock(return_value=None))
     monkeypatch.setattr(PullRequest, "requesters", AsyncMock(return_value=([], [])))
+    monkeypatch.setattr(PullRequest, "record_approval_check", AsyncMock())
     return pull
 
 
@@ -347,6 +349,130 @@ async def test_merging_base_does_not_disqualify_an_independent_reviewer(
     assert approval.verdict()[0] is incoming_on_base
     assert "alice" in approval.excluded
     assert ("carol" in approval.excluded) is not incoming_on_base
+
+
+@pytest.mark.parametrize(
+    ("author", "required", "fetched"),
+    [
+        pytest.param({"login": "alice", "type": "User"}, False, False, id="not-required"),
+        pytest.param(_ROBIN, False, False, id="robin-authored-not-required"),
+        pytest.param({"login": "alice", "type": "User"}, True, False, id="person-authored"),
+        pytest.param(_ROBIN, True, True, id="robin-authored-reads-the-current-head"),
+    ],
+)
+async def test_a_delivery_spares_fetching_the_pull_request(
+    monkeypatch: pytest.MonkeyPatch, author: dict[str, str], required: bool, fetched: bool
+) -> None:
+    monkeypatch.delenv("DISABLE_ROBIN_APPROVES", raising=False)
+    monkeypatch.setattr(Repository, "requires_approval_check", AsyncMock(return_value=required))
+    monkeypatch.setattr(Repository, "resolve_default_branch", AsyncMock(return_value="main"))
+    pull = _client(monkeypatch, "open", author)
+    delivered = {**pull.pull.return_value, "number": 7, "head": {"sha": "delivered"}}
+    await PullRequestApproval.evaluate_payload(
+        {"repository": {"owner": {"login": "acme"}, "name": "app"}, "pull_request": delivered}
+    )
+    assert pull.pull.await_count == fetched
+    if not required:
+        pull.repo.create_check_run.assert_not_awaited()
+        return
+    (check,), _ = pull.repo.create_check_run.call_args
+    assert check["head_sha"] == (_HEAD if fetched else "delivered")
+    if not fetched:
+        pull.issue_comments.assert_not_awaited()
+
+
+async def test_an_unchanged_verdict_is_not_posted_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DISABLE_ROBIN_APPROVES", raising=False)
+    monkeypatch.setattr(Repository, "requires_approval_check", AsyncMock(return_value=True))
+    pull = _client(monkeypatch, "open", _ROBIN)
+    await PullRequestApproval.evaluate("acme", "app", 7)
+    pull.comment.assert_awaited_once()
+    recorded = PullRequest.record_approval_check.await_args.kwargs
+    assert recorded["note_id"] == 99
+    stored = SimpleNamespace(
+        approval_check_head_sha=recorded["head_sha"],
+        approval_check_verdict=recorded["verdict"],
+        approval_note_id=recorded["note_id"],
+        auto_approved_head_sha="",
+        requester_unknown=False,
+    )
+    PullRequest.get.return_value = stored
+    pull.repo.create_check_run.reset_mock()
+    pull.issue_comments.reset_mock()
+
+    await PullRequestApproval.evaluate("acme", "app", 7)
+    pull.repo.create_check_run.assert_not_awaited()
+    pull.issue_comments.assert_not_awaited()
+
+    # A new head with the same verdict needs only the check.
+    pull.pull.return_value["head"]["sha"] = "next"
+    await PullRequestApproval.evaluate("acme", "app", 7)
+    pull.repo.create_check_run.assert_awaited_once()
+    pull.issue_comments.assert_not_awaited()
+    pull.edit_comment.assert_not_awaited()
+
+    # A changed verdict edits the remembered note without looking for it.
+    stored.approval_check_verdict = "stale"
+    await PullRequestApproval.evaluate("acme", "app", 7)
+    pull.edit_comment.assert_awaited_once()
+    assert pull.edit_comment.await_args.args[0] == 99
+    pull.issue_comments.assert_not_awaited()
+    pull.comment.assert_awaited_once()
+
+
+async def test_a_failed_note_edit_does_not_hide_withdrawn_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DISABLE_ROBIN_APPROVES", raising=False)
+    monkeypatch.setattr(Repository, "requires_approval_check", AsyncMock(return_value=True))
+    pull = _client(monkeypatch, "open", _ROBIN)
+    stored = SimpleNamespace(
+        approval_check_head_sha="",
+        approval_check_verdict="",
+        approval_note_id=None,
+        auto_approved_head_sha="",
+        requester_unknown=False,
+    )
+    PullRequest.get.return_value = stored
+
+    async def record(*_: object, head_sha: str, verdict: str, note_id: int | None) -> None:
+        stored.approval_check_head_sha = head_sha
+        stored.approval_check_verdict = verdict
+        stored.approval_note_id = note_id
+
+    PullRequest.record_approval_check.side_effect = record
+    await PullRequestApproval.evaluate("acme", "app", 7)
+    stored.auto_approved_head_sha = _HEAD
+    pull.edit_comment.side_effect = RuntimeError("Note edit failed")
+    await PullRequestApproval.evaluate("acme", "app", 7)
+    stored.auto_approved_head_sha = ""
+    pull.edit_comment.side_effect = None
+    await PullRequestApproval.evaluate("acme", "app", 7)
+    assert [call.args[0]["conclusion"] for call in pull.repo.create_check_run.await_args_list] == [
+        "failure",
+        "success",
+        "failure",
+    ]
+    assert "does not pass" in pull.edit_comment.await_args.args[1]
+
+
+async def test_a_deleted_note_is_found_or_posted_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DISABLE_ROBIN_APPROVES", raising=False)
+    monkeypatch.setattr(Repository, "requires_approval_check", AsyncMock(return_value=True))
+    pull = _client(monkeypatch, "open", _ROBIN)
+    response = httpx2.Response(404, request=httpx2.Request("PATCH", "https://api.github.com"))
+    pull.edit_comment.side_effect = GitHubError(response)
+    PullRequest.get.return_value = SimpleNamespace(
+        approval_check_head_sha=_HEAD,
+        approval_check_verdict="stale",
+        approval_note_id=5,
+        auto_approved_head_sha="",
+        requester_unknown=False,
+    )
+    await PullRequestApproval.evaluate("acme", "app", 7)
+    pull.issue_comments.assert_awaited_once()
+    pull.comment.assert_awaited_once()
+    assert PullRequest.record_approval_check.await_args.kwargs["note_id"] == 99
 
 
 @pytest.mark.parametrize("force_publish", [False, True])

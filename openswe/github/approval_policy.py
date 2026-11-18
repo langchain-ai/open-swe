@@ -26,6 +26,7 @@ from typing import Any, Self
 
 from openswe.config import ENV
 from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
+from openswe.github.http import GitHubError
 from openswe.github.org_membership import OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
@@ -215,73 +216,144 @@ class PullRequestApproval:
         return await pull.repo.open_pull_for_branch(base, strict=True) is not None
 
     @classmethod
+    async def _applies(
+        cls, pull: PullRequestClient, payload: Mapping[str, object], *, force_publish: bool
+    ) -> bool:
+        """Whether to publish for this pull request, as ``payload`` describes it."""
+        if payload.get("state") != "open":
+            return False
+        base = payload.get("base")
+        ref = base.get("ref") if isinstance(base, Mapping) else None
+        return (
+            isinstance(ref, str)
+            and bool(ref)
+            and (force_publish or await cls.should_publish(pull, ref))
+        )
+
+    @classmethod
     async def evaluate(
-        cls, owner: str, repo: str, number: int, *, force_publish: bool = False
+        cls,
+        owner: str,
+        repo: str,
+        number: int,
+        *,
+        force_publish: bool = False,
+        delivered: Mapping[str, object] | None = None,
     ) -> tuple[bool, str] | None:
-        """Post the approval verdict when enabled and required or explicitly requested."""
+        """Post the approval verdict when enabled and required or explicitly requested.
+
+        ``delivered`` is the pull request as a webhook delivery described it, which spares
+        fetching it when the check doesn't apply or its verdict can't depend on the head.
+        """
         if ENV.DISABLE_ROBIN_APPROVES.get_bool():
             return
         async with PullRequestClient.as_app(owner, repo, number) as pull:
-            payload = await pull.pull()
-            if payload.get("state") != "open":
+            payload = delivered or await pull.pull()
+            if not await cls._applies(pull, payload, force_publish=force_publish):
                 return
-            base = (payload.get("base") or {}).get("ref")
-            if not base or (not force_publish and not await cls.should_publish(pull, base)):
-                return
+            if delivered is not None and cls._is_robin(delivered.get("user")):
+                # This verdict turns on the current head, which a late delivery may not name.
+                payload = await pull.pull()
+                base, delivered_base = payload.get("base"), delivered.get("base")
+                same_base = (
+                    isinstance(base, Mapping)
+                    and isinstance(delivered_base, Mapping)
+                    and base.get("ref") == delivered_base.get("ref")
+                )
+                if not await cls._applies(pull, payload, force_publish=force_publish or same_base):
+                    return
             approval = await cls.read(pull, payload)
             if not approval.head_sha:
                 return
             passed, summary = approval.verdict()
             if not passed:
                 summary = f"{summary}\n\n{_BREAK_GLASS}"
-            await pull.repo.create_check_run(
-                {
-                    "name": APPROVAL_CHECK_RUN_NAME,
-                    "head_sha": approval.head_sha,
-                    "status": "completed",
-                    "conclusion": "success" if passed else "failure",
-                    "completed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    "output": {
-                        "title": "Ready to merge" if passed else "Not ready to merge",
-                        "summary": summary,
-                    },
-                }
-            )
-            await cls._update_note(pull, passed, summary)
+            await approval.publish(pull, passed, summary, force=force_publish)
             return passed, summary
 
-    @staticmethod
-    async def _update_note(pull: PullRequestClient, passed: bool, summary: str) -> None:
-        """Keep one comment on the pull request saying why the check fails, edited as it changes.
-
-        Nothing is posted while the check has always passed.
-        """
-        body = (
+    async def publish(
+        self, pull: PullRequestClient, passed: bool, summary: str, *, force: bool
+    ) -> None:
+        """Post the check and its note, skipping whichever already says this unless ``force``."""
+        owner, repo, number = pull.repo.owner, pull.repo.name, pull.number
+        head_sha = self.head_sha
+        verdict = (
             f"{_NOTE_MARKER}\n**`{APPROVAL_CHECK_RUN_NAME}` "
             f"{'passes' if passed else 'does not pass'}.**\n\n{summary}\n\n"
             f"_`{APPROVAL_CHECK_RUN_NAME}` reports the latest evaluation of Robin's approval policy. "
             "Repository rules determine whether this check is required to merge._"
         )
-        try:
-            note = next(
-                (
-                    comment
-                    for comment in await pull.issue_comments()
-                    if _NOTE_MARKER in str(comment.get("body") or "")
-                    and (comment.get("user") or {}).get("type") == "Bot"
-                ),
-                None,
+        stored = await PullRequest.get(owner, repo, number)
+        note_id = stored.approval_note_id if stored else None
+        unchanged = not force and stored is not None and stored.approval_check_verdict == verdict
+        if unchanged and stored is not None and stored.approval_check_head_sha == head_sha:
+            return
+        if not unchanged:
+            await PullRequest.record_approval_check(
+                owner, repo, number, head_sha=head_sha, verdict="", note_id=note_id
             )
-            if note is None:
-                if not passed:
-                    await pull.comment(body)
-            elif note.get("body") != body and isinstance(note.get("id"), int):
-                await pull.edit_comment(note["id"], body)
-        except Exception:
-            logger.exception(
-                "Failed to update the approval note",
-                extra={"pr_repo_full_name": pull.repo.full_name, "pr_number": pull.number},
-            )
+        await pull.repo.create_check_run(
+            {
+                "name": APPROVAL_CHECK_RUN_NAME,
+                "head_sha": head_sha,
+                "status": "completed",
+                "conclusion": "success" if passed else "failure",
+                "completed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "output": {
+                    "title": "Ready to merge" if passed else "Not ready to merge",
+                    "summary": summary,
+                },
+            }
+        )
+        if not unchanged and self._is_robin(self.author):
+            try:
+                note_id = await self._update_note(pull, passed, verdict, note_id)
+            except Exception:
+                logger.exception(
+                    "Failed to update the approval note",
+                    extra={"pr_repo_full_name": pull.repo.full_name, "pr_number": number},
+                )
+                return
+        await PullRequest.record_approval_check(
+            owner, repo, number, head_sha=head_sha, verdict=verdict, note_id=note_id
+        )
+
+    @staticmethod
+    async def _update_note(
+        pull: PullRequestClient, passed: bool, body: str, note_id: int | None
+    ) -> int | None:
+        """Keep one comment on the pull request saying why the check fails, edited as it changes.
+
+        Edits the note ``note_id`` names, looking for it only when that's unknown or deleted,
+        and returns its id. Nothing is posted while the check has always passed.
+        """
+        if note_id is not None:
+            try:
+                await pull.edit_comment(note_id, body)
+                return note_id
+            except GitHubError as error:
+                if error.response.status_code not in {404, 410}:
+                    raise
+        note = next(
+            (
+                comment
+                for comment in await pull.issue_comments()
+                if _NOTE_MARKER in str(comment.get("body") or "")
+                and (comment.get("user") or {}).get("type") == "Bot"
+            ),
+            None,
+        )
+        if note is None:
+            if passed:
+                return None
+            created = await pull.comment(body)
+            created_id = created.get("id") if isinstance(created, Mapping) else None
+            return created_id if isinstance(created_id, int) else None
+        if not isinstance(note_id := note.get("id"), int):
+            return None
+        if note.get("body") != body:
+            await pull.edit_comment(note_id, body)
+        return note_id
 
     @classmethod
     async def add_requesters(cls, owner: str, repo: str, number: int, logins: set[str]) -> None:
@@ -353,8 +425,8 @@ class PullRequestApproval:
     @classmethod
     async def evaluate_payload(cls, payload: Mapping[str, Any]) -> None:
         """Re-evaluate the pull request a ``pull_request`` or ``pull_request_review`` names."""
-        repository = payload.get("repository") or {}
-        number = (payload.get("pull_request") or {}).get("number")
+        repository, pull = payload.get("repository") or {}, payload.get("pull_request") or {}
+        number = pull.get("number")
         owner, repo = (repository.get("owner") or {}).get("login"), repository.get("name")
         if isinstance(number, int) and isinstance(owner, str) and isinstance(repo, str):
-            await cls.evaluate(owner, repo, number)
+            await cls.evaluate(owner, repo, number, delivered=pull)

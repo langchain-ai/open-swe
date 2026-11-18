@@ -201,6 +201,11 @@ class PullRequest(Base):
     requester_unknown: Mapped[bool] = mapped_column(
         server_default="false", default=False, init=False
     )
+    # The ``Robin Approves`` check Robin last published: the head it named, its verdict in
+    # the words of Robin's note, and the comment holding that note.
+    approval_check_head_sha: Mapped[str] = mapped_column(server_default="", default="", init=False)
+    approval_check_verdict: Mapped[str] = mapped_column(server_default="", default="", init=False)
+    approval_note_id: Mapped[int | None] = mapped_column(BigInteger, default=None, init=False)
     additions: Mapped[int | None] = mapped_column(default=None)
     deletions: Mapped[int | None] = mapped_column(default=None)
     changed_files: Mapped[int | None] = mapped_column(default=None)
@@ -487,6 +492,23 @@ class PullRequest(Base):
         async with postgres.session() as session:
             await session.execute(
                 update(cls).where(cls.id == row.id).values(auto_approved_head_sha=head_sha)
+            )
+
+    @classmethod
+    async def record_approval_check(
+        cls, owner: str, repo: str, number: int, *, head_sha: str, verdict: str, note_id: int | None
+    ) -> None:
+        """Remember the approval check Robin published, and the comment holding its note."""
+        row = await cls(owner=owner, repo=repo, number=number).ensure()
+        async with postgres.session() as session:
+            await session.execute(
+                update(cls)
+                .where(cls.id == row.id)
+                .values(
+                    approval_check_head_sha=head_sha,
+                    approval_check_verdict=verdict,
+                    approval_note_id=note_id,
+                )
             )
 
     @classmethod
