@@ -926,7 +926,6 @@ function createMenu() {
           ? [
               {
                 label: "Close Window",
-                accelerator: "Command+W",
                 click: () =>
                   void closeConfirmation.request(
                     "close",
