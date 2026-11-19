@@ -59,7 +59,8 @@ async def api_my_managed_tools(session: dict[str, Any] = SESSION_DEP) -> Managed
     if not managed_tools_configured():
         return ManagedToolsView(configured=False)
     try:
-        servers = await PersonalTools(session["sub"]).kit_servers()
+        # A page a person looks at asks LangSmith now, not the runs' cached copy.
+        servers = await PersonalTools(session["sub"]).kit_servers(fresh=True)
     except LangSmithNotConnected:
         return ManagedToolsView(configured=True)
     except ManagedToolsError as exc:
@@ -79,7 +80,7 @@ async def api_bot_managed_tools(session: dict[str, Any] = ADMIN_DEP) -> BotTools
     if not viewer.configured():
         return BotToolsView(configured=False)
     try:
-        servers = await viewer.kit_servers()
+        servers = await viewer.kit_servers(fresh=True)
     except LangSmithNotConnected:
         return BotToolsView(configured=True)
     except ManagedToolsError as exc:

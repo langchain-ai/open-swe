@@ -124,7 +124,8 @@ class ConsentWait(BaseModel):
         try:
             await tools.refresh()
         except Exception:
-            # Best effort: a stale list expires on its own; it may not stop the thread resuming.
+            # Best effort: a cached list is read again on its own; it may not stop the thread
+            # resuming.
             logger.warning("Managed tools refresh after consent failed", exc_info=True)
         if self.thread_id is None or self.card_id is None:
             return
@@ -330,8 +331,9 @@ class ConnectCard(BaseModel):
 
     async def resume_if_ready(self) -> None:
         """Queue the thread's one follow-up run once every service the card offers works."""
-        # Another of the card's services may still be missing; its consent resumes.
-        servers = {server.id: server for server in await self.tools.servers()}
+        # Another of the card's services may still be missing; its consent resumes. Asks
+        # LangSmith now, in case the refresh after consent failed.
+        servers = {server.id: server for server in await self.tools.servers(fresh=True)}
         if self.slack_channel_id and self.slack_message_ts:
             try:
                 offered = [servers[service] for service in self.services if service in servers]

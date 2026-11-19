@@ -45,12 +45,14 @@ from openswe.dashboard.langsmith_oauth import (
     langsmith_issuer,
     langsmith_oauth_configured,
 )
+from openswe.encryption import EncryptionKeyMissingError
 from openswe.mcp.models import MCPConnection, MCPScope
 from openswe.mcp.runtime import MCPSource, refresh_mcp_catalog
+from openswe.mcp.sealed import SealedListing
 from openswe.mcp.transport import MCPCredentialMissing, MCPDiscoveryError, mcp_http_client
 
 if TYPE_CHECKING:
-    from langgraph_api.cache import SWRResult
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +69,11 @@ CONSENT_SESSIONS_PATH = "/v1/agent-auth/oauth-authorization-sessions"
 PERSONAL_HIDDEN_BUILTINS = ("slack",)
 _TIMEOUT_SECONDS = 30
 _MAX_PAGES = 5
+# A caller's LangSmith listings are answered from a cached copy, kept up to a day and read
+# again in the background once a minute old; Robin reads them again at once after a change
+# it makes. Only a connect click asks LangSmith directly (see ``connect_link``).
 _LISTING_FRESH_FOR = timedelta(minutes=1)
-_LISTING_MAX_AGE = timedelta(minutes=10)
+_LISTING_MAX_AGE = timedelta(hours=24)
 # LangSmith holds each status request open this long while consent is pending.
 _CONSENT_WAIT_SECONDS = 25
 
@@ -427,46 +432,58 @@ class ManagedTools(ABC):
             }
         )
 
-    async def kit_servers(self) -> list[ManagedServer]:
-        """The servers whose tools the kit offers, with the caller's state of each."""
+    async def kit_servers(self, *, fresh: bool = False) -> list[ManagedServer]:
+        """The servers whose tools the kit offers, with the caller's state of each;
+        ``fresh`` asks LangSmith now rather than take the cached copy."""
         linked: set[str] | None = None
         if not self.built_per_caller:
-            cached = await self._cached("kit")
+            cached = await self._cached("kit", fresh=fresh)
             linked = set(cached) if isinstance(cached, list) else set()
         return [
             server
-            for server in await self.servers()
+            for server in await self.servers(fresh=fresh)
             if server.id not in self.hidden_builtins and (linked is None or server.id in linked)
         ]
 
-    async def _swr(self, listing: str) -> SWRResult[object]:
-        from langgraph_api.cache import swr
-
+    async def _listing(self, listing: str) -> SealedListing:
+        """A listing's cache entry, per caller, encrypted (see :mod:`openswe.mcp.sealed`)."""
         digest = hashlib.sha256(json.dumps(self.namespace).encode()).hexdigest()
-        return await swr(
+        return SealedListing(
             f"lmt:{listing}:{digest}",
             self._loaders()[listing],
             fresh_for=_LISTING_FRESH_FOR,
             max_age=_LISTING_MAX_AGE,
         )
 
-    async def _cached(self, listing: str) -> object:
-        """A listing shared by every replica for a minute, so runs and tool calls do not
-        each ask LangSmith; :meth:`refresh` re-reads it after a connection changes."""
-        return (await self._swr(listing)).value
+    async def _cached(self, listing: str, *, fresh: bool = False) -> object:
+        """A listing shared by every replica, so runs and tool calls do not each ask
+        LangSmith; :meth:`refresh` re-reads it after a connection changes. ``fresh`` reads
+        it from LangSmith now, as does a cached one that can't be read."""
+        try:
+            value = await (await self._listing(listing)).read(fresh=fresh)
+        except EncryptionKeyMissingError:
+            raise ManagedToolsError(
+                "Managed tools are not configured on this Robin instance"
+            ) from None
+        if value is None:
+            raise ManagedToolsError("Could not read managed tools; retry later")
+        return value
 
     async def _load_servers(self) -> list[dict[str, object]]:
         servers = [ManagedServer.from_lmt(item) for item in await self._pages(SERVERS_PATH)]
         return [server.model_dump(mode="json") for server in servers if server is not None]
 
-    async def servers(self) -> list[ManagedServer]:
-        """Every server the caller can see in the LangSmith workspace, with its state."""
-        cached = await self._cached("servers")
+    async def servers(self, *, fresh: bool = False) -> list[ManagedServer]:
+        """Every server the caller can see in the LangSmith workspace, with its state;
+        ``fresh`` asks LangSmith now rather than take the cached copy."""
+        cached = await self._cached("servers", fresh=fresh)
         items = cached if isinstance(cached, list) else []
         return [ManagedServer.model_validate(item) for item in items]
 
-    async def server(self, server_id: str) -> ManagedServer:
-        found = next((item for item in await self.servers() if item.id == server_id), None)
+    async def server(self, server_id: str, *, fresh: bool = False) -> ManagedServer:
+        found = next(
+            (item for item in await self.servers(fresh=fresh) if item.id == server_id), None
+        )
         if found is None:
             raise ManagedToolsError("LangSmith has no such service")
         return found
@@ -475,16 +492,14 @@ class ManagedTools(ABC):
         """Re-read the listings now, then the kit's tools, so a service that was just
         connected or disconnected shows in the next run."""
         for listing in self._loaders():
-            result = await self._swr(listing)
-            if result.status != "miss":
-                await result.mutate()
+            await (await self._listing(listing)).refresh()
         source = self.source()
         for connection in await self.connections():
             await refresh_mcp_catalog(source, connection.name)
 
     async def refresh_quietly(self) -> None:
-        """:meth:`refresh` after a change LangSmith already made; a stale listing expires
-        within a minute, so a failure is only logged."""
+        """:meth:`refresh` after a change LangSmith already made; a cached listing is read
+        again in the background once a minute old, so a failure is only logged."""
         try:
             await self.refresh()
         except Exception:
@@ -641,8 +656,8 @@ class PersonalTools(ManagedTools):
             raise RuntimeError("Personal managed tools require the private thread owner")
 
     async def connectable(self) -> list[str]:
-        """The names of the kit's services this person could connect, for the prompt; empty
-        when LangSmith cannot say, since the run goes on without them."""
+        """The names of the kit's services this person could connect, for a run's prompt;
+        empty when LangSmith cannot say, since the run goes on without them."""
         if not self.configured():
             return []
         try:
@@ -664,8 +679,10 @@ class PersonalTools(ManagedTools):
         ]
 
     async def connect_link(self, server_id: str) -> ConsentLink | None:
-        """A fresh link connecting one service for this person; None when it already works."""
-        server = await self.server(server_id)
+        """A fresh link connecting one service for this person; None when it already works.
+        Asks LangSmith now: a cached copy could still call a service connected that someone
+        has since disconnected in LangSmith."""
+        server = await self.server(server_id, fresh=True)
         if server.usable:
             return None
         if server.kind == "secret":
@@ -674,8 +691,8 @@ class PersonalTools(ManagedTools):
             )
             if (link := _link(response.json())) is None:
                 raise ManagedToolsError("LangSmith did not return a setup link; retry")
-            # Its status lives elsewhere in Agent Auth, so nothing waits on it; the next
-            # listing (within a minute) shows the service connected.
+            # Its status lives elsewhere in Agent Auth, so nothing waits on it; the cached
+            # listing, read again once a minute old, shows the service connected.
             return ConsentLink(url=link.url)
 
         async def ping(client: Client[StreamableHttpTransport]) -> None:
@@ -799,9 +816,9 @@ class BotKitViewer(PersonalTools):
     def kit(self) -> str | None:
         return self.bot.kit()
 
-    async def servers(self) -> list[ManagedServer]:
+    async def servers(self, *, fresh: bool = False) -> list[ManagedServer]:
         try:
-            return await self.bot.servers()
+            return await self.bot.servers(fresh=fresh)
         except ManagedToolsError as exc:
             # Only a forbidden listing falls back: a deployment key may invoke the kit
             # without mcp-servers:read. A revoked key or an outage stays an error, so the

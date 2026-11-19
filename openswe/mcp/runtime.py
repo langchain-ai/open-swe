@@ -19,12 +19,14 @@ from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langsmith import tracing_context
+from pydantic import ValidationError
 from runtime_api.mcp_secrets import HELD_SESSIONS, McpResult
 
 from mcp.shared.exceptions import MCPError
 from mcp.types import Tool
 from openswe.analytics.posthog import record_mcp_tool
 from openswe.mcp.models import MCPConnection, MCPScope, MCPToolProvenance
+from openswe.mcp.sealed import SealedListing
 from openswe.mcp.transport import MCPCredentialMissing, MCPDiscoveryError, mcp_http_client
 from openswe.prompts import prompt
 from openswe.utils.startup_trace import asubphase
@@ -46,10 +48,14 @@ _MAX_TOOL_PAGES = 50
 _CATALOG_TTL = timedelta(minutes=5)
 _CATALOG_MAX_AGE = timedelta(hours=24)
 _MANAGED_FAILURE_BACKOFF = timedelta(minutes=1)
-# How long a run's start waits on a connection with no listing cached at all.
+# How long a run's start waits to read a connection's cached listing.
 _CATALOG_GRACE = 1.0
+# How long it then waits on LangSmith when nothing was cached. A kit's listing takes
+# seconds (none of 289 in prod on 2026-11-18 took under one), so a run starts without
+# waiting on it, and the listing finishes for the next run.
+_LISTING_GRACE = 0.1
 # Listings that outlasted a run's grace, finishing so the next run finds them.
-_DEFERRED_LISTINGS: set[asyncio.Task[SWRResult[list[dict[str, Any]]]]] = set()
+_DEFERRED_LISTINGS: set[asyncio.Task[SWRResult[object]] | asyncio.Task[object]] = set()
 
 
 class MCPTools(list[BaseTool]):
@@ -109,6 +115,32 @@ class MCPSource:
     list_connections: Callable[[], Awaitable[list[MCPConnection]]]
     get_connection: Callable[[str], Awaitable[MCPConnection | None]]
     authorize: Callable[[], Awaitable[None]] | None = None
+
+    async def catalog(
+        self, record: MCPConnection, *, listing: Callable[[], None] | None = None
+    ) -> SealedListing:
+        """Where ``record``'s tool list is cached: under this owner's namespace, so one
+        person's list (LangSmith builds the ``me`` kit per caller) never reaches another's
+        run. It holds the tools' definitions, encrypted, never the connection's headers.
+        ``listing`` is called if a lookup lists the connection, as the request goes out."""
+        caller = asyncio.current_task()
+        namespace = self.namespace
+
+        async def discover() -> object:
+            async with asubphase(
+                "mcp.discover",
+                mcp_name=record.name,
+                background=asyncio.current_task() is not caller,
+            ):
+                definitions = await discover_tools(record, namespace, listing=listing)
+            return [tool.model_dump(mode="json", exclude_none=True) for tool in definitions]
+
+        digest = hashlib.sha256(
+            json.dumps((namespace, record.name, record.revision)).encode()
+        ).hexdigest()
+        return SealedListing(
+            f"mcp:{digest}", discover, fresh_for=_CATALOG_TTL, max_age=_CATALOG_MAX_AGE
+        )
 
 
 async def _resolve_connection(
@@ -235,7 +267,14 @@ def _discovery_slots() -> asyncio.Semaphore:
     return slots
 
 
-async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> list[Tool]:
+async def discover_tools(
+    record: MCPConnection,
+    namespace: tuple[str, ...],
+    *,
+    listing: Callable[[], None] | None = None,
+) -> list[Tool]:
+    """The connection's tools, listed now; ``listing`` is called as the request goes out,
+    after a failure that is backing off has had its chance to raise."""
     from langgraph_api.cache import cache_get, cache_set
 
     key: str | None = None
@@ -255,6 +294,8 @@ async def discover_tools(record: MCPConnection, namespace: tuple[str, ...]) -> l
             and time() < failure[1]
         ):
             raise MCPDiscoveryError(failure[0])
+    if listing is not None:
+        listing()
     try:
         async with asyncio.timeout(_TIMEOUT_SECONDS), _discovery_slots():
             tools = await _discover_tools(record)
@@ -356,31 +397,10 @@ def _wrap_tool(
     )
 
 
-async def _catalog(source: MCPSource, record: MCPConnection) -> SWRResult[list[dict[str, Any]]]:
-    key = (
-        "mcp:"
-        + hashlib.sha256(
-            json.dumps((source.namespace, record.name, record.revision)).encode()
-        ).hexdigest()
-    )
-    caller = asyncio.current_task()
-
-    async def discover() -> list[dict[str, Any]]:
-        async with asubphase(
-            "mcp.discover", mcp_name=record.name, background=asyncio.current_task() is not caller
-        ):
-            definitions = await discover_tools(record, source.namespace)
-        return [tool.model_dump(mode="json", exclude_none=True) for tool in definitions]
-
-    from langgraph_api.cache import swr
-
-    return await swr(key, discover, fresh_for=_CATALOG_TTL, max_age=_CATALOG_MAX_AGE)
-
-
-def _keep_listing(task: asyncio.Task[SWRResult[list[dict[str, Any]]]]) -> None:
+def _keep_listing(task: asyncio.Task[SWRResult[object]] | asyncio.Task[object]) -> None:
     _DEFERRED_LISTINGS.add(task)
 
-    def finished(done: asyncio.Task[SWRResult[list[dict[str, Any]]]]) -> None:
+    def finished(done: asyncio.Task[SWRResult[object]] | asyncio.Task[object]) -> None:
         _DEFERRED_LISTINGS.discard(done)
         if not done.cancelled() and (error := done.exception()) is not None:
             logger.warning("Deferred MCP discovery failed", exc_info=error)
@@ -392,20 +412,42 @@ async def _cached_definitions(
     source: MCPSource, record: MCPConnection
 ) -> tuple[list[Tool], CatalogOutcome]:
     """The connection's tools for a run. A cached listing comes back at once, fresh or
-    stale (a stale one is listed again in the background), so only a connection with none
-    cached waits, and at most a second (a kit LangSmith builds per caller can take
-    several): past that the run starts without its tools while the listing finishes for
-    the next run."""
-    lookup = asyncio.ensure_future(_catalog(source, record))
+    stale (a stale one is listed again in the background). With none cached, the run waits
+    only until the listing goes to LangSmith (a kit LangSmith builds per caller takes
+    seconds), and starts without the connection's tools while the listing finishes for the
+    next run; a slow cache read is waited on for at most a second."""
+    # Set only when this lookup found nothing cached and lists the connection itself: a
+    # stale hit's background listing starts after the lookup has already returned.
+    listing = asyncio.Event()
+    catalog = await source.catalog(record, listing=listing.set)
+    lookup = asyncio.ensure_future(catalog.lookup())
+    listed = asyncio.ensure_future(listing.wait())
     try:
-        result = await asyncio.wait_for(asyncio.shield(lookup), _CATALOG_GRACE)
-    except TimeoutError:
+        await asyncio.wait(
+            (lookup, listed), timeout=_CATALOG_GRACE, return_when=asyncio.FIRST_COMPLETED
+        )
+        if not lookup.done() and listing.is_set():
+            await asyncio.wait((lookup,), timeout=_LISTING_GRACE)
+    finally:
+        listed.cancel()
+    if not lookup.done():
         _keep_listing(lookup)
         logger.info("MCP catalog deferred past a run's start", extra={"mcp_name": record.name})
         return [], "deferred"
-    return [Tool.model_validate(tool) for tool in result.value], (
-        "hit" if result.status == "fresh" else result.status
-    )
+    result = lookup.result()
+    stored = await SealedListing.open(result.value)
+    try:
+        definitions = (
+            [Tool.model_validate(tool) for tool in stored] if isinstance(stored, list) else None
+        )
+    except ValidationError:
+        definitions = None
+    if definitions is None:
+        # Unreadable (a retired key, a damaged entry): as if nothing were cached.
+        _keep_listing(asyncio.ensure_future(result.mutate()))
+        logger.info("MCP catalog unreadable; listing it again", extra={"mcp_name": record.name})
+        return [], "deferred"
+    return definitions, "hit" if result.status == "fresh" else result.status
 
 
 async def refresh_mcp_catalog(source: MCPSource, name: str) -> None:
@@ -413,9 +455,7 @@ async def refresh_mcp_catalog(source: MCPSource, name: str) -> None:
     record = await source.get_connection(name)
     if record is None:
         return
-    result = await _catalog(source, record)
-    if result.status != "miss":
-        await result.mutate()
+    await (await source.catalog(record)).refresh()
 
 
 async def _load_tools(

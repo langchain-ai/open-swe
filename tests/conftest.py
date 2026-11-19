@@ -490,6 +490,14 @@ async def _close_http_pool() -> AsyncIterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _token_encryption_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every deployment has one: it encrypts sign-ins and the cached managed tools listings."""
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
+
+@pytest.fixture(autouse=True)
 async def _reset_ttl_cache() -> AsyncIterator[None]:
     """Keep the process-global caches from leaking settings, MCP catalogs and PR files between tests."""
     from langgraph_api import cache

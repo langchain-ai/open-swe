@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -12,11 +13,13 @@ import pytest
 from fastapi import HTTPException
 from mcp.types import Tool
 
+from openswe.encryption import decrypt_token
 from openswe.mcp import cards, managed, routes, runtime
 from openswe.mcp.transport import MCPCredentialMissing, MCPDiscoveryError
 from openswe.users.models import User
 
 ORIGINAL_PAGES = managed.ManagedTools._pages
+ORIGINAL_CACHED = managed.ManagedTools._cached
 LINEAR_ID = "01a0f8da-0000-7000-8000-000000000001"
 NOTION_ID = "01a0f8da-0000-7000-8000-000000000002"
 
@@ -67,7 +70,7 @@ def lmt(monkeypatch):
         registered=[],
     )
 
-    async def cached(self, listing):
+    async def cached(self, listing, *, fresh=False):
         return await self._loaders()[listing]()
 
     async def pages(self, path, headers=None):
@@ -309,6 +312,266 @@ async def test_the_built_kit_offers_every_server_and_takes_the_persons_own(monke
         await tools.remove_server(LINEAR_ID)
     await tools.remove_server(added.id)
     assert lmt.posts == [("DELETE", f"{managed.SERVERS_PATH}/{added.id}")]
+
+
+async def test_a_run_names_connectable_services_from_its_owners_cached_list(monkeypatch, lmt):
+    """A run's start names the services its owner could connect from that person's own
+    list, kept up to a day: an old one comes back at once and LangSmith is read again in
+    the background, so a slow listing never holds the run."""
+    from langgraph_api import cache
+
+    monkeypatch.setattr(managed.ManagedTools, "_cached", ORIGINAL_CACHED)
+    tokens = {"alice": "alice-langsmith-token", "carol": "carol-langsmith-token"}
+
+    async def access_token(login):
+        return tokens.get(login)
+
+    monkeypatch.setattr(managed, "langsmith_access_token", access_token)
+    lmt.servers["carol"] = [server(LINEAR_ID, "Linear", connected=False)]
+    alice, carol = managed.PersonalTools("alice"), managed.PersonalTools("carol")
+
+    assert await alice.connectable() == ["Notion", "Exa", "Sentry"]
+    assert await carol.connectable() == ["Linear"]
+    listings = len(lmt.listed_as)
+    lmt.servers["alice"][1]["connected"] = True
+    assert await alice.connectable() == ["Notion", "Exa", "Sentry"]
+    assert len(lmt.listed_as) == listings
+
+    listed = asyncio.Event()
+    fast_pages = managed.ManagedTools._pages
+
+    async def slow_pages(self, path, headers=None):
+        await listed.wait()
+        return await fast_pages(self, path, headers)
+
+    monkeypatch.setattr(managed.ManagedTools, "_pages", slow_pages)
+    now = cache._now_ms
+    monkeypatch.setattr(cache, "_now_ms", lambda: now() + 2 * 60 * 60 * 1000)
+    assert await asyncio.wait_for(alice.connectable(), 1) == ["Notion", "Exa", "Sentry"]
+    listed.set()
+    await asyncio.gather(*(state.task for state in cache._SWR_STATES.values() if state.task))
+    assert await alice.connectable() == ["Exa", "Sentry"]
+    assert await carol.connectable() == ["Linear"]
+    await asyncio.gather(*(state.task for state in cache._SWR_STATES.values() if state.task))
+
+
+async def stored_catalog(person):
+    """What the shared cache holds for the person's kit tools."""
+    from langgraph_api import cache
+
+    [record] = await person.connections()
+    key = cache._swr_cache_key((await person.source().catalog(record)).key)
+    entry = await cache.cache_get(key)
+    return entry["value"] if entry else None
+
+
+async def test_a_run_reads_its_owners_kit_tools_from_their_own_cached_listing(monkeypatch, lmt):
+    """A run's start never waits on LangSmith listing the owner's kit: a cached list, up to a
+    day old, comes back at once and is listed again in the background; with none cached
+    the run starts without the kit's tools as soon as the listing goes out. Each person's
+    list is their own, holds no credential, and Robin lists it again after a change."""
+    from langgraph_api import cache
+
+    tokens = {"alice": "alice-langsmith-token", "carol": "carol-langsmith-token"}
+
+    async def access_token(login):
+        return tokens.get(login)
+
+    monkeypatch.setattr(managed, "langsmith_access_token", access_token)
+    kits = {
+        "alice-langsmith-token": ["linear_list_issues"],
+        "carol-langsmith-token": ["notion_search"],
+    }
+    listings: list[str] = []
+    gate = asyncio.Event()
+
+    async def discover(record):
+        token = record.connection_headers()["Authorization"].removeprefix("Bearer ")
+        listings.append(token)
+        await gate.wait()
+        return [Tool(name=name, input_schema={"type": "object"}) for name in kits[token]]
+
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
+    alice, carol = managed.PersonalTools("alice"), managed.PersonalTools("carol")
+
+    async def names(person, within=0.5):
+        # Well inside the second a slow cache read may take: nothing here waits on LMT.
+        tools = await asyncio.wait_for(runtime.load_mcp_tools(person.source()), within)
+        return sorted(tool.name for tool in tools)
+
+    async def settled():
+        await asyncio.gather(*runtime._DEFERRED_LISTINGS)
+        await asyncio.gather(*(state.task for state in cache._SWR_STATES.values() if state.task))
+
+    # Nothing cached: the run starts without the kit's tools, and the listing finishes.
+    assert await names(alice) == []
+    assert listings == ["alice-langsmith-token"]
+    gate.set()
+    await settled()
+
+    # Cached: no listing at all.
+    assert await names(alice) == ["mcp_lmt_linear_list_issues"]
+    assert listings == ["alice-langsmith-token"]
+
+    # Another person lists their own kit, as themselves, and never sees alice's.
+    assert await names(carol, within=1) == ["mcp_lmt_notion_search"]
+    assert await names(carol) == ["mcp_lmt_notion_search"]
+    assert await names(alice) == ["mcp_lmt_linear_list_issues"]
+    assert listings == ["alice-langsmith-token", "carol-langsmith-token"]
+
+    # The cache holds each list encrypted: ciphertext that decrypts to that person's tool
+    # definitions, never the token the kit was listed with.
+    for person, listed in ((alice, "linear_list_issues"), (carol, "notion_search")):
+        sealed = await stored_catalog(person)
+        assert isinstance(sealed, str) and listed not in sealed
+        plaintext = decrypt_token(sealed)
+        assert [tool["name"] for tool in json.loads(plaintext)] == [listed]
+        assert not any(token in plaintext for token in tokens.values())
+
+    # Stale (an hour old): served at once, and listed again in the background.
+    kits["alice-langsmith-token"].append("linear_create_issue")
+    gate.clear()
+    now = cache._now_ms
+    monkeypatch.setattr(cache, "_now_ms", lambda: now() + 60 * 60 * 1000)
+    assert await names(alice) == ["mcp_lmt_linear_list_issues"]
+    gate.set()
+    await settled()
+    assert await names(alice) == ["mcp_lmt_linear_create_issue", "mcp_lmt_linear_list_issues"]
+
+    # A change Robin makes (connect, disconnect, add, remove) lists the kit again at once.
+    monkeypatch.setattr(cache, "_now_ms", now)
+    kits["alice-langsmith-token"].remove("linear_create_issue")
+    await alice.refresh()
+    assert await names(alice) == ["mcp_lmt_linear_list_issues"]
+    assert await names(carol) == ["mcp_lmt_notion_search"]
+    await settled()
+
+
+async def test_a_cached_kit_listing_that_cannot_be_read_is_listed_again(monkeypatch, lmt):
+    """A list sealed under a key since retired is nothing cached: the run starts without
+    the kit's tools, never failing, and the kit is listed again under the current key.
+    Entries cached before encryption stay under their own keys, for older replicas."""
+    from cryptography.fernet import Fernet
+    from langgraph_api import cache
+
+    listings = 0
+
+    async def discover(record):
+        nonlocal listings
+        listings += 1
+        return [Tool(name="linear_list_issues", input_schema={"type": "object"})]
+
+    monkeypatch.setattr(runtime, "_discover_tools", discover)
+    alice = managed.PersonalTools("alice")
+
+    async def names():
+        tools = await asyncio.wait_for(runtime.load_mcp_tools(alice.source()), 0.5)
+        return [tool.name for tool in tools]
+
+    async def settled():
+        await asyncio.gather(*runtime._DEFERRED_LISTINGS)
+        await asyncio.gather(*(state.task for state in cache._SWR_STATES.values() if state.task))
+
+    await names()
+    await settled()
+    assert await names() == ["mcp_lmt_linear_list_issues"] and listings == 1
+
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    assert await names() == []
+    await settled()
+    assert listings == 2
+    assert await names() == ["mcp_lmt_linear_list_issues"]
+    assert json.loads(decrypt_token(await stored_catalog(alice)))[0]["name"] == "linear_list_issues"
+
+    # Replicas still on the plaintext format keep their own entries during a rollout:
+    # this version neither reads nor overwrites them.
+    [record] = await alice.connections()
+    sealed_key = (await alice.source().catalog(record)).key
+    plaintext_key = sealed_key.removeprefix("sealed-v1:")
+    assert plaintext_key != sealed_key
+    plain = [{"name": "linear_search", "inputSchema": {"type": "object"}}]
+    await cache.swr(plaintext_key, AsyncMock(return_value=plain))
+    await alice.refresh()
+    assert await names() == ["mcp_lmt_linear_list_issues"]
+    assert (await cache.cache_get(cache._swr_cache_key(plaintext_key)))["value"] == plain
+
+
+async def test_managed_tools_listings_are_cached_encrypted(monkeypatch, lmt):
+    """The person's server listing, which also names the services they could connect, is
+    cached encrypted too, and one sealed under a retired key is read from LangSmith again."""
+    from cryptography.fernet import Fernet
+    from langgraph_api import cache
+
+    monkeypatch.setattr(managed.ManagedTools, "_cached", ORIGINAL_CACHED)
+    alice = managed.PersonalTools("alice")
+    assert await alice.connectable() == ["Notion", "Exa", "Sentry"]
+    digest = managed.hashlib.sha256(json.dumps(alice.namespace).encode()).hexdigest()
+    entry = await cache.cache_get(cache._swr_cache_key(f"sealed-v1:lmt:servers:{digest}"))
+    assert isinstance(entry["value"], str) and "Notion" not in entry["value"]
+    assert "Notion" in decrypt_token(entry["value"])
+
+    listed = len(lmt.listed_as)
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    lmt.servers["alice"][1]["connected"] = True
+    assert await alice.connectable() == ["Exa", "Sentry"]
+    assert len(lmt.listed_as) == listed + 1
+
+
+async def test_a_connect_click_asks_langsmith_rather_than_the_cached_listing(monkeypatch, lmt):
+    """Every read takes the cached listing except a connect click, which must not answer
+    "already connected" for a service someone has since disconnected in LangSmith."""
+    monkeypatch.setattr(managed.ManagedTools, "_cached", ORIGINAL_CACHED)
+
+    async def mcp(self, path, use):
+        raise self._mcp_failure(
+            httpx.Response(428, json={"verification_url": "https://smith.langchain.com/c/l"})
+        )
+
+    monkeypatch.setattr(managed.ManagedTools, "_mcp", mcp)
+    alice = managed.PersonalTools("alice")
+    from langgraph_api import cache
+
+    assert (await alice.server(LINEAR_ID)).usable
+    lmt.servers["alice"][0]["connected"] = False
+    listed = len(lmt.listed_as)
+    assert (await alice.server(LINEAR_ID)).usable
+    assert len(lmt.listed_as) == listed
+    assert await alice.connect_link(LINEAR_ID) == managed.ConsentLink(
+        url="https://smith.langchain.com/c/l"
+    )
+    assert len(lmt.listed_as) == listed + 1
+    # The read also updated the cached copy for everything else.
+    assert not (await alice.server(LINEAR_ID)).usable
+
+    # A copy past its day is read from LangSmith once, not twice.
+    lmt.servers["alice"][0]["connected"] = True
+    now = cache._now_ms
+    monkeypatch.setattr(cache, "_now_ms", lambda: now() + 25 * 60 * 60 * 1000)
+    listed = len(lmt.listed_as)
+    assert await alice.connect_link(LINEAR_ID) is None
+    assert len(lmt.listed_as) == listed + 1
+
+
+async def test_a_listing_backing_off_still_reports_its_failure_to_the_run(monkeypatch, lmt):
+    """Not waiting on a listing must not hide a failure that is backing off, which fails
+    before anything goes to LangSmith and which the run's prompt names."""
+    calls = 0
+
+    async def missing(record):
+        nonlocal calls
+        calls += 1
+        request = httpx2.Request("POST", record.url)
+        raise httpx2.HTTPStatusError(
+            "gone", request=request, response=httpx2.Response(404, request=request)
+        )
+
+    monkeypatch.setattr(runtime, "_discover_tools", missing)
+    alice = managed.PersonalTools("alice")
+    for _ in range(2):
+        tools = await asyncio.wait_for(runtime.load_mcp_tools(alice.source()), 0.5)
+        assert list(tools) == []
+        assert tools.failures == ["MCP tool discovery failed (HTTP 404). Check the MCP server URL"]
+    assert calls == 1
 
 
 async def test_an_unreachable_langsmith_leaves_the_run_without_managed_tools(monkeypatch):
