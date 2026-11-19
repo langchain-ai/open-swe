@@ -181,6 +181,7 @@ class DatadogSpans:
             start_time=datetime.fromtimestamp(span.start_ns / 1e9, UTC),
             end_time=datetime.fromtimestamp((span.start_ns + (span.duration_ns or 0)) / 1e9, UTC),
             error=span.get_tag("error.message") or "error" if span.error else None,
+            tags=[] if span.error else ["langsmith:hidden"],
             extra={"metadata": {"datadog_service": span.service, "datadog_name": span.name}},
         )
         cls._posts.put_nowait(run)

@@ -66,8 +66,10 @@ def _install(monkeypatch: pytest.MonkeyPatch) -> object:
     return processor
 
 
+@pytest.mark.parametrize("query_error", [False, True])
 def test_datadogs_spans_of_a_runs_work_are_posted_under_it_off_the_event_loop(
     monkeypatch: pytest.MonkeyPatch,
+    query_error: bool,
 ) -> None:
     processor = _install(monkeypatch)
     posted: list[dict[str, object]] = []
@@ -82,7 +84,9 @@ def test_datadogs_spans_of_a_runs_work_are_posted_under_it_off_the_event_loop(
     with DatadogSpans.under(run):
         pass
     # Children finish first: the query waits for the request it was made in.
-    processor.process_trace([_DatadogSpan(12, 11, "postgres.query")])  # type: ignore[attr-defined]
+    query = _DatadogSpan(12, 11, "postgres.query", **{"error.message": "query failed"})
+    query.error = int(query_error)
+    processor.process_trace([query])  # type: ignore[attr-defined]
     processor.process_trace(  # type: ignore[attr-defined]
         [
             _DatadogSpan(11, 10, "http.request", **{"http.url": "https://x.test/a?token=s"}),
@@ -96,6 +100,10 @@ def test_datadogs_spans_of_a_runs_work_are_posted_under_it_off_the_event_loop(
     assert set(names) == {"http.request https://x.test/a", "postgres.query"}
     assert names["http.request https://x.test/a"]["parent_run_id"] == run.id
     assert names["postgres.query"]["parent_run_id"] == names["http.request https://x.test/a"]["id"]
+    assert names["http.request https://x.test/a"]["tags"] == ["langsmith:hidden"]
+    assert names["postgres.query"]["tags"] == ([] if query_error else ["langsmith:hidden"])
+    assert names["postgres.query"].get("error") == ("query failed" if query_error else None)
+    assert "langsmith:hidden" not in (run.tags or [])
     assert threading.current_thread().name not in posting_threads
 
 
