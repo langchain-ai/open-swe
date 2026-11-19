@@ -611,29 +611,37 @@ async def _update_feedback(
     api_url: str,
     feedback_id: uuid.UUID,
     *,
-    score: float,
+    score: float | None,
+    value: dict[str, list[str]] | None,
     comment: str | None,
 ) -> None:
     # AsyncClient exposes no update_feedback; the sync one runs off-loop.
     client = sync_langsmith_client(api_key, api_url)
-    await asyncio.to_thread(client.update_feedback, feedback_id, score=score, comment=comment)
+    await asyncio.to_thread(
+        client.update_feedback, feedback_id, score=score, value=value, comment=comment
+    )
 
 
 async def create_langsmith_feedback(
     run_id: str,
     key: str,
     *,
-    score: float,
+    score: float | None = None,
+    value: dict[str, list[str]] | None = None,
     comment: str | None = None,
     source_info: dict[str, Any] | None = None,
+    identity: str | None = None,
 ) -> bool:
-    """Create or update deterministic feedback on all configured LangSmith tenants."""
+    """Create or update deterministic feedback on all configured LangSmith tenants.
+
+    ``identity`` replaces ``key`` in the feedback's ID, so one key can hold several rows.
+    """
     configs = _build_langsmith_feedback_clients()
     if not configs:
         logger.warning("No LangSmith API key configured, skipping feedback")
         return False
 
-    feedback_id = _feedback_id(run_id, key)
+    feedback_id = _feedback_id(run_id, identity or key)
     any_success = False
     for api_key, api_url in configs:
         try:
@@ -641,6 +649,7 @@ async def create_langsmith_feedback(
                 run_id=run_id,
                 key=key,
                 score=score,
+                value=value,
                 comment=comment,
                 source_info=source_info,
                 feedback_source_type="api",
@@ -651,7 +660,9 @@ async def create_langsmith_feedback(
         except Exception:  # noqa: BLE001 - feedback already exists; update in place
             pass
         try:
-            await _update_feedback(api_key, api_url, feedback_id, score=score, comment=comment)
+            await _update_feedback(
+                api_key, api_url, feedback_id, score=score, value=value, comment=comment
+            )
             any_success = True
         except Exception:
             logger.exception("Failed to create or update LangSmith feedback for run %s", run_id)

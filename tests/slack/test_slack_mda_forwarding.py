@@ -1979,9 +1979,10 @@ def _reaction(reaction: str, *, removed: bool = False) -> dict[str, JsonValue]:
     }
 
 
+@pytest.mark.parametrize("reaction", ["thumbsup", "bufo-hype"])
 @pytest.mark.parametrize("removed", [False, True])
-async def test_a_feedback_reaction_is_recorded_as_the_webhook_records_it(
-    monkeypatch: pytest.MonkeyPatch, removed: bool
+async def test_any_reaction_is_recorded_as_feedback(
+    monkeypatch: pytest.MonkeyPatch, removed: bool, reaction: str
 ) -> None:
     from openswe.mda_channels import slack_channel_events  # noqa: PLC0415
 
@@ -1991,7 +1992,6 @@ async def test_a_feedback_reaction_is_recorded_as_the_webhook_records_it(
     monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
     app = FastAPI()
     app.include_router(slack_channel_events.router)
-    reaction = next(iter(slack_channel_events.FEEDBACK_REACTIONS))
 
     answered = await _post_endpoint(
         app, _reaction(reaction, removed=removed), signed=True, path="/mda/slack/reactions"
@@ -2007,13 +2007,15 @@ async def test_a_feedback_reaction_is_recorded_as_the_webhook_records_it(
     other.assert_not_awaited()
 
 
-async def test_the_summon_reaction_tags_open_swe_and_any_other_does_nothing(
+async def test_the_summon_reaction_tags_robin_and_is_not_feedback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from openswe.mda_channels import slack_channel_events  # noqa: PLC0415
 
-    summon = AsyncMock()
+    summon, added, taken_back = AsyncMock(), AsyncMock(), AsyncMock()
     monkeypatch.setattr(slack_channel_events, "process_slack_summon_reaction", summon)
+    monkeypatch.setattr(slack_channel_events, "process_slack_reaction_added", added)
+    monkeypatch.setattr(slack_channel_events, "process_slack_reaction_removed", taken_back)
     monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
     app = FastAPI()
     app.include_router(slack_channel_events.router)
@@ -2028,6 +2030,8 @@ async def test_the_summon_reaction_tags_open_swe_and_any_other_does_nothing(
         assert answered.status_code == 200
 
     summon.assert_awaited_once()
+    assert [c.args[0]["reaction"] for c in added.await_args_list] == ["openswe", "tada"]
+    taken_back.assert_not_awaited()
     event = summon.await_args.args[0]
     assert (event.item.channel, event.item.ts) == ("C1", "1.2")
     assert summon.await_args.args[1] == "delivery-7"

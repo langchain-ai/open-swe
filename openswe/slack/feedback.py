@@ -20,6 +20,8 @@ FEEDBACK_REACTIONS: dict[str, float] = {
     "thumbsdown": 0.0,
 }
 
+REACTIONS_FEEDBACK_KEY = "reactions"
+
 # Slack retries a delivery for minutes at most.
 _REACTION_EVENT_TTL = timedelta(days=1)
 
@@ -68,7 +70,7 @@ async def process_slack_reaction(
     added: bool,
 ) -> None:
     reaction = event.get("reaction")
-    if not isinstance(reaction, str) or reaction not in FEEDBACK_REACTIONS:
+    if not isinstance(reaction, str) or not reaction:
         return
 
     item = event.get("item")
@@ -118,23 +120,41 @@ async def process_slack_reaction(
         channel_id, message_ts, user_id, reaction, added=added
     )
 
-    key = _feedback_key(channel_id, user_id, message_ts)
     source_info = {
         "source": "slack_reaction",
         "channel_id": channel_id,
         "message_ts": message_ts,
         "user_id": user_id,
     }
-    score = _score_reactions(active_reactions)
-    if score is None:
-        success = await delete_langsmith_feedback(run_id, key)
-    else:
+    reactions_identity = f"{REACTIONS_FEEDBACK_KEY}:{channel_id}:{user_id}:{message_ts}"
+    if active_reactions:
         success = await create_langsmith_feedback(
+            run_id,
+            REACTIONS_FEEDBACK_KEY,
+            value={"reactions": sorted(active_reactions)},
+            comment=f"Slack reactions from user {user_id}",
+            source_info=source_info,
+            identity=reactions_identity,
+        )
+    else:
+        success = await delete_langsmith_feedback(run_id, reactions_identity)
+    if reaction not in FEEDBACK_REACTIONS:
+        if success:
+            await _mark_event_processed(channel_id, event_id)
+        return
+
+    key = _feedback_key(channel_id, user_id, message_ts)
+    feedback_reactions = active_reactions & FEEDBACK_REACTIONS.keys()
+    score = _score_reactions(feedback_reactions)
+    if score is None:
+        scored = await delete_langsmith_feedback(run_id, key)
+    else:
+        scored = await create_langsmith_feedback(
             run_id,
             key,
             score=score,
             comment=f"Slack reaction feedback from user {user_id}",
-            source_info={**source_info, "reactions": sorted(active_reactions)},
+            source_info={**source_info, "reactions": sorted(feedback_reactions)},
         )
 
     outcome = _outcome_from_score(score, source="slack")
@@ -147,7 +167,7 @@ async def process_slack_reaction(
             extra={"channel_id": channel_id},
         )
 
-    if success:
+    if success and scored:
         await _mark_event_processed(channel_id, event_id)
 
 

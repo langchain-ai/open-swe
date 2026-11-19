@@ -1,6 +1,6 @@
 import importlib
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 
@@ -43,18 +43,44 @@ async def test_reaction_removed_deletes_feedback_when_last_reaction_removed(
 ) -> None:
     await _store_message_mapping("C123", "2.000")
     await SlackMessage.toggle_reaction("C123", "2.000", "U123", "thumbsup", added=True)
-    deleted: dict[str, str] = {}
-
-    async def fake_delete_feedback(run_id: str, key: str) -> bool:
-        deleted["run_id"] = run_id
-        deleted["key"] = key
-        return True
-
-    monkeypatch.setattr(slack_feedback, "delete_langsmith_feedback", fake_delete_feedback)
+    deleted = AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_feedback, "delete_langsmith_feedback", deleted)
 
     await process_slack_reaction_removed(_reaction_event(), event_id="Ev2")
 
-    assert deleted == {"run_id": "run-1", "key": "slack_reaction:C123:U123:2.000"}
+    assert deleted.await_args_list == [
+        call("run-1", "reactions:C123:U123:2.000"),
+        call("run-1", "slack_reaction:C123:U123:2.000"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_any_reaction_is_recorded_as_reactions_feedback_without_a_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _store_message_mapping("C123", "2.000")
+    await SlackMessage.toggle_reaction("C123", "2.000", "U123", "thumbsup", added=True)
+    created = AsyncMock(return_value=True)
+    outcome = AsyncMock()
+    monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", created)
+    monkeypatch.setattr(slack_feedback, "upsert_run_outcome", outcome)
+
+    await process_slack_reaction_added(_reaction_event("bufo-hype"), event_id="EvCustom")
+
+    created.assert_awaited_once_with(
+        "run-1",
+        "reactions",
+        value={"reactions": ["bufo-hype", "thumbsup"]},
+        comment="Slack reactions from user U123",
+        source_info={
+            "source": "slack_reaction",
+            "channel_id": "C123",
+            "message_ts": "2.000",
+            "user_id": "U123",
+        },
+        identity="reactions:C123:U123:2.000",
+    )
+    outcome.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -77,24 +103,16 @@ async def test_conflicting_reactions_clear_feedback(
 ) -> None:
     await _store_message_mapping("C123", "2.000")
     await SlackMessage.toggle_reaction("C123", "2.000", "U123", "thumbsup", added=True)
-    deleted: dict[str, str] = {}
-
-    async def fail_create_feedback(*args: Any, **kwargs: Any) -> bool:
-        raise AssertionError("conflicting reactions must not record a numeric score")
-
-    async def fake_delete_feedback(run_id: str, key: str) -> bool:
-        deleted["run_id"] = run_id
-        deleted["key"] = key
-        return True
-
-    monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", fail_create_feedback)
-    monkeypatch.setattr(slack_feedback, "delete_langsmith_feedback", fake_delete_feedback)
+    created, deleted = AsyncMock(return_value=True), AsyncMock(return_value=True)
+    monkeypatch.setattr(slack_feedback, "create_langsmith_feedback", created)
+    monkeypatch.setattr(slack_feedback, "delete_langsmith_feedback", deleted)
 
     # User adds a thumbsdown alongside the existing thumbsup → conflicting.
     event = {**_reaction_event("thumbsdown"), "type": "reaction_added"}
     await process_slack_reaction_added(event, event_id="EvConflict")
 
-    assert deleted == {"run_id": "run-1", "key": "slack_reaction:C123:U123:2.000"}
+    assert [c.kwargs.get("score") for c in created.await_args_list] == [None]
+    deleted.assert_awaited_once_with("run-1", "slack_reaction:C123:U123:2.000")
 
 
 @pytest.mark.parametrize(
@@ -148,7 +166,9 @@ async def test_automation_reply_feedback_uses_its_own_run_and_triggering_user(
         created.assert_not_awaited()
         return
     key = f"slack_reaction:{route.channel_id}:{reactor}:2.000"
-    created.assert_awaited_once_with(
+    reactions_identity = f"reactions:{route.channel_id}:{reactor}:2.000"
+    assert created.await_count == 2
+    created.assert_awaited_with(
         "run-1",
         key,
         score=1.0,
@@ -164,4 +184,4 @@ async def test_automation_reply_feedback_uses_its_own_run_and_triggering_user(
     await process_slack_reaction_removed(
         {**event, "type": "reaction_removed"}, event_id="EvAutomationRemoved"
     )
-    deleted.assert_awaited_once_with("run-1", key)
+    assert deleted.await_args_list == [call("run-1", reactions_identity), call("run-1", key)]

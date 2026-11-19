@@ -18,7 +18,6 @@ from openswe.incidents import channels as incidents
 from openswe.mda_channels.auth import require_mda_channel
 from openswe.slack.channels import DIRECTORY_EVENTS, SlackChannel
 from openswe.slack.feedback import (
-    FEEDBACK_REACTIONS,
     process_slack_reaction_added,
     process_slack_reaction_removed,
 )
@@ -62,7 +61,7 @@ async def slack_reaction(call: SlackEndpointRequest, background_tasks: Backgroun
     raw = dict(event["payload"])
     reaction = event.get("reaction")
     delivery_id = event["deliveryId"]
-    if reaction in FEEDBACK_REACTIONS:
+    if reaction and reaction != SUMMON_REACTION:
         process = (
             process_slack_reaction_removed if event.get("removed") else process_slack_reaction_added
         )
