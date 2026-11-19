@@ -8,6 +8,7 @@ import {
   agentThreadKeys,
   invalidateAgentThreadLists,
 } from "@/features/agents/lib/queries"
+import { earlyJoins } from "@/lib/earlyJoins"
 import { earlyReads } from "@/lib/earlyReads"
 import { createDashboardClient, dashboardFetch } from "@/lib/langgraph-client"
 import { RunTracker } from "@/lib/perf/streaming"
@@ -38,7 +39,9 @@ export interface AgentThreadStream {
 export function useAgentThreadStream(threadId: string): AgentThreadStream {
   const queryClient = useQueryClient()
   const [runAcceptance] = useState(() =>
-    createRunAcceptanceTracker(earlyReads.newReader(dashboardFetch))
+    createRunAcceptanceTracker(
+      earlyJoins.newReader(earlyReads.newReader(dashboardFetch))
+    )
   )
   // Every request of the hook, run starts included, goes through the client's fetch.
   const [client] = useState(() =>

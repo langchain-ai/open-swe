@@ -707,6 +707,15 @@ async def api_stream_thread_run(
     return await body.stream(thread_id, principal, request)
 
 
+@router.get("/threads/{thread_id}/runs/running/stream")
+async def api_join_running_thread_run(
+    thread_id: str, request: Request, principal: PrincipalDep
+) -> Response:
+    """The run going on the thread, joined before a page opening it has read its head."""
+    thread = await ThreadOnRuntime.readable(thread_id, principal)
+    return await thread.join_running(request)
+
+
 @router.get("/threads/{thread_id}/runs/{run_id}/stream")
 async def api_join_thread_run(
     thread_id: str, run_id: UUID, request: Request, principal: PrincipalDep

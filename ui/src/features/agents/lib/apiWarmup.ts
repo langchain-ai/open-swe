@@ -291,6 +291,11 @@ export function threadRunningRunUrl(threadId: string): string {
   )
 }
 
+/** The join of a running thread's run a press on its row starts (`EarlyJoins`). */
+export function threadRunningJoinUrl(threadId: string): string {
+  return `${agentsLangGraphApiUrl}/threads/${threadId}/runs/running/stream`
+}
+
 /**
  * Inline head script that starts the requests a route needs while the HTML is
  * still parsing and hands each in-flight response to the app's own later call.

@@ -215,6 +215,7 @@ async def test_info_is_mdas_not_this_deployments(mda: Mda, dashboard: Dashboard)
         ("GET", "/info"),
         ("POST", f"/threads/{THREAD}/runs/stream"),
         ("GET", f"/threads/{THREAD}/runs/{RUN}/stream"),
+        ("GET", f"/threads/{THREAD}/runs/running/stream"),
         ("GET", f"/threads/{THREAD}/runs/{RUN}"),
         ("GET", f"/threads/{THREAD}/stream"),
     ],
@@ -235,6 +236,7 @@ async def test_a_signed_out_caller_reaches_nothing(
     "path",
     [
         f"/threads/{THREAD}/runs/{RUN}/stream",
+        f"/threads/{THREAD}/runs/running/stream",
         f"/threads/{THREAD}/runs/{RUN}",
         f"/threads/{THREAD}/runs",
         f"/threads/{THREAD}/stream",
@@ -470,6 +472,69 @@ async def test_a_message_steered_into_someone_elses_run_never_gets_its_token(
     assert response.headers.get("x-robin-steered") == "true"
     assert "ada-run-token" not in response.text
     assert response.json()["kwargs"] == {"stream_mode": ["values"]}
+
+
+@pytest.mark.parametrize(
+    ("configurable", "namespaces"),
+    [
+        pytest.param({}, [("namespace", "")], id="root graph alone"),
+        pytest.param({"__event_streaming_v2": True}, [], id="v3 run, whole"),
+    ],
+)
+async def test_a_page_opening_a_thread_joins_its_running_run_as_the_page_would(
+    mda: Mda,
+    dashboard: Dashboard,
+    configurable: dict[str, JsonValue],
+    namespaces: list[tuple[str, str]],
+) -> None:
+    await _thread(SHARED, status="busy")
+    kwargs = {
+        "stream_mode": ["updates", "messages-tuple", "lifecycle"],
+        "subgraphs": True,
+        "config": {"configurable": {**configurable, "__run_token": "ada-run-token"}},
+    }
+    mda.answers[("GET", f"/threads/{THREAD}/runs")] = lambda _: httpx2.Response(
+        200, json=[{"run_id": RUN, "kwargs": kwargs}]
+    )
+    mda.answers[("GET", f"/threads/{THREAD}/state")] = lambda _: httpx2.Response(
+        200, json={"checkpoint": {"thread_id": THREAD, "checkpoint_id": "c-9"}}
+    )
+    dashboard.login = "bob"
+
+    response = await dashboard.request(
+        "GET", f"/threads/{THREAD}/runs/running/stream", headers={"last-event-id": "-1"}
+    )
+
+    assert response.status_code == 200
+    query = [("cancel_on_disconnect", "0"), *namespaces, ("checkpoint_id", "c-9")]
+    assert response.headers["x-robin-join"] == (
+        f"/threads/{THREAD}/runs/{RUN}/stream?{httpx2.QueryParams(query)}"
+    )
+    [(_, lookup)] = mda.sent("GET", f"/threads/{THREAD}/runs")
+    assert list(lookup.url.params.multi_items()) == [
+        ("status", "running"),
+        ("limit", "1"),
+        ("select", "run_id"),
+        ("select", "kwargs"),
+    ]
+    [(_, head)] = mda.sent("GET", f"/threads/{THREAD}/state")
+    assert head.url.params.get_list("select") == ["checkpoint"]
+    [(pool, joined)] = mda.sent("GET", f"/threads/{THREAD}/runs/{RUN}/stream")
+    assert pool == "stream_http"
+    assert joined.headers["last-event-id"] == "-1"
+    assert list(joined.url.params.multi_items()) == query
+
+
+async def test_a_page_opening_a_thread_with_no_run_going_joins_nothing_early(
+    mda: Mda, dashboard: Dashboard
+) -> None:
+    await _thread(SHARED, status="busy")
+    mda.answers[("GET", f"/threads/{THREAD}/runs")] = lambda _: httpx2.Response(200, json=[])
+
+    response = await dashboard.request("GET", f"/threads/{THREAD}/runs/running/stream")
+
+    assert response.status_code == 204
+    assert mda.sent("GET", f"/threads/{THREAD}/runs/{RUN}/stream") == []
 
 
 async def test_a_streamed_message_keeps_only_the_metadata_the_sdk_reads(

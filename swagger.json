@@ -26661,6 +26661,48 @@
         ]
       }
     },
+    "/dashboard/api/threads/{thread_id}/runs/running/stream": {
+      "get": {
+        "description": "The run going on the thread, joined before a page opening it has read its head.",
+        "operationId": "api_join_running_thread_run_dashboard_api_threads__thread_id__runs_running_stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Join Running Thread Run",
+        "tags": [
+          "dashboard",
+          "threads"
+        ]
+      }
+    },
     "/dashboard/api/threads/{thread_id}/runs/stream": {
       "post": {
         "description": "Start a run as ``/commands`` starts a message, streamed in the runs API's format.",

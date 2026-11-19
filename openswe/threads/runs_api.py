@@ -8,6 +8,7 @@ comes back as its HTTP status, never an SSE error frame, so the SDK can act on i
 ``Location`` and ``Content-Location`` are paths the SDK resolves under its ``apiUrl``.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -20,7 +21,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 
 from openswe.dashboard.ttft import SUBMITTED_AT_HEADER, DashboardClient
-from openswe.dispatch import SERVER_STREAM, RunFormat
+from openswe.dispatch import SERVER_STREAM, V3_STREAMING_CONFIG_KEY, RunFormat
 from openswe.threads.index import IndexedThread
 from openswe.threads.principals import Principal
 from openswe.threads.proxy import ThreadSend, langgraph_proxy_headers
@@ -34,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 # Says the message ``runs/stream`` was sent joined the live run instead of starting one.
 STEERED_HEADER: Final = "x-robin-steered"
+# Names the join a run stream answers, its path under the SDK's ``apiUrl`` and its query.
+JOIN_HEADER: Final = "x-robin-join"
 _RETURNED_RESPONSE_HEADERS: Final = ("content-type", "cache-control")
 _LOOPBACK_TIMEOUT: Final = httpx2.Timeout(30.0, connect=5.0)
 # Loopback streams held open by tabs watching threads from before MDA, apart from the
@@ -48,6 +51,14 @@ _CONFIG_EVENTS: Final = frozenset({b"checkpoints", b"debug"})
 _MESSAGE_METADATA_KEYS: Final = frozenset(
     {"langgraph_checkpoint_ns", "checkpoint_ns", "lc_subagent_tool_call_id"}
 )
+# The thread page's lookup of the run going on a thread, the run it joins.
+_RUNNING_RUN: Final = (
+    ("status", "running"),
+    ("limit", "1"),
+    ("select", "run_id"),
+    ("select", "kwargs"),
+)
+_runs: Final = TypeAdapter(list[dict[str, JsonValue]])
 
 
 class _ClientEvents:
@@ -168,6 +179,70 @@ class _ClientEvents:
         fields = [line for line in lines if line and not line.startswith(b"data:")]
         fields.append(b"data: " + data)
         return newline.join(fields) + newline * 2
+
+
+class _HeadCheckpoint(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    checkpoint_id: str | None = None
+
+
+class _Head(BaseModel):
+    """A thread's head as a ``select=checkpoint`` state read answers it."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    checkpoint: _HeadCheckpoint | None = None
+
+
+class _ServerInfo(BaseModel):
+    """The runtime's ``/info``, as the SDK reads it to join a run."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    flags: dict[str, JsonValue] | None = None
+
+    @property
+    def filters_namespaces(self) -> bool:
+        """Whether a join may ask for the root graph alone and still learn of its
+        subagents: the server streams chosen namespaces and lifecycle events."""
+        flags = self.flags or {}
+        return flags.get("stream_namespaces") is True and flags.get("stream_lifecycle") is True
+
+
+class _RunningRun(BaseModel):
+    """The run going on a thread as the thread page's lookup finds it, its kwargs cut
+    to what a client reads (:meth:`MdaRun.client_view`)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    run_id: str
+    kwargs: dict[str, JsonValue] | None = None
+
+    def join_query(self, server: _ServerInfo, checkpoint_id: str | None) -> httpx2.QueryParams:
+        """The query the SDK's ``useStream`` joins the run with as a thread loads
+        (``#joinFound`` and ``#joinMode``): from the head the load read, never cancelling
+        the run, and of the root graph alone when the server can filter and the run
+        streams its subgraphs with lifecycle events in the shape the SDK reads."""
+        params: list[tuple[str, str | int | float | None]] = [("cancel_on_disconnect", "0")]
+        if server.filters_namespaces and self._streams_subagent_lifecycles():
+            params.append(("namespace", ""))
+        if checkpoint_id is not None:
+            params.append(("checkpoint_id", checkpoint_id))
+        return httpx2.QueryParams(params)
+
+    def _streams_subagent_lifecycles(self) -> bool:
+        kwargs = self.kwargs or {}
+        config = kwargs.get("config")
+        configurable = config.get("configurable") if isinstance(config, dict) else None
+        # A run streaming v3 frames is joined whole: the SDK reads only its run events.
+        if kwargs.get("__protocol_stream_run") is True or (
+            isinstance(configurable, dict) and configurable.get(V3_STREAMING_CONFIG_KEY) is True
+        ):
+            return False
+        modes = kwargs.get("stream_mode")
+        lifecycle = "lifecycle" in modes if isinstance(modes, list) else modes == "lifecycle"
+        return kwargs.get("subgraphs") is True and lifecycle
 
 
 class SdkCommand(BaseModel):
@@ -381,6 +456,51 @@ class ThreadOnRuntime:
             query=httpx2.QueryParams([*query, ("cancel_on_disconnect", "0")]),
             last_event_id=request.headers.get("last-event-id"),
         )
+
+    async def join_running(self, request: Request) -> Response:
+        """Join the run going on the thread as the thread page joins it once its state read
+        and running lookup answer, for a page opening the thread to take before then.
+        :data:`JOIN_HEADER` names the join, and the page takes the stream only when it
+        would ask for the same one. 204 when no run is going on MDA.
+        """
+        if self.thread.runtime != "mda":
+            return Response(status_code=204)
+        thread_path = f"/threads/{self.thread.thread_id}"
+        async with self._client(held=False) as client:
+            try:
+                running, head, (info_status, info, _) = await asyncio.gather(
+                    client.get(f"{thread_path}/runs", params=_RUNNING_RUN),
+                    client.get(f"{thread_path}/state", params=[("select", "checkpoint")]),
+                    RUNTIMES.mda_runtime.info(),
+                )
+            except httpx2.TransportError as exc:
+                raise HTTPException(502, _UNREACHABLE) from exc
+        if running.is_error or head.is_error:
+            return Response(status_code=204)
+        try:
+            runs = [
+                _RunningRun.model_validate(MdaRun.client_view(run))
+                for run in _runs.validate_json(running.content)
+            ]
+            checkpoint = _Head.model_validate_json(head.content).checkpoint
+            server = _ServerInfo.model_validate_json(info) if info_status == 200 else _ServerInfo()
+        except ValidationError:
+            # Without the error: it quotes the run's kwargs, whose context holds the run token.
+            logger.warning(
+                "Could not read the run going on a thread to join it early",
+                extra={"thread_id": self.thread.thread_id},
+            )
+            return Response(status_code=204)
+        if not runs:
+            return Response(status_code=204)
+        path = f"{thread_path}/runs/{runs[0].run_id}/stream"
+        query = runs[0].join_query(server, checkpoint.checkpoint_id if checkpoint else None)
+        joined = await self.stream(
+            path, query=query, last_event_id=request.headers.get("last-event-id")
+        )
+        if joined.status_code == 200:
+            joined.headers[JOIN_HEADER] = f"{path}?{query}"
+        return joined
 
     async def stream(
         self, path: str, *, query: httpx2.QueryParams | str, last_event_id: str | None

@@ -62,9 +62,11 @@ import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { useSidebarThreadSelection } from "@/features/agents/components/SidebarThreadSelection"
 import { DropdownMenuItem } from "@/components/MenuItem"
 import {
+  threadRunningJoinUrl,
   threadRunningRunUrl,
   threadStateUrl,
 } from "@/features/agents/lib/apiWarmup"
+import { earlyJoins } from "@/lib/earlyJoins"
 import { earlyReads } from "@/lib/earlyReads"
 import { readPreference } from "@/lib/streamPreference"
 import {
@@ -563,6 +565,7 @@ export function SidebarThreadRow({
     earlyReads.start(threadStateUrl(item.id))
     if (thread.status === "running") {
       earlyReads.start(threadRunningRunUrl(item.id))
+      earlyJoins.start(item.id, threadRunningJoinUrl(item.id))
     }
   }
 
