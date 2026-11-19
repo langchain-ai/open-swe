@@ -26,6 +26,8 @@ from openswe.human_review.review_queue import ReviewQueue
 from openswe.human_review.standard import Origin, RequestResult, review_blockers
 from openswe.slack.client import GitHubPrRef
 from openswe.users import User
+from openswe.utils.startup_trace import apm_span
+from openswe.utils.timing import RequestTimings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["human-review"])
@@ -146,18 +148,25 @@ async def api_request_human_review(
 ) -> RequestResult:
     pr_ref = _pr_ref(owner, repo, number)
     login = str(session["sub"])
-    requester = await User.for_login("github", login)
-    if requester is None:
-        raise HTTPException(403, "No Robin user record for this login")
-    token = await require_repo_access_for_user(login, f"{owner}/{repo}")
-    options = body or HumanReviewRequestBody()
-    inline_summary = options.inline_summary
-    if inline_summary is not None and not inline_summary.strip():
-        raise HTTPException(422, "inline_summary must not be blank")
-    result = await DashboardReviewRequest(pr_ref, Origin(requester=requester), token).request(
-        channel=options.channel,
-        inline_summary=inline_summary,
-    )
+    span_tags = {"pull_request.url": pr_ref.url}
+    details: dict[str, object] = {"pull_request_url": pr_ref.url}
+    with RequestTimings.logged("Dashboard review request finished", details):
+        with apm_span("human_review.requester", span_tags):
+            requester = await User.for_login("github", login)
+        if requester is None:
+            raise HTTPException(403, "No Robin user record for this login")
+        with apm_span("human_review.repo_access", span_tags):
+            token = await require_repo_access_for_user(login, f"{owner}/{repo}")
+        options = body or HumanReviewRequestBody()
+        inline_summary = options.inline_summary
+        if inline_summary is not None and not inline_summary.strip():
+            raise HTTPException(422, "inline_summary must not be blank")
+        result = await DashboardReviewRequest(pr_ref, Origin(requester=requester), token).request(
+            channel=options.channel,
+            inline_summary=inline_summary,
+        )
+        details["success"] = result.success
+        details["reused"] = result.reused
     if not result.success:
         if result.retry_after_seconds is not None:
             raise HTTPException(

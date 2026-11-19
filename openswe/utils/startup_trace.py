@@ -8,8 +8,8 @@ and replayed once a parent span exists.
 
 import logging
 import time
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, nullcontext
+from collections.abc import AsyncIterator, Iterator
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -18,6 +18,8 @@ from typing import Any
 from langchain_core.runnables.config import ensure_config
 from langsmith.run_helpers import get_current_run_tree
 from langsmith.run_trees import RunTree
+
+from openswe.utils.timing import RequestTimings
 
 logger = logging.getLogger(__name__)
 
@@ -40,20 +42,30 @@ _PHASES: dict[str, list[_Phase]] = {}
 _CURRENT: ContextVar[tuple[str, str] | None] = ContextVar("startup_phase", default=None)
 
 
-def apm_span(name: str, tags: dict[str, Any]):
-    """Open a Datadog APM span, or a no-op when ddtrace is not installed."""
+@contextmanager
+def apm_span(name: str, tags: dict[str, Any]) -> Iterator[None]:
+    """Open a Datadog APM span (a no-op without ddtrace), timing it into any
+    ``RequestTimings`` being logged, since traces are sampled and logs are not."""
+    span: AbstractContextManager[object] = nullcontext()
     try:
         from ddtrace.trace import tracer  # pyright: ignore[reportMissingImports]
     except ImportError:
         try:
             from ddtrace import tracer  # pyright: ignore[reportMissingImports]
         except ImportError:
-            return nullcontext()
-    span = tracer.trace(name, service="openswe", resource=name)
-    for key, value in tags.items():
-        if value is not None:
-            span.set_tag(key, value)
-    return span
+            tracer = None
+    if tracer is not None:
+        traced = tracer.trace(name, service="openswe", resource=name)
+        for key, value in tags.items():
+            if value is not None:
+                traced.set_tag(key, value)
+        span = traced
+    start = time.perf_counter()
+    try:
+        with span:
+            yield
+    finally:
+        RequestTimings.record(name, (time.perf_counter() - start) * 1000)
 
 
 def _open(thread_id: str, name: str, metadata: dict[str, Any]) -> _Phase | None:
