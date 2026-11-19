@@ -147,6 +147,10 @@ def test_design_qa_declares_a_review_step_the_platform_accepts() -> None:
 
     assert manifest.review is not None
     assert (manifest.review.writes, manifest.review.browser) == (["captures"], True)
+    # Reviews leave Design QA out of pull requests that change no frontend.
+    assert manifest.review.covers(["smith-frontend/src/Settings.tsx", "README.md"])
+    assert not manifest.review.covers(["docs/guide.md", "smith-go/main.go"])
+    assert not manifest.review.covers(["smith-frontend/src/Settings.test.tsx"])
 
 
 def test_a_review_writes_only_under_its_own_pull_request() -> None:
@@ -263,6 +267,44 @@ async def test_a_review_of_a_private_repository_works_for_the_apps_its_workspace
         assert (found.repository, found.number) == ("acme/widgets", 7)
         # The release the admin approved, never whatever the owner released since.
         assert releases.await_args is not None and releases.await_args.args == ({app: release},)
+
+
+@pytest.mark.parametrize(
+    ("files", "works"),
+    [
+        (["web/src/Page.tsx", "docs/guide.md"], True),
+        (["docs/guide.md"], False),
+        # GitHub wouldn't list the files: the app stays out, recorded as a failure to retry.
+        (None, False),
+    ],
+)
+async def test_a_review_leaves_out_an_app_whose_paths_the_pull_request_misses(
+    monkeypatch: pytest.MonkeyPatch, files: list[str] | None, works: bool
+) -> None:
+    app, release = uuid4(), uuid4()
+    settings = WorkspaceSettings({"review_apps": [{"app": str(app), "release": str(release)}]})
+    monkeypatch.setattr(
+        review_apps_module, "cached_workspace_settings", AsyncMock(return_value=settings)
+    )
+    monkeypatch.setattr(
+        review_apps_module.Repository, "get", AsyncMock(return_value=Mock(private=True))
+    )
+    review = {"instructions": "Capture.", "writes": ["captures"], "paths": ["**/*.tsx"]}
+    manifest = PluginManifest.model_validate(_manifest(review, {"captures": {"write": "app"}}))
+    monkeypatch.setattr(
+        PluginApps,
+        "releases",
+        AsyncMock(return_value=[Mock(app=app, id=release, manifest=manifest)]),
+    )
+    monkeypatch.setattr(ReviewApps, "changed_files", AsyncMock(return_value=files))
+
+    found = await ReviewApps.of(_review())
+    triaged = await ReviewApps.triaged(_review())
+
+    assert (found is not None) is works
+    assert triaged is not None
+    assert [a.id for a in triaged.passed] == ([] if works else [app])
+    assert triaged.files_read is (files is not None)
 
 
 async def test_save_app_document_refuses_other_apps_and_undeclared_collections(
@@ -428,7 +470,7 @@ class _Preview:
         monkeypatch.setattr(
             webhook_common, "is_repo_auto_review_enabled", AsyncMock(return_value=auto_review)
         )
-        monkeypatch.setattr(ReviewApps, "of", AsyncMock(return_value=_apps(browser=browses)))
+        monkeypatch.setattr(ReviewApps, "triaged", AsyncMock(return_value=_apps(browser=browses)))
         monkeypatch.setattr(
             webhook_common, "workspace_for_repo_config", AsyncMock(return_value="w")
         )
@@ -1164,19 +1206,27 @@ async def test_a_retried_job_never_starts_a_second_run(monkeypatch: pytest.Monke
 
 
 @pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+@pytest.mark.parametrize("failure", ["dispatch", "files"])
 async def test_a_preview_run_that_failed_to_start_is_retried_by_the_queue(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     preview = _Preview(monkeypatch)
     dispatch = preview._dispatch
-    preview.dispatch.side_effect = RuntimeError("LangGraph is down")
+    working = _apps()
+    if failure == "dispatch":
+        preview.dispatch.side_effect = RuntimeError("LangGraph is down")
+    else:
+        # GitHub wouldn't list the files, so the browsing app's paths couldn't be checked.
+        unread = ReviewApps((), "acme/widgets", 7, working.apps, files_read=False)
+        monkeypatch.setattr(ReviewApps, "triaged", AsyncMock(return_value=unread))
     await PreviewReady.run(_check_passed())
     job = preview.jobs.pop(next(iter(preview.jobs)))
 
-    # The job raises, so the queue runs it again later.
-    with pytest.raises(RuntimeError):
+    # The job raises, so the queue runs it again later rather than mark the commit done.
+    with pytest.raises(Exception):  # noqa: B017, PT011 - each failure raises its own kind
         await PreviewReady.start_job(job)
     preview.dispatch.side_effect = dispatch
+    monkeypatch.setattr(ReviewApps, "triaged", AsyncMock(return_value=working))
     await PreviewReady.start_job(job)
 
     assert len(preview.runs) == 1

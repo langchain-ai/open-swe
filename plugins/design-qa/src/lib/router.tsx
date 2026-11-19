@@ -8,11 +8,13 @@ import {
   type ReactNode,
 } from "react"
 
-import { parseRoute, routePath, type Route } from "./route"
+import { parseRoute, routePath, type InboxRoute, type Route } from "./route"
 
 interface Router {
   path: string
   route: Route
+  /** The inbox tab and page last shown, which going back to the inbox returns to. */
+  inbox: InboxRoute
   navigate: (route: Route) => void
 }
 
@@ -25,6 +27,17 @@ const RouterContext = createContext<Router | null>(null)
 export function RouterProvider({ children }: { children: ReactNode }) {
   const host = usePluginHost()
   const [path, setPath] = useState(host.context.path)
+  const route = parseRoute(path)
+  const [inbox, setInbox] = useState<InboxRoute>(
+    route.page === "inbox"
+      ? route
+      : { page: "inbox", scope: "review-requested", index: 0 }
+  )
+  if (
+    route.page === "inbox" &&
+    (route.scope !== inbox.scope || route.index !== inbox.index)
+  )
+    setInbox(route)
   useEffect(
     () =>
       host.on((event) => {
@@ -32,14 +45,14 @@ export function RouterProvider({ children }: { children: ReactNode }) {
       }),
     [host]
   )
-  const navigate = (route: Route) => {
-    const next = routePath(route)
+  const navigate = (to: Route) => {
+    const next = routePath(to)
     if (next === path) return
     setPath(next)
     void host.nav.setPath(next)
   }
   return (
-    <RouterContext value={{ path, route: parseRoute(path), navigate }}>
+    <RouterContext value={{ path, route, inbox, navigate }}>
       {children}
     </RouterContext>
   )

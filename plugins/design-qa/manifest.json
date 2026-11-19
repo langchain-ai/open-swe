@@ -1,10 +1,59 @@
 {
   "name": "design-qa",
   "displayName": "Design QA",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Compare the saved before and after screenshots of your pull requests, and ask the agent about a change.",
-  "sidebar": { "label": "Design QA", "icon": "images" },
-  "permissions": ["storage", "github:read", "agent"],
-  "collections": { "captures": { "write": "app" } },
-  "review": { "writes": ["captures"], "browser": true }
+  "sidebar": {
+    "label": "Design QA",
+    "icon": "images"
+  },
+  "permissions": [
+    "storage",
+    "github:read",
+    "agent"
+  ],
+  "collections": {
+    "captures": {
+      "write": "app"
+    }
+  },
+  "review": {
+    "writes": [
+      "captures"
+    ],
+    "browser": true,
+    "paths": [
+      "**/*.tsx",
+      "**/*.jsx",
+      "**/*.ts",
+      "**/*.js",
+      "**/*.mjs",
+      "**/*.vue",
+      "**/*.svelte",
+      "**/*.astro",
+      "**/*.css",
+      "**/*.scss",
+      "**/*.sass",
+      "**/*.less",
+      "**/*.html",
+      "**/*.svg",
+      "**/*.png",
+      "**/*.jpg",
+      "**/*.jpeg",
+      "**/*.webp",
+      "**/*.gif",
+      "**/*.woff",
+      "**/*.woff2",
+      "**/tailwind.config.*",
+      "!**/*.test.*",
+      "!**/*.spec.*",
+      "!**/*.stories.*",
+      "!**/*.d.ts",
+      "!**/__tests__/**",
+      "!**/__mocks__/**",
+      "!**/tests/**",
+      "!**/e2e/**",
+      "!**/scripts/**"
+    ]
+  }
 }

@@ -1,7 +1,7 @@
 import type { PluginHost, PullRequest } from "@openswe/plugin-sdk"
 import { describe, expect, it } from "vitest"
 
-import { DesignQa } from "./queries"
+import { DesignQa, keys as queryKeys } from "./queries"
 
 const REPOSITORY = "acme/web"
 
@@ -59,7 +59,8 @@ describe("DesignQa.inbox", () => {
       host([key(7, 1), key(7, 2), key(9, 1), ...others], [7, 8, 9, 1599])
     )
 
-    const inbox = await qa.inbox("review-requested")
+    const search = await qa.search("review-requested")
+    const inbox = await qa.inbox(search.pulls)
 
     expect(
       inbox.items.map(({ pull, run }) => [pull.number, run?.id ?? null])
@@ -71,4 +72,37 @@ describe("DesignQa.inbox", () => {
     ])
     expect(inbox.incomplete).toBe(false)
   })
+})
+
+it("reads captures and GitHub only for the pull requests of one page", async () => {
+  const read: string[] = []
+  const qa = DesignQa.of(host([key(7, 1), key(9, 1)], [7, 8, 9]))
+  const captures = (repository: string) => {
+    read.push(repository)
+    return qa.repositoryCaptures(repository)
+  }
+  const search = await qa.search("mine")
+
+  const inbox = await qa.inbox(search.pulls.slice(1), captures)
+
+  expect(inbox.items.map(({ pull }) => pull.number)).toEqual([8, 9])
+  expect(read).toEqual([REPOSITORY])
+})
+
+it("keys an inbox page by when GitHub last updated each pull request", () => {
+  const pull = {
+    repository: REPOSITORY,
+    number: 7,
+    title: "Old",
+    url: "",
+    draft: false,
+    author: null,
+    createdAt: null,
+    updatedAt: "2026-11-18T10:00:00Z",
+  }
+  expect(queryKeys.inboxPage("mine", [pull])).not.toEqual(
+    queryKeys.inboxPage("mine", [
+      { ...pull, updatedAt: "2026-11-18T11:00:00Z" },
+    ])
+  )
 })

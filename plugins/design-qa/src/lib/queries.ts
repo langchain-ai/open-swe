@@ -4,12 +4,19 @@ import {
   type JsonObject,
   type PluginHost,
   type PullRequest,
+  type PullRequestSearch,
   type PullRequestSummary,
   type ReviewOutcome,
   type StoredDocument,
 } from "@openswe/plugin-sdk"
 import { usePluginHost } from "@openswe/plugin-sdk/react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  keepPreviousData,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { useEffect } from "react"
 
 import {
@@ -23,8 +30,8 @@ import {
 } from "./capture"
 import { PixelChange } from "./pixelChange"
 import { repositoryOf, type PullRequestRef } from "./pullRequest"
-
-export type InboxScope = "review-requested" | "mine"
+import { InboxOrder, type InboxPreferences } from "./inboxOrder"
+import type { InboxScope } from "./route"
 
 /** The most documents one storage query returns. */
 const CAPTURE_PAGE = 500
@@ -56,15 +63,37 @@ export interface InboxItem {
   outcome: ReviewOutcome | null
 }
 
+/** One page of the inbox. */
 export interface Inbox {
   items: InboxItem[]
-  /** Whether some pull requests may be missing: GitHub left some out, or would not give one. */
+  /** Whether some pull requests may be missing: GitHub would not give one. */
   incomplete: boolean
+}
+
+/** A repository's latest capture and capture outcome of each pull request, by number. */
+export interface RepositoryCaptures {
+  runs: Map<number, FrontendReviewRun>
+  outcomes: Map<number, ReviewOutcome>
 }
 
 export const keys = {
   repositories: ["repositories"] as const,
-  inbox: (scope: InboxScope) => ["inbox", scope] as const,
+  inboxSearch: (scope: InboxScope) => ["inbox", "search", scope] as const,
+  inboxPages: ["inbox", "page"] as const,
+  inboxPage: (scope: InboxScope, pulls: readonly PullRequestSummary[]) =>
+    [
+      "inbox",
+      "page",
+      scope,
+      // A pull request GitHub updated, such as a new title or head, reads again.
+      ...pulls.map(
+        ({ repository, number, updatedAt }) =>
+          `${repository}#${number}@${updatedAt ?? ""}`
+      ),
+    ] as const,
+  repositoryCaptures: (repository: string) =>
+    ["inbox", "captures", repository] as const,
+  preferences: ["preferences"] as const,
   runs: (pr: PullRequestRef) => ["runs", pr.owner, pr.repo, pr.number] as const,
   run: (pr: PullRequestRef, id: string) =>
     ["run", pr.owner, pr.repo, pr.number, id] as const,
@@ -235,50 +264,92 @@ export class DesignQa {
 
   /**
    * Open pull requests asking the person (or a team of theirs) for review, or
-   * their own, including those that have not been captured.
+   * their own, as GitHub's search lists them: no captures read yet.
    */
-  async inbox(scope: InboxScope): Promise<Inbox> {
-    const search = await this.host.pulls.search({
+  search(scope: InboxScope): Promise<PullRequestSearch> {
+    return this.host.pulls.search({
       role: scope === "mine" ? "author" : "review-requested",
     })
-    const repositories = [
-      ...new Set(search.pulls.map(({ repository }) => repository)),
-    ]
-    const captures = new Map<string, Map<number, FrontendReviewRun>>()
-    const outcomes = new Map<string, Map<number, ReviewOutcome>>()
-    // Bound host traffic even when a search spans many repositories.
-    for (let offset = 0; offset < repositories.length; offset += 5) {
+  }
+
+  /** The person's own inbox preferences, kept private to them. */
+  private preferenceStore() {
+    return this.host.storage.collection<"inbox", JsonObject>("preferences")
+  }
+
+  async preferences(): Promise<InboxPreferences> {
+    return InboxOrder.read(
+      (await this.preferenceStore().get("inbox"))?.document
+    )
+  }
+
+  async savePreferences(preferences: InboxPreferences): Promise<void> {
+    await this.preferenceStore().put("inbox", {
+      pageSize: preferences.pageSize,
+      sort: preferences.sort,
+    })
+  }
+
+  /**
+   * Whether the review skipped Design QA's work on pull request `number` and
+   * nothing was ever captured for it, as for a change with no frontend files.
+   */
+  static skipped(found: RepositoryCaptures | undefined, number: number) {
+    return (
+      found?.outcomes.get(number)?.status === "skipped" &&
+      !found.runs.has(number)
+    )
+  }
+
+  async repositoryCaptures(repository: string): Promise<RepositoryCaptures> {
+    const [runs, outcomes] = await Promise.all([
+      this.latestRunByPull(repository),
+      this.latestOutcomes(repository),
+    ])
+    return { runs, outcomes }
+  }
+
+  /**
+   * One page of searched pull requests with their latest captures, including
+   * those without one; `captures` reads each repository's, so a caller can
+   * keep them between pages.
+   */
+  async inbox(
+    pulls: readonly PullRequestSummary[],
+    captures: (repository: string) => Promise<RepositoryCaptures> = (
+      repository
+    ) => this.repositoryCaptures(repository)
+  ): Promise<Inbox> {
+    const repositories = [...new Set(pulls.map(({ repository }) => repository))]
+    const read = new Map(
       await Promise.all(
-        repositories.slice(offset, offset + 5).map(async (repository) => {
-          captures.set(repository, await this.latestRunByPull(repository))
-          outcomes.set(repository, await this.latestOutcomes(repository))
-        })
+        repositories.map(
+          async (repository) =>
+            [repository, await captures(repository)] as const
+        )
       )
-    }
-    const items: InboxItem[] = []
-    let incomplete = search.incomplete
-    for (let offset = 0; offset < search.pulls.length; offset += 5) {
-      const page = await Promise.all(
-        search.pulls.slice(offset, offset + 5).map(async (summary) => {
-          const { repository, number } = summary
-          const run = captures.get(repository)?.get(number) ?? null
-          // Search already supplies the uncaptured PR's identity and title.
-          const current = run
-            ? await this.currentPull(repository, number)
-            : undefined
-          if (run && current === undefined) incomplete = true
-          if (current && current.state !== "open") return null
-          return {
-            repository,
-            pull: current ?? summary,
-            run,
-            outcome: outcomes.get(repository)?.get(number) ?? null,
-          }
-        })
-      )
-      for (const item of page) if (item) items.push(item)
-    }
-    return { items, incomplete }
+    )
+    let incomplete = false
+    const items = await Promise.all(
+      pulls.map(async (summary) => {
+        const { repository, number } = summary
+        const found = read.get(repository)
+        const run = found?.runs.get(number) ?? null
+        // Search already supplies the uncaptured PR's identity and title.
+        const current = run
+          ? await this.currentPull(repository, number)
+          : undefined
+        if (run && current === undefined) incomplete = true
+        if (current && current.state !== "open") return null
+        return {
+          repository,
+          pull: current ?? summary,
+          run,
+          outcome: found?.outcomes.get(number) ?? null,
+        }
+      })
+    )
+    return { items: items.filter((item) => item !== null), incomplete }
   }
 
   async runs(pr: PullRequestRef): Promise<PullRequestRuns> {
@@ -350,11 +421,11 @@ export function useShareRepositories() {
   })
 }
 
-export function useInbox(scope: InboxScope) {
+export function useInboxSearch(scope: InboxScope) {
   const qa = useDesignQa()
   return useQuery({
-    queryKey: keys.inbox(scope),
-    queryFn: () => qa.inbox(scope),
+    queryKey: keys.inboxSearch(scope),
+    queryFn: () => qa.search(scope),
     staleTime: 60_000,
     // Review requests come and go on GitHub, which tells the app nothing.
     refetchInterval: 5 * 60_000,
@@ -363,8 +434,94 @@ export function useInbox(scope: InboxScope) {
 }
 
 /**
- * Reads the inbox again, once things settle, whenever a review saves or
- * changes a capture in one of `repositories`.
+ * Each repository's latest captures and outcomes, by repository, in the cache
+ * an inbox page reads from; `pending` until every one has loaded.
+ */
+export function useRepositoryCaptures(repositories: readonly string[]) {
+  const qa = useDesignQa()
+  return useQueries({
+    queries: repositories.map((repository) => ({
+      queryKey: keys.repositoryCaptures(repository),
+      queryFn: () => qa.repositoryCaptures(repository),
+      staleTime: 60_000,
+    })),
+    combine: (results) => ({
+      byRepository: new Map(
+        results.flatMap((result, index) =>
+          result.data ? [[repositories[index] ?? "", result.data] as const] : []
+        )
+      ),
+      pending: results.some((result) => result.isPending),
+      error: results.find((result) => result.error)?.error ?? null,
+    }),
+  })
+}
+
+/** How many pull requests a page shows and in what order, saved for the person as they change it. */
+export function useInboxPreferences() {
+  const host = usePluginHost()
+  const qa = DesignQa.of(host)
+  const queryClient = useQueryClient()
+  const query = useQuery({
+    queryKey: keys.preferences,
+    queryFn: () => qa.preferences(),
+    staleTime: Infinity,
+  })
+  const save = useMutation({
+    mutationFn: (next: InboxPreferences) => qa.savePreferences(next),
+    onMutate: (next) => {
+      const previous = queryClient.getQueryData<InboxPreferences>(
+        keys.preferences
+      )
+      queryClient.setQueryData(keys.preferences, next)
+      return { previous }
+    },
+    onError: (error, _next, context) => {
+      queryClient.setQueryData(keys.preferences, context?.previous)
+      void host.ui.toast({
+        title: "Could not save your inbox settings",
+        description: errorMessage(error),
+        intent: "error",
+      })
+    },
+  })
+  const preferences = query.data ?? InboxOrder.defaults
+  return {
+    preferences,
+    change: (update: Partial<InboxPreferences>) =>
+      save.mutate({ ...preferences, ...update }),
+  }
+}
+
+/** The captures of one inbox page's pull requests, keeping each repository's read between pages. */
+export function useInboxPage(
+  scope: InboxScope,
+  pulls: readonly PullRequestSummary[]
+) {
+  const qa = useDesignQa()
+  const queryClient = useQueryClient()
+  return useQuery({
+    queryKey: keys.inboxPage(scope, pulls),
+    queryFn: () =>
+      qa.inbox(pulls, (repository) =>
+        queryClient.fetchQuery({
+          queryKey: keys.repositoryCaptures(repository),
+          queryFn: () => qa.repositoryCaptures(repository),
+          staleTime: 60_000,
+        })
+      ),
+    enabled: pulls.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+    // As the search does: a head can move without GitHub's search noticing yet.
+    refetchInterval: 5 * 60_000,
+    refetchOnWindowFocus: true,
+  })
+}
+
+/**
+ * Reads the inbox's captures again, once things settle, whenever a review
+ * saves or changes a capture in one of `repositories`; GitHub's search stays.
  */
 export function useInboxChanges(repositories: readonly string[]) {
   const qa = useDesignQa()
@@ -375,7 +532,10 @@ export function useInboxChanges(repositories: readonly string[]) {
     const changed = () => {
       clearTimeout(timer)
       timer = setTimeout(() => {
-        void queryClient.invalidateQueries({ queryKey: ["inbox"] })
+        void queryClient.invalidateQueries({
+          queryKey: ["inbox", "captures"],
+        })
+        void queryClient.invalidateQueries({ queryKey: keys.inboxPages })
       }, INBOX_SETTLE_MS)
     }
     const stops = watched

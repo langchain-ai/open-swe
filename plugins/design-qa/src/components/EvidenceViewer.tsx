@@ -2,6 +2,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Slider } from "@langchain/macaw-components/Slider"
+import { cn } from "@langchain/macaw-components/utils/cn"
 import { useEffect, useRef, useState, type PointerEvent } from "react"
 
 import type { FrontendAnnotation, FrontendScenario } from "../lib/capture"
@@ -41,7 +42,14 @@ function Screenshot({
         <div
           role="img"
           aria-label={`${label}: ${annotation.title}`}
-          className="pointer-events-none absolute border-2 border-focus"
+          className={cn(
+            "pointer-events-none absolute border-2",
+            annotation.severity === "error"
+              ? "border-error"
+              : annotation.severity === "warning"
+                ? "border-warning"
+                : "border-focus"
+          )}
           style={{
             left: `${(annotation.x / image.width) * 100}%`,
             top: `${(annotation.y / image.height) * 100}%`,
@@ -259,7 +267,7 @@ function LoadedEvidence({
   return (
     <div role="region" aria-label="Visual comparison" className="min-w-0">
       {annotation && (
-        <div className="flex flex-col gap-space-2 border-y border-default bg-surface-level-3 px-space-4 py-space-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-space-2 border-t border-default bg-surface-level-3 px-space-4 py-space-2 sm:flex-row sm:items-start sm:justify-between">
           <p role="status" className="text-xs text-secondary">
             <span className="font-medium text-primary">{annotation.title}</span>
             {" · "}

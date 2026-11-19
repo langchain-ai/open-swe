@@ -35,10 +35,40 @@ export interface PixelRect {
   height: number
 }
 
+/** How serious a note is: `error` breaks the design system or the page, `warning` looks off. */
+export type Severity = "error" | "warning" | "info"
+
 /** What the AI assessment noted about one area of a scenario's screenshots. */
 export interface FrontendAnnotation extends PixelRect {
   title: string
   body: string
+  severity: Severity
+}
+
+/** One place the change departs from the design system. */
+export interface DesignSystemFinding {
+  severity: Exclude<Severity, "info">
+  title: string
+  body: string
+  /** Where the design system says so: a document and section, a component or a token. */
+  rule: string
+  /** The file and line in the diff, when the finding is in code. */
+  location: string | null
+  /** The scenario whose screenshots show it, when one does. */
+  scenario: string | null
+}
+
+/** The review's check of every visual change against the repository's design system. */
+export interface DesignSystemReview {
+  /** The documents, skills and packages it checked against; empty when the repository has none. */
+  sources: string[]
+  findings: DesignSystemFinding[]
+}
+
+/** How risky the visual change is, from 1 (low) to 5 (high), as Robin's code review scores it. */
+export interface RiskAssessment {
+  score: 1 | 2 | 3 | 4 | 5
+  reason: string
 }
 
 /** One page or interaction state, captured on the base preview and the pull request's. */
@@ -69,7 +99,12 @@ export interface FrontendScenario {
 
 export interface FrontendReport {
   production_url: string | null
+  /** A few short points, one per line starting with `- `. */
   summary: string
+  /** Null for captures saved before reviews scored risk. */
+  risk: RiskAssessment | null
+  /** Null for captures saved before reviews checked the design system. */
+  design_system: DesignSystemReview | null
   ai_review_status: "not_run" | "running" | "complete" | "failed"
   /** The private thread the AI assessment ran in, for `nav.openThread`. */
   assessment_thread_id: string | null
@@ -140,6 +175,10 @@ class Fields {
     return options.find((option) => option === this.found[key]) ?? or
   }
 
+  has(key: string): boolean {
+    return this.found[key] != null
+  }
+
   isTrue(key: string): boolean {
     return this.found[key] === true
   }
@@ -199,6 +238,10 @@ export class StoredCapture {
           : {
               production_url: reported.text("production_url"),
               summary: reported.text("summary") ?? "",
+              risk: StoredCapture.risk(reported.fields("risk")),
+              design_system: reported.has("design_system")
+                ? StoredCapture.designSystem(reported.fields("design_system"))
+                : null,
               ai_review_status: reported.oneOf(
                 "ai_review_status",
                 ["not_run", "running", "complete", "failed"],
@@ -246,6 +289,41 @@ export class StoredCapture {
     return new Date(Number.parseInt(hex.slice(0, 12), 16)).toISOString()
   }
 
+  private static risk(found: Fields): RiskAssessment | null {
+    const score = found.count("score")
+    if (score === null || !Number.isInteger(score) || score < 1 || score > 5)
+      return null
+    return {
+      score: score as RiskAssessment["score"],
+      reason: found.text("reason") ?? "",
+    }
+  }
+
+  private static designSystem(found: Fields): DesignSystemReview {
+    return {
+      sources: found.texts("sources"),
+      findings: found.list("findings").flatMap((value) => {
+        const finding = Fields.of(value)
+        const title = finding.text("title")
+        if (title === null) return []
+        return [
+          {
+            severity: finding.oneOf(
+              "severity",
+              ["error", "warning"],
+              "warning"
+            ),
+            title,
+            body: finding.text("body") ?? "",
+            rule: finding.text("rule") ?? "",
+            location: finding.text("location"),
+            scenario: finding.text("scenario"),
+          },
+        ]
+      }),
+    }
+  }
+
   private static scenario(value: JsonValue, index: number): FrontendScenario {
     const found = Fields.of(value)
     const path = found.text("path") ?? "/"
@@ -270,7 +348,18 @@ export class StoredCapture {
         const rect = box.rect()
         const title = box.text("title")
         return rect && title !== null
-          ? [{ ...rect, title, body: box.text("body") ?? "" }]
+          ? [
+              {
+                ...rect,
+                title,
+                body: box.text("body") ?? "",
+                severity: box.oneOf(
+                  "severity",
+                  ["error", "warning", "info"],
+                  "info"
+                ),
+              },
+            ]
           : []
       }),
       mask_rects: found

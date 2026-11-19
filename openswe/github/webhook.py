@@ -1576,7 +1576,7 @@ class PreviewReady:
         that commit: the thread and run it queued, or ``None`` when no app the review works
         for looks at the preview."""
         # Imported here: it loads the agent stack, which the web app never imports.
-        from openswe.review_apps.apps import ReviewApps
+        from openswe.review_apps.apps import ChangedFilesUnavailable, ReviewApps
 
         head_sha = (pr.get("head") or {}).get("sha", "")
         base_sha = (pr.get("base") or {}).get("sha", "")
@@ -1600,7 +1600,10 @@ class PreviewReady:
             re_review=False,
         )
         configurable["reviewer_event"] = "preview_ready"
-        apps = await ReviewApps.of(RunConfig.parse(configurable))
+        apps = await ReviewApps.triaged(RunConfig.parse(configurable))
+        if apps is not None and apps.may_browse:
+            # Not knowing whether an app applies isn't knowing it doesn't: the queue retries.
+            raise ChangedFilesUnavailable(f"{repo_config['owner']}/{repo_config['name']}#{number}")
         if apps is None or not apps.browses:
             # No app this review works for looks at the preview.
             return None

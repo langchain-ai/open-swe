@@ -7372,7 +7372,7 @@
         "type": "object"
       },
       "ReviewStep": {
-        "description": "What the app has a pull request's review do for it, once a workspace adds it to reviews.\n\nThe review follows ``instructions`` beside its own, writes only the collections in\n``writes`` (each app-written, so people cannot forge what it saves), and gets the\nthread's browser when ``browser`` asks for it.",
+        "description": "What the app has a pull request's review do for it, once a workspace adds it to reviews.\n\nThe review follows ``instructions`` beside its own, writes only the collections in\n``writes`` (each app-written, so people cannot forge what it saves), and gets the\nthread's browser when ``browser`` asks for it. With ``paths``, glob patterns where\n``**`` spans folders and a leading ``!`` excludes, it does this only for a pull\nrequest that changes a file one pattern matches and no ``!`` pattern does.",
         "properties": {
           "browser": {
             "default": false,
@@ -7384,6 +7384,16 @@
             "minLength": 1,
             "title": "Instructions",
             "type": "string"
+          },
+          "paths": {
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Paths",
+            "type": "array"
           },
           "writes": {
             "items": {

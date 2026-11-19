@@ -51,6 +51,8 @@ const notes = host.storage.collection<string, { text: string }>("notes", { repos
 await notes.put("n1", { text: "hi" })
 await host.github("acme/app").file("README.md", "main")
 const [person] = await host.people.get(["ada"])
+const newer = await host.app.newerRelease() // { number, version, newPermissions } or null
+if (newer) await host.app.update() // the person confirms; the frame reloads on it
 ```
 
 React bindings live in `@openswe/plugin-sdk/react` (`PluginHostProvider`, `useHostContext`, `useDashboardTheme`), and a Yjs provider for live rooms in `@openswe/plugin-sdk/yjs` (`RoomProvider`).

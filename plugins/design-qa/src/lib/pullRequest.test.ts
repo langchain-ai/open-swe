@@ -49,7 +49,24 @@ it("keeps the pull request and selected run in the app's path", () => {
     parseRoute("/acme/app/12?run=00000000-0000-0000-0000-000000000001")
   ).toEqual(route)
   expect(parseRoute("/acme/app/12")).toEqual({ ...route, run: null })
-  expect(parseRoute("/acme/app/12/runs")).toEqual({ page: "inbox" })
-  expect(parseRoute("/")).toEqual({ page: "inbox" })
-  expect(parseRoute("/acme/app/pulls")).toEqual({ page: "inbox" })
+  const requested = { page: "inbox", scope: "review-requested", index: 0 }
+  expect(parseRoute("/acme/app/12/runs")).toEqual(requested)
+  expect(parseRoute("/")).toEqual(requested)
+  expect(parseRoute("/acme/app/pulls")).toEqual(requested)
+})
+
+it("keeps the inbox tab and page in the app's path", () => {
+  const paths = {
+    "/": { page: "inbox", scope: "review-requested", index: 0 },
+    "/requested/3": { page: "inbox", scope: "review-requested", index: 2 },
+    "/mine": { page: "inbox", scope: "mine", index: 0 },
+    "/mine/2": { page: "inbox", scope: "mine", index: 1 },
+  } as const
+  for (const [path, route] of Object.entries(paths)) {
+    expect(routePath(route)).toBe(path)
+    expect(parseRoute(path)).toEqual(route)
+  }
+  expect(parseRoute("/requested")).toEqual(paths["/"])
+  expect(parseRoute("/mine/0")).toEqual(paths["/"])
+  expect(parseRoute("/mine/2/3")).toMatchObject({ page: "pull" })
 })

@@ -54,6 +54,20 @@ export function pullRequestContext(
     headSha: run.head_sha,
     currentHeadSha: current.headSha ?? null,
     buildVerification: run.report?.build_verification ?? "unverified",
+    risk: run.report?.risk
+      ? {
+          score: run.report.risk.score,
+          reason: clip(run.report.risk.reason, 300),
+        }
+      : null,
+    designSystemFindings:
+      run.report?.design_system?.findings.slice(0, 5).map((finding) => ({
+        severity: finding.severity,
+        title: clip(finding.title, 120),
+        rule: clip(finding.rule, 160),
+        location: finding.location ? clip(finding.location, 160) : null,
+        scenario: finding.scenario,
+      })) ?? null,
   }
 }
 

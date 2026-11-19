@@ -148,7 +148,7 @@ export function ComparisonViewport({
   }
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-md border border-default bg-surface-level-2">
+    <div className="min-w-0 overflow-hidden border-y border-default bg-surface-level-2">
       <div className="flex flex-wrap items-center justify-between gap-space-2 border-b border-default p-space-2">
         <GroupedTabs
           size="sm"
@@ -188,8 +188,13 @@ export function ComparisonViewport({
               aria-description={`${canPan ? "Drag to pan or use the arrow keys to scroll. " : ""}Plus and minus zoom. Zero fits the screenshot.`}
               tabIndex={0}
               className={cn(
-                "overflow-auto overscroll-contain bg-surface-level-3 outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--border-focus)]",
-                canPan && (dragging ? "cursor-grabbing" : "cursor-grab")
+                "bg-surface-level-3 outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--border-focus)]",
+                canPan
+                  ? cn(
+                      "overflow-auto",
+                      dragging ? "cursor-grabbing" : "cursor-grab"
+                    )
+                  : "overflow-hidden"
               )}
               style={{
                 height: `clamp(180px, ${((viewport.paneWidth || width) * height) / width}px, min(60vh, 560px))`,

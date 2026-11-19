@@ -183,6 +183,13 @@ export class PluginHost {
     setTitle: (title: string | null) => settle(this.api.setTitle(title)),
   }
 
+  /** The app itself: whether a newer release is out, and updating to it. */
+  readonly app = {
+    newerRelease: () => settle(this.api.newerRelease()),
+    /** Resolves whether the person updated; when they do, the frame reloads on the new release. */
+    update: () => settle(this.api.updateApp()),
+  }
+
   readonly storage = {
     /**
      * One collection of JSON documents, in one scope: private to the person,

@@ -34,6 +34,7 @@ import { useRouter } from "../lib/router"
 import { ReportView } from "./ReportView"
 import { CaptureAction } from "./CaptureAction"
 import { ShareRepositories } from "./ShareRepositories"
+import { UpdateBanner } from "./UpdateBanner"
 
 /** One pull request's saved Design QA runs. */
 export function PullRequestPage({
@@ -44,7 +45,7 @@ export function PullRequestPage({
   runId: string | null
 }) {
   const host = usePluginHost()
-  const { navigate } = useRouter()
+  const { inbox, navigate } = useRouter()
   const label = pullRequestLabel(pr)
   useTitle(clip(label, MAX_LABEL))
   const runs = useRuns(pr)
@@ -70,6 +71,7 @@ export function PullRequestPage({
 
   return (
     <main className="mx-auto flex w-full max-w-[1500px] flex-col gap-space-5 p-space-5 max-sm:p-space-3">
+      <UpdateBanner />
       <header className="flex flex-col gap-space-3">
         <Button
           size="sm"
@@ -77,7 +79,7 @@ export function PullRequestPage({
           variant="plain"
           className="self-start"
           leftDecorator={ArrowLeftIcon}
-          onClick={() => navigate({ page: "inbox" })}
+          onClick={() => navigate(inbox)}
         >
           Design QA
         </Button>

@@ -115,3 +115,86 @@ describe("StoredCapture.read", () => {
     expect(StoredCapture.createdAt("latest")).toBeNull()
   })
 })
+
+describe("StoredCapture.read assessment", () => {
+  const read = (report: Record<string, unknown>) =>
+    StoredCapture.read({
+      key: "pulls/7/019a6a5c-7e00-7abc-8def-0123456789ab",
+      updatedAt: null,
+      document: {
+        report: { summary: "- Tabs restyled", scenarios: [], ...report },
+      },
+    }).report
+
+  it("reads the risk, the design system check and each note's severity", () => {
+    const report = read({
+      risk: { score: 4, reason: "Hand-rolled dropdown replaces Macaw Select." },
+      design_system: {
+        sources: ["smith-frontend/DESIGN.md", "Macaw docs"],
+        findings: [
+          {
+            severity: "error",
+            title: "Hand-rolled dropdown",
+            rule: "Macaw · Select",
+            location: "src/Filters.tsx:42",
+            scenario: "filters",
+          },
+          { title: "Spacing off-scale", severity: "bogus" },
+          { severity: "error" },
+        ],
+      },
+      scenarios: [
+        {
+          id: "filters",
+          annotations: [
+            {
+              x: 1,
+              y: 2,
+              width: 3,
+              height: 4,
+              title: "Dropdown",
+              severity: "error",
+            },
+            { x: 1, y: 2, width: 3, height: 4, title: "Gap" },
+          ],
+        },
+      ],
+    })
+
+    expect(report?.risk).toEqual({
+      score: 4,
+      reason: "Hand-rolled dropdown replaces Macaw Select.",
+    })
+    expect(report?.design_system?.sources).toEqual([
+      "smith-frontend/DESIGN.md",
+      "Macaw docs",
+    ])
+    expect(report?.design_system?.findings).toEqual([
+      {
+        severity: "error",
+        title: "Hand-rolled dropdown",
+        body: "",
+        rule: "Macaw · Select",
+        location: "src/Filters.tsx:42",
+        scenario: "filters",
+      },
+      {
+        severity: "warning",
+        title: "Spacing off-scale",
+        body: "",
+        rule: "",
+        location: null,
+        scenario: null,
+      },
+    ])
+    expect(
+      report?.scenarios[0]?.annotations.map(({ severity }) => severity)
+    ).toEqual(["error", "info"])
+  })
+
+  it("leaves captures saved before reviews scored them unscored", () => {
+    const report = read({ risk: { score: 9 } })
+    expect(report?.risk).toBeNull()
+    expect(report?.design_system).toBeNull()
+  })
+})

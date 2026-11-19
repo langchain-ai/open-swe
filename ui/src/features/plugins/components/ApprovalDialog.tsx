@@ -6,6 +6,7 @@ import {
   DialogTitle,
 } from "@langchain/macaw-components/Dialog"
 
+import { PermissionList } from "@/features/plugins/components/PluginsSettings"
 import { RepositoryPicker } from "@/features/plugins/components/RepositoryPicker"
 import type { InstalledPlugin } from "@/features/plugins/lib/api"
 import type { Answer, Approval } from "@/features/plugins/lib/approval"
@@ -52,6 +53,27 @@ export function ApprovalDialog({
               plugin={plugin}
               pick={approval.pick}
               armed={armed}
+              onAnswer={onAnswer}
+            />
+          </>
+        ) : approval?.kind === "update" ? (
+          <>
+            <DialogTitle>
+              Update {name} to #{approval.release.number}?
+            </DialogTitle>
+            <DialogDescription>
+              {approval.newPermissions.length
+                ? `You're on #${plugin.version.number}. The new release also asks for:`
+                : `You're on #${plugin.version.number}. The new release asks for nothing new.`}
+            </DialogDescription>
+            {approval.newPermissions.length > 0 && (
+              <PermissionList permissions={[...approval.newPermissions]} />
+            )}
+            <Answers
+              armed={armed}
+              confirm={
+                approval.newPermissions.length ? "Approve and update" : "Update"
+              }
               onAnswer={onAnswer}
             />
           </>

@@ -7,15 +7,16 @@ export interface LoadedImage {
 }
 
 /**
- * `blob` decoded as an image, with its natural size and an object URL that is
- * revoked when the blob changes or the component unmounts.
+ * `blob` decoded as an image, with its natural size and an object URL. While a
+ * new blob decodes, such as the same file read again, the last image stays, so
+ * a refetch doesn't flash a loading state; each URL is revoked once replaced or
+ * on unmount.
  */
 export function useImage(blob: Blob | undefined): {
   image?: LoadedImage
   error?: string
 } {
   const [state, setState] = useState<{
-    blob: Blob
     image?: LoadedImage
     error?: string
   }>()
@@ -27,27 +28,29 @@ export function useImage(blob: Blob | undefined): {
     element.src = url
     element.decode().then(
       () => {
-        if (current)
-          setState({
-            blob,
-            image: {
-              url,
-              width: element.naturalWidth,
-              height: element.naturalHeight,
-            },
-          })
+        if (!current) return URL.revokeObjectURL(url)
+        setState({
+          image: {
+            url,
+            width: element.naturalWidth,
+            height: element.naturalHeight,
+          },
+        })
       },
       () => {
-        if (current)
-          setState({ blob, error: "The screenshot could not be read." })
+        URL.revokeObjectURL(url)
+        if (current) setState({ error: "The screenshot could not be read." })
       }
     )
     return () => {
       current = false
-      URL.revokeObjectURL(url)
     }
   }, [blob])
-  return blob && state?.blob === blob ? state : {}
+  const shown = state?.image?.url
+  useEffect(() => {
+    if (shown) return () => URL.revokeObjectURL(shown)
+  }, [shown])
+  return blob ? (state ?? {}) : {}
 }
 
 /** Whether the element has come within 200px of the viewport; it stays true once it has. */

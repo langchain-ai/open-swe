@@ -41,7 +41,7 @@ export function CaptureAction({
       (value) => value && { ...value, outcome: next }
     )
     client.setQueriesData<Inbox>(
-      { queryKey: ["inbox"] },
+      { queryKey: keys.inboxPages },
       (value) =>
         value && {
           ...value,
@@ -61,7 +61,9 @@ export function CaptureAction({
         client.cancelQueries({ queryKey: ["inbox"] }),
       ])
       const previous = client.getQueryData<PullRequestRuns>(keys.runs(pr))
-      const inboxes = client.getQueriesData<Inbox>({ queryKey: ["inbox"] })
+      const inboxes = client.getQueriesData<Inbox>({
+        queryKey: keys.inboxPages,
+      })
       update({
         id: "requesting",
         head_sha: "",

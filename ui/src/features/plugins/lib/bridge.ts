@@ -6,6 +6,7 @@
  * Cap'n Web exposes a target's prototype methods and nothing else.
  */
 import type {
+  AppRelease,
   AttachmentType,
   CollectionApi,
   ChatScope,
@@ -124,6 +125,10 @@ export interface BridgeHost {
   toast: (toast: Toast) => void
   /** The page's title, before " · Open SWE"; `null` is the plugin's name. */
   setTitle: (title: string | null) => void
+  /** The app's newest release when it's newer than the one running; `null` otherwise. */
+  newerRelease: () => Promise<AppRelease | null>
+  /** Asks the person to update to the newest release; resolves whether they did. */
+  updateApp: () => Promise<boolean>
   /** Whether to open `url`: only while the plugin is on screen, and outside GitHub only once the person agrees. */
   confirmLink: (url: string) => Promise<boolean>
   /** Shows the person a picker and shares what they choose; resolves to it, `[]` if they cancel. */
@@ -766,6 +771,14 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     return this.#budget.run(() =>
       this.#host().setTitle(optionalText(title, "title", 120) ?? null)
     )
+  }
+
+  newerRelease(): Promise<AppRelease | null> {
+    return this.#budget.run(() => this.#host().newerRelease())
+  }
+
+  updateApp(): Promise<boolean> {
+    return this.#budget.run(() => this.#host().updateApp())
   }
 
   people(logins: Array<string>) {

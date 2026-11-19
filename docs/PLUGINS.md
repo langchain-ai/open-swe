@@ -105,7 +105,7 @@ The manifest is a JSON script inside the bundle, read when a version is publishe
 | `sidebar.icon` | One of `puzzle-piece`, `notebook`, `file-text`, `book-open`, `kanban`, `chart-bar`, `chat-circle`, `calendar`, `lightbulb`, `images`, `siren`, `robot`. |
 | `permissions` | What the plugin may ask for; see below. |
 | `collections` | Optional rules for storage collections, by name: `{ "captures": { "write": "app" } }`; see [Who writes a collection](#who-writes-a-collection). |
-| `review` | Optional work pull request reviews do for the app: `{ "instructions": "…", "writes": ["captures"], "browser": true }`; see [Review steps](#review-steps). |
+| `review` | Optional work pull request reviews do for the app: `{ "instructions": "…", "writes": ["captures"], "browser": true, "paths": ["**/*.tsx"] }`; see [Review steps](#review-steps). |
 
 ### Permissions
 
@@ -214,7 +214,11 @@ Other navigation:
 - `host.ui.setTitle(title)` shows `title` beside the plugin's name in the bar above it, and names the browser tab "title · Open SWE".
   Up to 120 characters; `null` clears it, and the tab goes back to the plugin's name.
 
-The web UI asks the person in dialogs it draws over the plugin: the repository picker and link confirmations.
+- `host.app.newerRelease()` resolves to the app's newest release (`{ number, version, newPermissions }`) when the person runs an older one, or `null`; `host.context.plugin.release` is the number of the one running.
+  `host.app.update()` asks the person to update to it, approving any `newPermissions`, and resolves whether they did; when they do, the frame reloads on the new release.
+  Use them for an "update available" notice, since people rarely visit Settings → Apps to update.
+
+The web UI asks the person in dialogs it draws over the plugin: the repository picker, link confirmations and updates.
 The plugin can neither cover nor imitate them, and their approve buttons work only after a moment on screen.
 
 A plugin behaves like a tab.
@@ -341,7 +345,8 @@ An app can have pull request reviews do work for it, such as screenshotting a fr
 "review": {
   "instructions": "Screenshot the routes the diff changes on the preview and on the base…",
   "writes": ["captures"],
-  "browser": true
+  "browser": true,
+  "paths": ["**/*.tsx", "**/*.css", "!**/*.test.*"]
 }
 ```
 
@@ -355,6 +360,10 @@ An app can have pull request reviews do work for it, such as screenshotting a fr
   When the pull request closes, merged or not, Robin deletes what reviews saved under its `pulls/<number>/` in these collections, with the files; a document a person created or changed stays, as does anything in the app's other collections.
 - `browser` gives the review the thread's LangSmith browser.
   The browser never reaches the review's sandbox, and signs in only to the domains an instance admin lists under **Defaults → Review browser**, with the one MCP tool named there; sessions install only on LangSmith sites.
+- `paths`, optional, at most 64 glob patterns, limits the step to pull requests that change a matching file: `**` spans folders, and a pattern starting with `!` excludes what it matches, whatever else matches it.
+  A review of any other pull request leaves the app out, records its outcome as `skipped` without running its instructions, and starts no run for its preview.
+  Robin reads the changed files as the GitHub App and judges the first 3,000, all GitHub lists.
+  When GitHub won't answer even after retrying, the app is left out too, with its outcome recorded as `failed` so a person can retry it.
 
 A workspace admin adds apps to reviews in **Settings → Review → Apps in reviews**, or with `manage_review_apps`.
 Reviews follow the release that was newest when the admin added the app, so a later release changes no review until an admin updates it, and only on private repositories, whose previews run only code the organization's members pushed.

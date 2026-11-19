@@ -67,6 +67,15 @@ export type PluginPermission =
 
 export type Theme = "light" | "dark"
 
+/** The app's newest release, when it's newer than the one running. */
+export interface AppRelease {
+  number: number
+  /** Its manifest's `version`. */
+  version: string
+  /** What it asks for that the running release doesn't, which the person approves when updating. */
+  newPermissions: PluginPermission[]
+}
+
 export interface HostContext {
   protocol: number
   plugin: {
@@ -74,6 +83,8 @@ export interface HostContext {
     name: string
     displayName: string
     version: string
+    /** The number of the release running, which a newer one has a higher number than. */
+    release: number
     permissions: PluginPermission[]
   }
   /** The person using the plugin. */
@@ -501,6 +512,14 @@ export interface HostApi extends RpcTarget {
   toast(toast: Toast): Promise<void>
   /** Shows `title` beside the plugin's name above its frame and names the browser tab "<title> · Open SWE"; `null` clears it. */
   setTitle(title: string | null): Promise<void>
+  /** The app's newest release when the person runs an older one; `null` when they're up to date. */
+  newerRelease(): Promise<AppRelease | null>
+  /**
+   * Asks the person, in a dialog the web UI draws, to update to the newest
+   * release, approving any new permissions; resolves whether they did. An
+   * update reloads the frame on the new release.
+   */
+  updateApp(): Promise<boolean>
   /** Profiles for GitHub logins, in the order asked; at most 100 per call. */
   people(logins: string[]): Promise<Person[]>
   /**

@@ -13,6 +13,8 @@ from openswe.threads.store import THREADS
 
 REVIEW_OUTCOMES = "review_outcomes"
 OutcomeStatus = Literal["queued", "complete", "blocked", "failed", "skipped"]
+PASSED_REASON = "The pull request changes no file this app reviews, so Robin skipped it."
+UNREAD_REASON = "GitHub wouldn't list the pull request's files, so Robin couldn't tell whether this app applies. Retry once GitHub answers."
 
 
 class ReviewOutcome(BaseModel):
@@ -70,6 +72,19 @@ class ReviewOutcomes:
         # A fast run can save its result before dispatch returns. Never replace it.
         await self.put(
             ReviewOutcome(id=run_id, head_sha=head_sha, check=check, status="queued"),
+            create=True,
+        )
+
+    async def passed(self, run_id: str, head_sha: str, *, files_read: bool) -> None:
+        """The review left the app out: the pull request changes none of its ``paths``, or,
+        without ``files_read``, GitHub wouldn't list its files, which a retry may fix."""
+        await self.put(
+            ReviewOutcome(
+                id=run_id,
+                head_sha=head_sha,
+                status="skipped" if files_read else "failed",
+                reason=PASSED_REASON if files_read else UNREAD_REASON,
+            ),
             create=True,
         )
 

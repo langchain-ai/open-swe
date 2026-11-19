@@ -1,118 +1,112 @@
-Design QA saves matched before/after screenshots for visual review.
+Design QA saves before/after screenshots of a pull request's frontend and checks every visual change against the repository's design system, as a design system engineer would.
 
-Capture only visual frontend changes, once a successful deployment or deployment-bot comment links a preview serving the reviewed head commit.
-A building or deploying preview may serve an earlier commit and does not count.
-If the diff has no visual frontend changes, record `skipped` with that reason.
-If a current preview cannot be verified, record `blocked` with the missing prerequisite.
-Always record an outcome with `record_app_review_outcome`; never silently skip capture work.
+## Outcome
 
-1. Find the latest successful preview deployment for the reviewed head commit, using current deployment records or the latest updated deployment-bot comment, not an older comment or a guessed URL.
-   Open its link and verify it loads before capturing.
-   Find its base: the site built from the default branch that shares the preview's data.
-   The workspace's review guidelines name the base when there is one; without a base, record `blocked` and explain that the workspace needs a base URL.
-1. If the pages need a sign-in, sign the browser in to the base's host and to the preview's host.
-1. Pick the pages and interaction states the diff changes, at most ten.
-   For each, open the same route on the base and on the preview at one viewport size, such as 1440×900, reach the same state, and take a viewport screenshot of each with `shoot`, below, one side per run: `return await shoot('settings-before')` saves `/workspace/design-qa/settings-before.png`.
-   Don't take full-page screenshots: pages of different heights can't be compared.
-1. Look at each pair with `read_file` for what changed and anything that looks wrong; Design QA measures how many pixels differ itself.
-   Never note a difference that comes from when a screenshot was taken rather than from the diff.
-1. Save the capture once, with `save_app_document`: collection `captures`, key `pulls/<number>/`, the document below, and `files` naming every screenshot you refer to.
+Always record one with `record_app_review_outcome`:
+
+- `skipped`: nothing to capture.
+  The diff changes nothing visible, or the changed frontend has no preview, or the review guidelines name no base for it.
+- `blocked`: something fixable.
+  The preview is deploying, failed or doesn't serve the head commit, a sign-in failed, or the guidelines name no base at all.
+- `failed`: a capture or save error.
+- `complete`: only after saving at least one matched pair.
+
+## Steps
+
+1. **Preview and base.**
+   Use the head commit's latest successful preview (deployment records or the newest deployment-bot comment, never a guess) and the base the review guidelines name, signing in to both if needed.
+1. **Design system.**
+   Before looking at the change, read in full and list in `design_system.sources`:
+   - every `DESIGN.md`, at the root and in the changed app, and the docs they link;
+   - UI guidance in `AGENTS.md`;
+   - design, UI or Macaw skills in `.agents/skills` or `.claude/skills`, and `macaw-design`;
+   - the component library's docs and tokens, for Macaw `docs/*.md` and `dist/catalog.json` of `@langchain/macaw-components` and `@langchain/macaw-tokens`, else `langchain-ai/macaw-design-system` via `gh`.
+1. **Check.**
+   Hold every changed frontend line, then every screenshot, to the design system:
+   - documented components, variants and sizes, not hand-rolled copies or style overrides;
+   - semantic tokens for color, spacing, radius, type, shadow and motion, not raw hex, off-scale or arbitrary values;
+   - icons, hover, focus-visible, disabled, loading, empty and error states, light and dark, contrast, layout patterns and copy.
+
+   Judge only what the diff changes.
+1. **Shoot.**
+   For up to ten changed pages or states, reach the same state on both sides at one viewport, such as 1440×900, and run `return await shoot('<id>-before')` (`-after` on the preview) to save `/workspace/design-qa/<id>-before.png`, never a full page.
+1. **Record.**
+   For up to three states whose motion matters (a popover, menu or dialog opening, a hover, a transition), `browser_record` `start` with `path` `/workspace/design-qa/<id>-before.mp4` (`-after` on the preview), interact, wait a second, `stop`; under 20 seconds, no passwords.
+1. **Compare** each pair with `read_file`, ignoring timing differences.
+1. **Score risk** from 1 to 5, as Robin's code review does: 1 none or tiny and conforming, 2 small and conforming, 3 noticeable or with design system warnings, 4 violations or a visible regression, 5 broken or inaccessible.
+1. **Save** once with `save_app_document`: collection `captures`, key `pulls/<number>/`, `files` mapping each file name to its path, and a document like this:
 
 ```json
-{
-  "status": "complete",
-  "auth_mode": "dummy",
-  "base_url": "https://base.example.com",
-  "head_url": "https://pr-123.preview.example.com",
-  "base_sha": "<the base commit>",
-  "head_sha": "<the head commit you reviewed>",
-  "report": {
-    "summary": "What changed visually, and anything that looks wrong, in a few sentences.",
-    "scenarios": [
-      {
-        "id": "settings",
-        "title": "Settings page",
-        "path": "/settings",
-        "before_url": "settings-before.png",
-        "after_url": "settings-after.png",
-        "width": 1440,
-        "height": 900,
-        "actions": ["Open the account menu"],
-        "annotations": [
-          { "x": 120, "y": 64, "width": 300, "height": 40, "title": "Label clipped", "body": "The new label is cut off at this width." }
-        ]
-      }
-    ]
-  }
-}
+{"status": "complete", "auth_mode": "dummy", "base_url": "https://base.example", "head_url": "https://pr-1.example", "base_sha": "…", "head_sha": "…",
+ "report": {
+  "summary": "- Members menu is a hand-rolled dropdown, not Macaw Select\n- Selected tab uses the accent background",
+  "risk": {"score": 4, "reason": "A hand-rolled dropdown replaces Macaw's Select."},
+  "video_status": "recorded",
+  "design_system": {"sources": ["DESIGN.md", "macaw-design skill"],
+   "findings": [{"severity": "error", "title": "Hand-rolled dropdown", "body": "A div with raw colors.", "rule": "Macaw · Select", "location": "src/Members.tsx:42", "scenario": "settings"}]},
+  "scenarios": [{"id": "settings", "title": "Settings page", "path": "/settings", "before_url": "settings-before.png", "after_url": "settings-after.png", "width": 1440, "height": 900,
+   "actions": ["Open the account menu"], "before_video_url": "settings-before.mp4", "after_video_url": "settings-after.mp4",
+   "annotations": [{"x": 120, "y": 64, "width": 300, "height": 40, "title": "Label clipped", "body": "Cut off at this width.", "severity": "error"}]}]}}
 ```
 
-Use `files` such as `{"settings-before.png": "/workspace/design-qa/settings-before.png", "settings-after.png": "/workspace/design-qa/settings-after.png"}`.
+- `summary`: at most four `- ` lines of 15 words or fewer, problems first.
+- `risk.reason`: one sentence of 20 words or fewer.
+- `findings`, worst first: `error` breaks a written rule or looks broken, such as a hand-rolled component, raw or off-scale value, missing focus, poor contrast, clipping or a broken theme; `warning` is only inconsistent.
+  `rule` cites the design system, `location` is the diff's `file:line`, and `scenario` is an `id`.
+  Empty `sources` means the repository has no design system, so check against the surrounding UI.
+- `annotations`: at most three areas of the after screenshot, with `severity` `error`, `warning` or `info`.
+- `path` is the real browser path and query; for a modal, the parent route with the steps in `actions`.
+- `auth_mode` is `dummy` if you signed in; names use letters, digits, `.`, `_`, `-`; ids are unique; `width` and `height` are the viewport; add `layout_warnings` when the sides can't match.
 
-Record `complete` only after saving at least one matched pair and its files.
-Record `blocked` for missing prerequisites or `failed` for a capture/save error, with a concrete reason.
+## Steady screenshots
 
-- Save `base_url` and `head_url` as the verified site origins.
-  Save each scenario's `path` as the actual browser pathname, query and fragment, including any organization prefix, not a route inferred from source code.
-  For modal-only states, save the working parent route and put the interaction in `actions`.
-- `auth_mode` is `"dummy"` when you signed in, `"none"` otherwise.
-- Each `*_url` is a name in `files`, of letters, digits, `.`, `_` and `-`.
-  Give each scenario a distinct `id` of the same characters.
-- `width` and `height` are the viewport size you took both screenshots at.
-- `actions` are the steps that reached an interaction state, such as opening a menu; leave them out for a page as it loads.
-- `annotations` are at most three areas of the after screenshot a reviewer should look at, in its pixels, each with a short `title` and a `body`; leave them out when nothing stands out.
-- When the two sides of a pair can't reach the same state or size, or something on them keeps moving, add `"layout_warnings": ["<why>"]`, saying what moves and if you hid it.
-- When the preview or the base won't load, or wants a sign-in you can't do, record `blocked` with the specific reason; never report an empty capture as complete.
-
-Loading images or fonts, skeletons, spinners, animations and live data can create differences unrelated to the diff.
-`shoot` keeps most of that out, so put it in each run that shoots: it waits for fonts, images in view and loading indicators, pauses videos, freezes CSS and web animations, and shoots again until two takes in a row match.
+Define `shoot` in each run that shoots; it waits for loading, freezes motion and shoots until two takes match:
 
 ```js
 async function shoot(name) {
   await page.evaluate(async () => {
     const busy = '[aria-busy="true"], [role="progressbar"]:not([aria-valuenow]), [class*="skeleton" i], [class*="spinner" i], .animate-pulse, .animate-spin'
-    const seen = (el) => { const box = el.getBoundingClientRect(); return box.width > 0 && box.bottom > 0 && box.top < innerHeight }
-    for (const video of document.querySelectorAll('video')) { video.pause(); video.currentTime = 0 }
-    for (let wait = 0; wait < 40; wait++) {
+    const seen = (el) => { const b = el.getBoundingClientRect(); return b.width > 0 && b.bottom > 0 && b.top < innerHeight }
+    for (const v of document.querySelectorAll('video')) { v.pause(); v.currentTime = 0 }
+    for (let w = 0; w < 40; w++) {
       await document.fonts.ready
       if (![...document.querySelectorAll(busy), ...[...document.images].filter((img) => !img.complete)].some(seen)) break
       await new Promise((done) => setTimeout(done, 250))
     }
   })
-  const options = { path: `design-qa/${name}.png`, animations: 'disabled', style: '[data-design-qa-moving] { opacity: 0 !important }' }
-  let last = await page.screenshot(options)
-  for (let take = 0; take < 8; take++) {
+  const o = { path: `design-qa/${name}.png`, animations: 'disabled', style: '[data-design-qa-moving] { opacity: 0 !important }' }
+  let last = await page.screenshot(o)
+  for (let t = 0; t < 8; t++) {
     await page.evaluate(() => new Promise((done) => setTimeout(done, 500 + Math.random() * 500)))
-    const next = await page.screenshot(options)
-    if (next.length === last.length && next.every((byte, i) => byte === last[i])) return { name, steady: true }
+    const next = await page.screenshot(o)
+    if (next.length === last.length && next.every((b, i) => b === last[i])) return { name, steady: true }
     last = next
   }
   return { name, steady: false }
 }
 ```
 
-`steady: false` means something kept moving that freezing can't stop, such as a carousel, canvas or ticking counter.
-Mark what moves by running this on both sides, then shoot both again; `shoot` hides marked elements:
+On `steady: false`, mark what moves on both sides with this and shoot again; `shoot` hides it:
 
 ```js
 return await page.evaluate(async () => {
-  const running = document.getAnimations().filter((animation) => animation.playState === 'running')
-  for (const animation of running) animation.pause()
+  const running = document.getAnimations().filter((a) => a.playState === 'running')
+  for (const a of running) a.pause()
   const all = [...document.body.querySelectorAll('*')]
-  const look = (el) => { try { const box = el.getBoundingClientRect(); return [box.x, box.y, box.width, box.height, getComputedStyle(el).transform, el.toDataURL?.(), [...el.childNodes].map((node) => node.nodeType === Node.TEXT_NODE ? node.data : '').join('')].join() } catch { return '' } }
+  const look = (el) => { try { const b = el.getBoundingClientRect(); return [b.x, b.y, b.width, b.height, getComputedStyle(el).transform, el.toDataURL?.(), [...el.childNodes].map((n) => n.nodeType === Node.TEXT_NODE ? n.data : '').join('')].join() } catch { return '' } }
   const first = all.map(look)
   const moving = new Set()
-  for (let sample = 0; sample < 6; sample++) {
+  for (let i = 0; i < 6; i++) {
     await new Promise((done) => setTimeout(done, 250 + Math.random() * 250))
-    all.forEach((el, i) => look(el) !== first[i] && moving.add(el))
+    all.forEach((el, j) => look(el) !== first[j] && moving.add(el))
   }
-  for (const animation of running) animation.play()
+  for (const a of running) a.play()
   for (const el of moving) el.setAttribute('data-design-qa-moving', '')
-  return { marked: moving.size, examples: [...moving].slice(0, 5).map((el) => el.outerHTML.slice(0, 80)) }
+  return { marked: moving.size }
 })
 ```
 
-If that hides much of the page, such as a live feed, or what the diff changed, clear the marks and shoot again; a page that still isn't steady keeps its last take.
-Before you note a difference timing could explain, such as something on one side only, reload both sides, shoot again and look again: note it only if it's still there, and never one inside something that moves.
+If the marks hide what the diff changed, clear them and keep the last take.
+Reload and shoot again before noting a difference timing could explain.
 
-Say something about the capture in your review only when it shows a visual problem, and then say that Design QA has the screenshots.
+Mention the capture in your review only for a visual problem or design system violation, saying Design QA has the details.

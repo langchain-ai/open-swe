@@ -1,12 +1,17 @@
 import { Badge } from "@langchain/macaw-components/Badge"
+import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
 import { Link } from "@langchain/macaw-components/Link"
+import { cn } from "@langchain/macaw-components/utils/cn"
+import { StatusBadge } from "@langchain/macaw-components/StatusBadge"
 import { usePluginHost } from "@openswe/plugin-sdk/react"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { useRef, useState } from "react"
 
+import { Assessment } from "../lib/assessment"
 import type {
+  DesignSystemReview,
   FrontendAnnotation,
   FrontendReviewRun,
   FrontendRunStatus,
@@ -58,6 +63,16 @@ export function ReportView({
   const interactions = scenarios.filter((item) => item.interaction)
   const pairedInteractions = paired.filter((item) => item.interaction).length
   const assessmentThread = report?.assessment_thread_id
+  const reviewed = report?.ai_review_status === "complete"
+  const risk = reviewed && report.risk ? Assessment.risk(report.risk) : null
+  const designSystem =
+    reviewed && report.design_system
+      ? Assessment.designSystem(report.design_system)
+      : null
+  const show = (scenarioId: string) =>
+    sections.current
+      .get(scenarioId)
+      ?.scrollIntoView({ block: "start", behavior: "smooth" })
   return (
     <div className="flex flex-col gap-space-5">
       {currentHeadSha && currentHeadSha !== run.head_sha && (
@@ -66,13 +81,32 @@ export function ReportView({
           {run.head_sha.slice(0, 7)}, current {currentHeadSha.slice(0, 7)}.
         </p>
       )}
+      {reviewed &&
+        report.design_system &&
+        report.design_system.findings.length > 0 && (
+          <DesignSystemFindings
+            review={report.design_system}
+            scenarios={scenarios}
+            onShow={show}
+          />
+        )}
       {report && (
         <Card
           aria-label="Recap"
           className="flex flex-col gap-space-3 p-space-4"
         >
-          <div className="flex items-center gap-space-2">
+          <div className="flex flex-wrap items-center gap-space-2">
             <h3 className="text-sm font-semibold">Recap</h3>
+            {risk && (
+              <StatusBadge variant={risk.tone} size="sm">
+                {risk.label}
+              </StatusBadge>
+            )}
+            {designSystem && (
+              <StatusBadge variant={designSystem.tone} size="sm">
+                {designSystem.label}
+              </StatusBadge>
+            )}
             {report.ai_review_status !== "complete" && (
               <Badge color="secondary" size="xs">
                 {report.ai_review_status === "running"
@@ -83,15 +117,28 @@ export function ReportView({
               </Badge>
             )}
           </div>
-          <p className="text-sm text-secondary">
-            {report.ai_review_status === "complete"
-              ? report.summary
-              : report.ai_review_status === "running"
+          {reviewed && report.risk?.reason && (
+            <p className="text-xs text-secondary">{report.risk.reason}</p>
+          )}
+
+          {reviewed ? (
+            <RecapSummary summary={report.summary} />
+          ) : (
+            <p className="text-sm text-secondary">
+              {report.ai_review_status === "running"
                 ? "Reviewing captured screenshots…"
                 : report.ai_review_status === "failed"
                   ? "AI review unavailable. Saved screenshots are below."
                   : "No AI assessment yet."}
-          </p>
+            </p>
+          )}
+          {reviewed &&
+            report.design_system &&
+            report.design_system.findings.length === 0 && (
+              <p className="text-xs text-tertiary">
+                {Assessment.sources(report.design_system)}
+              </p>
+            )}
           {report.ai_review_status === "complete" && notes.length > 0 && (
             <div className="flex flex-wrap gap-space-2">
               {notes.slice(0, 3).map(({ note, scenario }, index) => (
@@ -107,9 +154,7 @@ export function ReportView({
                   }
                   onClick={() => {
                     setSelection({ scenarioId: scenario.id, note })
-                    sections.current
-                      .get(scenario.id)
-                      ?.scrollIntoView({ block: "start", behavior: "smooth" })
+                    show(scenario.id)
                   }}
                 >
                   {note.title} ↗
@@ -160,10 +205,20 @@ export function ReportView({
         >
           <div className="flex flex-wrap items-center justify-between gap-space-3 px-space-4 py-space-3">
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold">
-                <span className="mr-space-2 text-secondary">{index + 1}.</span>
-                {scenario.title}
-              </h3>
+              <div className="flex flex-wrap items-center gap-space-2">
+                <h3 className="text-sm font-semibold">
+                  <span className="mr-space-2 text-secondary">
+                    {index + 1}.
+                  </span>
+                  {scenario.title}
+                </h3>
+                {reviewed && report.design_system && (
+                  <ScenarioFindings
+                    review={report.design_system}
+                    scenarioId={scenario.id}
+                  />
+                )}
+              </div>
               <div className="mt-space-1 flex flex-wrap items-center gap-x-space-3 gap-y-space-1 text-xs text-secondary">
                 <ChangedShare media={media} scenario={scenario} />
                 {scenarioLinks(run, scenario.path).map(({ label, href }) => (
@@ -303,4 +358,116 @@ function ChangedShare({
       ) : null}
     </span>
   )
+}
+
+/** The recap's points as a list, and any other line as a sentence. */
+function RecapSummary({ summary }: { summary: string }) {
+  const blocks = Assessment.summary(summary)
+  if (blocks.length === 0)
+    return <p className="text-sm text-secondary">No visual changes noted.</p>
+  return (
+    <div className="flex flex-col gap-space-2 text-sm text-secondary">
+      {blocks.map((block, index) =>
+        block.kind === "text" ? (
+          <p key={index}>{block.text}</p>
+        ) : (
+          <ul
+            key={index}
+            className="flex list-disc flex-col gap-space-1 pl-space-5"
+          >
+            {block.items.map((item, itemIndex) => (
+              <li key={itemIndex}>{item}</li>
+            ))}
+          </ul>
+        )
+      )}
+    </div>
+  )
+}
+
+/**
+ * Where the change departs from the design system: a red banner when it
+ * breaks a rule and an amber one when it only looks off, over each finding.
+ */
+function DesignSystemFindings({
+  review,
+  scenarios,
+  onShow,
+}: {
+  review: DesignSystemReview
+  scenarios: readonly FrontendScenario[]
+  onShow: (scenarioId: string) => void
+}) {
+  const verdict = Assessment.designSystem(review)
+  const ordered = [...review.findings].sort(
+    (a, b) => Number(b.severity === "error") - Number(a.severity === "error")
+  )
+  const title =
+    verdict.errors && verdict.warnings
+      ? `${verdict.label} · ${verdict.warnings} warning${verdict.warnings === 1 ? "" : "s"}`
+      : verdict.label
+  return (
+    <section aria-label="Design system" className="flex flex-col gap-space-2">
+      <Banner intent={verdict.tone} title={title}>
+        {Assessment.sources(review)}
+      </Banner>
+      <Card className="flex flex-col divide-y divide-default p-0">
+        {ordered.map((finding, index) => {
+          const scenario = scenarios.find(({ id }) => id === finding.scenario)
+          const where = [finding.rule, finding.location].filter(Boolean)
+          const error = finding.severity === "error"
+          return (
+            <div
+              key={index}
+              className={cn(
+                "flex flex-col gap-space-1 border-l-2 px-space-4 py-space-3",
+                error ? "border-l-error" : "border-l-warning"
+              )}
+            >
+              <div className="flex flex-wrap items-center gap-space-2">
+                <StatusBadge variant={error ? "error" : "warning"}>
+                  {error ? "Violation" : "Warning"}
+                </StatusBadge>
+                <span className="text-sm font-medium text-primary">
+                  {finding.title}
+                </span>
+                {scenario && (
+                  <Button
+                    size="sm"
+                    color="secondary"
+                    variant="plain"
+                    onClick={() => onShow(scenario.id)}
+                  >
+                    {`Show ${scenario.title}`}
+                  </Button>
+                )}
+              </div>
+              {finding.body && (
+                <p className="text-xs text-secondary">{finding.body}</p>
+              )}
+              {where.length > 0 && (
+                <p className="text-xs text-tertiary">{where.join(" · ")}</p>
+              )}
+            </div>
+          )
+        })}
+      </Card>
+    </section>
+  )
+}
+
+/** A scenario's design system findings, as one colored count beside its title. */
+function ScenarioFindings({
+  review,
+  scenarioId,
+}: {
+  review: DesignSystemReview
+  scenarioId: string
+}) {
+  const findings = review.findings.filter(
+    ({ scenario }) => scenario === scenarioId
+  )
+  if (findings.length === 0) return null
+  const verdict = Assessment.designSystem({ ...review, findings })
+  return <StatusBadge variant={verdict.tone}>{verdict.label}</StatusBadge>
 }

@@ -1,4 +1,5 @@
 import { Spinner } from "@langchain/macaw-components/Spinner"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { connect, type PluginHost } from "@openswe/plugin-sdk"
 import { PluginHostProvider } from "@openswe/plugin-sdk/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -38,9 +39,11 @@ function Root() {
   return (
     <PluginHostProvider host={host}>
       <QueryClientProvider client={queryClient}>
-        <RouterProvider>
-          <App />
-        </RouterProvider>
+        <TooltipProvider>
+          <RouterProvider>
+            <App />
+          </RouterProvider>
+        </TooltipProvider>
       </QueryClientProvider>
     </PluginHostProvider>
   )

@@ -1,11 +1,20 @@
 import { useEffect, useRef, useState } from "react"
 
+import type { PluginPermission } from "@openswe/plugin-sdk"
+
+import type { AppVersion } from "@/features/plugins/lib/api"
 import type { RepositoryPick } from "@/features/plugins/lib/bridge"
 import { BridgeRequestError } from "@/features/plugins/lib/bridge"
 
 export type Approval =
   | { kind: "link"; url: string }
   | { kind: "repositories"; pick: RepositoryPick }
+  | {
+      kind: "update"
+      release: AppVersion
+      /** What `release` asks for beyond the running release. */
+      newPermissions: ReadonlyArray<PluginPermission>
+    }
 
 /** Approving a request, or the repositories picked; `null` declines. */
 export type Answer = true | ReadonlyArray<string>

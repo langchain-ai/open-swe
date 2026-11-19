@@ -9,7 +9,9 @@ the backend.
 
 import json
 import re
+from collections.abc import Iterable
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -86,17 +88,44 @@ class CollectionRules(BaseModel):
     server-side work; people read it but can't change it."""
 
 
+ReviewPath = Annotated[str, StringConstraints(min_length=1, max_length=200)]
+
+
 class ReviewStep(BaseModel):
     """What the app has a pull request's review do for it, once a workspace adds it to reviews.
 
     The review follows ``instructions`` beside its own, writes only the collections in
     ``writes`` (each app-written, so people cannot forge what it saves), and gets the
-    thread's browser when ``browser`` asks for it.
+    thread's browser when ``browser`` asks for it. With ``paths``, glob patterns where
+    ``**`` spans folders and a leading ``!`` excludes, it does this only for a pull
+    request that changes a file one pattern matches and no ``!`` pattern does.
     """
 
     instructions: str = Field(min_length=1, max_length=8000)
     writes: list[CollectionName] = Field(default_factory=list, max_length=8)
     browser: bool = False
+    paths: list[ReviewPath] = Field(default_factory=list, max_length=64)
+
+    @field_validator("paths")
+    @classmethod
+    def _includes_something(cls, paths: list[str]) -> list[str]:
+        if paths and all(path.startswith("!") for path in paths):
+            raise ValueError("paths needs a pattern that includes files, not only ! ones")
+        return paths
+
+    def covers(self, files: Iterable[str]) -> bool:
+        """Whether a pull request changing ``files`` is one this step works on."""
+        if not self.paths:
+            return True
+        included = [path for path in self.paths if not path.startswith("!")]
+        excluded = [path[1:] for path in self.paths if path.startswith("!")]
+        for file in files:
+            found = PurePosixPath(file)
+            if any(found.full_match(path) for path in included) and not any(
+                found.full_match(path) for path in excluded
+            ):
+                return True
+        return False
 
     @field_validator("instructions")
     @classmethod

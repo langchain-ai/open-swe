@@ -1,11 +1,17 @@
 import { ErrorState } from "@langchain/macaw-components/ErrorState"
-import { Skeleton } from "@/components/Skeleton"
+import { useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffectEvent } from "react"
+import { toast } from "sonner"
 
+import { Skeleton } from "@/components/Skeleton"
 import { ApprovalDialog } from "@/features/plugins/components/ApprovalDialog"
 import { PluginFrame } from "@/features/plugins/components/PluginFrame"
-import type { InstalledPlugin } from "@/features/plugins/lib/api"
+import {
+  pluginsApi,
+  type AppVersion,
+  type InstalledPlugin,
+} from "@/features/plugins/lib/api"
 import { useApproval } from "@/features/plugins/lib/approval"
 import type {
   AgentToolOffer,
@@ -14,8 +20,10 @@ import type {
   ToolRunner,
 } from "@/features/plugins/lib/bridge"
 import {
+  pluginKeys,
   usePluginBundle,
   useSharePluginRepositories,
+  useUpgradePlugin,
 } from "@/features/plugins/lib/queries"
 import type { ImageChunk } from "@/features/agents/lib/types"
 
@@ -54,6 +62,23 @@ export function PluginView({
   const bundle = usePluginBundle(plugin)
   const approval = useApproval()
   const share = useSharePluginRepositories()
+  const upgrade = useUpgradePlugin()
+  const queryClient = useQueryClient()
+
+  /** The app's newest release, when it's newer than the one running. */
+  const newer = async (): Promise<AppVersion | null> => {
+    const apps = await queryClient.fetchQuery({
+      queryKey: pluginKeys.apps,
+      queryFn: pluginsApi.apps,
+      staleTime: 60_000,
+    })
+    const latest = apps.find((app) => app.id === plugin.plugin_id)?.latest
+    return latest && latest.number > plugin.version.number ? latest : null
+  }
+  const added = (release: AppVersion) =>
+    release.manifest.permissions.filter(
+      (permission) => !plugin.manifest.permissions.includes(permission)
+    )
 
   if (bundle.error)
     return (
@@ -96,6 +121,43 @@ export function PluginView({
             repositories: [...chosen],
           })
           return chosen.filter((repo) => updated.repositories.includes(repo))
+        }}
+        newerRelease={async () => {
+          const release = await newer()
+          return (
+            release && {
+              number: release.number,
+              version: release.manifest.version,
+              newPermissions: added(release),
+            }
+          )
+        }}
+        updateApp={async () => {
+          if (!onScreen()) return false
+          const release = await newer()
+          if (!release) return false
+          const answer = await approval.ask({
+            kind: "update",
+            release,
+            newPermissions: added(release),
+          })
+          if (answer === null) return false
+          try {
+            await upgrade.mutateAsync({
+              id: plugin.id,
+              version: release.id,
+              permissions: release.manifest.permissions,
+            })
+          } catch (error) {
+            toast.error(`Couldn't update ${plugin.manifest.displayName}`, {
+              description: error instanceof Error ? error.message : undefined,
+            })
+            return false
+          }
+          toast.success(
+            `Updated ${plugin.manifest.displayName} to #${release.number}`
+          )
+          return true
         }}
         provideTools={agent.provideTools}
         chooseChat={agent.chooseChat}

@@ -6,10 +6,13 @@ workspace adds apps to its reviews (``review_apps``). A review of a private repo
 whose preview runs only code its organization's members could push, then follows each
 app's instructions, and writes only that app's declared collections, in the reviewed
 repository's scope, under ``pulls/<number>/``: never another pull request's data.
+An app whose step names ``paths`` is left out of a review whose pull request changes
+none of them, so a docs change never starts a frontend capture.
 """
 
 import asyncio
 import json
+import logging
 import posixpath
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -17,10 +20,13 @@ from io import BytesIO
 from typing import ClassVar, Self
 from uuid import UUID, uuid7
 
+import httpx2
 from PIL import Image
 from pydantic import TypeAdapter
 
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.github.http import GitHubAppUnavailable
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
@@ -45,8 +51,17 @@ WORKSPACE = "/workspace/"
 MAX_FILES = 40
 # Past this, decoding a PNG to re-encode it costs more memory than the space is worth.
 MAX_RECODED_PIXELS = 16_000_000
+# GitHub lists at most 3,000 of a pull request's files, 100 a page; triage judges those.
+_FILE_PAGES = 30
 _KEY = TypeAdapter(DocumentKey)
 _NAME = TypeAdapter(AttachmentName)
+
+logger = logging.getLogger(__name__)
+
+
+class ChangedFilesUnavailable(Exception):
+    """GitHub wouldn't list a pull request's files, so whether an app's ``paths`` cover it
+    is unknown; work that would start the app tries again rather than give up."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,12 +210,24 @@ class ReviewApps:
     apps: tuple[ReviewApp, ...]
     repository: str
     number: int
+    # The workspace's other apps, left out because the pull request changes none of their
+    # paths, or because GitHub wouldn't list its files when ``files_read`` is False.
+    passed: tuple[ReviewApp, ...] = ()
+    files_read: bool = True
     # Saves still running, held so a cancelled call's save is not collected mid-write.
     _saving: ClassVar[set[asyncio.Task[str]]] = set()
 
     @classmethod
     async def of(cls, cfg: RunConfig) -> Self | None:
         """The apps this review works for; None when it works for none."""
+        found = await cls.triaged(cfg)
+        return found if found is not None and found.apps else None
+
+    @classmethod
+    async def triaged(cls, cfg: RunConfig) -> Self | None:
+        """The apps the workspace added to this review, those with ``paths`` the pull request
+        changes nothing in, or whose files can't be read, moved to ``passed``; None when it
+        adds none to this review."""
         if cfg.is_eval or cfg.repo is None or cfg.pr_number is None or not cfg.head_sha:
             return None
         pinned = (await cached_workspace_settings(cfg.workspace_slug)).review_app_releases
@@ -217,11 +244,55 @@ class ReviewApps:
         )
         if not apps:
             return None
-        return cls(apps, normalize_repo_full_name(name).lower(), cfg.pr_number)
+        triaging = any(app.step.paths for app in apps)
+        files = (
+            await cls.changed_files(cfg.repo.owner, cfg.repo.name, cfg.pr_number)
+            if triaging
+            else []
+        )
+        working = tuple(
+            app
+            for app in apps
+            if not app.step.paths or (files is not None and app.step.covers(files))
+        )
+        passed = tuple(app for app in apps if app not in working)
+        return cls(
+            working,
+            normalize_repo_full_name(name).lower(),
+            cfg.pr_number,
+            passed,
+            files_read=files is not None,
+        )
+
+    @staticmethod
+    async def changed_files(owner: str, repo: str, number: int) -> list[str] | None:
+        """The pull request's changed paths as GitHub lists them, at most 3,000, a rename's
+        old path included; None when GitHub won't answer even after retrying."""
+        try:
+            async with PullRequestClient.as_app(owner, repo, number) as pull:
+                files = await pull.files(max_pages=_FILE_PAGES)
+        except GitHubAppUnavailable, httpx2.HTTPError, ValueError:
+            logger.warning(
+                "Could not list a pull request's files for its review apps",
+                extra={"pr_repo_full_name": f"{owner}/{repo}", "pr_number": number},
+                exc_info=True,
+            )
+            return None
+        return [
+            path
+            for file in files
+            for key in ("filename", "previous_filename")
+            if isinstance(path := file.get(key), str) and path
+        ]
 
     @property
     def browses(self) -> bool:
         return any(app.step.browser for app in self.apps)
+
+    @property
+    def may_browse(self) -> bool:
+        """Whether an app left out only because the files couldn't be read browses."""
+        return not self.files_read and any(app.step.browser for app in self.passed)
 
     @property
     def writes(self) -> bool:

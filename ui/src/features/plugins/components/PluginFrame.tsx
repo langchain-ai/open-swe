@@ -2,6 +2,7 @@ import {
   CONNECT_MESSAGE,
   HELLO_MESSAGE,
   PROTOCOL_VERSION,
+  type AppRelease,
   type HostContext,
   type HostEvent,
   type Person,
@@ -70,6 +71,8 @@ export function PluginFrame({
   visible,
   confirmLink,
   pickRepositories,
+  newerRelease,
+  updateApp,
   provideTools,
   chooseChat,
   openChat,
@@ -85,6 +88,8 @@ export function PluginFrame({
   visible: () => boolean
   confirmLink: (url: string) => Promise<boolean>
   pickRepositories: (pick: RepositoryPick) => Promise<Array<string>>
+  newerRelease: () => Promise<AppRelease | null>
+  updateApp: () => Promise<boolean>
   provideTools: (offer: AgentToolOffer, run: ToolRunner) => () => void
   chooseChat: (chat: ChatTarget) => void
   openChat: (draft: string | null, images: Array<ImageChunk>) => void
@@ -138,6 +143,7 @@ export function PluginFrame({
         name: plugin.name,
         displayName: plugin.manifest.displayName,
         version: plugin.manifest.version,
+        release: plugin.version.number,
         permissions: plugin.manifest.permissions,
       },
       user: await me(),
@@ -167,6 +173,8 @@ export function PluginFrame({
     },
     confirmLink,
     pickRepositories,
+    newerRelease,
+    updateApp,
     isInBaseOrg,
     provideTools,
     chooseChat,

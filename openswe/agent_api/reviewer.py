@@ -81,11 +81,21 @@ class ReviewerKind(RunKind):
         del settings, carried
         cfg = RunConfig.from_config(config)
         try:
-            if started.run_id and cfg.head_sha and (apps := await ReviewApps.of(cfg)) is not None:
+            if (
+                started.run_id
+                and cfg.head_sha
+                and (apps := await ReviewApps.triaged(cfg)) is not None
+            ):
                 for app in apps.apps:
                     outcomes = ReviewOutcomes(app.id, apps.repository, apps.number)
                     if not await outcomes.closed():
                         await outcomes.queued(started.run_id, cfg.head_sha, "")
+                for app in apps.passed:
+                    outcomes = ReviewOutcomes(app.id, apps.repository, apps.number)
+                    if not await outcomes.closed():
+                        await outcomes.passed(
+                            started.run_id, cfg.head_sha, files_read=apps.files_read
+                        )
         except Exception:
             logger.exception(
                 "Could not record pending review app work",
