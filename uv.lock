@@ -1661,7 +1661,7 @@ wheels = [
 
 [[package]]
 name = "langchain-openai"
-version = "1.8.3"
+version = "1.8.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -1669,9 +1669,9 @@ dependencies = [
     { name = "openai" },
     { name = "tiktoken" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/db/62/43f52708e14f851c43dda0e80cf4a481385c70f7be570ff976ed1f77ad37/langchain_openai-1.8.3.tar.gz", hash = "sha256:3cac299d8df107a9b106d8e28ea35791be1e7836dcaf4d857ea3510b027f1b36", size = 2808239, upload-time = "2026-11-19T00:38:40.752Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/53/00/e6388a0f193fee33bb06a171e9fe0b897a4974ff086a7063313c0d11a028/langchain_openai-1.8.4.tar.gz", hash = "sha256:9dbd491eca842b0434b2e5f2eb80005254dd332c0911db835a1064f8bd019060", size = 2810117, upload-time = "2026-11-19T21:36:34.034Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/c2/718ba0a95c68d2a41f5cfa1cccc93a8b669ed3d1fa9e9eba1777e68a69f6/langchain_openai-1.8.3-py3-none-any.whl", hash = "sha256:e383c2c2f53ec2b4985fb90504f56005310df1d56a758387fe6459b7775fafbf", size = 156375, upload-time = "2026-11-19T00:38:39.314Z" },
+    { url = "https://files.pythonhosted.org/packages/97/2f/be277e764ba45ceb9dde9c43fce0e04e595e8709ca791d8ac9112a312b12/langchain_openai-1.8.4-py3-none-any.whl", hash = "sha256:8acbbaee625954e2407d00e9e3e40d9acc8a2a3808d23f0824b1e3a9d505bc0c", size = 156908, upload-time = "2026-11-19T21:36:32.306Z" },
 ]
 
 [[package]]
@@ -2294,7 +2294,7 @@ requires-dist = [
     { name = "langchain-anthropic", specifier = ">=1.7.11" },
     { name = "langchain-fireworks", specifier = ">=1.7.3" },
     { name = "langchain-google-genai", specifier = ">=4.5.1" },
-    { name = "langchain-openai", specifier = ">=1.8.3,<2.0.0" },
+    { name = "langchain-openai", specifier = ">=1.8.4,<2.0.0" },
     { name = "langchain-quickjs", specifier = "==0.3.12" },
     { name = "langchain-typesafe", specifier = "==0.1.0" },
     { name = "langgraph", specifier = ">=1.2.23" },

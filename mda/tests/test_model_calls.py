@@ -33,6 +33,7 @@ from langchain_core.messages import (
 from langchain_core.tools import tool
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
+from langchain_openai.chat_models.base import OpenAIStreamServerError
 from langsmith.run_trees import RunTree
 from pydantic import SecretStr
 from rt.backend import Run, RunContext
@@ -529,6 +530,12 @@ def _fallback_call(
             "Our servers are currently overloaded. Please try again later.",
             request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
             body=None,
+        ),
+        # langchain-openai reclassifies a mid-stream `server_error` as retryable.
+        OpenAIStreamServerError(
+            message="An error occurred while processing your request.",
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+            body={"type": "server_error", "code": None},
         ),
     ],
 )
