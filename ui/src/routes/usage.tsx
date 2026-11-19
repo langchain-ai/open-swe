@@ -73,6 +73,17 @@ interface SortableColumn<Key extends string> {
   tooltip?: string
 }
 
+interface TableSorting<Key extends string> {
+  sort: Key
+  direction: SortDirection
+}
+
+interface UsageTablePreferences {
+  leaderboard: TableSorting<UsageLeaderboardSort>
+  outcomes: TableSorting<PROutcomesSort>
+  usageScope: UsageScope
+}
+
 type UsageScope = "invocations" | "threads"
 type PROutcomesSort =
   | "model"
@@ -172,6 +183,11 @@ export function UsageAnalytics({
   isAdmin: boolean
 }) {
   const [leaderboardPageSize, setLeaderboardPageSize] = useState(10)
+  const [preferences, setPreferences] = useState<UsageTablePreferences>({
+    leaderboard: { sort: "rank", direction: "asc" },
+    outcomes: { sort: "prs_opened", direction: "desc" },
+    usageScope: "threads",
+  })
 
   return (
     <UsageAnalyticsPeriod
@@ -181,6 +197,10 @@ export function UsageAnalytics({
       isAdmin={isAdmin}
       pageSize={leaderboardPageSize}
       onPageSizeChange={setLeaderboardPageSize}
+      preferences={preferences}
+      onPreferencesChange={(change) =>
+        setPreferences((current) => ({ ...current, ...change }))
+      }
     />
   )
 }
@@ -191,17 +211,22 @@ function UsageAnalyticsPeriod({
   isAdmin,
   pageSize: leaderboardPageSize,
   onPageSizeChange: setLeaderboardPageSize,
+  preferences,
+  onPreferencesChange,
 }: {
   period: UsageLeaderboardPeriod
   login: string
   isAdmin: boolean
   pageSize: number
   onPageSizeChange: (pageSize: number) => void
+  preferences: UsageTablePreferences
+  onPreferencesChange: (change: Partial<UsageTablePreferences>) => void
 }) {
   const [leaderboardPage, setLeaderboardPage] = useState(1)
-  const [sort, setSort] = useState<UsageLeaderboardSort>("rank")
-  const [direction, setDirection] = useState<SortDirection>("asc")
-  const [usageScope, setUsageScope] = useState<UsageScope>("threads")
+  const {
+    leaderboard: { sort, direction },
+    usageScope,
+  } = preferences
   const [leaderboardCursors, setLeaderboardCursors] = useState<
     (string | undefined)[]
   >([undefined])
@@ -278,7 +303,11 @@ function UsageAnalyticsPeriod({
 
   return (
     <>
-      <PRMergeRateSection report={report} />
+      <PRMergeRateSection
+        report={report}
+        sorting={preferences.outcomes}
+        onSortingChange={(outcomes) => onPreferencesChange({ outcomes })}
+      />
 
       <SettingsSection
         title="Agent Leaderboard"
@@ -300,19 +329,22 @@ function UsageAnalyticsPeriod({
                   aria-pressed={usageScope === scope}
                   className="capitalize focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                   onClick={() => {
-                    setUsageScope(scope)
+                    let nextSort = sort
                     if (sort === "invocations" || sort === "threads") {
-                      setSort(scope)
+                      nextSort = scope
                     } else if (
                       sort === "avg_invocation_seconds" ||
                       sort === "avg_thread_seconds"
                     ) {
-                      setSort(
+                      nextSort =
                         scope === "threads"
                           ? "avg_thread_seconds"
                           : "avg_invocation_seconds"
-                      )
                     }
+                    onPreferencesChange({
+                      usageScope: scope,
+                      leaderboard: { sort: nextSort, direction },
+                    })
                     setLeaderboardPage(1)
                     setLeaderboardCursors([undefined])
                   }}
@@ -370,14 +402,17 @@ function UsageAnalyticsPeriod({
             direction={direction}
             isUpdating={leaderboard.isPlaceholderData}
             onSort={(nextSort, nextDirection) => {
-              setDirection(
-                sort === nextSort
-                  ? direction === "asc"
-                    ? "desc"
-                    : "asc"
-                  : nextDirection
-              )
-              setSort(nextSort)
+              onPreferencesChange({
+                leaderboard: {
+                  sort: nextSort,
+                  direction:
+                    sort === nextSort
+                      ? direction === "asc"
+                        ? "desc"
+                        : "asc"
+                      : nextDirection,
+                },
+              })
               setLeaderboardPage(1)
               setLeaderboardCursors([undefined])
             }}
@@ -728,8 +763,12 @@ function usePRMergeRateReport(
 
 function PRMergeRateSection({
   report,
+  sorting,
+  onSortingChange,
 }: {
   report: ReturnType<typeof usePRMergeRateReport>
+  sorting: TableSorting<PROutcomesSort>
+  onSortingChange: (sorting: TableSorting<PROutcomesSort>) => void
 }) {
   const data = report.data?.payload
   const failed = report.isError && !data
@@ -780,6 +819,8 @@ function PRMergeRateSection({
           key={data.period}
           cohorts={data.cohorts}
           maturityDays={data.maturity_days}
+          sorting={sorting}
+          onSortingChange={onSortingChange}
         />
       ) : (
         <p
@@ -1192,15 +1233,17 @@ function PROutcomeCells({
 function PRMergeRateTable({
   cohorts,
   maturityDays,
+  sorting: { sort, direction },
+  onSortingChange,
 }: {
   cohorts: PRMergeRateCohort[]
   maturityDays: number
+  sorting: TableSorting<PROutcomesSort>
+  onSortingChange: (sorting: TableSorting<PROutcomesSort>) => void
 }) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const [sort, setSort] = useState<PROutcomesSort>("prs_opened")
-  const [direction, setDirection] = useState<SortDirection>("desc")
   const sortedCohorts = [...cohorts].sort((a, b) => {
     const aValue = prOutcomeSortValue(a, sort)
     const bValue = prOutcomeSortValue(b, sort)
@@ -1241,14 +1284,15 @@ function PRMergeRateTable({
                   sortKey={sort}
                   sortDirection={direction}
                   onSort={(nextSort, defaultDirection) => {
-                    setDirection(
-                      nextSort === sort
-                        ? direction === "asc"
-                          ? "desc"
-                          : "asc"
-                        : defaultDirection
-                    )
-                    setSort(nextSort)
+                    onSortingChange({
+                      sort: nextSort,
+                      direction:
+                        nextSort === sort
+                          ? direction === "asc"
+                            ? "desc"
+                            : "asc"
+                          : defaultDirection,
+                    })
                     setPage(1)
                   }}
                   className={

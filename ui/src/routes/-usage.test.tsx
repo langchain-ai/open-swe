@@ -1104,8 +1104,31 @@ it("keeps failed delivery visible when all PR groups are suppressed", async () =
   client.clear()
 })
 
-it("resets leaderboard pagination when the period changes outside the selector", async () => {
-  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
+it("preserves table sorting and scope while resetting pagination when the period changes", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockImplementation(async (period) =>
+    report({
+      ...captured,
+      period: period ?? "30d",
+      status: "ready",
+      cohorts: [
+        {
+          model_id: "sample-model",
+          model_attribution_quality: "configured",
+          merged: 8,
+          closed_without_merge: 0,
+          mature_pending: 0,
+          waiting: 0,
+          cohort_size: 8,
+          decided_denominator: 8,
+          decided_merge_rate: 1,
+          mature_denominator: 8,
+          mature_cohort_merge_share: 1,
+          efforts: [],
+          avg_merge_seconds: null,
+        },
+      ],
+    })
+  )
   vi.mocked(api.usageLeaderboard).mockImplementation(
     async (period, _limit, cursor) => ({
       ...emptyUsage,
@@ -1125,7 +1148,22 @@ it("resets leaderboard pagination when the period changes outside the selector",
       </TooltipProvider>
     </QueryClientProvider>
   )
-  fireEvent.click(await screen.findByRole("button", { name: "Next" }))
+  await screen.findByText("sample-model")
+  fireEvent.click(screen.getByRole("button", { name: "Opening model" }))
+  fireEvent.click(screen.getByRole("button", { name: "Opening model" }))
+  fireEvent.click(screen.getByRole("button", { name: "invocations" }))
+  fireEvent.click(
+    screen.getByRole("button", { name: "Avg Invocation Duration" })
+  )
+  fireEvent.click(
+    screen.getByRole("button", { name: "Avg Invocation Duration" })
+  )
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")
+    ).toBe(false)
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Next" }))
   expect(await screen.findByText("Page 2 of 2")).toBeTruthy()
 
   view.rerender(
@@ -1140,9 +1178,25 @@ it("resets leaderboard pagination when the period changes outside the selector",
     "7d",
     10,
     undefined,
-    "rank",
+    "avg_invocation_seconds",
     "asc"
   )
+  expect(
+    screen
+      .getByRole("columnheader", { name: "Avg Invocation Duration" })
+      .getAttribute("aria-sort")
+  ).toBe("ascending")
+  expect(
+    screen
+      .getByRole("button", { name: "invocations" })
+      .getAttribute("aria-pressed")
+  ).toBe("true")
+  await screen.findByText("sample-model")
+  expect(
+    screen
+      .getByRole("columnheader", { name: "Opening model" })
+      .getAttribute("aria-sort")
+  ).toBe("descending")
   client.clear()
 })
 
