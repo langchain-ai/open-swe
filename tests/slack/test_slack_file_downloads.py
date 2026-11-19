@@ -185,8 +185,6 @@ async def test_slack_files_wait_for_the_runs_sandbox_and_land_there_once(
     monkeypatch.setattr(staged_files, "get_client", lambda: client)
 
     async def download(url: str) -> bytes:
-        if url.endswith("second.zip"):
-            assert (tmp_path / "bundle.zip").read_bytes() == b"zip"
         return b"zip"
 
     async def upload(files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
@@ -216,20 +214,118 @@ async def test_slack_files_wait_for_the_runs_sandbox_and_land_there_once(
     racing = await staged_files.queue_slack_files(
         "thread-1", [_entry("late.csv", "https://files.slack.com/late.csv")]
     )
-    await staged_files.deliver_slack_files("thread-1", run_read, backend)
+    await staged_files.upload_files("thread-1", run_read, backend)
     assert metadata[staged_files.PENDING_SLACK_FILES_KEY] == [
         {"url": "https://files.slack.com/late.csv", "path": racing[0].sandbox_path}
     ]
-    await staged_files.deliver_slack_files("thread-1", dict(metadata), backend)
+    await staged_files.upload_files("thread-1", dict(metadata), backend)
 
     assert [*first, *later] == [
         staged_files.StagedSlackFile("bundle.zip", "/workspace/.open-swe/slack-files/bundle.zip"),
         staged_files.StagedSlackFile("bundle-1", "/workspace/.open-swe/slack-files/bundle-1"),
         staged_files.StagedSlackFile("bundle-2", "/workspace/.open-swe/slack-files/bundle-2"),
     ]
-    assert backend.aupload_files.await_count == 4
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "bundle-1",
+        "bundle-2",
+        "bundle.zip",
+        "late.csv",
+    ]
     assert (tmp_path / "bundle-2").read_bytes() == b"zip"
     assert metadata[staged_files.PENDING_SLACK_FILES_KEY] is None
+
+
+@pytest.mark.asyncio
+async def test_delivery_skips_only_the_files_that_fail_and_bounds_files_in_flight(
+    monkeypatch, caplog
+) -> None:
+    """Files go up concurrently, a few at a time; one file's failure leaves the others."""
+    from deepagents.backends.protocol import FileUploadResponse
+
+    from openswe.sandboxes import state
+
+    names = [
+        "ok-1.png",
+        "ok-2.png",
+        "ok-3.png",
+        "ok-4.png",
+        "ok-5.png",
+        "gone.png",
+        "broken-download.png",
+        "rejected.png",
+        "upload-raises.png",
+    ]
+    directory = staged_files.SLACK_FILE_DIR
+    metadata = {
+        staged_files.PENDING_SLACK_FILES_KEY: [
+            {"url": f"https://files.slack.com/{name}", "path": f"{directory}/{name}"}
+            for name in names
+        ]
+    }
+    updates: list[dict[str, object]] = []
+
+    async def write_metadata(*, thread_id: str, metadata: dict[str, object]) -> None:
+        assert not written, "the pending key is cleared before any upload"
+        updates.append(metadata)
+
+    client = MagicMock()
+    client.threads.update = write_metadata
+    monkeypatch.setattr(state, "get_sandbox_metadata", AsyncMock(return_value=dict(metadata)))
+    monkeypatch.setattr(staged_files, "get_client", lambda: client)
+
+    async def download(url: str) -> bytes:
+        name = url.rsplit("/", 1)[-1]
+        if name == "gone.png":
+            raise slack_client.SlackFileDownloadError("file_not_found")
+        if name == "broken-download.png":
+            raise ConnectionError("reset by peer")
+        return name.encode()
+
+    written: dict[str, bytes] = {}
+    in_flight = 0
+    most_in_flight = 0
+
+    async def upload(files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
+        nonlocal in_flight, most_in_flight
+        in_flight += 1
+        most_in_flight = max(most_in_flight, in_flight)
+        try:
+            await asyncio.sleep(0.01)
+            responses = []
+            for path, content in files:
+                if path.endswith("upload-raises.png"):
+                    raise TimeoutError
+                if path.endswith("rejected.png"):
+                    responses.append(FileUploadResponse(path=path, error="permission_denied"))
+                    continue
+                written[path] = content
+                responses.append(FileUploadResponse(path=path))
+            return responses
+        finally:
+            in_flight -= 1
+
+    backend = MagicMock()
+    backend.aupload_files = AsyncMock(side_effect=upload)
+    monkeypatch.setattr(slack_client, "download_slack_file", download)
+
+    with caplog.at_level("INFO", logger=staged_files.logger.name):
+        await staged_files.upload_files("thread-1", metadata, backend)
+
+    assert updates == [{staged_files.PENDING_SLACK_FILES_KEY: None}]
+    assert written == {
+        f"{directory}/ok-{index}.png": f"ok-{index}.png".encode() for index in range(1, 6)
+    }
+    assert 1 < most_in_flight <= staged_files._DELIVERY_CONCURRENCY
+    failures = {
+        record.file: record.slack_error
+        for record in caplog.records
+        if record.getMessage() == "Slack file staging failed"
+    }
+    assert failures == {
+        f"{directory}/broken-download.png": "ConnectionError",
+        f"{directory}/rejected.png": "permission_denied",
+        f"{directory}/upload-raises.png": "TimeoutError",
+    }
 
 
 @pytest.mark.asyncio

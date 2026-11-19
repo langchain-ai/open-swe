@@ -158,7 +158,7 @@ from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
 from openswe.skill_store.run_skills import RunSkillStores
 from openswe.slack.client import get_slack_user_timezone, remember_slack_user_timezone
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
-from openswe.slack.staged_files import deliver_slack_files, slack_files_pending
+from openswe.slack.staged_files import slack_files_pending, upload_files
 from openswe.tasks.schemas import ThreadMetadata
 from openswe.tasks.store import Task
 from openswe.thread_title import (
@@ -1512,7 +1512,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     await ThreadMetadata.model_validate(bound).git_identity()
                 )
             async with aphase(self._thread_id, "prepare.slack_files"):
-                await deliver_slack_files(self._thread_id, bound, sandbox_backend)
+                await upload_files(self._thread_id, bound, sandbox_backend)
             async with aphase(self._thread_id, "prepare.work_dir"):
                 work_dir = await resolve_sandbox_work_dir(sandbox_backend)
             bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None

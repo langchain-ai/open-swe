@@ -6,6 +6,7 @@ file goes and where Slack serves it; the run's first connection to its sandbox, 
 the model runs, downloads the files and writes them there.
 """
 
+import asyncio
 import logging
 import posixpath
 import re
@@ -29,6 +30,8 @@ PENDING_SLACK_FILES_KEY = "slack_files_pending"
 SLACK_FILE_DIR = "/workspace/.open-swe/slack-files"
 DASHBOARD_FILE_DIR = "/workspace/.open-swe/attachments"
 _MAX_SLACK_FILE_ATTACHMENTS = 10
+_DELIVERY_CONCURRENCY = 5
+"""Files read and written at once; each can be up to 10 MB."""
 
 
 @dataclass(frozen=True)
@@ -106,6 +109,32 @@ class _PendingFile(BaseModel):
             logger.info("Slack file download skipped", extra={"slack_error": error.code})
             return None
 
+    async def upload(
+        self, thread_id: str, backend: SandboxBackendProtocol, limit: asyncio.Semaphore
+    ) -> None:
+        """Write the file into the thread's sandbox; a failed download or write only skips it.
+
+        ``limit`` is shared by the files written together and bounds how many hold their bytes.
+        """
+        async with limit:
+            try:
+                content = await self.content(thread_id)
+                if content is None:
+                    return
+                responses = await backend.aupload_files([(self.path, content)])
+            except Exception as exc:
+                logger.info(
+                    "Slack file staging failed",
+                    extra={"slack_error": type(exc).__name__, "file": self.path},
+                    exc_info=True,
+                )
+                return
+        error = responses[0].error if responses else "no response"
+        if error:
+            logger.info(
+                "Slack file staging failed", extra={"slack_error": str(error), "file": self.path}
+            )
+
 
 _pending_files = TypeAdapter(list[_PendingFile])
 
@@ -172,7 +201,7 @@ async def queue_slack_files(
     return staged
 
 
-async def deliver_slack_files(
+async def upload_files(
     thread_id: str, metadata: Mapping[str, object], backend: SandboxBackendProtocol
 ) -> None:
     """Download the files waiting for the thread's sandbox and write them there, once.
@@ -201,16 +230,8 @@ async def deliver_slack_files(
             else None
         },
     )
-    for file in pending:
-        content = await file.content(thread_id)
-        if content is None:
-            continue
-        try:
-            responses = await backend.aupload_files([(file.path, content)])
-        finally:
-            del content
-        error = responses[0].error if responses else "no response"
-        if error:
-            logger.info(
-                "Slack file staging failed", extra={"slack_error": str(error), "file": file.path}
-            )
+    # Each file is read and written on its own, a few at a time: the run's first model call
+    # waits on this, and the cap bounds how many files' bytes are held at once. The LangSmith
+    # backend writes a batch one request after another, so concurrent calls are what overlap.
+    limit = asyncio.Semaphore(_DELIVERY_CONCURRENCY)
+    await asyncio.gather(*(file.upload(thread_id, backend, limit) for file in pending))
