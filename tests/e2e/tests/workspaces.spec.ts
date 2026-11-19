@@ -513,12 +513,16 @@ test.describe("Workspaces", () => {
       page.getByText(/workspace is captured and live/),
     ).toBeVisible();
 
-    // Publishing captured this thread's sandbox synchronously, so the image is
-    // ready as soon as the tool returned. The reproducibility rebuild it then
-    // kicked off is a background job; wait for that on the record.
-    expect((await findWorkspace(page, DEFAULT_SLUG))?.snapshot_status).toBe(
-      "ready",
-    );
+    // Publishing captured this thread's sandbox synchronously, so a bootable
+    // image is on the record as soon as the tool returned. The reproducibility
+    // rebuild it then kicked off is a background job whose own capture flips the
+    // status to "capturing" while the snapshot stays bootable, and with the fake
+    // sandbox it can get there before this read, so either status is fine here.
+    const published = await findWorkspace(page, DEFAULT_SLUG);
+    expect(published?.snapshot_id).toBeTruthy();
+    expect(published?.snapshot_name).toBe(EXPECTED_SNAPSHOT_NAME);
+    expect(["ready", "capturing"]).toContain(published?.snapshot_status);
+    // Wait for the rebuild on the record; it ends on "ready", checked below.
     await expect
       .poll(
         async () => (await findWorkspace(page, DEFAULT_SLUG))?.refresh_status,
