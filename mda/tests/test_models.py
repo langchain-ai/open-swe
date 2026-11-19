@@ -17,7 +17,7 @@ from rt.backend import Run, RunContext
 from rt.gateway import GATEWAY_BEARER
 from rt.loop import RunLoop
 from rt.middleware import BackendRunMiddleware, RunState
-from rt.models import _SDK_RETRY_DISABLE, _build, build_model
+from rt.models import _SDK_RETRY_DISABLE, THINKING_BINDING_BETA, _build, build_model
 from rt.run_tools import RunSubagentMiddleware, RunToolsets
 from runtime_api.catalog import Catalog, LoopRules, ModelSpec, RoutingRules, RunModels
 from runtime_api.gateway_auth import GatewayChatAnthropic
@@ -106,6 +106,40 @@ def test_an_anthropic_model_streams() -> None:
     assert isinstance(model, ChatAnthropic)
     assert model.streaming is True
     assert model.max_retries == 0
+
+
+def test_a_claude_5_model_drops_thinking_a_summary_left_stale() -> None:
+    """Summarizing rewrites the prefix a preserved thinking block is bound to; without the
+    binding, the next call is refused instead of the block dropped."""
+    model = build_model(_spec("anthropic:claude-opus-5-5", "high"))
+    assert isinstance(model, ChatAnthropic)
+
+    payload = model._get_request_payload([HumanMessage("hi")])
+
+    assert payload["thinking"] == {
+        "type": "adaptive",
+        "display": "summarized",
+        "block_binding": {"prefix_mismatch_behavior": "drop_block"},
+    }
+    assert payload["betas"] == [THINKING_BINDING_BETA]
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        _spec("anthropic:claude-haiku-4-5", "high"),
+        _spec("openai:gpt-6.1-sol", "high"),
+        # The Claude fallback of an OpenAI run sets no thinking.
+        ModelSpec(model_id="anthropic:claude-opus-5-5", kwargs={"max_tokens": 64_000}),
+    ],
+    ids=["claude-4", "openai", "unthinking-claude-5"],
+)
+def test_other_models_keep_the_backends_thinking(spec: ModelSpec) -> None:
+    model = build_model(spec)
+
+    assert getattr(model, "betas", None) is None
+    thinking = getattr(model, "thinking", None)
+    assert thinking is None or "block_binding" not in thinking
 
 
 def test_a_baseten_model_uses_the_gateway() -> None:
