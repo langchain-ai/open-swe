@@ -112,6 +112,126 @@ async def test_a_sandbox_the_script_cannot_read_leaves_only_the_pull_requests(
         "open_swe_git_targets": [{"repo": "org/actual", "branch": "Exact/head"}],
         "ls_git_repo": "org/actual",
         "ls_git_branch": "Exact/head",
+        "robin_git_incomplete": True,
+    }
+
+
+async def test_a_baseline_that_skips_every_checkout_stops_probes(
+    tmp_path: Path, sandbox: LocalShellBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshots = iter(
+        [
+            {"skipped": {"/repo": "git status timed out"}},
+            {"repos": {"/repo": {"repo": "org/repo", "branch": "work"}}},
+        ]
+    )
+
+    async def fingerprint(*args: object, **kwargs: object) -> dict[str, object]:
+        return dict(next(snapshots))
+
+    monkeypatch.setattr(SandboxScript, "run", fingerprint)
+    git = TurnGit()
+    git.start(sandbox, str(tmp_path))
+    await git.changing()
+    git.changed(1)
+
+    assert await git.metadata() == {"robin_git_incomplete": True}
+
+
+async def test_a_partial_scan_keeps_evidence_incomplete_until_the_checkout_is_read(
+    tmp_path: Path, sandbox: LocalShellBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a = {"repo": "org/a", "branch": "work"}
+    b = {"repo": "org/b", "branch": "work"}
+    snapshots = iter(
+        [
+            {"repos": {"/a": a, "/b": b}},
+            {"repos": {"/a": a}, "skipped": {"/b": "git status timed out"}},
+            {"repos": {"/a": a, "/b": {**b, "dirty": "changed"}}},
+        ]
+    )
+
+    async def fingerprint(*args: object, **kwargs: object) -> dict[str, object]:
+        return dict(next(snapshots))
+
+    monkeypatch.setattr(SandboxScript, "run", fingerprint)
+    git = TurnGit()
+    git.start(sandbox, str(tmp_path))
+    await git.changing()
+    git.changed(1)
+    assert await git.metadata() == {"robin_git_incomplete": True}
+
+    git.changed(2)
+    assert await git.metadata() == {
+        "open_swe_git_targets": [b],
+        "ls_git_repo": "org/b",
+        "ls_git_branch": "work",
+    }
+
+
+async def test_failing_fingerprints_back_off_then_stop_for_the_turn(
+    tmp_path: Path, sandbox: LocalShellBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[int] = []
+
+    async def baseline_then_timeouts(*args: object, **kwargs: object) -> dict[str, object]:
+        calls.append(len(calls))
+        if len(calls) == 1:
+            return {"repos": {}}
+        return {"repos": {}, "skipped": {str(tmp_path / "repo"): "git status timed out"}}
+
+    monkeypatch.setattr(SandboxScript, "run", baseline_then_timeouts)
+    monkeypatch.setattr(TurnGit, "RETRY_AFTER", (0.0, 3600.0))
+    git = TurnGit()
+    git.start(sandbox, str(tmp_path))
+    await git.changing()
+
+    for at in range(1, 4):
+        git.changed(at)
+        git.settle()
+        for _ in range(5):
+            await asyncio.sleep(0)
+    # The first failure is retried at once, the second not within the hour.
+    assert len(calls) == 3
+    # The turn's end still fingerprints its last change, a third failure, and says so.
+    assert await git.metadata() == {"robin_git_incomplete": True}
+    assert len(calls) == 4
+
+    monkeypatch.setattr(TurnGit, "RETRY_AFTER", (0.0, 0.0))
+    git.changed(5)
+    git.settle()
+    assert await git.metadata() == {"robin_git_incomplete": True}
+    assert len(calls) == 4
+
+
+async def test_a_slow_baseline_lets_the_tool_run_and_marks_the_evidence_incomplete(
+    tmp_path: Path, sandbox: LocalShellBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scanned = asyncio.Event()
+    changed: dict[str, object] = {
+        "repos": {str(tmp_path / "repo"): {"repo": "org/actual", "branch": "work"}}
+    }
+
+    async def slow_baseline(*args: object, **kwargs: object) -> dict[str, object]:
+        if not scanned.is_set():
+            await scanned.wait()
+            return {"repos": {}}
+        return changed
+
+    monkeypatch.setattr(SandboxScript, "run", slow_baseline)
+    monkeypatch.setattr(TurnGit, "BASELINE_WAIT", 0.01)
+    git = TurnGit()
+    git.start(sandbox, str(tmp_path))
+
+    await asyncio.wait_for(git.changing(), 1)
+    git.changed(1)
+    scanned.set()
+
+    assert await git.metadata() == {
+        "open_swe_git_targets": [{"repo": "org/actual", "branch": "work"}],
+        "ls_git_repo": "org/actual",
+        "ls_git_branch": "work",
+        "robin_git_incomplete": True,
     }
 
 
