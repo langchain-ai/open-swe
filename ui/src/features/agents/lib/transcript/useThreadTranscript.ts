@@ -2,7 +2,7 @@
  * Live transcript for one thread: snapshot, replay from the snapshot's version,
  * then live events.
  *
- * The reduced state is kept in a module-level cache for a few minutes, so
+ * The reduced state is kept a few minutes (`transcriptSnapshots`), so
  * coming back to a thread resumes with `after=<version>` instead of refetching
  * the whole conversation.
  */
@@ -46,39 +46,65 @@ import type { Message } from "@/features/agents/lib/types"
 import type { TranscriptEventStream } from "./api"
 import type { TranscriptState, QueuedTurn, StaleWorkspace } from "./reducer"
 
-const CACHE_TTL_MS = 5 * 60_000
+class TranscriptSnapshots {
+  static readonly TTL_MS = 5 * 60_000
 
-interface CacheEntry {
-  state: TranscriptState
-  touchedAt: number
-}
+  readonly #states = new Map<
+    string,
+    { state: TranscriptState; touchedAt: number }
+  >()
+  readonly #reads = new Map<string, Promise<TranscriptState>>()
 
-const cache = new Map<string, CacheEntry>()
-
-function cached(threadId: string): TranscriptState | null {
-  const now = Date.now()
-  for (const [id, entry] of cache) {
-    if (now - entry.touchedAt > CACHE_TTL_MS) cache.delete(id)
+  cached(threadId: string): TranscriptState | null {
+    const now = Date.now()
+    for (const [id, entry] of this.#states) {
+      if (now - entry.touchedAt > TranscriptSnapshots.TTL_MS)
+        this.#states.delete(id)
+    }
+    return this.#states.get(threadId)?.state ?? null
   }
-  return cache.get(threadId)?.state ?? null
-}
 
-const snapshots = new Map<string, Promise<TranscriptState>>()
-
-/**
- * One snapshot fetch per thread at a time: a view remounted while its first
- * fetch is in flight joins it rather than starting another.
- */
-function loadSnapshot(threadId: string): Promise<TranscriptState> {
-  let pending = snapshots.get(threadId)
-  if (!pending) {
-    pending = fetchTranscript(threadId)
-      .then(fromSnapshot)
-      .finally(() => snapshots.delete(threadId))
-    snapshots.set(threadId, pending)
+  remember(threadId: string, state: TranscriptState): void {
+    this.#states.set(threadId, { state, touchedAt: Date.now() })
   }
-  return pending
+
+  forget(threadId: string): void {
+    this.#states.delete(threadId)
+  }
+
+  /**
+   * One snapshot read per thread at a time: a view remounted while its first
+   * read is in flight joins it rather than starting another.
+   */
+  load(threadId: string): Promise<TranscriptState> {
+    let pending = this.#reads.get(threadId)
+    if (!pending) {
+      pending = fetchTranscript(threadId)
+        .then(fromSnapshot)
+        .finally(() => this.#reads.delete(threadId))
+      this.#reads.set(threadId, pending)
+    }
+    return pending
+  }
+
+  /**
+   * Starts a thread's snapshot read before its view mounts, such as while the
+   * summary that picks the view is on its way. The view joins the read, or
+   * resumes from its result as from a reopen. A read that fails before the
+   * view mounts is left to the view, which reads again.
+   */
+  preload(threadId: string): void {
+    if (this.cached(threadId)) return
+    this.load(threadId).then(
+      (state) => {
+        if (!this.#states.has(threadId)) this.remember(threadId, state)
+      },
+      () => {}
+    )
+  }
 }
+
+export const transcriptSnapshots = new TranscriptSnapshots()
 
 /** The thread was deleted while this client was reading it. */
 export class ThreadDeletedError extends Error {
@@ -136,7 +162,7 @@ export function useThreadTranscript(
     [queryClient, threadId]
   )
   const [state, setState] = useState<TranscriptState | null>(() =>
-    cached(threadId)
+    transcriptSnapshots.cached(threadId)
   )
   const [error, setError] = useState<unknown>(null)
   const { connection, onReconnect, onConnected } = useReconnectNotice()
@@ -151,7 +177,7 @@ export function useThreadTranscript(
   const publish = useCallback(
     (next: TranscriptState) => {
       stateRef.current = next
-      cache.set(threadId, { state: next, touchedAt: Date.now() })
+      transcriptSnapshots.remember(threadId, next)
       setState(next)
     },
     [threadId]
@@ -212,7 +238,7 @@ export function useThreadTranscript(
           // cached transcript, surface the failure the way a missing thread
           // already surfaces, and let the sidebar refetch without this thread.
           stream = null
-          cache.delete(threadId)
+          transcriptSnapshots.forget(threadId)
           stateRef.current = null
           if (disposed) return
           setState(null)
@@ -305,7 +331,7 @@ export function useThreadTranscript(
     const start = async () => {
       try {
         if (!stateRef.current) {
-          const loaded = await loadSnapshot(threadId)
+          const loaded = await transcriptSnapshots.load(threadId)
           if (disposed) return
           publish(loaded)
         }
@@ -345,10 +371,7 @@ export function useThreadTranscript(
       if (retry) clearTimeout(retry)
       stream?.close()
       if (stateRef.current) {
-        cache.set(threadId, {
-          state: stateRef.current,
-          touchedAt: Date.now(),
-        })
+        transcriptSnapshots.remember(threadId, stateRef.current)
       }
     }
   }, [

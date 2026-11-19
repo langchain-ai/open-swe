@@ -11,7 +11,7 @@ import { AgentsApiError } from "@/features/agents/lib/api"
 import { fetchTranscript } from "./api"
 import type { TranscriptEventHandlers } from "./api"
 import type { StoredEvent } from "./types"
-import { useThreadTranscript } from "./useThreadTranscript"
+import { transcriptSnapshots, useThreadTranscript } from "./useThreadTranscript"
 
 const stream = vi.hoisted(() => ({
   handlers: null as TranscriptEventHandlers | null,
@@ -42,6 +42,27 @@ afterEach(() => {
   stream.handlers = null
   vi.useRealTimers()
 })
+
+it.each(["in flight", "settled"])(
+  "hands a snapshot read started before the view to the view, %s",
+  async (when) => {
+    const threadId = `preloaded-${when}`
+    transcriptSnapshots.preload(threadId)
+    expect(fetchTranscript).toHaveBeenCalledTimes(1)
+    if (when === "settled") await act(async () => {})
+    const client = new QueryClient()
+    const view = renderHook(() => useThreadTranscript(threadId), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    })
+    await act(async () => {
+      await view.result.current.hydration
+    })
+    expect(view.result.current.state?.threadId).toBe(threadId)
+    expect(fetchTranscript).toHaveBeenCalledTimes(1)
+  }
+)
 
 it("recovers initial hydration after a temporary service outage", async () => {
   vi.useFakeTimers()

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AgentThreadPage } from "./AgentThreadPage"
 import { LoadError } from "@/components/LoadError"
 import { agentThreadKeys, useAgentThread } from "@/features/agents/lib/queries"
+import { fetchTranscript } from "@/features/agents/lib/transcript/api"
 import type { Message } from "@/features/agents/lib/types"
 import { setUseStreamPreference } from "@/lib/streamPreference"
 
@@ -71,6 +72,9 @@ vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", async () => {
     }),
   }
 })
+vi.mock("@/features/agents/lib/transcript/api", () => ({
+  fetchTranscript: vi.fn(() => new Promise(() => {})),
+}))
 vi.mock("@/features/agents/components/AgentPromptBar", () => ({
   AgentPromptBar: ({ disabled }: { disabled?: boolean }) => (
     <textarea aria-label="Message" disabled={disabled} />
@@ -230,6 +234,17 @@ describe("AgentThreadPage", () => {
 
     expect(screen.getByText("Fix web title")).toBeTruthy()
     expect(stream.mounts).toBe(1)
+  })
+
+  it("starts the transcript read while the summary loads, unless the SDK setting is on", () => {
+    vi.mocked(useAgentThread).mockReturnValue(awaitingSummary as never)
+    render(<AgentThreadPage threadId="transcript-early" />, { wrapper })
+    expect(fetchTranscript).toHaveBeenCalledWith("transcript-early")
+
+    cleanup()
+    setUseStreamPreference(true)
+    render(<AgentThreadPage threadId="stream-early" />, { wrapper })
+    expect(fetchTranscript).not.toHaveBeenCalledWith("stream-early")
   })
 
   it("shows only the newest turns the stream source shows while the summary loads", () => {

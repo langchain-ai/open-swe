@@ -17,6 +17,7 @@ import {
   useThreadSource,
 } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
 import { agentThreadKeys, useAgentThread } from "@/features/agents/lib/queries"
+import { transcriptSnapshots } from "@/features/agents/lib/transcript/useThreadTranscript"
 import type { ComposerDraft } from "@/features/agents/lib/types"
 import {
   ensureThreadLoad,
@@ -28,7 +29,7 @@ import {
 } from "@/lib/perf/threadLoad"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
-import { useStreamPreference } from "@/lib/streamPreference"
+import { readPreference, useStreamPreference } from "@/lib/streamPreference"
 import {
   pendingThreadStarts,
   usePendingThreadStarts,
@@ -153,6 +154,16 @@ function AgentThreadContent({
   useEffect(() => {
     if (active) ensureThreadLoad(threadId)
   }, [active, threadId])
+
+  // Most threads turn out to be transcript threads, so their read leaves with
+  // the summary instead of after it. A thread older than the transcript log
+  // wastes a 404, beside the head script's own on a page load. The stored
+  // setting, not `streamFirst`, which reads off while a page hydrates.
+  const summaryPending = threadQuery.isPending
+  useEffect(() => {
+    if (active && summaryPending && !readPreference())
+      transcriptSnapshots.preload(threadId)
+  }, [active, summaryPending, threadId])
 
   useEffect(() => {
     if (!active) return
