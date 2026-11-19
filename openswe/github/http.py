@@ -11,7 +11,9 @@ use the typed async SDK in ``openswe.github.sdk``. This helper centralises:
   See ``github_request`` for the full retry matrix.
 - **Rate-limit awareness**: respects ``Retry-After`` headers and backs off on
   GitHub secondary rate limits; a spent hourly quota is not retried unless it
-  resets within the longest backoff.
+  resets within the longest backoff. Once GitHub says an App installation's quota
+  is spent, ``openswe.github.quota_gate`` refuses that installation's requests
+  itself until the reset, without asking GitHub.
 - **Conditional reads**: ``github_client`` revalidates repeated GETs with their
   ETag (``openswe.github.revalidation``), and GitHub doesn't count a 304 against
   the quota.

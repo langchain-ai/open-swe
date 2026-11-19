@@ -10,7 +10,9 @@ and ``x-ratelimit-used``) and the kind of token sent, read from its prefix alone
 an installation token spends the shared quota, a person's token spends their own.
 They also carry how long GitHub took, the installation an installation token belongs
 to, and the graph run that sent the request, so a burst can be traced to its thread.
-A request that fails before GitHub answers is logged with its error type instead.
+A request that fails before GitHub answers is logged with its error type instead,
+and one the quota gate refused itself, while the installation's quota is spent, is
+logged as held.
 """
 
 import inspect
@@ -31,6 +33,8 @@ logger = logging.getLogger(__name__)
 _GITHUB_API_HOST: Final = "api.github.com"
 # Set on a response replayed from a 304: GitHub spent no quota on it.
 REVALIDATED: Final = "openswe_github_revalidated"
+# Set on a refusal ``QuotaGate`` answered itself: GitHub never saw the request.
+HELD: Final = "openswe_github_held"
 # Set on a request sent with an App installation's token: the installation it belongs to.
 INSTALLATION: Final = "openswe_github_installation_id"
 # Modules between a caller and the wire; the caller is the first frame outside them.
@@ -216,6 +220,7 @@ class MeteredTransport(httpx2.AsyncBaseTransport):
                 **fields,
                 "github_status": response.status_code,
                 "github_revalidated": revalidated,
+                "github_held": bool(response.extensions.get(HELD)),
                 "github_quota_resource": headers.get("x-ratelimit-resource"),
                 "github_quota_used": cls._header_int(headers, "x-ratelimit-used"),
                 "github_quota_remaining": cls._header_int(headers, "x-ratelimit-remaining"),
