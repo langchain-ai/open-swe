@@ -50,6 +50,17 @@ test("a busy run takes a queued follow-up and a monitor event before its next mo
     )
     .toBe(true);
 
+  let resumeTranscript!: () => void;
+  const transcriptReady = new Promise<void>((resolve) => {
+    resumeTranscript = resolve;
+  });
+  await page.route(
+    `**/threads/${threadId}/transcript/events?*`,
+    async (route) => {
+      await transcriptReady;
+      await route.continue();
+    },
+  );
   await page.goto(`/agents/${threadId}`);
   await dismissOnboardingIfShown(page);
   await expect(
@@ -69,6 +80,16 @@ test("a busy run takes a queued follow-up and a monitor event before its next mo
       { timeout: 30_000 },
     )
     .toBe(1);
+  await expect(
+    page.getByText("Waiting for the agent", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText(FOLLOW_UP, { exact: true })).toHaveCount(1);
+  await expect(page.getByText("Sending", { exact: true })).toHaveCount(0);
+  resumeTranscript();
+  await expect(
+    page.getByText("Waiting for the agent", { exact: true }),
+  ).toHaveCount(0);
+  await expect(page.getByText(FOLLOW_UP, { exact: true })).toHaveCount(1);
   await expect
     .poll(
       async () =>

@@ -709,16 +709,23 @@ export function AgentThreadView({
     () => ({ threadId: thread.id, running: thread.status === "running" }),
     [thread.id, thread.status]
   )
+  const agentQueue = useAgentThreadQueuedMessages(thread.id).data
+  const inboxIds = useMemo(
+    () => new Set(agentQueue?.map((message) => message.id)),
+    [agentQueue]
+  )
   // An optimistic row sent to queue renders as a queued row from the start,
   // so it never flashes as a sent message before the server confirms it.
   const pendingMessages = useMemo(
     () =>
       visiblePendingMessages(
-        thread.pendingMessages?.filter((message) => !message.queued),
+        thread.pendingMessages?.filter(
+          (message) => !message.queued && !inboxIds.has(message.id)
+        ),
         [...baseMessages, ...queued.map((entry) => entry.message)],
         senderName
       ),
-    [baseMessages, queued, senderName, thread.pendingMessages]
+    [baseMessages, inboxIds, queued, senderName, thread.pendingMessages]
   )
   const visibleMessages = useMemo(
     () => [...baseMessages, ...pendingMessages],
@@ -734,11 +741,11 @@ export function AgentThreadView({
   useEffect(() => {
     const pending = thread.pendingMessages
     if (!pending?.length) return
-    const persisted = new Set(
-      [...baseMessages, ...queued.map((entry) => entry.message)].map(
-        (message) => message.id
-      )
-    )
+    const persisted = new Set([
+      ...baseMessages.map((message) => message.id),
+      ...queued.map((entry) => entry.message.id),
+      ...inboxIds,
+    ])
     if (!pending.some((message) => persisted.has(message.id))) return
     queryClient.setQueryData<AgentThread>(
       agentThreadKeys.detail(thread.id),
@@ -750,9 +757,15 @@ export function AgentThreadView({
           ),
         }
     )
-  }, [baseMessages, queryClient, queued, thread.id, thread.pendingMessages])
+  }, [
+    baseMessages,
+    inboxIds,
+    queryClient,
+    queued,
+    thread.id,
+    thread.pendingMessages,
+  ])
 
-  const agentQueue = useAgentThreadQueuedMessages(thread.id).data
   const queuedRows = useMemo(() => {
     const known = new Set(queued.map((entry) => entry.message.id))
     // A steered follow-up is already on the transcript under the same id.
@@ -771,7 +784,12 @@ export function AgentThreadView({
         mine: isOwnQueued(entry),
       })),
       ...(thread.pendingMessages ?? [])
-        .filter((message) => message.queued && !known.has(message.id))
+        .filter(
+          (message) =>
+            message.queued &&
+            !shown.has(message.id) &&
+            !inboxIds.has(message.id)
+        )
         .map((message) => ({
           id: message.id,
           content: message.content,
@@ -790,7 +808,14 @@ export function AgentThreadView({
           sender: message.sender,
         })),
     ]
-  }, [agentQueue, baseMessages, isOwnQueued, queued, thread.pendingMessages])
+  }, [
+    agentQueue,
+    baseMessages,
+    inboxIds,
+    isOwnQueued,
+    queued,
+    thread.pendingMessages,
+  ])
 
   const hasMessages = visibleMessages.length > 0
   const hasConversation = hasMessages || queuedRows.length > 0
