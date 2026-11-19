@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from typing import Final, Literal
 
 import httpx2
+import orjson
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
@@ -42,6 +43,11 @@ _UNREACHABLE: Final = "the thread's runtime could not be reached"
 _run_or_runs: Final = TypeAdapter(list[dict[str, JsonValue]] | dict[str, JsonValue])
 _json_value: Final = TypeAdapter(JsonValue)
 _CONFIG_EVENTS: Final = frozenset({b"checkpoints", b"debug"})
+# What the SDK reads of a streamed message's metadata: the graph it came from, and the
+# `task` call of a subagent's message.
+_MESSAGE_METADATA_KEYS: Final = frozenset(
+    {"langgraph_checkpoint_ns", "checkpoint_ns", "lc_subagent_tool_call_id"}
+)
 
 
 class _ClientEvents:
@@ -49,8 +55,10 @@ class _ClientEvents:
 
     A checkpoint's ``config`` and ``parent_config`` hold the run's configurable, the run
     token among it, so ``checkpoints`` and ``debug`` events lose both and keep their
-    ``checkpoint`` ids. One that can't be read is dropped. Every other event passes
-    through byte for byte, held back only until it ends.
+    ``checkpoint`` ids. One that can't be read is dropped. Every message chunk carries
+    the run's whole metadata, most of each ``messages`` event, so it keeps only the keys
+    the SDK reads. Every other event passes through byte for byte, held back only until
+    it ends.
     """
 
     def __init__(self) -> None:
@@ -62,11 +70,13 @@ class _ClientEvents:
     def feed(self, chunk: bytes) -> bytes:
         self._pending += chunk
         done: list[bytes] = []
-        while (end := self._end_of_event()) >= 0:
-            event = bytes(self._pending[:end])
-            del self._pending[:end]
-            self._searched = 0
-            done.append(self._readable(event))
+        start = 0
+        while (end := self._end_of_event(start)) >= 0:
+            done.append(self._readable(bytes(self._pending[start:end])))
+            start = end
+        # Once per chunk: each event's own cut would move the rest of the chunk every time.
+        del self._pending[:start]
+        self._searched -= start
         return b"".join(done)
 
     def rest(self) -> bytes:
@@ -74,15 +84,20 @@ class _ClientEvents:
         self._pending.clear()
         return self._readable(event) if event else b""
 
-    def _end_of_event(self) -> int:
-        start = max(0, self._searched - 3)
-        ends = [
-            at + len(blank_line)
-            for blank_line in (b"\r\n\r\n", b"\n\n")
-            if (at := self._pending.find(blank_line, start)) >= 0
-        ]
-        self._searched = len(self._pending)
-        return min(ends) if ends else -1
+    def _end_of_event(self, start: int) -> int:
+        """Where the event at ``start`` ends, past its blank line, or -1 while it hasn't
+        arrived whole. Only line ends are checked, so a chunk of many events is scanned
+        once."""
+        pending = self._pending
+        at = max(start, self._searched - 3)
+        while (at := pending.find(b"\n", at)) >= 0:
+            for blank_line in (b"\n", b"\r\n"):
+                if pending.startswith(blank_line, at + 1):
+                    self._searched = at + 1 + len(blank_line)
+                    return self._searched
+            at += 1
+        self._searched = len(pending)
+        return -1
 
     @staticmethod
     def _readable(event: bytes) -> bytes:
@@ -96,14 +111,13 @@ class _ClientEvents:
             ),
             b"",
         )
-        if name.partition(b"|")[0] not in _CONFIG_EVENTS:
+        kind = name.partition(b"|")[0]
+        if kind == b"messages":
+            return _ClientEvents._message(event, name)
+        if kind not in _CONFIG_EVENTS:
             return event
         lines = event.splitlines()
-        data = b"\n".join(
-            line.removeprefix(b"data:").removeprefix(b" ")
-            for line in lines
-            if line.startswith(b"data:")
-        )
+        data = _ClientEvents._data(lines)
         try:
             payload = _json_value.validate_json(data)
         except ValidationError:
@@ -117,9 +131,42 @@ class _ClientEvents:
             if isinstance(part, dict):
                 part.pop("config", None)
                 part.pop("parent_config", None)
+        return _ClientEvents._with_data(event, lines, json.dumps(payload).encode())
+
+    @staticmethod
+    def _message(event: bytes, name: bytes) -> bytes:
+        """A ``messages`` event, a subagent's (``messages|<namespace>``) too, its
+        ``[chunk, metadata]`` pair keeping only the metadata the SDK reads. A v3 run's
+        frame is a protocol event that carries no run metadata, and passes through as
+        sent, as does any other shape."""
+        lines = event.splitlines()
+        try:
+            payload = orjson.loads(_ClientEvents._data(lines))
+        except orjson.JSONDecodeError:
+            logger.warning(
+                "Passed on a run stream message that could not be read",
+                extra={"stream_event": name.decode(errors="replace"), "event_bytes": len(event)},
+            )
+            return event
+        if not (isinstance(payload, list) and len(payload) == 2 and isinstance(payload[1], dict)):
+            return event
+        chunk, metadata = payload
+        kept = {key: value for key, value in metadata.items() if key in _MESSAGE_METADATA_KEYS}
+        return _ClientEvents._with_data(event, lines, orjson.dumps([chunk, kept]))
+
+    @staticmethod
+    def _data(lines: list[bytes]) -> bytes:
+        return b"\n".join(
+            line.removeprefix(b"data:").removeprefix(b" ")
+            for line in lines
+            if line.startswith(b"data:")
+        )
+
+    @staticmethod
+    def _with_data(event: bytes, lines: list[bytes], data: bytes) -> bytes:
         newline = b"\r\n" if b"\r\n" in event else b"\n"
         fields = [line for line in lines if line and not line.startswith(b"data:")]
-        fields.append(b"data: " + json.dumps(payload).encode())
+        fields.append(b"data: " + data)
         return newline.join(fields) + newline * 2
 
 

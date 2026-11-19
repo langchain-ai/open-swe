@@ -472,6 +472,55 @@ async def test_a_message_steered_into_someone_elses_run_never_gets_its_token(
     assert response.json()["kwargs"] == {"stream_mode": ["values"]}
 
 
+async def test_a_streamed_message_keeps_only_the_metadata_the_sdk_reads(
+    mda: Mda, dashboard: Dashboard
+) -> None:
+    await _thread(SHARED)
+    chunk = {"type": "AIMessageChunk", "id": "run--1", "content": "Hel"}
+    run_metadata = {
+        "ls_model_name": "a-model",
+        "user_email": "ada@example.com",
+        "langgraph_step": 3,
+    }
+    root = {"langgraph_checkpoint_ns": "model:1", "checkpoint_ns": "model:1"}
+    subagent = {
+        "langgraph_checkpoint_ns": "tools:call-1|model:2",
+        "checkpoint_ns": "tools:call-1|model:2",
+        "lc_subagent_tool_call_id": "call-1",
+    }
+    # A v3 run's frame: its own ``metadata`` is the model's, and no run metadata rides on it.
+    v3_frame = {"event": "message-start", "id": "run--2", "metadata": {"model_name": "a-model"}}
+    sent = [
+        ("messages", [chunk, {**root, **run_metadata}]),
+        ("messages|tools:call-1", [chunk, {**subagent, **run_metadata}]),
+        ("messages", v3_frame),
+        ("custom", run_metadata),
+    ]
+    stream = b"".join(
+        f"id: {at}-0\r\nevent: {name}\r\ndata: {json.dumps(data)}\r\n\r\n".encode()
+        for at, (name, data) in enumerate(sent)
+    )
+
+    async def in_pieces() -> AsyncIterator[bytes]:
+        for start in range(0, len(stream), 5):
+            yield stream[start : start + 5]
+
+    mda.answers[("GET", f"/threads/{THREAD}/runs/{RUN}/stream")] = lambda _: httpx2.Response(
+        200, content=in_pieces(), headers={"content-type": "text/event-stream"}
+    )
+
+    response = await dashboard.request("GET", f"/threads/{THREAD}/runs/{RUN}/stream")
+
+    events = [event for event in response.text.split("\r\n\r\n") if event]
+    assert [event.split("\r\n")[1] for event in events] == [f"event: {name}" for name, _ in sent]
+    assert [json.loads(event.split("data: ", 1)[1]) for event in events] == [
+        [chunk, root],
+        [chunk, subagent],
+        v3_frame,
+        run_metadata,
+    ]
+
+
 async def test_the_runtimes_refusal_is_the_streams_status(mda: Mda, dashboard: Dashboard) -> None:
     await _thread(SHARED)
     mda.answers[("GET", f"/threads/{THREAD}/stream")] = lambda _: httpx2.Response(
