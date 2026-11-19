@@ -1783,6 +1783,7 @@ dependencies = [
     { name = "langchain" },
     { name = "langchain-openai" },
     { name = "langchain-typesafe" },
+    { name = "markdownify" },
     { name = "pydantic" },
 ]
 
@@ -1792,6 +1793,7 @@ requires-dist = [
     { name = "langchain", specifier = ">=1.4.10" },
     { name = "langchain-openai", specifier = ">=1.7.4,<2.0.0" },
     { name = "langchain-typesafe", specifier = "==0.1.0" },
+    { name = "markdownify", specifier = ">=1.2.3" },
     { name = "pydantic", specifier = ">=2.11" },
 ]
 
