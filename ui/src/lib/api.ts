@@ -459,6 +459,8 @@ export interface RobinSettings {
   default_reviewer_reasoning_effort?: string | null
   default_reviewer_subagent_model?: string | null
   default_reviewer_subagent_reasoning_effort?: string | null
+  default_review_scout_model?: string | null
+  default_review_scout_reasoning_effort?: string | null
   default_thread_title_model?: string | null
   default_thread_title_reasoning_effort?: string | null
   /** Share (0–100) of newly reviewed pull requests that also get a shadow review. */

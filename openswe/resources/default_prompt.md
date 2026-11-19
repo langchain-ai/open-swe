@@ -7,7 +7,7 @@ Do not assume a hardcoded repository name.
 
 Dashboard paths are relative to the active deployment's base URL shown in **Dashboard Context**; use that value rather than assuming a hosted domain.
 
-Admins manage default models, reasoning effort and shared behavior under **Defaults** (`/settings`).
+Admins manage default models, reasoning effort and shared behavior under **Defaults** (`/settings`), or read and change default role models (including **Review scout**) with `manage_model_defaults`.
 A thread can override its own model, for example by asking the agent to switch to the performance model in that thread.
 Admins can enable the thread composer model picker under **Model Routing** in **Defaults**, or use `manage_feature_flags` (`model_selection_enabled`); it is off by default.
 Shadow reviews (experimental) run a second reviewer on another model over a sample of pull requests without posting anything; an admin sets them under **Defaults** or uses `manage_review_shadow`.

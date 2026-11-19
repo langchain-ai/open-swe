@@ -28,6 +28,7 @@ from openswe.dashboard.options import (
     provider_fallback_pair,
 )
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS
+from openswe.database import postgres
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.ui_invalidations import Topic
 from openswe.utils.time import now_iso
@@ -131,6 +132,8 @@ class SettingsUpdate(BaseModel):
     default_reviewer_reasoning_effort: str | None = None
     default_reviewer_subagent_model: str | None = None
     default_reviewer_subagent_reasoning_effort: str | None = None
+    default_review_scout_model: str | None = None
+    default_review_scout_reasoning_effort: str | None = None
     default_thread_title_model: str | None = None
     default_thread_title_reasoning_effort: str | None = None
     # The share of newly reviewed pull requests that also get a shadow review on this model.
@@ -300,6 +303,11 @@ _MODEL_PAIRS: tuple[tuple[str, str, str], ...] = (
         "default_reviewer_subagent_reasoning_effort",
         "reviewer subagent",
     ),
+    (
+        "default_review_scout_model",
+        "default_review_scout_reasoning_effort",
+        "review scout",
+    ),
     ("default_thread_title_model", "default_thread_title_reasoning_effort", "thread title"),
     ("review_shadow_model", "review_shadow_reasoning_effort", "shadow reviewer"),
 )
@@ -371,6 +379,8 @@ def _default_settings() -> dict[str, Any]:
         "default_reviewer_reasoning_effort": fallback_effort,
         "default_reviewer_subagent_model": fallback_model,
         "default_reviewer_subagent_reasoning_effort": fallback_effort,
+        "default_review_scout_model": REVIEW_SCOUT_FALLBACK_MODEL[0],
+        "default_review_scout_reasoning_effort": REVIEW_SCOUT_FALLBACK_MODEL[1],
         "default_thread_title_model": DEFAULT_THREAD_TITLE_MODEL,
         "default_thread_title_reasoning_effort": DEFAULT_THREAD_TITLE_REASONING_EFFORT,
         "review_shadow_percent": 0,
@@ -531,6 +541,30 @@ class Settings(Mapping[str, Any]):
         """Resolve global defaults using the caller's connection."""
         return _finish({**_default_settings(), **await instance_record(session=session)})
 
+    @staticmethod
+    async def patch(changes: Mapping[str, object]) -> dict[str, object]:
+        """Atomically merge ``changes`` into the instance record, validate, and persist."""
+        async with postgres.session() as session:
+            before = _set_fields(await INSTANCE_SETTINGS.lock("", session=session))
+            update = SettingsUpdate.model_validate({**before, **changes})
+            update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
+            value = _record_values(update)
+            await INSTANCE_SETTINGS.put("", value, session=session)
+        if current_audit_log.get() is not None:
+            _bind_settings_changes(
+                {
+                    field: SettingsChange(
+                        before=_audit_setting_value(field, before.get(field)),
+                        after=_audit_setting_value(field, value.get(field)),
+                    )
+                    for field in SettingsUpdate.model_fields
+                    if before.get(field) != value.get(field)
+                }
+            )
+        await _forget_cached_settings()
+        await Topic.SETTINGS.invalidate()
+        return value
+
     def __getitem__(self, key: str) -> Any:
         return self._values[key]
 
@@ -592,9 +626,9 @@ class Settings(Mapping[str, Any]):
 
     @property
     def review_scout_model(self) -> tuple[str, str]:
-        """The review scout's ``(model_id, reasoning_effort)``: model routing's balanced tier."""
-        model = self.get("default_agent_routing_balanced_model")
-        effort = self.get("default_agent_routing_balanced_reasoning_effort")
+        """The review scout's ``(model_id, reasoning_effort)``."""
+        model = self.get("default_review_scout_model")
+        effort = self.get("default_review_scout_reasoning_effort")
         if (
             isinstance(model, str)
             and isinstance(effort, str)

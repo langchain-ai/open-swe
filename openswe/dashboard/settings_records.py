@@ -46,8 +46,10 @@ class SettingsRecords:
         )
         return dict(rows.tuples().all())
 
-    async def put(self, key: str, value: JsonObject) -> None:
-        async with postgres.session() as session:
+    async def put(
+        self, key: str, value: JsonObject, *, session: AsyncSession | None = None
+    ) -> None:
+        async with postgres.session(session) as session:
             upsert = insert(SettingsRecord).values(tier=self.tier, key=key, value=value)
             await session.execute(
                 upsert.on_conflict_do_update(

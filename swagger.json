@@ -9021,6 +9021,28 @@
             ],
             "title": "Default Repo"
           },
+          "default_review_scout_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Review Scout Model"
+          },
+          "default_review_scout_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Review Scout Reasoning Effort"
+          },
           "default_reviewer_model": {
             "anyOf": [
               {

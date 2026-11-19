@@ -27,6 +27,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.snapshotctl",
     "openswe.tools.organization_skills",
     "openswe.tools.manage_feature_flags",
+    "openswe.tools.manage_model_defaults",
     "openswe.tools.execution_defaults",
     "openswe.tools.manage_review_apps",
     "openswe.tools.manage_review_approval_mode",

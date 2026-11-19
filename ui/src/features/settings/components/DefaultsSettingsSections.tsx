@@ -152,6 +152,14 @@ export function ModelDefaultsSection({
           modelField="default_reviewer_subagent_model"
           effortField="default_reviewer_subagent_reasoning_effort"
         />
+        <ModelRow
+          settings={settings}
+          models={models}
+          label="Review scout"
+          description="Model used to plan shared PR walkthroughs and summarize human input."
+          modelField="default_review_scout_model"
+          effortField="default_review_scout_reasoning_effort"
+        />
       </div>
     </SettingsSection>
   )
