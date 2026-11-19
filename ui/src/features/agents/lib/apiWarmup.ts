@@ -1,3 +1,4 @@
+import { resolveDashboardApiBase } from "@/lib/api-base"
 import {
   STREAM_PREFERENCE_DEFAULT,
   STREAM_PREFERENCE_STORAGE_KEY,
@@ -12,36 +13,67 @@ const THREAD_PATH_RE =
 const AGENTS_HOME_RE = /^\/agents\/?$/
 const REVIEWS_PATH_RE = /^\/agents\/reviews\/?$/
 
+/** What the page tells the script, which reads everything else where it runs. */
+interface WarmupConfig {
+  /** `VITE_DASHBOARD_API_BASE_URL` and Vite's `base`, to find the API as the app does. */
+  apiBase: string | undefined
+  basePath: string
+  /** Stands for the thread's id in `thread`, the reads a thread route makes. */
+  threadId: string
+  thread: typeof THREAD_READS
+  /** The reviews page's reads for the pull request its `pr` parameter names. */
+  review: Array<string>
+  sidebar: string
+  /** The session read, warmed only in the desktop app: a server render already has it. */
+  session: string
+  desktopProtocol: string
+  prefsKey: string
+  streamPreferenceKey: string
+  streamPreferenceDefault: boolean
+  pageSize: number
+}
+
 /**
  * Serialized into the document with `toString()`, so it may not reference
  * imports, module scope, or any syntax the build lowers with a helper.
+ *
+ * The route comes from the address the script runs at, not the page that holds
+ * it: the desktop app serves one prerendered document for every route.
  *
  * The sidebar query is built here rather than passed in: every part of it comes
  * from a localStorage preference that only the browser can read, and a single
  * wrong parameter costs a whole duplicate request.
  */
 function warmApiRequests(
-  thread: {
-    state: string
-    runningRun: string
-    transcript: string
-    summary: string
-  } | null,
-  sidebarPath: string | null,
-  prefsKey: string,
-  streamPreferenceKey: string,
-  streamPreferenceDefault: boolean,
-  pageSize: number,
-  reviewReads: Array<string>
+  config: WarmupConfig,
+  threadRoute: RegExp,
+  homeRoute: RegExp,
+  reviewsRoute: RegExp,
+  resolveApiBase: typeof resolveDashboardApiBase
 ) {
   if (document.readyState !== "loading") return
 
+  const base = config.basePath.replace(/\/$/, "")
+  const route =
+    base && location.pathname.indexOf(base + "/") === 0
+      ? location.pathname.slice(base.length)
+      : location.pathname
+  const api =
+    resolveApiBase(config.apiBase, location.protocol, config.basePath) +
+    "/dashboard/api"
+  const threadId = threadRoute.exec(route)?.[1]
+  const review = reviewsRoute.test(route) ? config.review : []
+
   const targets: Array<{ url: string; dashboard: boolean }> = []
-  for (const url of reviewReads) targets.push({ url, dashboard: true })
-  if (thread) {
-    let prefersStream = streamPreferenceDefault
+  if (location.protocol === config.desktopProtocol) {
+    targets.push({ url: api + config.session, dashboard: true })
+  }
+  for (const path of review) targets.push({ url: api + path, dashboard: true })
+  if (threadId) {
+    const read = (path: string) => api + path.replace(config.threadId, threadId)
+    let prefersStream = config.streamPreferenceDefault
     try {
-      const stored = localStorage.getItem(streamPreferenceKey)
+      const stored = localStorage.getItem(config.streamPreferenceKey)
       if (stored !== null) prefersStream = stored === "true"
     } catch {
       // An unreadable preference just means the default.
@@ -52,15 +84,15 @@ function warmApiRequests(
     // That is on purpose: warming the state too would waste it on every other thread.
     if (prefersStream) {
       targets.push(
-        { url: thread.state, dashboard: false },
-        { url: thread.runningRun, dashboard: false }
+        { url: read(config.thread.state), dashboard: false },
+        { url: read(config.thread.runningRun), dashboard: false }
       )
     } else {
-      targets.push({ url: thread.transcript, dashboard: true })
+      targets.push({ url: read(config.thread.transcript), dashboard: true })
     }
-    targets.push({ url: thread.summary, dashboard: true })
+    targets.push({ url: read(config.thread.summary), dashboard: true })
   }
-  if (sidebarPath) {
+  if (threadId || review.length > 0 || homeRoute.test(route)) {
     let includeAutomations = false
     let includeResolved = false
     let owned = true
@@ -68,7 +100,7 @@ function warmApiRequests(
     let repoMode = false
     let sortByActivity = true
     try {
-      const raw = localStorage.getItem(prefsKey)
+      const raw = localStorage.getItem(config.prefsKey)
       const prefs = raw ? JSON.parse(raw) : null
       const filters = prefs?.filters
       repoMode = prefs?.organize === "repo" || prefs?.organize === "workspace"
@@ -89,7 +121,7 @@ function warmApiRequests(
     // handoff below sorts query keys before matching.
     const search = new URLSearchParams()
     search.set("hierarchy", "true")
-    search.set("limit", String(pageSize))
+    search.set("limit", String(config.pageSize))
     search.set("offset", "0")
     if (!includeResolved) search.set("resolved", "false")
     search.set("scope", includeAutomations ? "all" : "interactive")
@@ -98,10 +130,11 @@ function warmApiRequests(
     if (!includeSlack) search.append("exclude_source", "slack")
     search.set("sort_by", sortByActivity ? "updated_at" : "created_at")
     targets.push({
-      url: sidebarPath + "?" + search.toString(),
+      url: api + config.sidebar + "?" + search.toString(),
       dashboard: true,
     })
   }
+  if (targets.length === 0) return
 
   // A request matches a warmed one whatever order its query keys come in.
   // `sort` is stable, so a repeated key's values keep their order.
@@ -217,38 +250,37 @@ const THREAD_STATE_SELECT = [
   "values.messages",
 ]
 
-export function threadStateUrl(threadId: string): string {
-  const search = new URLSearchParams()
-  for (const field of THREAD_STATE_SELECT) search.append("select", field)
-  return `${agentsLangGraphApiUrl}/threads/${threadId}/state?${search}`
-}
+/** Stands for the thread's id in {@link THREAD_READS}. */
+const THREAD_ID = "{threadId}"
 
-/**
- * The stream's first lookup for a running run, which it sends with the state
- * read and joins once both have answered.
- */
-export function threadRunningRunUrl(threadId: string): string {
-  const search = new URLSearchParams({
+/** The reads a thread page makes as it opens, as paths under the dashboard API. */
+const THREAD_READS = {
+  state: `/threads/${THREAD_ID}/state?${new URLSearchParams(
+    THREAD_STATE_SELECT.map((field) => ["select", field])
+  )}`,
+  /**
+   * The stream's first lookup for a running run, which it sends with the state
+   * read and joins once both have answered.
+   */
+  runningRun: `/threads/${THREAD_ID}/runs?${new URLSearchParams({
     limit: "1",
     offset: "0",
     status: "running",
-  })
-  return `${agentsLangGraphApiUrl}/threads/${threadId}/runs?${search}`
+  })}`,
+  /** What `fetchTranscript` requests: the transcript view's whole thread. */
+  transcript: `/threads/${THREAD_ID}/transcript`,
+  /** What `agentsApi.getThread` requests. The thread page waits on it to show the thread. */
+  summary: `/threads/${THREAD_ID}`,
 }
 
-/** What `agentsApi.getThread` requests. The thread page waits on it to show the thread. */
-function threadSummaryUrl(threadId: string): string {
-  return `${agentsLangGraphApiUrl}/threads/${threadId}`
+export function threadStateUrl(threadId: string): string {
+  return agentsLangGraphApiUrl + THREAD_READS.state.replace(THREAD_ID, threadId)
 }
 
-/** What `fetchTranscript` requests: the transcript view's whole thread. */
-function threadTranscriptUrl(threadId: string): string {
-  return `${agentsLangGraphApiUrl}/threads/${threadId}/transcript`
-}
-
-/** The sidebar page endpoint; the script appends the preference-dependent query. */
-function sidebarPageEndpoint(): string {
-  return `${agentsLangGraphApiUrl}/threads/page`
+export function threadRunningRunUrl(threadId: string): string {
+  return (
+    agentsLangGraphApiUrl + THREAD_READS.runningRun.replace(THREAD_ID, threadId)
+  )
 }
 
 /**
@@ -259,41 +291,28 @@ function sidebarPageEndpoint(): string {
  * `selectedPullRequest` is the reviews page's `pr` search parameter as the
  * router parsed it, before any route validated it.
  */
-export function apiWarmupScript(
-  pathname: string,
-  selectedPullRequest?: unknown
-): string | null {
-  const threadId = THREAD_PATH_RE.exec(pathname)?.[1]
-  const isAgentsHome = AGENTS_HOME_RE.test(pathname)
-  const review = REVIEWS_PATH_RE.test(pathname)
-    ? parsePullRequestSelection(selectedPullRequest)
-    : null
-  if (!threadId && !isAgentsHome && !review) return null
+export function apiWarmupScript(selectedPullRequest?: unknown): string {
+  const review = parsePullRequestSelection(selectedPullRequest)
   // The open pull request's detail and diff, and its chat, whose thread the
   // chat panel waits for before it reads anything else.
   const reviewPath =
     review &&
-    `${agentsLangGraphApiUrl}/reviews/${encodeURIComponent(review.owner)}/${encodeURIComponent(review.repo)}/${review.number}`
-
-  const args = [
-    JSON.stringify(
-      threadId
-        ? {
-            state: threadStateUrl(threadId),
-            runningRun: threadRunningRunUrl(threadId),
-            transcript: threadTranscriptUrl(threadId),
-            summary: threadSummaryUrl(threadId),
-          }
-        : null
-    ),
-    JSON.stringify(sidebarPageEndpoint()),
-    JSON.stringify(SIDEBAR_PREFS_STORAGE_KEY),
-    JSON.stringify(STREAM_PREFERENCE_STORAGE_KEY),
-    JSON.stringify(STREAM_PREFERENCE_DEFAULT),
-    JSON.stringify(SIDEBAR_PAGE_SIZE),
-    JSON.stringify(
-      reviewPath ? [reviewPath, `${reviewPath}/diff`, `${reviewPath}/chat`] : []
-    ),
-  ].join(",")
-  return `(${warmApiRequests.toString()})(${args});`
+    `/reviews/${encodeURIComponent(review.owner)}/${encodeURIComponent(review.repo)}/${review.number}`
+  const config: WarmupConfig = {
+    apiBase: import.meta.env.VITE_DASHBOARD_API_BASE_URL,
+    basePath: import.meta.env.BASE_URL,
+    threadId: THREAD_ID,
+    thread: THREAD_READS,
+    review: reviewPath
+      ? [reviewPath, `${reviewPath}/diff`, `${reviewPath}/chat`]
+      : [],
+    sidebar: "/threads/page",
+    session: "/me",
+    desktopProtocol: "open-swe:",
+    prefsKey: SIDEBAR_PREFS_STORAGE_KEY,
+    streamPreferenceKey: STREAM_PREFERENCE_STORAGE_KEY,
+    streamPreferenceDefault: STREAM_PREFERENCE_DEFAULT,
+    pageSize: SIDEBAR_PAGE_SIZE,
+  }
+  return `(${warmApiRequests.toString()})(${JSON.stringify(config)},${THREAD_PATH_RE},${AGENTS_HOME_RE},${REVIEWS_PATH_RE},${resolveDashboardApiBase.toString()});`
 }

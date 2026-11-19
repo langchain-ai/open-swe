@@ -25,12 +25,23 @@ const STATE_PATH = `${SUMMARY_PATH}/state`
 const TRANSCRIPT_PATH = `${SUMMARY_PATH}/transcript`
 const RUNS_PATH = `${SUMMARY_PATH}/runs`
 const SIDEBAR_PATH = "/dashboard/api/threads/page"
+const SESSION_PATH = "/dashboard/api/me"
+const DESKTOP_ORIGIN = "open-swe://app"
 
 function setReadyState(value: DocumentReadyState) {
   Object.defineProperty(document, "readyState", { value, configurable: true })
 }
 
-function run(script: string) {
+function run(
+  pathname: string,
+  { pullRequest, desktop }: { pullRequest?: unknown; desktop?: boolean } = {}
+) {
+  const script = apiWarmupScript(pullRequest)
+  if (desktop) {
+    new Function("location", script)(new URL(`${DESKTOP_ORIGIN}${pathname}`))
+    return
+  }
+  window.history.replaceState(null, "", pathname)
   new Function(script)()
 }
 
@@ -159,22 +170,33 @@ function stubStreamPreference() {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
   vi.restoreAllMocks()
   clearPerfSpans()
   setReadyState("complete")
+  window.history.replaceState(null, "", "/")
 })
 
 describe("apiWarmupScript", () => {
-  it("only matches the routes whose first reads it warms", () => {
-    expect(apiWarmupScript("/")).toBeNull()
-    expect(apiWarmupScript("/login")).toBeNull()
-    expect(apiWarmupScript(`/agents/${THREAD_ID}/plan`)).toBeNull()
-    expect(apiWarmupScript("/agents")).toContain("/threads/page")
-    expect(apiWarmupScript(`/agents/${THREAD_ID}`)).toContain(STATE_PATH)
-    expect(apiWarmupScript("/agents/reviews")).toBeNull()
-    expect(apiWarmupScript("/agents/reviews", "acme/web app#12")).toBeNull()
-    expect(apiWarmupScript("/agents/reviews", ["acme/web.app#12"])).toBeNull()
-  })
+  it.each<[string, unknown]>([
+    ["/", undefined],
+    ["/login", undefined],
+    [`/agents/${THREAD_ID}/plan`, undefined],
+    ["/agents/reviews", undefined],
+    ["/agents/reviews", "acme/web app#12"],
+    ["/agents/reviews", ["acme/web.app#12"]],
+  ])(
+    "leaves %s with pr %j, whose first reads it doesn't warm, to the app",
+    (pathname, selectedPullRequest) => {
+      setReadyState("loading")
+      const original = stubFetch()
+
+      run(pathname, { pullRequest: selectedPullRequest })
+
+      expect(original).not.toHaveBeenCalled()
+      expect(window.fetch).toBe(original)
+    }
+  )
 
   it("warms the open pull request's first reads as the page requests them, and hands each to that request", async () => {
     const reads = [
@@ -187,7 +209,7 @@ describe("apiWarmupScript", () => {
 
     setReadyState("loading")
     const network = stubFetch()
-    run(apiWarmupScript("/agents/reviews", "acme/web.app#012")!)
+    run("/agents/reviews", { pullRequest: "acme/web.app#012" })
     const reviewCalls = () =>
       network.mock.calls.filter(
         ([input]) => !requestUrl(input).includes(SIDEBAR_PATH)
@@ -203,7 +225,7 @@ describe("apiWarmupScript", () => {
     setReadyState("loading")
     const original = stubFetch()
 
-    run(apiWarmupScript("/agents")!)
+    run("/agents")
 
     expect(original).toHaveBeenCalledTimes(1)
     expect(String(original.mock.calls[0]?.[0])).toContain("/threads/page")
@@ -213,7 +235,7 @@ describe("apiWarmupScript", () => {
     setReadyState("loading")
     const original = stubFetch()
 
-    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+    run(`/agents/${THREAD_ID}`)
     expect(original).toHaveBeenCalledTimes(3)
     expect(requestsTo(original, STATE_PATH)).toHaveLength(0)
     expect(requestsTo(original, RUNS_PATH)).toHaveLength(0)
@@ -229,13 +251,73 @@ describe("apiWarmupScript", () => {
     expect(window.fetch).toBe(original)
   })
 
+  it("warms the session in the desktop app, and hands it to that request", async () => {
+    const own = stubFetch()
+    await api.me()
+
+    setReadyState("loading")
+    const network = stubFetch()
+    run(`/agents/${THREAD_ID}`, { desktop: true })
+    const warmed = network.mock.calls.filter(
+      ([input]) => String(input) === `${DESKTOP_ORIGIN}${SESSION_PATH}`
+    )
+    expect(warmed).toHaveLength(1)
+    const before = network.mock.calls.length
+    await api.me()
+
+    expect(network).toHaveBeenCalledTimes(before)
+    const { url: _sentTo, ...sent } = asSent(warmed[0]!)
+    const { url: _ownTo, ...ownSent } = asSent(own.mock.calls[0]!)
+    expect(sent).toEqual(ownSent)
+  })
+
+  it("warms no session on a page the server rendered, which already has it", () => {
+    setReadyState("loading")
+    const network = stubFetch()
+
+    run(`/agents/${THREAD_ID}`)
+    run("/agents")
+
+    expect(requestsTo(network, SESSION_PATH)).toHaveLength(0)
+  })
+
+  it("warms the desktop app's reads at its own origin, whatever API origin the build names", async () => {
+    vi.stubEnv("VITE_DASHBOARD_API_BASE_URL", "https://backend.example")
+    setReadyState("loading")
+    const network = stubFetch()
+    run(`/agents/${THREAD_ID}`, { desktop: true })
+    const warmed = network.mock.calls.map(([input]) => String(input))
+    expect(warmed).toContain(`${DESKTOP_ORIGIN}${SESSION_PATH}`)
+    expect(warmed).toContain(`${DESKTOP_ORIGIN}${SUMMARY_PATH}`)
+    expect(
+      warmed.every((url) => url.startsWith(`${DESKTOP_ORIGIN}/dashboard/api/`))
+    ).toBe(true)
+
+    await window.fetch(SESSION_PATH, { credentials: "include" })
+    await window.fetch(SUMMARY_PATH, { credentials: "include" })
+
+    expect(network).toHaveBeenCalledTimes(warmed.length)
+  })
+
+  it("finds the route and the API under the path the app is served from", async () => {
+    vi.stubEnv("BASE_URL", "/robin/")
+    setReadyState("loading")
+    const network = stubFetch()
+    run(`/robin/agents/${THREAD_ID}`)
+    expect(requestsTo(network, `/robin${SUMMARY_PATH}`)).toHaveLength(1)
+
+    await window.fetch(`/robin${SUMMARY_PATH}`, { credentials: "include" })
+
+    expect(requestsTo(network, `/robin${SUMMARY_PATH}`)).toHaveLength(1)
+  })
+
   it("warms the summary as the thread page requests it, and hands it to that request", async () => {
     const own = stubFetch()
     await agentsApi.getThread(THREAD_ID)
 
     setReadyState("loading")
     const network = stubFetch()
-    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+    run(`/agents/${THREAD_ID}`)
     const warmed = requestsTo(network, SUMMARY_PATH)
     expect(warmed).toHaveLength(1)
     await agentsApi.getThread(THREAD_ID)
@@ -250,7 +332,7 @@ describe("apiWarmupScript", () => {
 
     setReadyState("loading")
     const network = stubFetch()
-    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+    run(`/agents/${THREAD_ID}`)
     const warmed = requestsTo(network, TRANSCRIPT_PATH)
     expect(warmed).toHaveLength(1)
     await fetchTranscript(THREAD_ID)
@@ -268,7 +350,7 @@ describe("apiWarmupScript", () => {
       Promise.resolve(new Response("{}", { status }))
     )
     vi.stubGlobal("fetch", original)
-    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+    run(`/agents/${THREAD_ID}`)
     await new Promise((resolve) => setTimeout(resolve))
     status = 200
 
@@ -286,7 +368,7 @@ describe("apiWarmupScript", () => {
       })
       setReadyState("loading")
       const original = stubFetch()
-      run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+      run(`/agents/${THREAD_ID}`)
 
       const warmed = readPreference() ? STATE_PATH : TRANSCRIPT_PATH
       const skipped = readPreference() ? TRANSCRIPT_PATH : STATE_PATH
@@ -299,7 +381,7 @@ describe("apiWarmupScript", () => {
     stubStreamPreference()
     setReadyState("loading")
     const network = stubAgentServer()
-    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+    run(`/agents/${THREAD_ID}`)
     network.mockClear()
     const asked = vi.fn(window.fetch)
     window.fetch = asked
@@ -327,7 +409,7 @@ describe("apiWarmupScript", () => {
 
     setReadyState("loading")
     const network = stubAgentServer()
-    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+    run(`/agents/${THREAD_ID}`)
 
     expect(runLookups(network, "running").map(asSent)).toEqual([
       asSent(sentWithRead!),
@@ -345,7 +427,7 @@ describe("apiWarmupScript", () => {
         })
     )
     vi.stubGlobal("fetch", original)
-    run(apiWarmupScript("/agents")!)
+    run("/agents")
     now.mockReturnValue(180)
     resolveResponse(new Response("{}"))
     await Promise.resolve()
@@ -384,7 +466,7 @@ describe("apiWarmupScript", () => {
         })
     )
     vi.stubGlobal("fetch", original)
-    run(apiWarmupScript("/agents")!)
+    run("/agents")
     now.mockReturnValue(150)
     const page = agentsApi.listThreadsPage(
       {
@@ -415,7 +497,7 @@ describe("apiWarmupScript", () => {
     setReadyState("loading")
     const now = vi.spyOn(performance, "now").mockReturnValue(100)
     const original = stubFetch()
-    run(apiWarmupScript("/agents")!)
+    run("/agents")
     now.mockReturnValue(500)
 
     await agentsApi.listThreadsPage({ limit: 123 }, true)
@@ -431,7 +513,7 @@ describe("apiWarmupScript", () => {
   it("hands over a warmed request whose query keys come in a different order", async () => {
     setReadyState("loading")
     const original = stubFetch()
-    run(apiWarmupScript("/agents")!)
+    run("/agents")
 
     const reordered = new URL(
       String(original.mock.calls[0]?.[0]),
@@ -448,7 +530,7 @@ describe("apiWarmupScript", () => {
     setReadyState("loading")
     const original = stubFetch()
 
-    run(apiWarmupScript("/agents")!)
+    run("/agents")
     await window.fetch("/dashboard/api/options")
 
     expect(original).toHaveBeenCalledTimes(2)
@@ -459,7 +541,7 @@ describe("apiWarmupScript", () => {
     setReadyState("complete")
     const original = stubFetch()
 
-    run(apiWarmupScript("/agents")!)
+    run("/agents")
 
     expect(original).not.toHaveBeenCalled()
     expect(window.fetch).toBe(original)
@@ -521,7 +603,7 @@ describe("apiWarmupScript", () => {
       setReadyState("loading")
       stubPrefs(prefs)
       const original = stubFetch()
-      run(apiWarmupScript("/agents")!)
+      run("/agents")
 
       await requestSidebarPage(params)
 
@@ -532,7 +614,7 @@ describe("apiWarmupScript", () => {
   it("hands the warmed sidebar page to the app's request on a thread route", async () => {
     setReadyState("loading")
     const original = stubFetch()
-    run(apiWarmupScript(`/agents/${THREAD_ID}`)!)
+    run(`/agents/${THREAD_ID}`)
 
     await requestSidebarPage()
 

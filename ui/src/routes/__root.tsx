@@ -99,18 +99,18 @@ function AppProviders({ children }: { children: React.ReactNode }) {
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { queryClient } = useRouter().options.context
-  const pathname = useRouterState({ select: (s) => s.location.pathname })
   const selectedPullRequest = useRouterState({
     select: (s) => s.location.search.pr,
   })
-  const warmupScript = apiWarmupScript(pathname, selectedPullRequest)
+  const warmupScript = apiWarmupScript(selectedPullRequest)
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
-        {warmupScript && (
-          <script dangerouslySetInnerHTML={{ __html: warmupScript }} />
-        )}
+        <script
+          dangerouslySetInnerHTML={{ __html: warmupScript }}
+          suppressHydrationWarning
+        />
         <HeadContent />
       </head>
       <body>
