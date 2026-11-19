@@ -13,6 +13,7 @@ from typing import Final
 
 import httpx
 import httpx2
+import openai
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain_core.callbacks import AsyncCallbackHandler, BaseCallbackHandler
@@ -23,6 +24,7 @@ from langgraph.config import get_stream_writer
 from langgraph.errors import GraphBubbleUp
 from langgraph.pregel._messages import StreamMessagesHandler  # noqa: PLC2701
 from langgraph.pregel.protocol import StreamChunk
+from runtime_api.model_errors import classify_exception
 
 from rt.models import middleware_retries
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
@@ -116,6 +118,11 @@ def _status(error: Exception) -> int | None:
 def _transient(error: Exception) -> bool:
     if isinstance(error, GraphBubbleUp):
         return False
+    # An error the provider sent inside a stream it already started; see ``is_transient``.
+    if type(error) is openai.APIError:
+        return "server_error" in {error.code, error.type} or (
+            classify_exception(error) == "provider_overloaded"
+        )
     if (status := _status(error)) is not None:
         return status in (408, 409, 429) or 500 <= status < 600
     return isinstance(error, TimeoutError | httpx.TransportError | httpx2.TransportError) or (

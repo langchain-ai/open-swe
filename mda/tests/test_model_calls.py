@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
 from datetime import timedelta
@@ -474,6 +475,12 @@ def _fallback_call(
             request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
             body=None,
         ),
+        # So does a server error the provider sends inside a stream it already started.
+        openai.APIError(
+            "An error occurred while processing your request.",
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+            body={"type": "server_error", "code": "server_error"},
+        ),
     ],
 )
 async def test_a_transient_failure_goes_to_the_fallback(error: BaseException) -> None:
@@ -512,7 +519,18 @@ async def test_attempts_wait_out_the_backoff_with_jitter(monkeypatch: pytest.Mon
     sleep.assert_awaited_once_with(10.0)
 
 
-@pytest.mark.parametrize("error", [ValueError("not transient"), _status_error(400)])
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("not transient"),
+        _status_error(400),
+        openai.APIError(
+            "Invalid schema for function 'complete'.",
+            request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+            body={"type": "invalid_request_error", "code": "invalid_function_parameters"},
+        ),
+    ],
+)
 async def test_an_error_another_attempt_would_repeat_raises_at_once(error: BaseException) -> None:
     attempts = _Attempts(error)
 
@@ -790,6 +808,60 @@ async def test_retry_after_beyond_sleep_budget_is_not_retried_early(
         graph = create_agent(model=model, middleware=model_call_guards())
         with pytest.raises(openai.RateLimitError):
             await graph.ainvoke({"messages": [HumanMessage(content="go")]})
+    assert attempts == expected_attempts
+
+
+@pytest.mark.parametrize(
+    "error,expected_attempts",
+    [
+        ({"type": "server_error", "code": "server_error", "message": "try again"}, 2),
+        ({"type": "invalid_request_error", "code": None, "message": "bad input"}, 1),
+    ],
+)
+async def test_an_in_stream_server_error_is_retried(
+    monkeypatch: pytest.MonkeyPatch, error: dict[str, object], expected_attempts: int
+) -> None:
+    monkeypatch.setattr("rt.model_retries.random.uniform", lambda *args: 0.0)
+    attempts = 0
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        nonlocal attempts
+        attempts += 1
+        chunk = {
+            "id": "chat",
+            "object": "chat.completion.chunk",
+            "created": 1,
+            "model": "test",
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": "partial"}}],
+        }
+        if attempts > 1:
+            chunk["choices"] = [
+                {"index": 0, "delta": {"content": "recovered"}, "finish_reason": "stop"}
+            ]
+        events = [chunk] if attempts > 1 else [chunk, {"error": error}]
+        body = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+        return httpx2.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=f"{body}data: [DONE]\n\n".encode(),
+        )
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
+        sdk = openai.AsyncOpenAI(api_key="test", max_retries=0, http_client=client)
+        model = ChatOpenAI(
+            model="test",
+            api_key="test",
+            max_retries=0,
+            streaming=True,
+            async_client=sdk.chat.completions,
+        )
+        graph = create_agent(model=model, middleware=model_call_guards())
+        if expected_attempts > 1:
+            result = await graph.ainvoke({"messages": [HumanMessage(content="go")]})
+            assert result["messages"][-1].content == "recovered"
+        else:
+            with pytest.raises(openai.APIError):
+                await graph.ainvoke({"messages": [HumanMessage(content="go")]})
     assert attempts == expected_attempts
 
 

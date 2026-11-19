@@ -187,8 +187,12 @@ def is_transient(exc: BaseException) -> bool:
         status = getattr(exc, "status_code", None)
         if isinstance(status, int) and status in RETRYABLE_STATUS_CODES:
             return True
+    # The exact class is what the SDK raises for an error the provider sends inside a
+    # stream it already started, so it has no status; subclasses keep their verdicts.
     if type(exc) is openai.APIError:
-        return classify_exception(exc) == "provider_overloaded"
+        return "server_error" in {exc.code, exc.type} or (
+            classify_exception(exc) == "provider_overloaded"
+        )
     return False
 
 
