@@ -62,6 +62,7 @@ RESUME_JOB = "managed_tools_card_resume"
 _CONSENT_DEADLINE = timedelta(minutes=11)
 # LangSmith's long poll sometimes returns early; never ask it again sooner than this.
 _CONSENT_POLL_FLOOR = timedelta(seconds=1)
+_REFRESH_RETRY = timedelta(seconds=5)
 
 
 class ConsentWait(BaseModel):
@@ -77,6 +78,8 @@ class ConsentWait(BaseModel):
     """The thread whose connect card sent the link, which resumes once the card's
     services work."""
     card_id: str | None = None
+    consented: bool = False
+    """LangSmith reported the consent completed, leaving only the re-list after it."""
 
     @classmethod
     async def start(cls, login: str, auth_id: str, card: ConnectCard | None = None) -> None:
@@ -111,22 +114,26 @@ class ConsentWait(BaseModel):
             # Runs name a GitHub-linked person by their current login.
             login = user.github_login or login
         tools = PersonalTools(login)
-        status = await tools.consent_status(self.auth_id)
-        if status == "pending":
-            if datetime.now(UTC) < self.until:
-                await self.schedule(datetime.now(UTC) + _CONSENT_POLL_FLOOR)
-            else:
-                logger.info("Stopped waiting for managed tools consent")
-            return
-        if status != "completed":
-            logger.info("Managed tools consent not completed", extra={"outcome": status})
-            return
+        if not self.consented:
+            status = await tools.consent_status(self.auth_id)
+            if status == "pending":
+                if datetime.now(UTC) < self.until:
+                    await self.schedule(datetime.now(UTC) + _CONSENT_POLL_FLOOR)
+                else:
+                    logger.info("Stopped waiting for managed tools consent")
+                return
+            if status != "completed":
+                logger.info("Managed tools consent not completed", extra={"outcome": status})
+                return
         try:
             await tools.refresh()
         except Exception:
-            # Best effort: a cached list is read again on its own; it may not stop the thread
-            # resuming.
             logger.warning("Managed tools refresh after consent failed", exc_info=True)
+            # The resumed run would start with the kit's tools from before the connection.
+            if datetime.now(UTC) < self.until:
+                retry = self.model_copy(update={"consented": True})
+                await retry.schedule(datetime.now(UTC) + _REFRESH_RETRY)
+                return
         if self.thread_id is None or self.card_id is None:
             return
         card = await ConnectCard.load(self.thread_id, self.card_id, login)

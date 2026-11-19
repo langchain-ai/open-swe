@@ -197,7 +197,7 @@ async def _discover_tools(record: MCPConnection) -> list[Tool]:
     async with _client(record) as client:
         cursor: str | None = None
         for _ in range(_MAX_TOOL_PAGES):
-            page = await client.list_tools_mcp(cursor=cursor, cache_mode="bypass")
+            page = await client.list_tools_mcp(cursor=cursor)
             tools.extend(page.tools)
             if (cursor := page.next_cursor) is None:
                 break

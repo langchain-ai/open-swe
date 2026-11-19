@@ -251,8 +251,8 @@ async def test_a_change_to_the_kit_relists_only_when_robin_refreshes_it(monkeypa
         if key not in cache:
             cache[key] = await load()
 
-        async def mutate():
-            cache[key] = await load()
+        async def mutate(value):
+            cache[key] = value
 
         return SimpleNamespace(value=cache[key], status="fresh", mutate=mutate)
 
@@ -445,6 +445,54 @@ async def test_a_run_reads_its_owners_kit_tools_from_their_own_cached_listing(mo
     assert await names(alice) == ["mcp_lmt_linear_list_issues"]
     assert await names(carol) == ["mcp_lmt_notion_search"]
     await settled()
+
+
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize("other_replica", [False, True])
+async def test_a_refresh_is_not_undone_by_a_listing_begun_before_it(
+    monkeypatch, cached, other_replica
+):
+    """A listing begun before a person connects a service, still running when Robin
+    refreshes, neither stands in for the refresh nor overwrites it, on this replica or on
+    another, which shares the cache but guards only its own writes."""
+    from langgraph_api import cache
+
+    from openswe.mcp.sealed import SealedListing
+
+    started = asyncio.Event()
+    connected = asyncio.Event()
+    upstream = ["connect_figma"]
+    loads = 0
+
+    async def load():
+        nonlocal loads
+        loads += 1
+        seen = list(upstream)
+        if loads == (2 if cached else 1):
+            started.set()
+            await connected.wait()
+        return seen
+
+    listing = SealedListing("test:kit", load, fresh_for=timedelta(0), max_age=timedelta(days=1))
+    if cached:
+        await listing.lookup()
+    # A run's lookup lists it, or a stale copy is listed again in the background.
+    older = asyncio.ensure_future(listing.lookup())
+    await started.wait()
+    upstream[:] = ["figma_get_file"]
+    replicas = [cache._SWR_STATES]
+    if other_replica:
+        replicas.append({})
+        monkeypatch.setattr(cache, "_SWR_STATES", replicas[1])
+    refresh = asyncio.ensure_future(listing.refresh())
+    await asyncio.sleep(0.05)
+    monkeypatch.setattr(cache, "_SWR_STATES", replicas[0])
+    connected.set()
+    await asyncio.wait_for(refresh, 1)
+    await older
+    tasks = [state.task for states in replicas for state in states.values() if state.task]
+    await asyncio.gather(*tasks)
+    assert await listing.read() == ["figma_get_file"]
 
 
 async def test_a_cached_kit_listing_that_cannot_be_read_is_listed_again(monkeypatch, lmt):
@@ -896,10 +944,7 @@ async def test_card_resumes_once_its_own_services_are_connected(
     monkeypatch.setattr(
         managed.PersonalTools, "consent_status", AsyncMock(return_value="completed")
     )
-    # Re-listing is best effort; a refusal must not keep the thread waiting.
-    monkeypatch.setattr(
-        managed.PersonalTools, "refresh", AsyncMock(side_effect=ValueError("listing failed"))
-    )
+    monkeypatch.setattr(managed.PersonalTools, "refresh", AsyncMock())
     claims: set[str] = set()
 
     async def claim(scope, key, *, ttl):
@@ -946,6 +991,42 @@ async def test_card_resumes_once_its_own_services_are_connected(
     assert configurable["github_login"] == "alice"
     assert configurable["workspace"] == "eng"
     assert "Notion, Exa" in dispatch.await_args.args[1]
+
+
+async def test_a_card_resumes_only_once_the_kit_is_listed_again(monkeypatch, lmt, card_store):
+    """The resumed run must see the service just connected, so a failed re-list after
+    consent is retried through the queue; past the wait's deadline the thread resumes."""
+    await cards.ConnectCard(
+        thread_id="t", card_id="call-1", login="alice", services=[LINEAR_ID]
+    ).save()
+    status = AsyncMock(return_value="completed")
+    monkeypatch.setattr(managed.PersonalTools, "consent_status", status)
+    refresh = AsyncMock(side_effect=[ValueError("listing failed"), None])
+    monkeypatch.setattr(managed.PersonalTools, "refresh", refresh)
+    monkeypatch.setattr(cards, "claim", AsyncMock(return_value=True))
+    dispatch = AsyncMock()
+    monkeypatch.setattr(cards, "dispatch_agent_run", dispatch)
+    scheduled = AsyncMock()
+    monkeypatch.setattr(cards.queue, "schedule", scheduled)
+
+    def waiting(until):
+        return cards.ConsentWait(
+            login="alice", auth_id="a", until=until, thread_id="t", card_id="call-1"
+        )
+
+    await waiting(datetime.now(UTC) + timedelta(minutes=5)).poll()
+    dispatch.assert_not_awaited()
+    retry = cards.ConsentWait.model_validate(scheduled.await_args.args[1])
+    await retry.poll()
+    # The consent already completed, so the retry only lists the kit again.
+    status.assert_awaited_once()
+    dispatch.assert_awaited_once()
+
+    refresh.side_effect = ValueError("listing failed")
+    scheduled.reset_mock()
+    await waiting(datetime.now(UTC) - timedelta(seconds=1)).poll()
+    scheduled.assert_not_awaited()
+    assert dispatch.await_count == 2
 
 
 async def test_removed_service_does_not_block_the_connected_cards_resume(monkeypatch, lmt):
