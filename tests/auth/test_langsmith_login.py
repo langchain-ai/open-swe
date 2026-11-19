@@ -50,6 +50,7 @@ class LangSmithServer:
     member: bool = True
     revoked: bool = False
     unavailable: bool = False
+    rate_limited: int = 0
     refreshes: int = 0
     authorizations: int = 0
     revocations: list[str] = field(default_factory=list)
@@ -94,6 +95,11 @@ class LangSmithServer:
             self.revocations.append(parse_qs(request.content.decode())["token"][0])
             return httpx2.Response(200)
         if request.url.path == "/oauth/token":
+            if self.rate_limited:
+                self.rate_limited -= 1
+                return httpx2.Response(
+                    429, text="<html>Too Many Requests</html>", headers={"Retry-After": "0"}
+                )
             body = parse_qs(request.content.decode())
             assert body["resource"] == [ISSUER]
             assert body["client_secret"] == ["test-client-secret"]
@@ -398,6 +404,18 @@ async def test_login_without_desktop_proof_and_cross_purpose_codes_are_rejected(
     )
     assert response.status_code == 400
     assert await User.for_identity("langsmith", server.subject) is None
+
+
+@pytest.mark.parametrize(("rate_limited", "status"), [(2, 302), (3, 503)])
+async def test_rate_limited_sign_in_retries_then_reports_unavailable(
+    langsmith_client, rate_limited: int, status: int
+) -> None:
+    server, client = langsmith_client
+    server.rate_limited = rate_limited
+    callback = await server.desktop_login(client)
+    assert callback.status_code == status
+    if status == 503:
+        assert callback.json()["detail"] == "LangSmith authorization is temporarily unavailable"
 
 
 @pytest.mark.parametrize("wrong_org", [False, True])

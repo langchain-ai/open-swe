@@ -43,6 +43,10 @@ LANGSMITH_WORKSPACE_LOGIN_SINCE = datetime(2026, 11, 12, 4, 15, 14, tzinfo=UTC)
 # The callback already registered on the LangSmith OAuth client.
 LANGSMITH_LOGIN_CALLBACK_PATH = "/dashboard/api/langsmith/callback"
 LANGSMITH_STATE_COOKIE_PATH = "/dashboard/api/langsmith"
+# LangSmith's edge rate limiter rejects a request before the app sees it, so
+# resending it cannot replay an authorization code.
+LANGSMITH_RATE_LIMIT_ATTEMPTS = 3
+LANGSMITH_RATE_LIMIT_MAX_WAIT = 2.0
 
 
 class LangSmithAccount(BaseModel):
@@ -162,26 +166,50 @@ class LangSmithLogin:
             async with httpx2.AsyncClient(
                 timeout=httpx2.Timeout(15.0, connect=5.0), transport=pooled_transport()
             ) as client:
-                response = await client.request(
-                    method, self.same_origin(url), headers=headers, data=data
-                )
+                for attempt in range(1, LANGSMITH_RATE_LIMIT_ATTEMPTS + 1):
+                    response = await client.request(
+                        method, self.same_origin(url), headers=headers, data=data
+                    )
+                    if response.status_code != 429 or attempt == LANGSMITH_RATE_LIMIT_ATTEMPTS:
+                        break
+                    await asyncio.sleep(self.rate_limit_wait(response, attempt))
         except httpx2.RequestError as exc:
             raise HTTPException(503, "LangSmith authorization is temporarily unavailable") from exc
-        if response.is_success and not response.content:
+        if not response.is_success:
+            raise self.failure(response)
+        if not response.content:
             return None
         try:
-            body: object = response.json()
+            return response.json()
         except ValueError as exc:
             raise HTTPException(502, "Invalid LangSmith authorization response") from exc
-        if not response.is_success:
-            if response.status_code in {401, 403} or (
-                isinstance(body, dict) and body.get("error") == "invalid_grant"
-            ):
-                raise HTTPException(
-                    401, "LangSmith authorization expired or revoked — sign in again"
-                )
-            raise HTTPException(503, "LangSmith authorization is temporarily unavailable")
-        return body
+
+    @staticmethod
+    def rate_limit_wait(response: httpx2.Response, attempt: int) -> float:
+        try:
+            requested = float(response.headers.get("Retry-After", ""))
+        except ValueError:
+            requested = 0.5 * attempt
+        return min(requested, LANGSMITH_RATE_LIMIT_MAX_WAIT) if requested >= 0 else 0.0
+
+    @staticmethod
+    def failure(response: httpx2.Response) -> HTTPException:
+        try:
+            body: object = response.json()
+        except ValueError:
+            body = None
+        if response.status_code in {401, 403} or (
+            isinstance(body, dict) and body.get("error") == "invalid_grant"
+        ):
+            return HTTPException(401, "LangSmith authorization expired or revoked — sign in again")
+        logger.warning(
+            "LangSmith authorization request failed",
+            extra={
+                "status_code": response.status_code,
+                "langsmith_path": response.request.url.path,
+            },
+        )
+        return HTTPException(503, "LangSmith authorization is temporarily unavailable")
 
     async def metadata(self) -> dict[str, str]:
         await self.require_configured()
