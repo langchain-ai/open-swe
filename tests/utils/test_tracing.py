@@ -135,3 +135,22 @@ def test_each_span_is_posted_under_its_parent_however_late_the_parent_finishes(
     assert query["parent_run_id"] == request["id"]
     assert len(by_name["jinja2.render"]) == 500
     assert {r["parent_run_id"] for r in by_name["jinja2.render"]} == {catalog["id"]}
+
+
+def test_requests_ddtrace_left_without_a_path_are_named_after_their_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ddtrace's last pass leaves this app's requests as ``POST ``; APM can't tell them apart."""
+    processor = _install(monkeypatch)
+    route = "/dashboard/api/repos/{owner}/{repo}/pulls/{number}/human-review"
+    unnamed = _DatadogSpan(
+        1, None, "fastapi.request", **{"http.method": "POST", "http.route": route}
+    )
+    unnamed.resource = "POST "
+    named = _DatadogSpan(2, None, "fastapi.request", **{"http.method": "GET", "http.route": "/ok"})
+    named.resource = "GET /threads/search"
+
+    processor.process_trace([unnamed, named])  # type: ignore[attr-defined]
+
+    assert unnamed.resource == f"POST {route}"
+    assert named.resource == "GET /threads/search"

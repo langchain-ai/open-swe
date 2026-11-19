@@ -16,7 +16,7 @@ from openswe.api.github_errors import add_github_error_handlers
 from openswe.api.health import router as health_router
 from openswe.api.public_origin import PublicOriginMiddleware
 from openswe.api.request_ids import add_request_ids
-from openswe.api.tracing import add_trace_resource_names, configure_datadog_environment
+from openswe.api.tracing import configure_datadog_environment
 from openswe.audit_logs.middleware import AuditLogMiddleware
 from openswe.config import ENV
 from openswe.dashboard import router as dashboard_router
@@ -190,7 +190,6 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=4)
     # Wraps every route and the MCP mount, so they see which domain the request used.
     app.add_middleware(PublicOriginMiddleware)
-    add_trace_resource_names(app)
     add_request_ids(app)
     add_github_error_handlers(app)
     app.add_exception_handler(UnknownUser, _conflict)

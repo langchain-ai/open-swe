@@ -90,6 +90,7 @@ from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
+from openswe.utils.startup_trace import apm_span
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.workspaces.routing import resolve_workspace
 
@@ -505,8 +506,11 @@ async def _request_review(
 
     if supplementary_review and not inline_summary:
         return _failure("A supplementary review needs an open review request or an inline_summary.")
-    snapshot = await PullRequestPayload.read(pull)
-    blockers = None if snapshot is None else await review_blockers(pull, snapshot)
+    span_tags = {"pull_request.url": pr_ref.url}
+    with apm_span("human_review.read_pull_request", span_tags):
+        snapshot = await PullRequestPayload.read(pull)
+    with apm_span("human_review.blockers", span_tags):
+        blockers = None if snapshot is None else await review_blockers(pull, snapshot)
     if blockers is None:
         return _failure("GitHub was unavailable while checking the pull request.")
     if blockers:
@@ -537,10 +541,12 @@ async def _request_review(
             + prompt("tools/human-review-blocked")
         )
 
-    target = await target_channel(pr_ref, pull, channel, snapshot)
+    with apm_span("human_review.target_channel", span_tags):
+        target = await target_channel(pr_ref, pull, channel, snapshot)
     if isinstance(target, RequestResult):
         return target
-    recorded = await record_pull_request(pull, snapshot)
+    with apm_span("human_review.record_pull_request", span_tags):
+        recorded = await record_pull_request(pull, snapshot)
     if recorded is None:
         return _failure("Pull request is unavailable")
     pull_request, details = recorded
@@ -567,7 +573,8 @@ async def _request_review(
             if auto_merge is None
             else auto_merge
         )
-        request = await request.save()
+        with apm_span("human_review.save_request", span_tags):
+            request = await request.save()
     except IntegrityError:
         # A concurrent request opened one first; the partial unique index allows only one.
         winner = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
@@ -575,16 +582,20 @@ async def _request_review(
             raise
         return await _existing(winner, auto_merge, target.id if channel.strip() else "")
     # Without its deadlines a request could wait forever on a reviewer who never approves.
-    scheduled = await _schedule(
-        request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
-    )
-    if scheduled and request.auto_merge:
-        scheduled = await _schedule(request, "auto_merge", timedelta(hours=AUTO_MERGE_AFTER_HOURS))
+    with apm_span("human_review.schedule_deadlines", span_tags):
+        scheduled = await _schedule(
+            request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
+        )
+        if scheduled and request.auto_merge:
+            scheduled = await _schedule(
+                request, "auto_merge", timedelta(hours=AUTO_MERGE_AFTER_HOURS)
+            )
     if not scheduled:
         await _discard(request.id)
         return _failure("Robin could not schedule the review request's deadlines. Try again.")
     try:
-        message_ts = await ReviewCard(request).post_standard()
+        with apm_span("human_review.post_card", span_tags):
+            message_ts = await ReviewCard(request).post_standard()
     except SlackRequestError as exc:
         await _discard(request.id)
         return _failure(
@@ -595,9 +606,11 @@ async def _request_review(
         await _discard(request.id)
         raise
     request.slack_message_ts = message_ts
-    request = await request.save()
+    with apm_span("human_review.save_request", span_tags):
+        request = await request.save()
     if not in_thread and origin.slack_channel_id and origin.slack_thread_ts:
-        await _point_to_card(request, origin, target)
+        with apm_span("human_review.point_to_card", span_tags):
+            await _point_to_card(request, origin, target)
     refusal = ""
     if supplementary_review:
         try:
@@ -609,7 +622,8 @@ async def _request_review(
             )
         except SupplementaryReviewRefused as refused:
             refusal = str(refused)
-    await SupplementaryReviews(request).start(pull)
+    with apm_span("human_review.supplementary_reviews", span_tags):
+        await SupplementaryReviews(request).start(pull)
     return RequestResult(
         success=True,
         supplementary_refusal=refusal,

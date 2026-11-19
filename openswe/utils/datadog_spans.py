@@ -7,6 +7,9 @@ ddtrace trace processor queues each of them, as it finishes, to be posted under 
 run, nested as Datadog nests them. Children finish before their parents, so a span
 waits until its parent's run is known. Without ddtrace, nothing is traced, and tracing
 never raises into the work it traces.
+
+ddtrace keeps one set of trace processors, so this one also names each request's span
+after its route (``name_routes``).
 """
 
 import logging
@@ -64,6 +67,7 @@ class DatadogSpans:
 
         class _Processor(TraceFilter):
             def process_trace(self, trace: list[Span]) -> list[Span]:
+                cls.name_routes(trace)
                 cls.process(trace)
                 return trace
 
@@ -105,6 +109,24 @@ class DatadogSpans:
                 cls._waiting.setdefault(marker.trace_id, {})
                 cls._open[marker.trace_id] = cls._open.get(marker.trace_id, 0) + 1
             yield
+
+    @staticmethod
+    def name_routes(trace: list[Span]) -> None:
+        """Name each request's span after the route that served it.
+
+        ddtrace tags a request with its route, then resolves the route again as the
+        response finishes, against the Agent Server's route table. For this app's routes
+        that second pass finds no path and leaves a resource like ``POST ``, which APM
+        cannot search, compare or alert on. By the time the trace is processed nothing
+        overwrites the resource any more, so the tagged route is put back here.
+        """
+        try:
+            for span in trace:
+                route, method = span.get_tag("http.route"), span.get_tag("http.method")
+                if route and method and span.resource.strip() == method:
+                    span.resource = f"{method} {route}"
+        except Exception:
+            logger.debug("Could not name a request span after its route", exc_info=True)
 
     @classmethod
     def process(cls, trace: list[Span]) -> None:

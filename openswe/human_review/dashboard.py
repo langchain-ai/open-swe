@@ -18,6 +18,7 @@ from openswe.human_review.standard import (
     target_channel,
 )
 from openswe.slack.client import GitHubPrRef
+from openswe.utils.startup_trace import apm_span
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class DashboardReviewRequest:
         self, *, channel: str = "", inline_summary: str | None = None
     ) -> RequestResult:
         pr = self.pr_ref
+        span_tags = {"pull_request.url": pr.url}
         active = await HumanReviewRequest.active_for(pr.owner, pr.repo, pr.number)
         if active is not None and active.kind == "expedited":
             if (active.slack_message_ts or active.awaiting_ready) and not self.origin.asked(active):
@@ -71,26 +73,33 @@ class DashboardReviewRequest:
         if active is None and (await get_workspace_settings()).expedited_review_enabled:
             try:
                 async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-                    snapshot = await PullRequestPayload.read(pull)
-                    blockers = None if snapshot is None else await review_blockers(pull, snapshot)
+                    with apm_span("human_review.read_pull_request", span_tags):
+                        snapshot = await PullRequestPayload.read(pull)
+                    with apm_span("human_review.blockers", span_tags):
+                        blockers = (
+                            None if snapshot is None else await review_blockers(pull, snapshot)
+                        )
                     if blockers == []:
-                        target = await target_channel(pr, pull, channel, snapshot)
+                        with apm_span("human_review.target_channel", span_tags):
+                            target = await target_channel(pr, pull, channel, snapshot)
                         if isinstance(target, RequestResult):
                             return target
-                        try:
-                            result = await ExpeditedReviewNomination(
-                                pr, self.origin, self.token
-                            ).start(
-                                target.id,
-                                inline_summary=inline_summary,
-                                replace_standard=False,
-                            )
-                        except ExpeditedReviewIneligible as exc:
-                            logger.info(
-                                "Dashboard review falling back to standard review",
-                                extra={"pr_url": pr.url, "reason": str(exc)},
-                            )
-                        else:
+                        with apm_span("human_review.expedited", span_tags):
+                            try:
+                                result = await ExpeditedReviewNomination(
+                                    pr, self.origin, self.token
+                                ).start(
+                                    target.id,
+                                    inline_summary=inline_summary,
+                                    replace_standard=False,
+                                )
+                            except ExpeditedReviewIneligible as exc:
+                                logger.info(
+                                    "Dashboard review falling back to standard review",
+                                    extra={"pr_url": pr.url, "reason": str(exc)},
+                                )
+                                result = None
+                        if result is not None:
                             if not result["success"]:
                                 logger.warning(
                                     "Expedited dashboard review failed; requesting standard review",
@@ -116,4 +125,7 @@ class DashboardReviewRequest:
                     success=False,
                     error="Robin cannot reach this repository's GitHub App installation.",
                 )
-        return await request_review(pr, self.origin, channel=channel, inline_summary=inline_summary)
+        with apm_span("human_review.standard", span_tags):
+            return await request_review(
+                pr, self.origin, channel=channel, inline_summary=inline_summary
+            )
