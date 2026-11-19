@@ -7,7 +7,8 @@ context. Setting `ls_agent_type: subagent` there as run-wide tracing metadata
 of an async worker as a separate root instead of under the worker's graph run.
 
 Robin tags its agent's own model calls instead (`RootAgentTraceMiddleware` in
-`mda/rt/tracing.py`): `subagent` on an async worker's calls (a run with
+`mda/rt/tracing.py`): `subagent` on an async worker's calls while its run is
+nested in the coordinator's trace (marked `ls_nest_under_parent`, with
 `configurable.deepagents_parent.thread_id` or `metadata.parent_thread_id`), so
 they stay out of the coordinator's conversation, and `root` on every other
 agent's calls, so dashboard turns remain one conversation across summaries.

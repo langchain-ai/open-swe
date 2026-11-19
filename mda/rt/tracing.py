@@ -247,8 +247,9 @@ class RootAgentTraceMiddleware(AgentMiddleware):
     summaries that restart its history. Installed innermost, it leaves out the summary's
     model call and the calls a tool makes. A call whose trace already names an agent type
     keeps it, as deepagents tags a forked subagent ``subagent``. An async worker's calls
-    are tagged ``subagent``, so they stay out of the coordinator's conversation that the
-    worker's run is nested in.
+    are tagged ``subagent`` while its run is nested in the coordinator's trace, so they
+    stay out of the coordinator's conversation; a run on a worker thread that has its own
+    trace is that trace's root agent.
     """
 
     async def awrap_model_call(
@@ -260,22 +261,31 @@ class RootAgentTraceMiddleware(AgentMiddleware):
         metadata = tracing["metadata"] or {}
         if "ls_agent_type" in metadata:
             return await handler(request)
-        agent_type = "subagent" if self.is_async_worker(ensure_config()) else "root"
+        agent_type = "subagent" if self.is_nested_worker(ensure_config()) else "root"
         tracing["metadata"] = {**metadata, "ls_agent_type": agent_type}
         with tracing_context(**tracing):
             return await handler(request)
 
     @staticmethod
-    def is_async_worker(config: Mapping[str, object]) -> bool:
-        """Whether the run was launched by another agent's async subagent tool.
+    def is_nested_worker(config: Mapping[str, object]) -> bool:
+        """Whether the run is an async worker's, traced inside its coordinator's trace.
 
         deepagents sends the lead thread as ``configurable.deepagents_parent``; the Agent
-        Server also copies the task thread's ``parent_thread_id`` into every run on it.
+        Server also copies the task thread's ``parent_thread_id`` into every run on it,
+        including runs deepagents didn't start. Only a run deepagents marked to nest under
+        its launching call is inside the coordinator's trace.
         """
         configurable = config.get("configurable")
-        reference = (
-            configurable.get("deepagents_parent") if isinstance(configurable, Mapping) else None
-        )
+        if not isinstance(configurable, Mapping):
+            return False
+        trace_metadata = configurable.get("langsmith-metadata")
+        if not (
+            isinstance(configurable.get("langsmith-trace"), str)
+            and isinstance(trace_metadata, Mapping)
+            and trace_metadata.get("ls_nest_under_parent") is True
+        ):
+            return False
+        reference = configurable.get("deepagents_parent")
         metadata = config.get("metadata")
         return bool(
             (isinstance(reference, Mapping) and reference.get("thread_id"))

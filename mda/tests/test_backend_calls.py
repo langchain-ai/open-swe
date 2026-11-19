@@ -3058,6 +3058,7 @@ async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_
         ("dashboard", nested, {}),
         ("launched", {**nested, "deepagents_parent": {"thread_id": "lead"}}, {}),
         ("forwarded context", nested, {"parent_thread_id": "lead"}),
+        ("resumed worker", {}, {"parent_thread_id": "lead"}),
         ("own", {}, {}),
     ]:
         client.create_run.reset_mock()
@@ -3090,10 +3091,11 @@ async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_
         "dashboard": [(True, "root")] * 2,
         "launched": [(True, "subagent")] * 2,
         "forwarded context": [(True, "subagent")] * 2,
+        "resumed worker": [(False, "root")] * 2,
         "own": [(False, "root")] * 2,
     }
     # The worker's type stays on its model calls; a run-wide tag splits the trace by node.
-    assert in_tool == [None, None, None, None]
+    assert in_tool == [None] * 5
 
 
 async def test_a_subagent_keeps_its_own_tag_though_it_inherits_the_root_agent_middleware() -> None:
