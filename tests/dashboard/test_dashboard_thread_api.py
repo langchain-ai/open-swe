@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.bridge.store import BridgeStore
-from openswe.dashboard import deps, profiles
+from openswe.dashboard import deps, oauth, profiles
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettings,
     WorkspaceSettingsUpdate,
@@ -50,7 +50,7 @@ from openswe.transcript.turns import OpenTurn
 from openswe.users import User
 from openswe.users.models import UserIdentity
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
-from tests.conftest import ThreadStoreOverClient, patch_thread_module
+from tests.conftest import LangSmithUsers, ThreadStoreOverClient, patch_thread_module
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -1484,6 +1484,7 @@ async def _read_thread_state(
     select: list[str],
     metadata: dict[str, object] | None = None,
     reader: Principal | None = None,
+    session: str | None = None,
 ) -> httpx.Response:
     """Read a thread's state through the dashboard, from a runtime whose Agent Server is faked."""
     if runtime == "mda":
@@ -1516,9 +1517,12 @@ async def _read_thread_state(
     )
     app = FastAPI()
     app.include_router(thread_routes.router, prefix="/dashboard/api")
-    app.dependency_overrides[require_principal] = lambda: reader or Principal.of_login("owner")
+    if session is None:
+        app.dependency_overrides[require_principal] = lambda: reader or Principal.of_login("owner")
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        cookies={oauth.COOKIE_NAME: session} if session else None,
     ) as client:
         return await client.get(
             f"/dashboard/api/threads/{thread_id}/state",
@@ -1571,6 +1575,40 @@ async def test_thread_state_reaches_a_client_without_openai_encrypted_reasoning(
         anthropic,
         answer,
     ]
+
+
+async def test_thread_state_times_each_part_of_a_signed_in_read(
+    monkeypatch, langsmith_users: LangSmithUsers
+) -> None:
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "thread-state-timing-test-secret-of-32-bytes")
+    owner = langsmith_users.add("owner")
+
+    def agent_server(request: httpx.Request | httpx2.Request) -> httpx.Response | httpx2.Response:
+        response = httpx2.Response if isinstance(request, httpx2.Request) else httpx.Response
+        if request.url.path.endswith("/state"):
+            return response(200, json={"values": {"messages": []}})
+        return response(200, json=[])
+
+    response = await _read_thread_state(
+        monkeypatch,
+        "mda",
+        agent_server,
+        select=[],
+        session=oauth.issue_session(
+            login="owner", email=None, avatar_url=None, user_id=str(owner.id)
+        ),
+    )
+
+    assert response.status_code == 200
+    assert {entry.split(";")[0] for entry in response.headers["server-timing"].split(", ")} == {
+        "auth",
+        "thread_get",
+        "mda",
+        "parse",
+        "get_state",
+        "total",
+        "encode",
+    }
 
 
 @pytest.mark.parametrize("runtime", ["mda", "local"])

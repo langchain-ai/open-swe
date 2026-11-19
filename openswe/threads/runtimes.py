@@ -23,6 +23,7 @@ from typing import Final, Literal
 from urllib.request import getproxies, proxy_bypass
 
 import httpx2
+import orjson
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
@@ -53,6 +54,7 @@ from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS, RunOrigi
 from openswe.utils.http_pool import KEEPALIVE_SECONDS, pooled_transport
 from openswe.utils.langsmith import resolve_tenant_id
 from openswe.utils.startup_trace import apm_span
+from openswe.utils.timing import phase
 
 logger = logging.getLogger(__name__)
 
@@ -214,9 +216,16 @@ class _SdkThreads:
         )
 
     async def state(
-        self, thread_id: str, *, select: list[str] | None = None
+        self,
+        thread_id: str,
+        *,
+        select: list[str] | None = None,
+        timings: dict[str, float] | None = None,
     ) -> dict[str, JsonValue]:
-        """The thread's current state here, only its ``select`` fields when given."""
+        """The thread's current state here, only its ``select`` fields when given.
+
+        The SDK parses the state as it reads it, so this read adds no phases to ``timings``.
+        """
         state = await self.client.threads.get_state(thread_id, select=select)
         return _object.validate_python(dict(state))
 
@@ -834,14 +843,23 @@ class _MdaThreads(_SdkThreads):
         return runs[0] if runs else None
 
     async def state(
-        self, thread_id: str, *, select: list[str] | None = None
+        self,
+        thread_id: str,
+        *,
+        select: list[str] | None = None,
+        timings: dict[str, float] | None = None,
     ) -> dict[str, JsonValue]:
-        async with self.runtime.read_http as client:
-            response = await client.get(
-                f"/threads/{thread_id}/state", params={"select": select} if select else None
-            )
+        """The thread's state on MDA: ``mda`` in ``timings`` is the read with its body, and
+        ``parse`` this backend's parse and validation of it."""
+        record = timings if timings is not None else {}
+        with phase(record, "mda"):
+            async with self.runtime.read_http as client:
+                response = await client.get(
+                    f"/threads/{thread_id}/state", params={"select": select} if select else None
+                )
         response.raise_for_status()
-        return _object.validate_python(response.json())
+        with phase(record, "parse"):
+            return _object.validate_python(orjson.loads(response.content))
 
     async def has_active_run(self, thread_id: str) -> bool:
         for status in ("pending", "running"):

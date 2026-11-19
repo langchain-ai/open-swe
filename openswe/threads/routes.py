@@ -9,6 +9,7 @@ from uuid import UUID
 
 import httpx
 import httpx2
+import orjson
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -104,7 +105,7 @@ from openswe.threads.summary import (
     _thread_run_id,
     assert_thread_readable,
 )
-from openswe.utils.timing import server_timing_header
+from openswe.utils.timing import RequestTimings, phase, server_timing_header
 
 logger = logging.getLogger(__name__)
 
@@ -799,11 +800,12 @@ async def api_delete_thread(
 
 @router.get("/threads/{thread_id}/state")
 async def api_get_thread_state(
+    request: Request,
     thread_id: str,
     principal: PrincipalDep,
     select: Annotated[list[str] | None, Query()] = None,
 ) -> Response:
-    timings: dict[str, float] = {}
+    timings = RequestTimings.of(request)
     started = perf_counter()
     try:
         payload = await get_dashboard_thread_state(
@@ -828,9 +830,11 @@ async def api_get_thread_state(
             media_type=exc.response.headers.get("content-type"),
         )
     timings["total"] = (perf_counter() - started) * 1000
+    with phase(timings, "encode"):
+        body = orjson.dumps(payload)
     header = server_timing_header(timings)
     logger.info("thread state timings thread_id=%s %s", thread_id, header)
-    return JSONResponse(payload, headers={"Server-Timing": header})
+    return Response(body, media_type="application/json", headers={"Server-Timing": header})
 
 
 @router.post("/threads/{thread_id}/stream/events")

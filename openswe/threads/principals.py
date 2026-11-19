@@ -39,6 +39,7 @@ from openswe.threads.identity import ThreadIdentity
 from openswe.threads.summary import _assert_thread_postable, assert_thread_readable
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
+from openswe.utils.timing import RequestTimings, phase
 from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 logger = logging.getLogger(__name__)
@@ -272,8 +273,9 @@ async def require_principal(request: Request) -> Principal:
         dashboard.authorize_path(request.url.path, request.method)
     from openswe.dashboard.langsmith_login import LangSmithLogin
 
-    async with LangSmithLogin().authorized_person(dashboard):
-        pass
+    with phase(RequestTimings.of(request), "auth"):
+        async with LangSmithLogin().authorized_person(dashboard):
+            pass
     principal = Principal.of_person(session)
     bind_audit_session(request, session)
     return principal

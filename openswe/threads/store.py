@@ -285,16 +285,21 @@ class ThreadStore:
         return await self.state_of(thread)
 
     async def state_of(
-        self, thread: IndexedThread, *, select: list[str] | None = None
+        self,
+        thread: IndexedThread,
+        *,
+        select: list[str] | None = None,
+        timings: dict[str, float] | None = None,
     ) -> dict[str, JsonValue]:
         """The state of a thread already read from the index, as its runtime keeps it.
 
         ``select`` names the fields to return, as the Agent Server takes them; the runtime
-        validates them.
+        validates them. ``timings`` gets the phases of the runtime's read, which add up over
+        both reads of a thread it recreates.
         """
         runtime = RUNTIMES.runs_on(thread.runtime)
         try:
-            return await runtime.state(thread.thread_id, select=select)
+            return await runtime.state(thread.thread_id, select=select, timings=timings)
         except (httpx.HTTPStatusError, httpx2.HTTPStatusError) as error:
             # Indexed with no copy on MDA: creating it there failed, or MDA swept it. A
             # channel makes its own threads there, so the backend makes only its own again.
@@ -308,15 +313,19 @@ class ThreadStore:
                 "Making an indexed thread MDA has no copy of", extra={"thread_id": thread.thread_id}
             )
         await runtime.create(thread.thread_id, for_mda(thread.metadata))
-        return await runtime.state(thread.thread_id, select=select)
+        return await runtime.state(thread.thread_id, select=select, timings=timings)
 
     async def client_state_of(
-        self, thread: IndexedThread, *, select: list[str] | None = None
+        self,
+        thread: IndexedThread,
+        *,
+        select: list[str] | None = None,
+        timings: dict[str, float] | None = None,
     ) -> dict[str, JsonValue]:
         """:meth:`state_of` as a client reads it, without the encrypted reasoning OpenAI
         returns for the model's next call: no client reads it, and on a long thread it is
         megabytes gzip can't shrink. The thread's own state keeps it."""
-        state = await self.state_of(thread, select=select)
+        state = await self.state_of(thread, select=select, timings=timings)
         values = state.get("values")
         messages = values.get("messages") if isinstance(values, dict) else None
         for message in messages if isinstance(messages, list) else []:

@@ -108,7 +108,11 @@ class ThreadStoreOverClient(ThreadStore):
         return await proxy.langgraph_client().threads.get_state(thread_id)
 
     async def state_of(
-        self, thread: IndexedThread, *, select: list[str] | None = None
+        self,
+        thread: IndexedThread,
+        *,
+        select: list[str] | None = None,
+        timings: dict[str, float] | None = None,
     ) -> dict[str, JsonValue]:
         state = await proxy.langgraph_client().threads.get_state(thread.thread_id)
         return TypeAdapter(dict[str, JsonValue]).validate_python(dict(state))

@@ -735,4 +735,4 @@ async def get_dashboard_thread_state(
         assert_thread_readable(thread.metadata, login, email)
 
     with phase(record, "get_state"):
-        return await THREADS.client_state_of(thread, select=select)
+        return await THREADS.client_state_of(thread, select=select, timings=record)

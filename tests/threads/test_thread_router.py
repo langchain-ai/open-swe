@@ -78,7 +78,11 @@ class _Threads:
         return self.threads.get(thread_id)
 
     async def state(
-        self, thread_id: str, *, select: list[str] | None = None
+        self,
+        thread_id: str,
+        *,
+        select: list[str] | None = None,
+        timings: dict[str, float] | None = None,
     ) -> dict[str, JsonValue]:
         thread = self.threads.get(thread_id)
         if thread is None:
