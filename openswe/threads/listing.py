@@ -9,7 +9,6 @@ from typing import Any, Literal
 from fastapi import HTTPException
 from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.errors import NotFoundError
-from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel, Field, model_validator
 
 from openswe.database import postgres
@@ -62,7 +61,7 @@ from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 _THREADS_SEARCH_PAGE = 50
 _THREADS_PAGE_SCAN_CAP = 5000
-_THREAD_LIST_SELECT: list[ThreadSelectField] = [
+_THREAD_LIST_SELECT: list[index.SelectField] = [
     "thread_id",
     "status",
     "metadata",
@@ -1003,12 +1002,10 @@ async def _pinned_thread_summaries(
     # state. Refresh idle metadata too: external runs and visibility can change.
     for offset in range(0, len(pin_ids), _PINNED_THREADS_BATCH_SIZE):
         batch_ids = pin_ids[offset : offset + _PINNED_THREADS_BATCH_SIZE]
-        threads = await client.threads.search(
-            ids=batch_ids,
-            limit=len(batch_ids),
-            select=_THREAD_LIST_SELECT,
-        )
-        for thread in threads:
+        for indexed in await THREADS.search(
+            index.ThreadSearch(ids=batch_ids, limit=len(batch_ids))
+        ):
+            thread = indexed.as_langgraph(_THREAD_LIST_SELECT)
             thread_id = _thread_id(thread)
             metadata = _thread_metadata(thread)
             slack_thread = SourceContext.from_metadata(metadata).slack_thread
