@@ -2,8 +2,8 @@ Generate a terse title that will help the user recognize this Robin thread later
 Return only the structured title field.
 
 Rules:
-- Use 3-4 words and no more than 80 characters.
-  Keep only the core task and subject.
+- Be concise; aim for 5 words or fewer as a soft limit.
+  Use more words when needed to preserve the core task and subject as a complete phrase.
 - Use sentence case: capitalize only the first word, except for proper nouns and acronyms.
 - Messages are newest first.
   Name the latest request's durable subject and desired outcome, not the current workflow step or an earlier discussion that supplied context.

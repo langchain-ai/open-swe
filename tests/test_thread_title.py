@@ -300,6 +300,7 @@ async def test_haiku_empty_tool_arguments_recover_to_a_stored_title(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     threads = _Threads({"source": "dashboard", "title": "fix it", "title_seed": "fix it"})
+    title = "Preserve complete generated thread titles without cutting off the subject of the conversation"
     model = ChatAnthropic(model="claude-haiku-5-5", api_key="test", effort="high", max_tokens=1024)
 
     async def create(self: ChatAnthropic, payload: dict[str, object]) -> object:
@@ -307,7 +308,7 @@ async def test_haiku_empty_tool_arguments_recover_to_a_stored_title(
         content = (
             [ToolUseBlock(type="tool_use", id="tool-1", name="_ThreadTitle", input={})]
             if "tools" in payload
-            else [TextBlock(type="text", text=' "Repair   thread title generation failures." ')]
+            else [TextBlock(type="text", text=f' "{title.replace(" ", "   ")}." ')]
         )
         response = Message(
             id="message-1",
@@ -329,6 +330,6 @@ async def test_haiku_empty_tool_arguments_recover_to_a_stored_title(
         model=model,
         client=SimpleNamespace(threads=threads),
     )
-    assert threads.metadata["title"] == "Repair thread title generation"
+    assert threads.metadata["title"] == title
     assert threads.metadata["title_seed"] is None
-    mirror.assert_awaited_once_with("thread-123", {"title": "Repair thread title generation"})
+    mirror.assert_awaited_once_with("thread-123", {"title": title})

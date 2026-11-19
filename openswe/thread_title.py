@@ -22,7 +22,6 @@ from openswe.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 
-MAX_THREAD_TITLE_CHARS = 80
 MAX_TITLE_INPUT_CHARS = 8_000
 TITLE_GENERATION_MAX_TOKENS = 256
 ANTHROPIC_TITLE_GENERATION_MAX_TOKENS = 1024
@@ -32,7 +31,7 @@ _inflight_thread_ids: set[str] = set()
 
 
 class _ThreadTitle(BaseModel):
-    title: str = Field(description="Terse, task-focused thread title, 3-4 words")
+    title: str = Field(description="Concise, task-focused thread title; aim for 5 words or fewer")
 
 
 _TITLE_SYSTEM_PROMPT = prompt("thread-title")
@@ -70,11 +69,7 @@ def _breakout_title_input(request: str, conversation: str) -> str:
 
 
 def _normalize_title(title: str) -> str:
-    normalized = " ".join(title.strip().strip("`\"'").split())
-    normalized = " ".join(normalized.split()[:4]).rstrip(".")
-    if len(normalized) <= MAX_THREAD_TITLE_CHARS:
-        return normalized
-    return normalized[:MAX_THREAD_TITLE_CHARS].rsplit(" ", 1)[0].rstrip()
+    return " ".join(title.strip().strip("`\"'").split()).rstrip(".")
 
 
 async def generate_and_store_thread_title(
