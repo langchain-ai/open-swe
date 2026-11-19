@@ -1194,6 +1194,8 @@ export interface ReviewDetail extends Omit<
   walkthrough_running: boolean
   /** Why the latest scout run on this head failed, when it did. */
   walkthrough_error: string | null
+  /** When a scout held back by GitHub's rate limit starts again (ISO time); `null` when none waits. */
+  walkthrough_delayed_until?: string | null
   walkthrough_scout_thread_id: string | null
   /** What the running scout has done so far; set only while `walkthrough_running`. */
   walkthrough_progress: ScoutProgress | null

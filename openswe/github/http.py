@@ -23,6 +23,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import random
 import re
 import time
@@ -30,10 +31,10 @@ import zipfile
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 from urllib.parse import quote, unquote, urlparse
 
 import httpx2
@@ -1987,6 +1988,35 @@ class GitHubError(httpx2.HTTPStatusError):
             self.response.status_code == 429
             or _Retry.rate_limited(self.response)
             or (self.response.status_code == 403 and "Retry-After" in self.response.headers)
+        )
+
+    @property
+    def retry_in(self) -> float | None:
+        """Seconds until GitHub takes the refused request again, when it named a time.
+
+        ``None`` for a refusal that is not a rate limit, or one that named no time.
+        """
+        if not self.rate_limited:
+            return None
+        if (reset := _Retry._quota_reset_in(self.response)) is not None:  # noqa: SLF001
+            return reset
+        try:
+            wait = float(self.response.headers["Retry-After"])
+        except KeyError, ValueError:
+            return None
+        return wait if math.isfinite(wait) and wait > 0 else None
+
+    # GitHub's hourly quota resets within the hour; a wait it names further out is not trusted.
+    _LONGEST_WAIT: ClassVar[timedelta] = timedelta(hours=1)
+    # A secondary limit that names no wait usually clears within a minute.
+    _UNNAMED_WAIT: ClassVar[timedelta] = timedelta(minutes=1)
+
+    @property
+    def resume_at(self) -> datetime:
+        """When to try a rate-limited request again: GitHub's named time, capped at an hour."""
+        wait = self.retry_in
+        return datetime.now(UTC) + min(
+            self._UNNAMED_WAIT if wait is None else timedelta(seconds=wait), self._LONGEST_WAIT
         )
 
     @property

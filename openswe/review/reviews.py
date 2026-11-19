@@ -743,6 +743,11 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
     walkthrough_progress = (
         await _scout_progress(target) if walkthrough_running and target is not None else None
     )
+    walkthrough_delayed_until = (
+        await target.delayed_until()
+        if walkthrough is None and target is not None and not walkthrough_running
+        else None
+    )
     thread_id = thread.get("thread_id") if thread else None
     review_error = (
         await _reviewer_failure(thread_id)
@@ -764,6 +769,9 @@ async def get_review(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
         "walkthrough": walkthrough.model_dump(mode="json") if walkthrough else None,
         "walkthrough_running": walkthrough_running,
         "walkthrough_error": walkthrough_error,
+        "walkthrough_delayed_until": (
+            walkthrough_delayed_until.isoformat() if walkthrough_delayed_until else None
+        ),
         "walkthrough_progress": (
             walkthrough_progress.model_dump(mode="json") if walkthrough_progress else None
         ),

@@ -76,6 +76,7 @@ from openswe.review.publish import (
     TrackedReviewCheck,
     settle_review_check_run,
 )
+from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.sandboxes.retry import (
     SANDBOX_ATTACH_MAX_ELAPSED,
     is_transient_sandbox_error,
@@ -115,6 +116,7 @@ WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
 WORKER.register(GITHUB_QUOTA_SAMPLE)(InstallationQuota.sample)
 WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)
 WORKER.register(ApprovalWithdrawal.JOB)(ApprovalWithdrawal.retry)
+WORKER.register(ReviewScoutTarget.RETRY_JOB)(ReviewScoutTarget.retry)
 WORKER.register(TASK_MESSAGE_DELIVERY)(TaskMessage.retry)
 WORKER.register(INCIDENT_JOIN)(IncidentChannel.join)
 WORKER.register(INCIDENT_INVESTIGATE)(IncidentChannel.investigate)

@@ -40,9 +40,20 @@ export function WalkthroughCallout({
   const running = detail.walkthrough_running || scout.isPending
   const failure = running ? null : detail.walkthrough_error
   const failureSummary = failure?.trim().split("\n", 1)[0]?.slice(0, 300)
+  const delayedUntil =
+    running || !detail.walkthrough_delayed_until
+      ? null
+      : new Date(detail.walkthrough_delayed_until).toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+        })
   const wasRunning = useRef(detail.walkthrough_running)
   useEffect(() => {
-    if (wasRunning.current && !detail.walkthrough_running) {
+    if (
+      wasRunning.current &&
+      !detail.walkthrough_running &&
+      !detail.walkthrough_delayed_until
+    ) {
       toast.error("The walkthrough failed to build", {
         description: failureSummary
           ? `The review scout crashed: ${failureSummary}`
@@ -50,7 +61,11 @@ export function WalkthroughCallout({
       })
     }
     wasRunning.current = detail.walkthrough_running
-  }, [detail.walkthrough_running, failureSummary])
+  }, [
+    detail.walkthrough_running,
+    detail.walkthrough_delayed_until,
+    failureSummary,
+  ])
   useEffect(() => {
     if (!failure) return
     console.error("Review scout failed", {
@@ -78,6 +93,12 @@ export function WalkthroughCallout({
         </p>
         {running && detail.walkthrough_progress && (
           <ScoutProgressPreview progress={detail.walkthrough_progress} />
+        )}
+        {delayedUntil && (
+          <p className="mt-space-1 text-secondary">
+            GitHub is rate-limiting Robin, so the walkthrough starts again
+            around {delayedUntil}.
+          </p>
         )}
         {failure && failureSummary && (
           <div className="mt-space-1 flex items-start gap-space-1">

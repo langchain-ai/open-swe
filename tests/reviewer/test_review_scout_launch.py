@@ -93,6 +93,7 @@ async def test_scout_run_context_preserves_history_and_system_prefix(
     client.__aenter__ = AsyncMock(return_value=pull)
     monkeypatch.setattr(graph.PullRequestClient, "as_app", lambda *args: client)
     monkeypatch.setattr(PinnedCheckout, "pin", AsyncMock())
+    monkeypatch.setattr(launch.queue, "cancel_key", AsyncMock())
     workspace = MagicMock(complete=False)
     workspace.pull_request.concise_walkthrough = AsyncMock(return_value=False)
     monkeypatch.setattr(graph, "_workspace", AsyncMock(return_value=workspace))

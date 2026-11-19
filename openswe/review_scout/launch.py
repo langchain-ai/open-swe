@@ -1,12 +1,20 @@
 import logging
+from datetime import datetime
+from typing import ClassVar, Self
 
+import httpx2
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, ValidationError
 
 from openswe.dispatch import create_durable_run, dispatch_client
+from openswe.github.http import GitHubError
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.input_messages import build_run_input
 from openswe.invocation import new_invocation_id, with_invocation_id
+from openswe.jobs import queue
+from openswe.jobs.queue import Job
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.thread_ids import review_scout_thread_id
 from openswe.threads import index, succession
 from openswe.threads.creation import ensure_titled_thread
@@ -106,12 +114,77 @@ class ScoutProgress(BaseModel):
 class ReviewScoutTarget(BaseModel):
     """The pull request head a scout run describes."""
 
+    RETRY_JOB: ClassVar[str] = "review_scout_retry"
+
     owner: str
     repo: str
     pr_number: int
     pr_title: str
     base_sha: str
     head_sha: str
+
+    @classmethod
+    def of_run(cls, cfg: RunConfig) -> Self | None:
+        """The head a scout run was started for, or ``None`` when its config names none."""
+        if cfg.repo is None or cfg.pr_number is None or not cfg.base_sha or not cfg.head_sha:
+            return None
+        return cls(
+            owner=cfg.repo.owner,
+            repo=cfg.repo.name,
+            pr_number=cfg.pr_number,
+            pr_title=cfg.pr_title or "",
+            base_sha=cfg.base_sha,
+            head_sha=cfg.head_sha,
+        )
+
+    @property
+    def _retry_key(self) -> str:
+        return f"{self.RETRY_JOB}:{self.owner}/{self.repo}#{self.pr_number}@{self.head_sha}"
+
+    async def retry_at(self, due_at: datetime) -> None:
+        """Start this head's scout again at ``due_at``, after GitHub's rate limit clears."""
+        await queue.schedule(
+            self.RETRY_JOB, self.model_dump(mode="json"), due_at=due_at, key=self._retry_key
+        )
+
+    async def cancel_retry(self) -> None:
+        """Drop this head's queued retry: a run got past GitHub's rate limit and plans it."""
+        await queue.cancel_key(self._retry_key)
+
+    async def delayed_until(self) -> datetime | None:
+        """When this head's scout starts again, while it waits out a GitHub rate limit."""
+        job = await queue.get(self._retry_key)
+        return None if job is None or job.underway else job.due_at
+
+    @classmethod
+    async def retry(cls, job: Job) -> None:
+        """Start a delayed scout, unless its pull request has moved to a newer head since.
+
+        While GitHub still rate-limits Robin, it queues itself again for the time GitHub names,
+        instead of spending the queue's few short backoffs. Other failures raise, so the queue
+        retries them with backoff.
+        """
+        target = cls.model_validate(job.payload)
+        try:
+            async with PullRequestClient.as_app(
+                target.owner, target.repo, target.pr_number
+            ) as pull:
+                head_sha = await pull.head_sha()
+        except httpx2.HTTPStatusError as exc:
+            error = exc if isinstance(exc, GitHubError) else GitHubError(exc.response)
+            if not error.rate_limited:
+                raise
+            # Queued again under this job's key, so the replacement outlives this run.
+            await target.retry_at(error.resume_at)
+            logger.warning(
+                "Delayed review scout is still rate-limited",
+                extra={**target.log_extra, "scout_retry_at": error.resume_at.isoformat()},
+            )
+            return
+        if head_sha != target.head_sha:
+            logger.info("Delayed review scout head is stale", extra=target.log_extra)
+            return
+        await target.start()
 
     async def current_thread_id(self) -> str:
         """The scout thread to read, which follows its successor once one exists."""

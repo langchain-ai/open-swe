@@ -38,6 +38,7 @@ from openswe.middleware import (
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.author_guidance import SteeringHistory
+from openswe.review_scout.launch import ReviewScoutTarget
 from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
@@ -56,7 +57,7 @@ from openswe.tools.record_human_input import record_human_input
 from openswe.tools.suggest_task import suggest_task
 from openswe.ui_invalidations import Topic
 from openswe.utils.deferred_model import make_deferred_error_model
-from openswe.walkthrough.checkout import CheckoutError, PinnedCheckout
+from openswe.walkthrough.checkout import CheckoutError, CheckoutRateLimited, PinnedCheckout
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError, Walkthrough
 
@@ -174,11 +175,26 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
                     f"review scout could not check out the pull request: {failure}"
                 ) from failure
             await asyncio.sleep(3)
-        await checkout.pin(
-            full_name=cfg.repo.full_name,
-            pr_number=cfg.pr_number,
-            head_sha=cfg.head_sha,
-        )
+        try:
+            await checkout.pin(
+                full_name=cfg.repo.full_name,
+                pr_number=cfg.pr_number,
+                head_sha=cfg.head_sha,
+            )
+        except CheckoutRateLimited as exc:
+            # Robin's installation is out of GitHub quota; failing would only lose this head.
+            target = ReviewScoutTarget.of_run(cfg)
+            if target is None:
+                raise
+            await target.retry_at(exc.retry_at)
+            logger.warning(
+                "Review scout delayed by a GitHub rate limit",
+                extra={**target.log_extra, "scout_retry_at": exc.retry_at.isoformat()},
+            )
+            return nothing_to_plan
+        if (target := ReviewScoutTarget.of_run(cfg)) is not None:
+            # This run got past the rate limit, so an earlier run's queued retry is moot.
+            await target.cancel_retry()
         try:
             workspace = await _workspace(backend, cfg)
         except PlanMovedError:
@@ -240,6 +256,11 @@ async def finish_scout_plan(
         "pr_number": cfg.pr_number,
         "scout_head_sha": cfg.head_sha,
     }
+    target = ReviewScoutTarget.of_run(cfg)
+    if target is not None and await target.delayed_until() is not None:
+        # This run is waiting out a GitHub rate limit; its retry plans this head.
+        logger.info("Review scout delayed; leaving the plan to its retry", extra=extra)
+        return
     try:
         workspace = await _workspace(get_cached_sandbox_backend(thread_id), cfg)
         settled = await workspace.settle()

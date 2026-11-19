@@ -18,7 +18,7 @@ import httpx2
 from deepagents.backends.protocol import SandboxBackendProtocol
 from pydantic import BaseModel, JsonValue, ValidationError
 
-from openswe.github.http import GitHubAppUnavailable
+from openswe.github.http import GitHubAppUnavailable, GitHubError
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.sandboxes.paths import resolve_checkout_dir, resolve_sandbox_work_dir
 from openswe.sandboxes.repo_prep import BLOBLESS_CLONE_ARGS
@@ -35,6 +35,17 @@ _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 class CheckoutError(RuntimeError):
     """A git step in the walkthrough checkout failed."""
+
+
+class CheckoutRateLimited(CheckoutError):
+    """GitHub refused the checkout's lookups for a rate limit; it takes them again at ``retry_at``."""
+
+    def __init__(self, error: GitHubError) -> None:
+        self.retry_at = error.resume_at
+        super().__init__(
+            f"GitHub is rate-limiting Robin ({error.failure_reason}); "
+            f"trying again after {self.retry_at:%H:%M} UTC"
+        )
 
 
 class ReadFile(BaseModel):
@@ -104,6 +115,11 @@ class PinnedCheckout:
         try:
             async with PullRequestClient.as_app(owner, repo, pr_number) as pull:
                 merge_base_sha = await pull.merge_base(head_sha)
+        except httpx2.HTTPStatusError as exc:
+            error = exc if isinstance(exc, GitHubError) else GitHubError(exc.response)
+            if error.rate_limited:
+                raise CheckoutRateLimited(error) from exc
+            raise CheckoutError(f"could not find the pull request's merge base: {exc}") from exc
         except (GitHubAppUnavailable, httpx2.HTTPError, ValueError) as exc:
             raise CheckoutError(f"could not find the pull request's merge base: {exc}") from exc
         if await self.pinned(allow_missing=True) == (merge_base_sha, head_sha):
