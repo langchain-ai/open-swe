@@ -2202,25 +2202,21 @@ class _ExecuteTransport:
         return {"output": self.output, "exit_code": self.exit_code, "truncated": False}
 
 
-@pytest.mark.parametrize(
-    ("timeout", "sent"),
-    [(1500, 480), (300, 300), (None, None)],
-)
-async def test_a_command_through_the_backend_ends_before_its_reply_would_be_lost(
-    timeout: int | None, sent: int | None
+@pytest.mark.parametrize("timeout", [1500, 300, None])
+async def test_a_command_through_the_backend_runs_for_its_own_timeout(
+    timeout: int | None,
 ) -> None:
-    """A command the backend runs is held to what the backend's reply survives."""
-    from rt.remote_files import MAX_COMMAND_SECONDS, RemoteFiles
+    """A command the backend runs keeps its timeout, and the call waits that long."""
+    from rt.remote_files import RemoteFiles
 
     transport = _ExecuteTransport(124, "building...")
     remote = RemoteFiles(transport, lambda: "run-1")
 
     result = await remote.aexecute("make build", timeout=timeout)
 
-    assert transport.bodies[0]["timeout"] == sent
-    if sent is not None:
-        assert sent <= MAX_COMMAND_SECONDS
-        assert transport.timeouts[0] >= sent
+    assert transport.bodies[0]["timeout"] == timeout
+    if timeout is not None:
+        assert transport.timeouts[0] >= timeout
     assert (result.exit_code, result.output) == (124, "building...")
 
 

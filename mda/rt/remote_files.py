@@ -39,9 +39,6 @@ from runtime_api.operations import RunRequest
 from rt.backend import TOOL_CALL_SLACK_SECONDS
 
 _SYNC: Final = "The backend's files are reached asynchronously"
-# The reply to a call held open much past ten minutes never reaches the run, though the
-# backend sends it, so a command here ends well before then.
-MAX_COMMAND_SECONDS: Final = 480
 # deepagents' file and shell tools.
 FILE_TOOLS: Final = frozenset(
     {"ls", "read_file", "write_file", "edit_file", "delete", "glob", "grep", "execute"}
@@ -196,15 +193,14 @@ class RemoteFiles(SandboxBackendProtocol):
         raise NotImplementedError(_SYNC)
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:  # noqa: ASYNC109
-        limit = None if timeout is None else min(timeout, MAX_COMMAND_SECONDS)
         # A command may run out its own timeout and answer that it did, past the
         # call's usual deadline.
         reply = await self._call(
             file_api.EXECUTE,
-            file_api.ExecuteRequest(command=command, timeout=limit),
+            file_api.ExecuteRequest(command=command, timeout=timeout),
             timeout=None
-            if limit is None
-            else max(LONG_CALL_SECONDS, limit + TOOL_CALL_SLACK_SECONDS),
+            if timeout is None
+            else max(LONG_CALL_SECONDS, timeout + TOOL_CALL_SLACK_SECONDS),
         )
         return ExecuteResponse(
             output=reply.output, exit_code=reply.exit_code, truncated=reply.truncated
