@@ -476,6 +476,7 @@ class TokenRun:
         # Once recorded: a report that failed is delivered again.
         ModelUsageMetrics.record(
             response,
+            thread_id=self.run.thread_id,
             position="subagent"
             if request.namespace
             else "first"

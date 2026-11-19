@@ -34,26 +34,30 @@ class ModelUsageMetrics:
     _socket: ClassVar[socket.socket | None] = None
 
     @classmethod
-    def record(cls, replies: Sequence[BaseMessage], *, position: CallPosition) -> None:
-        """Count ``replies``' input tokens: uncached, read from the cache, and written to it.
+    def record(
+        cls,
+        replies: Sequence[BaseMessage],
+        *,
+        position: CallPosition,
+        thread_id: str | None = None,
+    ) -> None:
+        """Log replies and count those with usage without raising into their report."""
+        for reply in replies:
+            if isinstance(reply, AIMessage):
+                try:
+                    cls._record_reply(reply, position=position, thread_id=thread_id)
+                except Exception:
+                    logger.warning(
+                        "Model usage metrics were not sent",
+                        exc_info=True,
+                        extra={"thread_id": thread_id, "reply_id": reply.id},
+                    )
 
-        Never raises into the report it counts.
-        """
-        try:
-            for reply in replies:
-                if isinstance(reply, AIMessage) and reply.usage_metadata:
-                    cls._send(cls.lines(reply, position=position))
-        except Exception:
-            logger.debug("Model usage metrics were not sent", exc_info=True)
-
-    @staticmethod
-    def lines(reply: AIMessage, *, position: CallPosition) -> list[str]:
-        """``reply``'s DogStatsD counter lines, one per token type, zeros included.
-
-        A monitor that divides one token type by the others sees a group only once
-        every type has a series, so a group that never hits the cache still reports
-        ``cache_read:0``.
-        """
+    @classmethod
+    def _record_reply(
+        cls, reply: AIMessage, *, position: CallPosition, thread_id: str | None
+    ) -> None:
+        """Log normalized usage before sending one datagram, including zero token types."""
         usage = reply.usage_metadata or {}
         details = usage.get("input_token_details") or {}
         cache_read = details.get("cache_read") or 0
@@ -73,25 +77,47 @@ class ModelUsageMetrics:
             "call_position": position,
         }
         tagged = ",".join(f"{key}:{ModelUsageMetrics._tag(value)}" for key, value in tags.items())
-        return [
-            f"{METRIC}:{count}|c|#token_type:{token_type},{tagged}"
-            for token_type, count in counts.items()
-        ]
+        logger.info(
+            "Model usage observed",
+            extra={
+                **tags,
+                "thread_id": thread_id,
+                "reply_id": reply.id,
+                "invocation_id": metadata.get("open_swe_invocation_id"),
+                "usage_present": bool(reply.usage_metadata),
+                "input_tokens": usage.get("input_tokens", 0),
+                "uncached_input_tokens": counts["input"],
+                "cache_read_tokens": cache_read,
+                "cache_creation_tokens": cache_creation,
+            },
+        )
+        if not reply.usage_metadata:
+            return
+        cls._send(
+            [
+                f"{METRIC}:{count}|c|#token_type:{token_type},{tagged}"
+                for token_type, count in counts.items()
+            ]
+            + [f"openswe_model_usage_calls:1|c|#{tagged}"]
+        )
 
     @classmethod
     def _send(cls, lines: list[str]) -> None:
-        if not lines:
+        if not lines or not any(
+            os.environ.get(key)
+            for key in ("DD_API_KEY", "DD_DOGSTATSD_URL", "DD_AGENT_HOST", "DD_DOGSTATSD_PORT")
+        ):
             return
         if cls._socket is None:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setblocking(False)
-            sock.connect(cls._destination())
+            try:
+                sock.setblocking(False)
+                sock.connect(cls._destination())
+            except Exception:
+                sock.close()
+                raise
             cls._socket = sock
-        try:
-            cls._socket.send("\n".join(lines).encode())
-        except OSError:
-            # Nothing listening (ECONNREFUSED from an earlier datagram) or a full buffer.
-            logger.debug("DogStatsD did not take model usage metrics", exc_info=True)
+        cls._socket.send("\n".join(lines).encode())
 
     @staticmethod
     def _destination() -> tuple[str, int]:
