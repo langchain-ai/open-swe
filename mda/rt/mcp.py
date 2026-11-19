@@ -34,6 +34,7 @@ from managed_deepagents import (
 from mcp.types import Tool
 from pydantic import JsonValue
 from runtime_api.catalog import McpServerSpec
+from runtime_api.mcp_arguments import McpArguments
 from runtime_api.mcp_secrets import McpResult, Sessions
 
 from rt.backend import OpenSweBackend
@@ -201,7 +202,8 @@ class McpServer:
             # Called directly so arguments LangChain reserves for itself reach the server.
             with tracing_context(enabled=False):
                 content, artifact = await asyncio.wait_for(
-                    tool.coroutine(**arguments), timeout=_TIMEOUT_SECONDS
+                    tool.coroutine(**McpArguments.of(arguments, definition.input_schema)),
+                    timeout=_TIMEOUT_SECONDS,
                 )
                 content, artifact = McpResult(content, artifact).withheld(held)
         except ToolException as exc:

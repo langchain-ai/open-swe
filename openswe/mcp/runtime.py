@@ -19,6 +19,7 @@ from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from langchain.mcp import as_langchain_tool
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langsmith import tracing_context
+from runtime_api.mcp_arguments import McpArguments
 from runtime_api.mcp_secrets import HELD_SESSIONS, McpResult
 
 from mcp.shared.exceptions import MCPError
@@ -320,7 +321,8 @@ def _wrap_tool(
             with tracing_context(enabled=False):
                 try:
                     content, artifact = await asyncio.wait_for(
-                        fresh.coroutine(**arguments), timeout=_TIMEOUT_SECONDS
+                        fresh.coroutine(**McpArguments.of(arguments, definition.input_schema)),
+                        timeout=_TIMEOUT_SECONDS,
                     )
                 except ToolException as exc:
                     raise ToolException(McpResult.scrub(str(exc))) from None

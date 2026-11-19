@@ -12,6 +12,7 @@ from rt.backend import OpenSweBackend
 from rt.mcp import McpServer, McpServerError, McpTools
 from runtime_api.catalog import McpServerSpec
 from runtime_api.connections import ConnectionRef
+from runtime_api.mcp_arguments import McpArguments
 
 _URL = "https://mcp.example.com/mcp"
 
@@ -196,6 +197,37 @@ async def test_a_server_tool_gets_the_arguments_langchain_names_for_itself(
     arguments = {"config": "staging", "run_manager": "alice", "query": "q"}
     await tool.ainvoke({**arguments, "runtime": runtime})
     assert sent == [arguments]
+
+
+def test_an_optional_string_the_model_left_empty_is_left_out() -> None:
+    schema = {
+        "type": "object",
+        "required": ["query", "channel"],
+        "properties": {
+            "query": {"type": "string"},
+            "channel": {"type": "string"},
+            "context_channel_id": {"type": "string"},
+            "cursor": {"type": ["string", "null"]},
+            "thread": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "limit": {"type": "integer"},
+        },
+    }
+    arguments = {
+        "query": "deploys",
+        "channel": "",
+        "context_channel_id": "",
+        "cursor": "",
+        "thread": "",
+        "limit": "",
+        "invented": "",
+        "after": None,
+    }
+    assert McpArguments.of(arguments, schema) == {
+        "query": "deploys",
+        "channel": "",
+        "limit": "",
+        "after": None,
+    }
 
 
 class _Listing:
