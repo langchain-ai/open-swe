@@ -1536,9 +1536,10 @@ async def test_sandbox_tools_ask_the_guards_and_reach_the_backends_paths(
     assert in_sandbox.await_count == int(not remote)
 
 
+@pytest.mark.parametrize("launched_worker", [False, True])
 @pytest.mark.parametrize("next_trace_available", [True, False])
 async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
-    monkeypatch: pytest.MonkeyPatch, next_trace_available: bool
+    monkeypatch: pytest.MonkeyPatch, next_trace_available: bool, launched_worker: bool
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
@@ -1600,7 +1601,8 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         "configurable": {"thread_id": "trace-test"},
         "callbacks": [tracer],
         "metadata": {
-            "invocation_id": "turn",
+            # deepagents launches a worker's run with its own thread and no invocation.
+            **({"thread_id": "worker-thread"} if launched_worker else {"invocation_id": "turn"}),
             "created_by": "system",
             "existing_key": "preserved",
             "revision_id": "queued-sha",

@@ -79,26 +79,38 @@ class TurnTrace:
 
     @staticmethod
     def current_root() -> RunTree | None:
-        """Find the live tree within this invocation, not its external tracing parent."""
+        """Find the live tree within this invocation, not its external tracing parent.
+
+        A run the backend started names its invocation. A worker deepagents launched names
+        none until it adopts a run token, so its turn is its own thread's runs: the
+        coordinator's span it nests under, rebuilt from trace headers, names no thread.
+        """
         config = ensure_config()
-        invocation_id = config.get("metadata", {}).get("invocation_id")
+        metadata = config.get("metadata", {})
+        invocation_id = metadata.get("invocation_id")
+        thread_id = metadata.get("thread_id")
         callbacks = config.get("callbacks")
-        if not isinstance(invocation_id, str) or not isinstance(
-            callbacks, (AsyncCallbackManager, CallbackManager)
-        ):
+        if not isinstance(callbacks, (AsyncCallbackManager, CallbackManager)):
             return None
+        if isinstance(invocation_id, str):
+            turn: tuple[str, str | None] = ("invocation_id", invocation_id)
+        elif isinstance(thread_id, str) and thread_id:
+            turn = ("thread_id", thread_id)
+        else:
+            return None
+        key, value = turn
         for tracer in callbacks.handlers:
             if not isinstance(tracer, LangChainTracer):
                 continue
             current = tracer.run_map.get(str(callbacks.parent_run_id))
-            if current is None or current.metadata.get("invocation_id") != invocation_id:
+            if current is None or current.metadata.get(key) != value:
                 continue
             while current.parent_run_id is not None:
                 parent = tracer.run_map.get(str(current.parent_run_id))
                 if (
                     parent is None
                     or parent.trace_id != current.trace_id
-                    or parent.metadata.get("invocation_id") != invocation_id
+                    or parent.metadata.get(key) != value
                 ):
                     break
                 current = parent
