@@ -243,13 +243,17 @@ async def review_blockers(
 
 
 async def target_channel(
-    pr_ref: GitHubPrRef, pull: PullRequestClient, override: str
+    pr_ref: GitHubPrRef,
+    pull: PullRequestClient,
+    override: str,
+    snapshot: PullRequestPayload | None = None,
 ) -> SlackChannel | RequestResult:
+    """Where ``pull``'s card goes; ``snapshot`` is the pull request as the caller already read it."""
     configured = override.strip()
     if not configured:
         settings = await RepoSettings.cached(pr_ref.owner, pr_ref.repo)
         try:
-            configured = await settings.channel_for_pr(pull)
+            configured = await settings.channel_for_pr(pull, snapshot=snapshot)
         except httpx2.HTTPError, ValueError:
             logger.exception("Could not resolve review channel from changed files")
             return _failure(
@@ -387,13 +391,15 @@ async def _request_supplementary(
 
 
 async def record_pull_request(
-    pull: PullRequestClient,
+    pull: PullRequestClient, details: PullRequestPayload | None = None
 ) -> tuple[PullRequest, PullRequestPayload] | None:
-    """Fetch the pull request and save what a review request shows of it; ``None`` if unavailable."""
-    payload = await or_none(pull.pull())
-    if payload is None:
+    """Save what a review request shows of the pull request; ``None`` if unavailable.
+
+    ``details`` is the pull request as the caller already read it, so it isn't read again.
+    """
+    details = details or await PullRequestPayload.read(pull)
+    if details is None:
         return None
-    details = PullRequestPayload.model_validate(payload)
     pull_request = await PullRequest.load(pull.repo.owner, pull.repo.name, pull.number)
     pull_request.title = details.title
     pull_request.body = details.body or ""
@@ -499,7 +505,8 @@ async def _request_review(
 
     if supplementary_review and not inline_summary:
         return _failure("A supplementary review needs an open review request or an inline_summary.")
-    blockers = await review_blockers(pull)
+    snapshot = await PullRequestPayload.read(pull)
+    blockers = None if snapshot is None else await review_blockers(pull, snapshot)
     if blockers is None:
         return _failure("GitHub was unavailable while checking the pull request.")
     if blockers:
@@ -530,10 +537,10 @@ async def _request_review(
             + prompt("tools/human-review-blocked")
         )
 
-    target = await target_channel(pr_ref, pull, channel)
+    target = await target_channel(pr_ref, pull, channel, snapshot)
     if isinstance(target, RequestResult):
         return target
-    recorded = await record_pull_request(pull)
+    recorded = await record_pull_request(pull, snapshot)
     if recorded is None:
         return _failure("Pull request is unavailable")
     pull_request, details = recorded

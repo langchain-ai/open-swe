@@ -12,7 +12,7 @@ from openswe.expedited_review.nomination import ExpeditedReviewNomination
 from openswe.github.codeowners import CodeOwners
 from openswe.github.http import GitHubClient, RepoFileUnreadableError
 from openswe.github.pull_request_status import PullRequestClient
-from openswe.github.pull_requests import PullRequest
+from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review import routes
 from openswe.human_review.dashboard import DashboardReviewRequest
@@ -40,6 +40,7 @@ async def test_review_channel_lookup_failure_is_actionable(
         "openswe.human_review.dashboard.get_workspace_settings",
         AsyncMock(return_value=WorkspaceSettings({"expedited_review_enabled": expedited})),
     )
+    monkeypatch.setattr(PullRequestPayload, "read", AsyncMock(return_value=PullRequestPayload()))
     monkeypatch.setattr(
         "openswe.human_review.dashboard.review_blockers", AsyncMock(return_value=[])
     )
@@ -192,6 +193,7 @@ async def test_dashboard_selects_review_workflow(
     for method in ("broadcast_configured", "remove_superseded"):
         monkeypatch.setattr(ReviewCard, method, AsyncMock())
     monkeypatch.setattr(ReviewCard, "prompt_author_ready", AsyncMock(return_value=""))
+    monkeypatch.setattr(PullRequestPayload, "read", AsyncMock(return_value=PullRequestPayload()))
     monkeypatch.setattr(
         CodeOwners,
         "fetch",

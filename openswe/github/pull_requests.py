@@ -57,6 +57,7 @@ from openswe.config import ENV
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.comments import PrState, derive_pr_state
+from openswe.github.http import or_none
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, OPEN_SWE_GITHUB_LOGINS
 from openswe.github.pull_request_status import PullRequestClient, pull_request_identity
 from openswe.github.repositories import Repository
@@ -775,6 +776,12 @@ class PullRequestPayload(BaseModel):
     base_ref: str = Field("", validation_alias=AliasPath("base", "ref"))
     base_sha: str = Field("", validation_alias=AliasPath("base", "sha"))
     merge_commit_sha: str | None = None
+
+    @classmethod
+    async def read(cls, pull: PullRequestClient) -> Self | None:
+        """The pull request as GitHub has it now, or ``None`` when GitHub could not answer."""
+        payload = await or_none(pull.pull())
+        return cls.model_validate(payload) if payload is not None else None
 
     @property
     def stats(self) -> dict[str, int]:

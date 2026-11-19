@@ -8,6 +8,7 @@ from openswe.dashboard.workspace_settings import get_workspace_settings
 from openswe.expedited_review.nomination import ExpeditedReviewIneligible, ExpeditedReviewNomination
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.github.pull_requests import PullRequestPayload
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.human_review.standard import (
     Origin,
@@ -70,9 +71,10 @@ class DashboardReviewRequest:
         if active is None and (await get_workspace_settings()).expedited_review_enabled:
             try:
                 async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
-                    blockers = await review_blockers(pull)
+                    snapshot = await PullRequestPayload.read(pull)
+                    blockers = None if snapshot is None else await review_blockers(pull, snapshot)
                     if blockers == []:
-                        target = await target_channel(pr, pull, channel)
+                        target = await target_channel(pr, pull, channel, snapshot)
                         if isinstance(target, RequestResult):
                             return target
                         try:

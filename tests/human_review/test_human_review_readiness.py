@@ -25,16 +25,11 @@ async def test_draft_request_links_diff_without_requesting_review(
         ]
     )
     pull = MagicMock(spec=PullRequestClient)
-    pull.pull = AsyncMock(
-        return_value={
-            "state": "open",
-            "draft": True,
-            "user": {"login": "ada"},
-            "head": {"sha": "abc"},
-        }
-    )
+    payload = {"state": "open", "draft": True, "user": {"login": "ada"}, "head": {"sha": "abc"}}
+    pull.pull = AsyncMock(return_value=payload)
     if failure == "github":
-        pull.pull.side_effect = HTTPException(502, "GitHub unavailable")
+        # The request reads the pull request once; offering readiness reads it again.
+        pull.pull.side_effect = [payload, HTTPException(502, "GitHub unavailable")]
     legacy_claim = (
         readiness.DELIVERY_SCOPE,
         "https://github.com/lc/repo/pull/7:abc:U1",
