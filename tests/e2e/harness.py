@@ -120,6 +120,7 @@ INBOX_GATE = {"waiting": False, "released": False}
 
 @app.post("/control/reset")
 async def control_reset() -> JSONResponse:
+    await _github_changed()
     fakes.reset()
     INBOX_GATE.update(waiting=False, released=False)
     CURRENT_THREAD["channel"] = DEMO_CHANNEL
@@ -139,6 +140,22 @@ async def control_reset() -> JSONResponse:
     for owner, repo in ((OWNER, REPO), (SECOND_OWNER, SECOND_REPO)):
         await cache_set(f"__lg_swr__:repo-settings:{owner}/{repo}".lower(), None)
     return JSONResponse({"ok": True})
+
+
+async def _github_changed() -> None:
+    """Fire every fake pull request's topic, as GitHub's webhooks would on a real change.
+
+    The dashboard shares each pull request's status until its topics fire, and specs
+    change the fake GitHub directly (and reuse its numbers after a reset) without the
+    webhooks that would tell it.
+    """
+    from openswe.github.pull_request_key import PullRequestKey
+    from openswe.ui_invalidations.topics import Topic
+
+    for pull in fakes.PULLS:
+        await Topic.PULL_REQUESTS.invalidate(
+            key=PullRequestKey.of(pull["owner"], pull["repo"], pull["number"])
+        )
 
 
 async def _cancel_inflight_runs() -> None:
@@ -227,6 +244,7 @@ async def control_repo_private(request: Request) -> JSONResponse:
     body = await request.json()
     value = bool(body.get("private", False))
     fakes.set_repo_private(value)
+    await _github_changed()
     return JSONResponse({"ok": True, "private": value})
 
 
@@ -239,6 +257,7 @@ async def control_pull_request_health(request: Request) -> JSONResponse:
     pull = fakes.update_pull_health(number, body)
     if pull is None:
         raise HTTPException(404, "Pull request not found")
+    await _github_changed()
     return JSONResponse({"ok": True, "pull_request": fakes.pull_health_json(pull)})
 
 
@@ -271,6 +290,7 @@ async def control_repo_merge_methods(request: Request) -> JSONResponse:
     flags = fakes.set_repo_merge_methods(
         owner, name, {flag: flag in enabled for flag in fakes.MERGE_METHOD_FLAGS}
     )
+    await _github_changed()
     return JSONResponse({"ok": True, "repo": f"{owner}/{name}", **flags})
 
 
@@ -316,6 +336,7 @@ async def control_seed_pull_request(request: Request) -> JSONResponse:
         updated_at=body.get("updated_at") if isinstance(body.get("updated_at"), str) else None,
     )
     fakes.update_pull_health(pull["number"], body)
+    await _github_changed()
     return JSONResponse(
         {
             "ok": True,

@@ -30,6 +30,11 @@ _INSERT = text("INSERT INTO ui_invalidation (topic) SELECT unnest(:topics)").bin
     bindparam("topics", type_=ARRAY(Text))
 )
 _NOTIFY = text("SELECT pg_notify(:channel, :payload)")
+LAST_INVALIDATED = text(
+    "SELECT max(created_at) AS changed_at, clock_timestamp() AS now "
+    "FROM ui_invalidation WHERE topic = ANY(:topics)"
+).bindparams(bindparam("topics", type_=ARRAY(Text)))
+"""When any of ``topics`` was last invalidated, and the database's clock as it answered."""
 _INVALIDATED_SINCE = text(
     """
     SELECT DISTINCT wanted.topic

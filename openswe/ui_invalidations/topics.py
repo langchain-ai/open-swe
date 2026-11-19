@@ -12,11 +12,13 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
+from openswe.database import postgres
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.ui_invalidations import outbox
 
@@ -57,6 +59,17 @@ class BaseTopic(ABC):
         """How long a stream waits after sending ``topic`` before sending it again."""
         kind = cls._by_name.get(topic.partition("/")[0])
         return kind.min_interval_seconds if kind is not None else 0.0
+
+    @staticmethod
+    async def last_changed(*topics: str) -> tuple[datetime | None, datetime]:
+        """When any of ``topics`` last changed (``None`` within retention if never), and now.
+
+        Both by the database's clock, so a read stamped with ``now`` is current until
+        one of ``topics`` changes after it.
+        """
+        async with postgres.connection() as conn:
+            row = (await conn.execute(outbox.LAST_INVALIDATED, {"topics": list(topics)})).one()
+        return row.changed_at, row.now
 
     @staticmethod
     def well_formed(topic: str) -> bool:

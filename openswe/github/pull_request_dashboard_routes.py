@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.comments import PrState
 from openswe.github.http import GitHubClient
@@ -18,6 +19,7 @@ from openswe.github.pull_request_actions import (
     act_on_pull_request,
     resolve_review_threads,
 )
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import (
     OpenPullRequest,
     OpenPullRequests,
@@ -26,6 +28,7 @@ from openswe.github.pull_request_status import (
 )
 from openswe.github.pull_requests import PullRequest
 from openswe.github.repos import accessible_repo_full_names
+from openswe.github.shared_status import SharedPullRequestStatus
 from openswe.threads.pr_fixes import (
     PullRequestThreadIntent,
     PullRequestThreadRun,
@@ -33,6 +36,8 @@ from openswe.threads.pr_fixes import (
     pull_request_thread_running,
     start_pull_request_thread,
 )
+from openswe.ui_invalidations.topics import Topic
+from openswe.users import User
 
 router = APIRouter(tags=["pull-requests"])
 
@@ -105,8 +110,17 @@ async def api_pull_request_details(
 ) -> OpenPullRequest | None:
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
+    viewer = await User.for_session(session_user_id(session), str(session["sub"]))
+    # A shared status was read with someone else's token, so only a viewer whose own
+    # login (the one this session's reads use) can read the repository may have it.
+    shared = (
+        viewer is not None
+        and (viewer.github_login or "").lower() == str(session["sub"]).lower()
+        and await viewer.can_read_repository(f"{owner}/{repo}")
+    )
     async with GitHubClient.as_user(session["sub"]) as github:
-        return await github.repo(owner, repo).pull_request(number).load()
+        pull = github.repo(owner, repo).pull_request(number)
+        return await (SharedPullRequestStatus.read(pull) if shared else pull.load())
 
 
 @router.post("/repos/{owner}/{repo}/pulls/{number}/action")
@@ -118,8 +132,13 @@ async def api_act_on_pull_request(
     body: PullRequestAction,
     session: dict[str, Any] = SESSION_DEP,
 ) -> PullRequestActionResult:
-    async with GitHubClient.as_user(session["sub"]) as github:
-        return await act_on_pull_request(github.repo(owner, repo).pull_request(number), body)
+    try:
+        async with GitHubClient.as_user(session["sub"]) as github:
+            return await act_on_pull_request(github.repo(owner, repo).pull_request(number), body)
+    finally:
+        # Every open view of it, and its shared status, are stale now; a failed merge
+        # may already have resolved its conversations.
+        await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, number))
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}/thread")
@@ -155,7 +174,10 @@ async def api_resolve_review_threads(
     session: dict[str, Any] = SESSION_DEP,
 ) -> ResolveReviewThreadsResult:
     await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    async with GitHubClient.as_user(session["sub"]) as github:
-        return await resolve_review_threads(
-            github.repo(owner, repo).pull_request(number), body.thread_ids
-        )
+    try:
+        async with GitHubClient.as_user(session["sub"]) as github:
+            return await resolve_review_threads(
+                github.repo(owner, repo).pull_request(number), body.thread_ids
+            )
+    finally:
+        await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, number))

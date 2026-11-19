@@ -15,7 +15,9 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import SESSION_DEP
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import PullRequestClient
+from openswe.ui_invalidations.topics import Topic
 
 logger = logging.getLogger(__name__)
 
@@ -443,3 +445,4 @@ async def api_set_review_thread_resolution(
             .pull_request(pr_number)
             .set_thread_resolved(thread_node_id, resolution.resolved)
         )
+    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, pr_number))

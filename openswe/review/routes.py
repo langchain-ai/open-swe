@@ -15,6 +15,7 @@ from openswe.dashboard.oauth import session_user_id
 from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repos import accessible_repo_full_names
@@ -67,6 +68,7 @@ from openswe.review.styles import (
 )
 from openswe.review_scout.launch import RepositoryNotAllowed
 from openswe.threads.handlers import mark_review_session_viewed
+from openswe.ui_invalidations.topics import Topic
 from openswe.users.records import user_id_for_login
 from openswe.walkthrough.record import Walkthrough
 
@@ -278,6 +280,7 @@ async def api_update_pull_request_title(
 ) -> None:
     async with _as_viewer(session, owner, repo) as repository:
         await repository.pull_request(pr_number).update_title(update.title)
+    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, pr_number))
 
 
 class PullRequestDescriptionUpdate(BaseModel):
@@ -430,7 +433,9 @@ async def api_post_review_comment(
     session: dict[str, Any] = SESSION_DEP,
 ) -> PostedReviewComment:
     async with _as_viewer(session, owner, repo) as repository:
-        return await PostedReviewComment.post(repository.pull_request(pr_number), comment)
+        posted = await PostedReviewComment.post(repository.pull_request(pr_number), comment)
+    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, pr_number))
+    return posted
 
 
 class PullRequestReviewSubmit(BaseModel):
@@ -448,12 +453,15 @@ async def api_submit_pull_request_review(
     session: dict[str, Any] = SESSION_DEP,
 ) -> SubmittedReview:
     async with _as_viewer(session, owner, repo) as repository:
-        return await SubmittedReview.submit(
+        submitted = await SubmittedReview.submit(
             repository.pull_request(pr_number),
             login=session["sub"],
             event=review.event,
             body=review.body.strip(),
         )
+    # Its reviewers and review decision changed; don't wait on GitHub's webhook.
+    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, pr_number))
+    return submitted
 
 
 @asynccontextmanager
