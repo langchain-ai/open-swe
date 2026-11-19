@@ -97,13 +97,64 @@ function ReviewsPage() {
   }, [filters.tab])
   const selection = parsePullRequestSelection(filters.pr)
 
-  return (
-    <main
+  const header = (
+    <div
+      data-desktop-drag-region={isDesktop ? "" : undefined}
       className={cn(
-        "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
-        isDesktop && "pt-11"
+        "flex flex-wrap items-center gap-space-3",
+        isDesktop
+          ? "min-h-11 border-b border-muted py-space-1 pr-space-3 pl-[80px] [.desktop-fullscreen_&]:pl-space-3"
+          : selection && "border-b border-muted px-space-3 py-space-2"
       )}
     >
+      <Button
+        as={<Link to="/agents" />}
+        size="sm"
+        color="secondary"
+        variant="plain"
+        leftDecorator={ArrowLeftIcon}
+        className="border-0"
+      >
+        Back to threads
+      </Button>
+      <Text as="h1" variant="h3" weight="medium" color="primary">
+        Pull Requests
+      </Text>
+      <div className="flex items-center gap-space-1">
+        {tabs.map(([value, label]) => (
+          <Button
+            key={value}
+            color="secondary"
+            variant={tab === value ? "normal" : "plain"}
+            aria-pressed={tab === value}
+            onClick={() => {
+              changeFilters({
+                tab: value,
+                page: undefined,
+                pr: undefined,
+                queue: undefined,
+              })
+            }}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+      <OpenPullRequestInput />
+      {!selection && (
+        <>
+          <ReviewBookmarklet />
+          <span className="hidden text-xs text-secondary lg:inline">
+            Drag to your bookmarks bar
+          </span>
+        </>
+      )}
+    </div>
+  )
+
+  return (
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      {isDesktop && header}
       <div
         className={cn(
           "flex min-h-0 w-full flex-1 flex-col",
@@ -116,55 +167,7 @@ function ReviewsPage() {
             !selection && "max-w-6xl"
           )}
         >
-          <div
-            className={cn(
-              "flex flex-wrap items-center gap-space-3",
-              selection && "border-b border-muted px-space-3 py-space-2"
-            )}
-          >
-            <Button
-              as={<Link to="/agents" />}
-              size="sm"
-              color="secondary"
-              variant="plain"
-              leftDecorator={ArrowLeftIcon}
-              className="border-0"
-            >
-              Back to threads
-            </Button>
-            <Text as="h1" variant="h3" weight="medium" color="primary">
-              Pull Requests
-            </Text>
-            <div className="flex items-center gap-space-1">
-              {tabs.map(([value, label]) => (
-                <Button
-                  key={value}
-                  color="secondary"
-                  variant={tab === value ? "normal" : "plain"}
-                  aria-pressed={tab === value}
-                  onClick={() => {
-                    changeFilters({
-                      tab: value,
-                      page: undefined,
-                      pr: undefined,
-                      queue: undefined,
-                    })
-                  }}
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
-            <OpenPullRequestInput />
-            {!selection && (
-              <>
-                <ReviewBookmarklet />
-                <span className="hidden text-xs text-secondary lg:inline">
-                  Drag to your bookmarks bar
-                </span>
-              </>
-            )}
-          </div>
+          {!isDesktop && header}
 
           {session.data &&
             (tab === "all" ? (
