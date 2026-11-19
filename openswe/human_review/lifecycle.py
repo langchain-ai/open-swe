@@ -711,6 +711,7 @@ class ReviewCard:
                 prompt,
                 title=title,
                 before_dispatch=record_thread,
+                system=_AGENT_WAKER,
                 unlisted=unlisted,
                 origin=origin or str(request.run_config.get("origin") or "automation"),
             )

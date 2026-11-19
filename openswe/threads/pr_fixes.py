@@ -503,6 +503,7 @@ async def dispatch_pull_request_prompt(
     *,
     title: str,
     before_dispatch: Callable[[str], Awaitable[None]],
+    system: SystemIdentity,
     unlisted: bool = False,
     origin: str = "dashboard",
 ) -> str:
@@ -530,6 +531,8 @@ async def dispatch_pull_request_prompt(
             source="dashboard",
             origin=origin,
             thread_title=None,
+            context={"sender_id": system["id"], "surface": "automation", "kind": "system"},
+            systems=[system],
             client=client,
             multitask_strategy="enqueue",
         )

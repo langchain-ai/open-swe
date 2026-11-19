@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock
 import httpx2
 import pytest
 from fastapi import HTTPException
+from runtime_api.provenance import Provenance
 
+from openswe import dispatch
 from openswe.dashboard import profiles
 from openswe.github.http import GitHubError
 from openswe.github.pull_request_status import PullRequestClient
@@ -154,7 +156,10 @@ async def test_linked_thread_the_caller_cannot_post_to_is_never_reused(setup, mo
     ) == pr_fixes.PullRequestThreadRun(thread_id="new")
 
 
-async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
+async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup, monkeypatch):
+    queued = AsyncMock()
+    monkeypatch.setattr(dispatch, "create_durable_run", queued)
+    monkeypatch.setattr(pr_fixes, "dispatch_agent_run", dispatch.dispatch_agent_run)
     thread_id = await pr_fixes.dispatch_pull_request_prompt(
         "acme",
         "app",
@@ -163,8 +168,18 @@ async def test_internal_pr_dispatch_does_not_hide_or_reuse_user_thread(setup):
         "Pick a reviewer",
         title="Reviewer assignment",
         before_dispatch=AsyncMock(),
+        system={
+            "id": "system:human-review",
+            "display_name": "Human review",
+            "platform": "open-swe",
+        },
         unlisted=True,
     )
+    messages = queued.await_args.kwargs["input"]["messages"]
+    assert Provenance.of(messages[-1]) == Provenance(
+        kind="system", sender="system:human-review", surface="automation"
+    )
+    assert not any((source := Provenance.of(message)) and source.human for message in messages)
     assert thread_id == "new"
     metadata = setup.client.threads.update.await_args_list[0].kwargs["metadata"]
     assert metadata["unlisted"] is True
