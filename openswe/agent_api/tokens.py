@@ -77,6 +77,8 @@ class AgentTurnSettings(BaseModel):
     tool_discovery_failures: list[str] = []
     # Managed tools services a private thread's owner has yet to connect, which the prompt names.
     connectable_managed_services: list[str] = []
+    # MCP connections whose tools were still loading when the run started.
+    loading_mcp_connections: list[str] = []
     # A task worker's coordinator, whose sandbox the worker may use only once the backend has
     # checked it may, and whose GitHub token its runs keep fresh.
     coordinator_thread_id: str | None = None

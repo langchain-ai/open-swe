@@ -5,3 +5,8 @@
 Their tools may be missing from `search_tools`, and those listed fail until connected.
 When the requester asks for one of these services, call `connect_managed_tools` with its name instead of saying you lack access.
 {% endif %}
+{% if loading %}{% if failures or connectable %}
+{% endif %}MCP connections whose tools are still loading: {{ loading | join(", ") }}. Their tools (named `mcp_<connection>_…`; `lmt` is LangSmith Managed Tools, every connected service such as Notion or Linear) are missing from this run and will be there on the requester's next message.
+When the requester asks for a connected service whose tools are missing{% if connectable %} (not one listed above as not connected yet){% endif %}, say its tools did not load in time and to ask again.
+Do not tell them to connect or enable it.
+{% endif %}

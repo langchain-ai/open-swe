@@ -397,18 +397,32 @@ async def test_a_run_reads_its_owners_kit_tools_from_their_own_cached_listing(mo
         await asyncio.gather(*runtime._DEFERRED_LISTINGS)
         await asyncio.gather(*(state.task for state in cache._SWR_STATES.values() if state.task))
 
-    # Nothing cached: the run starts without the kit's tools, and the listing finishes.
-    assert await names(alice) == []
+    # Nothing cached: the run starts without the kit's tools, its prompt says they are still
+    # loading, and the listing finishes.
+    started = await asyncio.wait_for(runtime.load_mcp_tools(alice.source()), 0.5)
+    assert list(started) == []
+    assert started.loading == [managed.KIT_CONNECTION]
+    assert "Do not tell them to connect or enable it" in started.catalog_note
     assert listings == ["alice-langsmith-token"]
+    # An automation waits out a listing that a chat would not: its own (carol), and one it
+    # joins that an earlier run started (alice), past the second a cache read gets.
+    monkeypatch.setattr(runtime, "_CATALOG_GRACE", runtime.LISTING_GRACE)
+    automations = [
+        asyncio.ensure_future(
+            runtime.load_mcp_tools(person.source(), listing_grace=runtime.UNATTENDED_LISTING_GRACE)
+        )
+        for person in (alice, carol)
+    ]
+    await asyncio.sleep(runtime.LISTING_GRACE * 3)
     gate.set()
+    joined, own = await asyncio.gather(*automations)
+    assert [tool.name for tool in joined] == ["mcp_lmt_linear_list_issues"]
+    assert [tool.name for tool in own] == ["mcp_lmt_notion_search"]
+    assert joined.loading == own.loading == []
     await settled()
 
-    # Cached: no listing at all.
+    # Cached: no listing at all. Carol listed her own kit, as herself, and never sees alice's.
     assert await names(alice) == ["mcp_lmt_linear_list_issues"]
-    assert listings == ["alice-langsmith-token"]
-
-    # Another person lists their own kit, as themselves, and never sees alice's.
-    assert await names(carol, within=1) == ["mcp_lmt_notion_search"]
     assert await names(carol) == ["mcp_lmt_notion_search"]
     assert await names(alice) == ["mcp_lmt_linear_list_issues"]
     assert listings == ["alice-langsmith-token", "carol-langsmith-token"]
@@ -792,6 +806,10 @@ async def test_private_threads_load_the_kit_as_the_owner_and_others_as_the_bot(
     assert tools.connectable == (["Notion", "Exa", "Sentry"] if private else [])
     note = runtime.catalog_note(tools.failures, tools.connectable)
     assert ("connect_managed_tools" in note) is private
+    # While the kit loads, the services not yet connected keep their connect instruction.
+    loading = runtime.catalog_note(tools.failures, tools.connectable, ["lmt"])
+    assert ("connect_managed_tools" in loading) is private
+    assert ("not one listed above as not connected yet" in loading) is private
 
 
 def test_a_connect_challenge_survives_the_client_wrapping_it():

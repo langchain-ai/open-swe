@@ -353,6 +353,11 @@ class RunConfig(BaseModel):
         return None
 
     @property
+    def unattended(self) -> bool:
+        """Whether an automation started the run, so no one waits on its start."""
+        return self.source == "schedule" or self.schedule_id is not None
+
+    @property
     def is_eval(self) -> bool:
         return self.eval is True or self.reviewer_eval is True
 

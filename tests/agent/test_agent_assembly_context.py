@@ -89,7 +89,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
             "read_user_settings",
         }
     )
-    mcps.assert_awaited_once_with(None)
+    mcps.assert_awaited_once_with(None, unattended=False)
 
 
 async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:

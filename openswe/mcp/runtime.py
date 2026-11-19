@@ -53,7 +53,10 @@ _CATALOG_GRACE = 1.0
 # How long it then waits on LangSmith when nothing was cached. A kit's listing takes
 # seconds (none of 289 in prod on 2026-11-18 took under one), so a run starts without
 # waiting on it, and the listing finishes for the next run.
-_LISTING_GRACE = 0.1
+LISTING_GRACE = 0.1
+# The same wait for a run no one watches start (an automation), which needs the tools more
+# than a fast start.
+UNATTENDED_LISTING_GRACE = 5.0
 # Listings that outlasted a run's grace, finishing so the next run finds them.
 _DEFERRED_LISTINGS: set[asyncio.Task[SWRResult[object]] | asyncio.Task[object]] = set()
 
@@ -66,28 +69,35 @@ class MCPTools(list[BaseTool]):
         self.failures: list[str] = []
         # Managed tools services the private thread's owner could connect, which the prompt names.
         self.connectable: list[str] = []
+        # Connections whose listing outlasted the run's start, which the next run will have.
+        self.loading: list[str] = []
 
     @property
     def catalog_note(self) -> str:
-        return catalog_note(self.failures, self.connectable)
+        return catalog_note(self.failures, self.connectable, self.loading)
 
     def without(self, tool_name: str) -> MCPTools:
         """These tools less every one named ``tool_name`` on its server."""
         kept = MCPTools(t for t in self if (t.metadata or {}).get("mcp_tool_name") != tool_name)
         kept.failures = list(self.failures)
         kept.connectable = list(self.connectable)
+        kept.loading = list(self.loading)
         return kept
 
 
-def catalog_note(failures: Sequence[str], connectable: Sequence[str] = ()) -> str:
-    """What the system prompt says of managed tool discovery that ``failures`` broke, and of
-    the ``connectable`` services the requester has yet to connect."""
-    if not failures and not connectable:
+def catalog_note(
+    failures: Sequence[str], connectable: Sequence[str] = (), loading: Sequence[str] = ()
+) -> str:
+    """What the system prompt says of managed tool discovery that ``failures`` broke, of
+    the ``connectable`` services the requester has yet to connect, and of the connections
+    still ``loading``."""
+    if not failures and not connectable and not loading:
         return ""
     return "\n\n" + prompt(
         "tools/mcp-catalog-note",
         failures=list(dict.fromkeys(failures)),
         connectable=list(dict.fromkeys(connectable)),
+        loading=list(dict.fromkeys(loading)),
     )
 
 
@@ -409,13 +419,16 @@ def _keep_listing(task: asyncio.Task[SWRResult[object]] | asyncio.Task[object]) 
 
 
 async def _cached_definitions(
-    source: MCPSource, record: MCPConnection
+    source: MCPSource, record: MCPConnection, listing_grace: float
 ) -> tuple[list[Tool], CatalogOutcome]:
     """The connection's tools for a run. A cached listing comes back at once, fresh or
     stale (a stale one is listed again in the background). With none cached, the run waits
     only until the listing goes to LangSmith (a kit LangSmith builds per caller takes
     seconds), and starts without the connection's tools while the listing finishes for the
-    next run; a slow cache read is waited on for at most a second."""
+    next run; a slow cache read is waited on for at most a second. A ``listing_grace``
+    longer than that second (an automation's) is waited out whatever the lookup waits on,
+    including another run's listing of the same connection, which this lookup joins
+    without listing it itself."""
     # Set only when this lookup found nothing cached and lists the connection itself: a
     # stale hit's background listing starts after the lookup has already returned.
     listing = asyncio.Event()
@@ -426,8 +439,8 @@ async def _cached_definitions(
         await asyncio.wait(
             (lookup, listed), timeout=_CATALOG_GRACE, return_when=asyncio.FIRST_COMPLETED
         )
-        if not lookup.done() and listing.is_set():
-            await asyncio.wait((lookup,), timeout=_LISTING_GRACE)
+        if not lookup.done() and (listing.is_set() or listing_grace > _CATALOG_GRACE):
+            await asyncio.wait((lookup,), timeout=listing_grace)
     finally:
         listed.cancel()
     if not lookup.done():
@@ -464,9 +477,10 @@ async def _load_tools(
     sources: tuple[MCPSource, ...],
     overridden_scopes: list[MCPScope],
     failures: list[str],
+    listing_grace: float,
 ) -> tuple[list[BaseTool], CatalogOutcome]:
     try:
-        definitions, outcome = await _cached_definitions(source, record)
+        definitions, outcome = await _cached_definitions(source, record, listing_grace)
         tools = [
             _wrap_tool(
                 record.name,
@@ -492,8 +506,13 @@ async def _load_tools(
         return [], "failed"
 
 
-async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None) -> MCPTools:
-    """Combine sources in precedence order; later connections replace earlier names entirely."""
+async def load_mcp_tools(
+    *sources: MCPSource,
+    connection_name: str | None = None,
+    listing_grace: float = LISTING_GRACE,
+) -> MCPTools:
+    """Combine sources in precedence order; later connections replace earlier names entirely.
+    ``listing_grace`` is how long a connection with nothing cached is waited on."""
     result = MCPTools()
     try:
         catalogs = await asyncio.gather(*(source.list_connections() for source in sources))
@@ -522,6 +541,7 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
                 sources,
                 scopes[record.name][:-1],
                 result.failures,
+                listing_grace,
             )
             for source, record in connections
         )
@@ -535,4 +555,9 @@ async def load_mcp_tools(*sources: MCPSource, connection_name: str | None = None
         },
     )
     result.extend(tool for tools, _ in groups for tool in tools)
+    result.loading = [
+        record.name
+        for (_, record), (_, outcome) in zip(connections, groups, strict=True)
+        if outcome == "deferred"
+    ]
     return result

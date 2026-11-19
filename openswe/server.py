@@ -93,7 +93,12 @@ from openswe.input_messages import (
 )
 from openswe.mcp import load_mcp_tools
 from openswe.mcp.managed import BotTools, PersonalTools, managed_tools_configured
-from openswe.mcp.runtime import MCPTools, catalog_note
+from openswe.mcp.runtime import (
+    LISTING_GRACE,
+    UNATTENDED_LISTING_GRACE,
+    MCPTools,
+    catalog_note,
+)
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
@@ -879,7 +884,7 @@ async def integration_tools(
     loaded = None if fresh else _integrations.get(login)
     if loaded is not None and loaded[0] > time.monotonic():
         return loaded[1]
-    tools = await _run_mcp_tools(cfg.thread_id or "", login)
+    tools = await _run_mcp_tools(cfg.thread_id or "", login, unattended=cfg.unattended)
     by_name: dict[str, BaseTool] = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
     _keep_integrations(login, by_name)
     return by_name
@@ -919,23 +924,27 @@ class ThreadFiles:
         return cls(cfg.thread_id, cfg, skills=await RunSkillStores.for_run(config))
 
 
-async def _mcp_tools_for(credential_login: str | None) -> MCPTools:
-    """The owner's LMT kit in a private thread, or Robin's bot kit otherwise."""
+async def _mcp_tools_for(credential_login: str | None, *, unattended: bool = False) -> MCPTools:
+    """The owner's LMT kit in a private thread, or Robin's bot kit otherwise. An
+    ``unattended`` run waits longer for a listing nothing has cached."""
+    grace = UNATTENDED_LISTING_GRACE if unattended else LISTING_GRACE
     if not credential_login:
-        return await load_mcp_tools(BotTools().source())
+        return await load_mcp_tools(BotTools().source(), listing_grace=grace)
     personal = PersonalTools(credential_login)
     tools, connectable = await asyncio.gather(
-        load_mcp_tools(personal.source()),
+        load_mcp_tools(personal.source(), listing_grace=grace),
         personal.connectable(),
     )
     tools.connectable = connectable
     return tools
 
 
-async def _run_mcp_tools(thread_id: str, credential_login: str | None) -> MCPTools:
+async def _run_mcp_tools(
+    thread_id: str, credential_login: str | None, *, unattended: bool = False
+) -> MCPTools:
     """The MCP tools the run may use."""
     async with aphase(thread_id, "factory.mcp_tools"):
-        return await _mcp_tools_for(credential_login)
+        return await _mcp_tools_for(credential_login, unattended=unattended)
 
 
 # The sandbox's file and shell tools, which code mode offers directly as well.
@@ -1049,9 +1058,11 @@ async def _thread_settings(thread_id: str) -> tuple[ThreadSettings, bool]:
     return normalize_thread_settings(await load_thread_settings(client, thread_id))
 
 
-async def _scoped_mcp_tools(thread_id: str, scope: Awaitable[tuple[str | None, bool]]) -> MCPTools:
+async def _scoped_mcp_tools(
+    thread_id: str, scope: Awaitable[tuple[str | None, bool]], *, unattended: bool
+) -> MCPTools:
     login, known = await scope
-    return await _run_mcp_tools(thread_id, login) if known else MCPTools()
+    return await _run_mcp_tools(thread_id, login, unattended=unattended) if known else MCPTools()
 
 
 async def _cached_profile(profile_login: str | None):
@@ -1141,7 +1152,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._sole_writer = turn.sole_writer
         self._routing_defaults = dict(turn.route_models)
         self._tool_catalog_note = catalog_note(
-            turn.tool_discovery_failures, turn.connectable_managed_services
+            turn.tool_discovery_failures,
+            turn.connectable_managed_services,
+            turn.loading_mcp_connections,
         )
 
     @cached_property
@@ -1742,7 +1755,9 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     credential_scope = asyncio.ensure_future(_credential_scope(config))
     # MCP loading needs only who the run acts for, and it is the slowest lookup here, so
     # it overlaps every lookup below.
-    mcp_tools_task = asyncio.ensure_future(_scoped_mcp_tools(thread_id, credential_scope))
+    mcp_tools_task = asyncio.ensure_future(
+        _scoped_mcp_tools(thread_id, credential_scope, unattended=cfg.unattended)
+    )
     (
         profile_login,
         (credential_login, _),
@@ -2136,6 +2151,9 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         tool_discovery_failures=list(mcp_tools.failures) if isinstance(mcp_tools, MCPTools) else [],
         connectable_managed_services=(
             list(mcp_tools.connectable) if isinstance(mcp_tools, MCPTools) else []
+        ),
+        loading_mcp_connections=(
+            list(mcp_tools.loading) if isinstance(mcp_tools, MCPTools) else []
         ),
     )
     configurable[AGENT_TURN_KEY] = turn.model_dump(mode="json")
