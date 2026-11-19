@@ -5,7 +5,8 @@ A thread's history is replayed to the provider on every call, and to whichever
 provider routing or the fallback picks, so a block one provider wrote can break
 every later call on another. A provider stall that never raises would park the
 run with nothing for the retry or the fallback to react to. Anthropic's prompt
-cache is marked here too, where the call's real model is known.
+cache is marked here too, and OpenAI's is keyed to the thread, where the call's
+real model is known.
 
 A call the provider fails transiently goes again, alternating between the call's
 model and its fallback with a growing wait between attempts. Both providers can be
@@ -428,6 +429,33 @@ class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
             )
 
 
+class OpenAIPromptCacheKeyMiddleware(_ModelCallGuard):
+    """Key an OpenAI call's prompt cache to its thread, unless the call or model has a key.
+
+    OpenAI sends requests with the same key and prefix to the same machine, which holds
+    their cache; GPT-5.6 and later need the key for that reliable match. Without one, a
+    thread's next call, its last call plus a turn, can land where that cache is not.
+    """
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        model = _chat_model(request.model)
+        info = request.runtime.execution_info if request.runtime is not None else None
+        if (
+            isinstance(model, ChatOpenAI)
+            and info is not None
+            and info.thread_id
+            and "prompt_cache_key" not in request.model_settings
+            and "prompt_cache_key" not in model.model_kwargs
+        ):
+            settings = {**request.model_settings, "prompt_cache_key": info.thread_id}
+            request = request.override(model_settings=settings)
+        return await handler(request)
+
+
 class _RunPromptCaching(AnthropicPromptCachingMiddleware):
     """Anthropic's prompt cache, less its breakpoint on the last tool.
 
@@ -480,6 +508,7 @@ def model_call_guards(
         ReplayableHistoryMiddleware(),
         ModelCallTimeoutMiddleware(timeout_seconds),
         ModelRetriesMiddleware(),
+        OpenAIPromptCacheKeyMiddleware(),
         (AnthropicPromptCachingMiddleware if subagent else _RunPromptCaching)(
             ttl=PROMPT_CACHE_TTL, unsupported_model_behavior="ignore"
         ),

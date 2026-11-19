@@ -32,6 +32,7 @@ from langchain_core.messages import (
 from langchain_core.tools import tool
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
+from langgraph.runtime import ExecutionInfo, Runtime
 from pydantic import SecretStr
 from rt.backend import Run, RunContext
 from rt.gateway import RUN_GATEWAY
@@ -40,6 +41,7 @@ from rt.model_calls import (
     MODEL_OUTAGE_MESSAGE,
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,
+    OpenAIPromptCacheKeyMiddleware,
     ReplayableHistoryMiddleware,
     call_with_fallback,
     model_call_guards,
@@ -328,6 +330,14 @@ class _Skills(AgentMiddleware):
         return await handler(request.override(system_message=system))
 
 
+def _on_thread(thread_id: str) -> Runtime[None]:
+    return Runtime(
+        execution_info=ExecutionInfo(
+            checkpoint_id="checkpoint", checkpoint_ns="", task_id="task", thread_id=thread_id
+        )
+    )
+
+
 def _through(
     layers: list[AgentMiddleware], handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
 ) -> Callable[[ModelRequest], Awaitable[ModelResponse]]:
@@ -350,7 +360,8 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
 ) -> None:
     """The run's shared prompt and the workspace's each end in an Anthropic cache
     breakpoint ahead of the skills and the thread's own part, keeping a request within
-    four, the tools take none, and a fallback to OpenAI carries OpenAI's breakpoints."""
+    four, the tools take none, and a fallback to OpenAI carries OpenAI's breakpoints and
+    the thread's cache key."""
     built: dict[str, BaseChatModel] = {"anthropic:opus": _ANTHROPIC, "openai:gpt": _OPENAI}
     monkeypatch.setattr("rt.middleware.build_model", lambda spec: built[spec.model_id])
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
@@ -379,7 +390,7 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
         RunPromptMiddleware(),
         _Skills(),
         ThreadPromptMiddleware(),
-        model_call_guards()[-1],
+        *model_call_guards()[-2:],
     ]
     for thread in ("First thread's part", "Next thread's part"):
         call = ModelCall(
@@ -396,6 +407,7 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
             system_message=static,
             tools=[_search],
             state=cast(AgentState, {"messages": messages, "open_swe_call": call.model_dump()}),
+            runtime=_on_thread("thread-1"),
         )
         await BackendRunMiddleware(run.backend).awrap_model_call(request, _through(layers, handler))
 
@@ -425,8 +437,22 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
         {"type": "text", "text": "\n\nSkills"},
         {"type": "text", "text": "First thread's part"},
     ]
-    assert first_fallback.model_settings == {}
+    assert first_fallback.model_settings == {"prompt_cache_key": "thread-1"}
     assert static.content == "The graph's own instructions"
+
+
+async def test_a_prompt_cache_key_already_set_is_kept() -> None:
+    keyed = _OPENAI.model_copy(update={"model_kwargs": {"prompt_cache_key": "model"}})
+    guard = OpenAIPromptCacheKeyMiddleware()
+
+    for model, settings in ((_OPENAI, {"prompt_cache_key": "call"}), (keyed, {})):
+        request = ModelRequest(
+            model=model, messages=[], model_settings=settings, runtime=_on_thread("thread-1")
+        )
+        handler = AsyncMock(return_value=ModelResponse(result=[AIMessage(content="ok")]))
+        await guard.awrap_model_call(request, handler)
+        assert handler.await_args is not None
+        assert handler.await_args.args[0].model_settings == settings
 
 
 def _status_error(status: int, body: dict[str, object] | None = None) -> openai.APIStatusError:
