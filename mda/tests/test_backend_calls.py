@@ -2090,6 +2090,61 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     ran.assert_not_awaited()
 
 
+class _ExecuteTransport:
+    """A backend that answers every ``files.execute`` with ``exit_code`` and ``output``, and
+    records the call."""
+
+    def __init__(self, exit_code: int, output: str) -> None:
+        self.exit_code = exit_code
+        self.output = output
+        self.bodies: list[dict[str, JsonValue]] = []
+        self.timeouts: list[float] = []
+
+    async def post(
+        self,
+        path: str,
+        body: dict[str, JsonValue],
+        *,
+        timeout: float,
+        delivery: Delivery,
+        headers: Mapping[str, str] | None = None,
+    ) -> JsonValue:
+        self.bodies.append(body)
+        self.timeouts.append(timeout)
+        return {"output": self.output, "exit_code": self.exit_code, "truncated": False}
+
+
+@pytest.mark.parametrize(
+    ("timeout", "exit_code", "output", "sent", "capped"),
+    [
+        (1500, 124, "building...\n[command timed out after 480s]", 480, True),
+        (1500, 124, "building...\ntimeout: sending signal TERM", 480, False),
+        (1500, 0, "building...", 480, False),
+        (300, 124, "building...\n[command timed out after 300s]", 300, False),
+        (None, 0, "building...", None, False),
+    ],
+)
+async def test_a_command_through_the_backend_ends_before_its_reply_would_be_lost(
+    timeout: int | None, exit_code: int, output: str, sent: int | None, capped: bool
+) -> None:
+    """A command run on a bridged machine is held to what the backend's reply survives, and
+    one the limit stopped, rather than its own `timeout`, says how to run longer work."""
+    from rt.remote_files import MAX_COMMAND_SECONDS, RemoteFiles
+
+    transport = _ExecuteTransport(exit_code, output)
+    remote = RemoteFiles(transport, lambda: "run-1")
+
+    result = await remote.aexecute("make build", timeout=timeout)
+
+    assert transport.bodies[0]["timeout"] == sent
+    if sent is not None:
+        assert sent <= MAX_COMMAND_SECONDS
+        assert transport.timeouts[0] >= sent
+    assert result.exit_code == exit_code
+    assert ("background_execute" in result.output) is capped
+    assert result.output.startswith("building...")
+
+
 async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
