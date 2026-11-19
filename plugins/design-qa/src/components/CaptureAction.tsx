@@ -12,19 +12,25 @@ import {
   type PullRequestRuns,
 } from "../lib/queries"
 
-/** Capture is requested through the host, which checks app and repository access. */
+/**
+ * Capture is requested through the host, which checks app and repository
+ * access. The latest attempt's outcome shows only when it didn't capture, and
+ * not at all without `showOutcome`.
+ */
 export function CaptureAction({
   pr,
   outcome,
   hasCapture,
   disabled = false,
   currentHeadSha,
+  showOutcome = true,
 }: {
   pr: PullRequestRef
   outcome: ReviewOutcome | null
   hasCapture: boolean
   disabled?: boolean
   currentHeadSha?: string
+  showOutcome?: boolean
 }) {
   const host = usePluginHost()
   const client = useQueryClient()
@@ -96,14 +102,13 @@ export function CaptureAction({
   const queued = outcome?.status === "queued" && !earlierCommit && !stalled
   const labels = {
     queued: "Capture queued",
-    complete: "Captured",
     blocked: "Capture blocked",
     failed: "Capture failed",
     skipped: "Capture skipped",
   }
   return (
     <div className="flex flex-col items-start gap-space-2">
-      {outcome && (
+      {showOutcome && outcome && outcome.status !== "complete" && (
         <p role="status" className="text-xs text-secondary">
           {stalled
             ? "Capture has not reported an outcome"

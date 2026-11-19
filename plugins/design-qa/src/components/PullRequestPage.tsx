@@ -6,7 +6,8 @@ import type { JsonObject, PullRequest } from "@openswe/plugin-sdk"
 import { usePluginHost } from "@openswe/plugin-sdk/react"
 import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
-import { useEffect, useState } from "react"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
+import { useEffect, useState, type MouseEvent } from "react"
 
 import type { FrontendReviewRun, FrontendScenario } from "../lib/capture"
 import {
@@ -26,13 +27,16 @@ import {
   errorMessage,
   isForbidden,
   useCaptureChanges,
+  usePeople,
   useRun,
   useRuns,
   useTitle,
 } from "../lib/queries"
 import { useRouter } from "../lib/router"
 import { ReportView } from "./ReportView"
+import { Author } from "./Author"
 import { CaptureAction } from "./CaptureAction"
+import { PinButton } from "./PinButton"
 import { ShareRepositories } from "./ShareRepositories"
 import { UpdateBanner } from "./UpdateBanner"
 
@@ -64,7 +68,15 @@ export function PullRequestPage({
       ? run.report?.scenarios.find(({ id }) => id === asked.scenario)
       : undefined
   usePullRequestChat(pr, run, current, askedScenario)
+  const author = current?.author ?? null
+  const people = usePeople([author])
   const empty = runs.isSuccess && !selectedId
+  const title = current?.title ?? `Pull request #${pr.number}`
+  const github = pullRequestUrl(pr)
+  const openGitHub = (event: MouseEvent) => {
+    event.preventDefault()
+    void host.nav.openExternal(github)
+  }
   const options = (runs.data?.runs ?? []).map(runOption)
   if (run && !options.some((option) => option.value === run.id))
     options.push(runOption(run))
@@ -85,25 +97,45 @@ export function PullRequestPage({
         </Button>
         <div className="flex flex-wrap items-end justify-between gap-space-3">
           <div className="min-w-0">
-            <p className="text-xs text-secondary">
-              {label}
-              {current?.draft ? " · Draft" : ""}
-            </p>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-space-2 gap-y-space-1 text-xs text-secondary">
+              <span>
+                {label}
+                {current?.draft ? " · Draft" : ""}
+              </span>
+              {author && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <Author
+                    login={author}
+                    person={people.get(author.toLowerCase())}
+                  />
+                </>
+              )}
+            </div>
             <h1 className="text-xl font-semibold tracking-tight text-primary">
-              {current?.title ?? `Pull request #${pr.number}`}
+              <a
+                href={github}
+                title="Open on GitHub"
+                className="rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+                onClick={openGitHub}
+              >
+                {title}
+              </a>
             </h1>
           </div>
-          <Link
-            href={pullRequestUrl(pr)}
-            variant="sm"
-            rightDecorator={ArrowSquareOutIcon}
-            onClick={(event) => {
-              event.preventDefault()
-              void host.nav.openExternal(pullRequestUrl(pr))
-            }}
-          >
-            Open on GitHub
-          </Link>
+          <div className="flex items-center gap-space-3">
+            <PinButton pr={pr} title={title} />
+            <Link
+              href={github}
+              variant="sm"
+              leftDecorator={GithubLogoIcon}
+              rightDecorator={ArrowSquareOutIcon}
+              aria-label="Open on GitHub"
+              onClick={openGitHub}
+            >
+              GitHub
+            </Link>
+          </div>
         </div>
       </header>
       {isForbidden(runs.error) || isForbidden(detail.error) ? (

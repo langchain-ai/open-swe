@@ -2,6 +2,7 @@ import {
   HostError,
   type Collection,
   type JsonObject,
+  type Person,
   type PluginHost,
   type PullRequest,
   type PullRequestSearch,
@@ -12,6 +13,7 @@ import {
 import { usePluginHost } from "@openswe/plugin-sdk/react"
 import {
   keepPreviousData,
+  queryOptions,
   useMutation,
   useQueries,
   useQuery,
@@ -28,6 +30,7 @@ import {
   type FrontendScenario,
   StoredCapture,
 } from "./capture"
+import { Pins, type Pin, type PinKey } from "./pins"
 import { PixelChange } from "./pixelChange"
 import { repositoryOf, type PullRequestRef } from "./pullRequest"
 import { InboxOrder, type InboxPreferences } from "./inboxOrder"
@@ -94,6 +97,8 @@ export const keys = {
   repositoryCaptures: (repository: string) =>
     ["inbox", "captures", repository] as const,
   preferences: ["preferences"] as const,
+  pins: ["pins"] as const,
+  people: (logins: readonly string[]) => ["people", ...logins] as const,
   runs: (pr: PullRequestRef) => ["runs", pr.owner, pr.repo, pr.number] as const,
   run: (pr: PullRequestRef, id: string) =>
     ["run", pr.owner, pr.repo, pr.number, id] as const,
@@ -177,11 +182,11 @@ export class DesignQa {
     }
   }
 
-  private async *documents(
-    collection: Collection<CaptureKey, JsonObject>,
+  private async *documents<K extends string>(
+    collection: Collection<K, JsonObject>,
     prefix = "pulls/"
   ) {
-    let after: CaptureKey | undefined
+    let after: K | undefined
     for (;;) {
       const page = await collection.query({
         prefix,
@@ -264,12 +269,50 @@ export class DesignQa {
 
   /**
    * Open pull requests asking the person (or a team of theirs) for review, or
-   * their own, as GitHub's search lists them: no captures read yet.
+   * their own, as GitHub's search lists them, or the ones they pinned: no
+   * captures read yet.
    */
-  search(scope: InboxScope): Promise<PullRequestSearch> {
+  async search(scope: InboxScope): Promise<PullRequestSearch> {
+    if (scope === "pinned") {
+      const pins = await this.pins()
+      const pulls = await Promise.all(
+        pins.map(async (pin) =>
+          Pins.summary(
+            pin,
+            (await this.currentPull(pin.repository, pin.number)) ?? null
+          )
+        )
+      )
+      return { pulls, incomplete: false }
+    }
     return this.host.pulls.search({
       role: scope === "mine" ? "author" : "review-requested",
     })
+  }
+
+  /** The pull requests the person pinned, kept private to them. */
+  private pinStore() {
+    return this.host.storage.collection<PinKey, JsonObject>("pins")
+  }
+
+  async pins(): Promise<Pin[]> {
+    const pins: Pin[] = []
+    for await (const stored of this.documents(this.pinStore(), "")) {
+      const pin = Pins.read(stored.document)
+      if (pin) pins.push(pin)
+    }
+    return pins
+  }
+
+  async pin(pin: Pin): Promise<void> {
+    await this.pinStore().put(
+      Pins.key(pin.repository, pin.number),
+      Pins.document(pin)
+    )
+  }
+
+  async unpin(pr: PullRequestRef): Promise<void> {
+    await this.pinStore().delete(Pins.key(repositoryOf(pr), pr.number))
   }
 
   /** The person's own inbox preferences, kept private to them. */
@@ -312,13 +355,15 @@ export class DesignQa {
   /**
    * One page of searched pull requests with their latest captures, including
    * those without one; `captures` reads each repository's, so a caller can
-   * keep them between pages.
+   * keep them between pages. Closed pull requests drop out, unless `pinned`:
+   * then every one is read from GitHub and stays until it's unpinned.
    */
   async inbox(
     pulls: readonly PullRequestSummary[],
     captures: (repository: string) => Promise<RepositoryCaptures> = (
       repository
-    ) => this.repositoryCaptures(repository)
+    ) => this.repositoryCaptures(repository),
+    pinned = false
   ): Promise<Inbox> {
     const repositories = [...new Set(pulls.map(({ repository }) => repository))]
     const read = new Map(
@@ -335,12 +380,14 @@ export class DesignQa {
         const { repository, number } = summary
         const found = read.get(repository)
         const run = found?.runs.get(number) ?? null
-        // Search already supplies the uncaptured PR's identity and title.
-        const current = run
+        // Search already supplies the uncaptured PR's identity and title; a
+        // pin only its title when it was pinned.
+        const asked = Boolean(run) || pinned
+        const current = asked
           ? await this.currentPull(repository, number)
           : undefined
-        if (run && current === undefined) incomplete = true
-        if (current && current.state !== "open") return null
+        if (asked && current === undefined) incomplete = true
+        if (current && current.state !== "open" && !pinned) return null
         return {
           repository,
           pull: current ?? summary,
@@ -421,6 +468,7 @@ export function useShareRepositories() {
   })
 }
 
+/** An inbox tab's pull requests: GitHub's search, or the person's pins. */
 export function useInboxSearch(scope: InboxScope) {
   const qa = useDesignQa()
   return useQuery({
@@ -431,6 +479,83 @@ export function useInboxSearch(scope: InboxScope) {
     refetchInterval: 5 * 60_000,
     refetchOnWindowFocus: true,
   })
+}
+
+const pinsQuery = (qa: DesignQa) =>
+  queryOptions({ queryKey: keys.pins, queryFn: () => qa.pins() })
+
+/**
+ * Whether the person pinned `pr`, and pinning or unpinning it, shown at once
+ * and undone with a toast if storage refuses.
+ */
+export function usePin(pr: PullRequestRef, title: string) {
+  const host = usePluginHost()
+  const qa = DesignQa.of(host)
+  const queryClient = useQueryClient()
+  const pins = useQuery(pinsQuery(qa))
+  const key = Pins.key(repositoryOf(pr), pr.number)
+  const other = (pin: Pin) => Pins.key(pin.repository, pin.number) !== key
+  const pinned = pins.data?.some((pin) => !other(pin)) ?? false
+  const toggle = useMutation({
+    mutationFn: (next: Pin | null) => (next ? qa.pin(next) : qa.unpin(pr)),
+    onMutate: async (next) => {
+      const tab = keys.inboxSearch("pinned")
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: keys.pins }),
+        queryClient.cancelQueries({ queryKey: tab }),
+      ])
+      const previous = queryClient.getQueryData<Pin[]>(keys.pins)
+      const listed = queryClient.getQueryData<PullRequestSearch>(tab)
+      queryClient.setQueryData<Pin[]>(keys.pins, (current = []) => [
+        ...current.filter(other),
+        ...(next ? [next] : []),
+      ])
+      // An unpinned card leaves the tab at once; a pinned one joins once GitHub answers.
+      if (!next)
+        queryClient.setQueryData<PullRequestSearch>(
+          tab,
+          (current) =>
+            current && {
+              ...current,
+              pulls: current.pulls.filter(
+                ({ repository, number }) => Pins.key(repository, number) !== key
+              ),
+            }
+        )
+      return { previous, listed }
+    },
+    onError: (error, next, context) => {
+      queryClient.setQueryData(keys.pins, context?.previous)
+      queryClient.setQueryData(keys.inboxSearch("pinned"), context?.listed)
+      void host.ui.toast({
+        title: next ? "Could not pin this PR" : "Could not unpin this PR",
+        description: errorMessage(error),
+        intent: "error",
+      })
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.pins }),
+        queryClient.invalidateQueries({
+          queryKey: keys.inboxSearch("pinned"),
+        }),
+      ]),
+  })
+  return {
+    pinned,
+    ready: pins.isSuccess,
+    toggle: () =>
+      toggle.mutate(
+        pinned
+          ? null
+          : {
+              repository: repositoryOf(pr).toLowerCase(),
+              number: pr.number,
+              title,
+              pinnedAt: new Date().toISOString(),
+            }
+      ),
+  }
 }
 
 /**
@@ -503,12 +628,15 @@ export function useInboxPage(
   return useQuery({
     queryKey: keys.inboxPage(scope, pulls),
     queryFn: () =>
-      qa.inbox(pulls, (repository) =>
-        queryClient.fetchQuery({
-          queryKey: keys.repositoryCaptures(repository),
-          queryFn: () => qa.repositoryCaptures(repository),
-          staleTime: 60_000,
-        })
+      qa.inbox(
+        pulls,
+        (repository) =>
+          queryClient.fetchQuery({
+            queryKey: keys.repositoryCaptures(repository),
+            queryFn: () => qa.repositoryCaptures(repository),
+            staleTime: 60_000,
+          }),
+        scope === "pinned"
       ),
     enabled: pulls.length > 0,
     placeholderData: keepPreviousData,
@@ -651,6 +779,23 @@ export function usePixelChange(
     staleTime: Infinity,
     gcTime: 60_000,
   })
+}
+
+/** Names and pictures of GitHub `logins`, by lowercased login. */
+export function usePeople(logins: readonly (string | null)[]) {
+  const host = usePluginHost()
+  const wanted = [
+    ...new Set(logins.flatMap((login) => (login ? [login.toLowerCase()] : []))),
+  ].sort()
+  const people = useQuery({
+    queryKey: keys.people(wanted),
+    queryFn: () => host.people.get(wanted),
+    enabled: wanted.length > 0,
+    staleTime: Infinity,
+  })
+  return new Map<string, Person>(
+    (people.data ?? []).map((person) => [person.login.toLowerCase(), person])
+  )
 }
 
 /** Names the web UI's tab after what is open; `null` leaves it named Design QA. */

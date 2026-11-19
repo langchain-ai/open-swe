@@ -1,8 +1,8 @@
 import { Badge } from "@langchain/macaw-components/Badge"
-import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
 import { Link } from "@langchain/macaw-components/Link"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { cn } from "@langchain/macaw-components/utils/cn"
 import { StatusBadge } from "@langchain/macaw-components/StatusBadge"
 import { usePluginHost } from "@openswe/plugin-sdk/react"
@@ -81,15 +81,6 @@ export function ReportView({
           {run.head_sha.slice(0, 7)}, current {currentHeadSha.slice(0, 7)}.
         </p>
       )}
-      {reviewed &&
-        report.design_system &&
-        report.design_system.findings.length > 0 && (
-          <DesignSystemFindings
-            review={report.design_system}
-            scenarios={scenarios}
-            onShow={show}
-          />
-        )}
       {report && (
         <Card
           aria-label="Recap"
@@ -98,9 +89,16 @@ export function ReportView({
           <div className="flex flex-wrap items-center gap-space-2">
             <h3 className="text-sm font-semibold">Recap</h3>
             {risk && (
-              <StatusBadge variant={risk.tone} size="sm">
-                {risk.label}
-              </StatusBadge>
+              <Tooltip title={report.risk?.reason || undefined}>
+                <span
+                  tabIndex={report.risk?.reason ? 0 : undefined}
+                  className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <StatusBadge variant={risk.tone} size="sm">
+                    {risk.label}
+                  </StatusBadge>
+                </span>
+              </Tooltip>
             )}
             {designSystem && (
               <StatusBadge variant={designSystem.tone} size="sm">
@@ -117,29 +115,7 @@ export function ReportView({
               </Badge>
             )}
           </div>
-          {reviewed && report.risk?.reason && (
-            <p className="text-xs text-secondary">{report.risk.reason}</p>
-          )}
-
-          {reviewed ? (
-            <RecapSummary summary={report.summary} />
-          ) : (
-            <p className="text-sm text-secondary">
-              {report.ai_review_status === "running"
-                ? "Reviewing captured screenshots…"
-                : report.ai_review_status === "failed"
-                  ? "AI review unavailable. Saved screenshots are below."
-                  : "No AI assessment yet."}
-            </p>
-          )}
-          {reviewed &&
-            report.design_system &&
-            report.design_system.findings.length === 0 && (
-              <p className="text-xs text-tertiary">
-                {Assessment.sources(report.design_system)}
-              </p>
-            )}
-          {report.ai_review_status === "complete" && notes.length > 0 && (
+          {reviewed && notes.length > 0 && (
             <div className="flex flex-wrap gap-space-2">
               {notes.slice(0, 3).map(({ note, scenario }, index) => (
                 <Button
@@ -178,6 +154,15 @@ export function ReportView({
           )}
         </Card>
       )}
+      {reviewed &&
+        report.design_system &&
+        report.design_system.findings.length > 0 && (
+          <DesignSystemFindings
+            review={report.design_system}
+            scenarios={scenarios}
+            onShow={show}
+          />
+        )}
       {(run.status !== "complete" || run.error) && (
         <Card role="status" className="flex flex-col gap-space-2 p-space-4">
           <h3 className="text-sm font-medium">
@@ -360,34 +345,10 @@ function ChangedShare({
   )
 }
 
-/** The recap's points as a list, and any other line as a sentence. */
-function RecapSummary({ summary }: { summary: string }) {
-  const blocks = Assessment.summary(summary)
-  if (blocks.length === 0)
-    return <p className="text-sm text-secondary">No visual changes noted.</p>
-  return (
-    <div className="flex flex-col gap-space-2 text-sm text-secondary">
-      {blocks.map((block, index) =>
-        block.kind === "text" ? (
-          <p key={index}>{block.text}</p>
-        ) : (
-          <ul
-            key={index}
-            className="flex list-disc flex-col gap-space-1 pl-space-5"
-          >
-            {block.items.map((item, itemIndex) => (
-              <li key={itemIndex}>{item}</li>
-            ))}
-          </ul>
-        )
-      )}
-    </div>
-  )
-}
-
 /**
- * Where the change departs from the design system: a red banner when it
- * breaks a rule and an amber one when it only looks off, over each finding.
+ * Where the change departs from the design system, worst first, one line each:
+ * what's wrong, where in the code, and the scenario that shows it. The rule
+ * and the reviewer's explanation show on hover or focus.
  */
 function DesignSystemFindings({
   review,
@@ -398,61 +359,64 @@ function DesignSystemFindings({
   scenarios: readonly FrontendScenario[]
   onShow: (scenarioId: string) => void
 }) {
-  const verdict = Assessment.designSystem(review)
   const ordered = [...review.findings].sort(
     (a, b) => Number(b.severity === "error") - Number(a.severity === "error")
   )
-  const title =
-    verdict.errors && verdict.warnings
-      ? `${verdict.label} · ${verdict.warnings} warning${verdict.warnings === 1 ? "" : "s"}`
-      : verdict.label
   return (
-    <section aria-label="Design system" className="flex flex-col gap-space-2">
-      <Banner intent={verdict.tone} title={title}>
-        {Assessment.sources(review)}
-      </Banner>
-      <Card className="flex flex-col divide-y divide-default p-0">
-        {ordered.map((finding, index) => {
-          const scenario = scenarios.find(({ id }) => id === finding.scenario)
-          const where = [finding.rule, finding.location].filter(Boolean)
-          const error = finding.severity === "error"
-          return (
-            <div
-              key={index}
-              className={cn(
-                "flex flex-col gap-space-1 border-l-2 px-space-4 py-space-3",
-                error ? "border-l-error" : "border-l-warning"
-              )}
+    <Card
+      aria-label="Design system findings"
+      className="flex flex-col divide-y divide-default p-0"
+    >
+      {ordered.map((finding, index) => {
+        const scenario = scenarios.find(({ id }) => id === finding.scenario)
+        const error = finding.severity === "error"
+        const explained = Boolean(finding.body || finding.rule)
+        return (
+          <div
+            key={index}
+            className={cn(
+              "flex min-w-0 flex-wrap items-center gap-x-space-3 gap-y-space-1 border-l-2 px-space-4 py-space-2",
+              error ? "border-l-error" : "border-l-warning"
+            )}
+          >
+            <StatusBadge variant={error ? "error" : "warning"}>
+              {error ? "Violation" : "Warning"}
+            </StatusBadge>
+            <Tooltip
+              title={finding.body || undefined}
+              description={finding.rule || undefined}
             >
-              <div className="flex flex-wrap items-center gap-space-2">
-                <StatusBadge variant={error ? "error" : "warning"}>
-                  {error ? "Violation" : "Warning"}
-                </StatusBadge>
-                <span className="text-sm font-medium text-primary">
-                  {finding.title}
-                </span>
-                {scenario && (
-                  <Button
-                    size="sm"
-                    color="secondary"
-                    variant="plain"
-                    onClick={() => onShow(scenario.id)}
-                  >
-                    {`Show ${scenario.title}`}
-                  </Button>
-                )}
-              </div>
-              {finding.body && (
-                <p className="text-xs text-secondary">{finding.body}</p>
-              )}
-              {where.length > 0 && (
-                <p className="text-xs text-tertiary">{where.join(" · ")}</p>
-              )}
-            </div>
-          )
-        })}
-      </Card>
-    </section>
+              <span
+                tabIndex={explained ? 0 : undefined}
+                className="min-w-0 rounded-sm text-sm font-medium text-primary outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                {finding.title}
+              </span>
+            </Tooltip>
+            {finding.location && (
+              <span
+                className="min-w-0 truncate font-mono text-xs text-tertiary"
+                title={finding.location}
+              >
+                {finding.location.split("/").at(-1)}
+              </span>
+            )}
+            {scenario && (
+              <Button
+                size="sm"
+                color="secondary"
+                variant="plain"
+                className="ml-auto"
+                aria-label={`Show ${scenario.title}`}
+                onClick={() => onShow(scenario.id)}
+              >
+                Show
+              </Button>
+            )}
+          </div>
+        )
+      })}
+    </Card>
   )
 }
 

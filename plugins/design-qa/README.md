@@ -8,6 +8,7 @@ The app itself uses only the generic app API.
 ## Inbox
 
 The inbox lists open pull requests, including those without captures, in the repositories you shared with the app: **Requested from you** (GitHub's `review-requested`, which includes your teams) and **My PRs**.
+**Pinned** lists the pull requests you pinned from a card or a pull request's page, closed ones included, until you unpin them, each read from GitHub so it filters and sorts like the other tabs; pins are kept in your private storage, and a pin in a repository you stop sharing is hidden until you share it again.
 Pull requests the review skipped and never captured, such as ones that change no frontend file, are hidden; **Show N skipped** lists them again.
 Each tab lists 10, 15 (the default), 20, 50 or 100 pull requests a page, sorted by recent updates, highest or lowest risk, most design system issues, or newest or oldest; Design QA keeps both choices for you in its private storage.
 Pull requests with no risk score or design system check follow the rest when sorting by those.
@@ -17,8 +18,8 @@ The tab and page are part of the app's path (`/mine`, `/mine/2`, `/requested/3`)
 Share more repositories from the inbox; a repository you stop sharing, or can no longer read, drops out.
 It reads each repository's captures in one query rather than one per pull request, shows a capture a review saves within seconds without searching GitHub again, and searches again every five minutes and when you come back to the tab.
 
-Cards show the first paired screenshot, paired screenshot coverage, captured interaction states, the latest capture's date, and a warning when the capture is of an earlier commit than the pull request's head.
-**Open PR** takes `owner/repo#number`, a GitHub pull request URL, or a bare number when you share one repository.
+Cards show the first paired screenshot, the title, who opened the pull request and the latest capture's date, with badges only for what needs attention: a later capture attempt that was blocked or failed (its reason on hover), a capture of an earlier commit than the pull request's head, a capture or review still running, the risk score and the design system result.
+**Open PR** takes `owner/repo#number`, a GitHub pull request URL, or a bare number when you share one repository, and opens it when you press **Open PR** or Enter; pasting only fills the field.
 
 ## Comparing
 
@@ -27,10 +28,10 @@ A pane scrolls only when its screenshot is larger than it; otherwise the wheel s
 A screenshot read again, as when a review writes a capture, keeps showing until its replacement decodes.
 Original screenshot colors stay independent of the app's theme; no pixel tint is painted over them.
 Each card shows the share of pixels that differ between its two screenshots, which the app measures in the page once both load (`PixelChange`); it is the extent of a change, not its severity.
-The recap shows the AI assessment's summary as a few short points, its risk score from 1 to 5 with one line on why (green for 1–2, amber for 3, red for 4–5, as Robin's code review scores risk), and up to three notes; selecting a note highlights its area on both screenshots, outlined in red for an error and amber for a warning.
-Above it, the design system check shows as a red banner listing each violation, an amber one for warnings only, or a green one naming what it checked against.
-Each finding cites the rule, the file and line, and links to the scenario that shows it, and each scenario card counts its own findings.
-Inbox cards show the risk score and the design system result beside the capture status.
+A pull request's page names who opened it, and its title opens it on GitHub, as does the **GitHub** link beside **Pin**.
+The recap shows the risk score from 1 to 5, with its one-line reason on hover (green for 1–2, amber for 3, red for 4–5, as Robin's code review scores risk), the design system result as a badge, and up to three notes; selecting a note highlights its area on both screenshots, outlined in red for an error and amber for a warning.
+Below it, each design system finding takes one line: its severity, title and file, and a link to the scenario that shows it, with the reviewer's explanation and the rule it breaks on hover or focus; each scenario card counts its own findings.
+The latest capture attempt's reason shows above the captures only when it didn't capture, such as a blocked or failed attempt.
 Captures saved before reviews scored risk or checked the design system show neither.
 Replay steps, missing sides, blockers and clipping warnings stay visible on their card.
 An interaction state the review recorded, such as a popover opening, plays its base and PR recordings below its screenshots.
@@ -79,7 +80,7 @@ It does not renew that watch indefinitely and starts at most five recovery revie
 Drafts follow the author's existing draft-review preference and workspace fallback.
 
 Publishing and merging are separate steps.
-Build version 0.3.0 from this directory, publish `bundle/index.html` as a new release of the existing app, update the installed app in Settings → Apps, and approve that same release under Defaults → Apps in reviews (or the owning environment's override).
+Build version 0.4.0 from this directory, publish `bundle/index.html` as a new release of the existing app, update the installed app in Settings → Apps, and approve that same release under Defaults → Apps in reviews (or the owning environment's override).
 Reviews follow `review.md` and `paths` from the approved release only, so the design system check, recordings and frontend-only triage start once that release is approved, and triage once the backend that reads `paths` is deployed; an earlier backend ignores them.
 
 Before capture, verify Preview checks names the actual deployment check, review guidelines identify a comparison base, and Review browser lists only the allowed review/base domains and an existing tool name from Robin's bot kit.

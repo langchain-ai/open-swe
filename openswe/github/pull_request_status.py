@@ -790,7 +790,8 @@ class HeadChecks:
 
     ``runs`` take REST's shape (``id``, ``name``, lower-case ``conclusion``, ``app``,
     ``check_suite``); ``workflows`` names the Actions workflow behind each check suite, by
-    suite id. ``runs`` is ``None`` when a suite holds more runs than one read returns.
+    suite id. ``runs`` is ``None`` when a suite holds more runs than one read returns, or
+    GitHub withheld a suite's workflow.
     """
 
     state: PullRequestState
@@ -1013,15 +1014,17 @@ class PullRequestClient:
 
     async def head_checks(self) -> HeadChecks:
         """The pull request's state and the check runs on its head, read over GraphQL so
-        they spend none of the REST quota. Raises like ``RepoClient``; ``ValueError`` when
-        the head moves between pages."""
+        they spend none of the REST quota. A suite's app GitHub withholds, as for another
+        organization behind an IP allow list, reads as unknown; a withheld workflow gives
+        no runs, since a failed redeploy can't be told from the success before it without
+        one. Raises like ``RepoClient``; ``ValueError`` when the head moves between pages."""
         runs: list[dict[str, object]] = []
         workflows: dict[int, int] = {}
         cursor: str | None = None
         seen: set[str] = set()
         sha: str | None = None
         while True:
-            data = await self.repo.graphql(
+            data, workflows_withheld = await self.repo.ci_graphql(
                 _HEAD_CHECKS_QUERY, {"number": self.number, "cursor": cursor}
             )
             pull = _HeadPull.model_validate(_graphql_pull(data))
@@ -1029,6 +1032,8 @@ class PullRequestClient:
             if commit is None or commit.oid != pull.head_ref_oid or sha not in {None, commit.oid}:
                 raise ValueError("The pull request's head moved while its checks were read")
             sha = commit.oid
+            if workflows_withheld:
+                return HeadChecks(_PULL_REQUEST_STATES[pull.state], sha, None, {})
             suites = commit.check_suites
             for suite in suites.nodes:
                 if suite.check_runs.page_info.has_next_page:
@@ -1093,7 +1098,8 @@ class PullRequestClient:
         return response.status_code in {401, 403} and not GitHubError(response).rate_limited
 
     async def _ci_over_graphql(self) -> PullRequestCI:
-        pull = _graphql_pull(await self.repo.ci_graphql(_PULL_CI_QUERY, {"number": self.number}))
+        data, _ = await self.repo.ci_graphql(_PULL_CI_QUERY, {"number": self.number})
+        pull = _graphql_pull(data)
         if pull is None:
             raise ValueError("GitHub answered without the pull request")
         parsed = _CIPull.model_validate(pull)

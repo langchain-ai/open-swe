@@ -45,20 +45,3 @@ describe("Assessment.designSystem", () => {
     )
   })
 })
-
-describe("Assessment.summary", () => {
-  it("groups each run of bullet lines into one list", () => {
-    expect(
-      Assessment.summary(
-        "Tabs restyled.\n- Selected tab uses the accent\n* Hover lost its focus ring\n\nLooks fine otherwise."
-      )
-    ).toEqual([
-      { kind: "text", text: "Tabs restyled." },
-      {
-        kind: "points",
-        items: ["Selected tab uses the accent", "Hover lost its focus ring"],
-      },
-      { kind: "text", text: "Looks fine otherwise." },
-    ])
-  })
-})

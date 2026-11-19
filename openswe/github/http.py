@@ -984,12 +984,12 @@ class RepoClient:
 
     async def ci_graphql(
         self, query: str, variables: Mapping[str, object] | None = None
-    ) -> Mapping[str, object]:
+    ) -> tuple[Mapping[str, object], bool]:
         """``graphql`` for a query of check suites, keeping the answer when GitHub withheld
-        only fields inside them: a withheld ``workflowRun`` reads as unknown, and a suite
-        missing more is read over REST by ``CommitCI.from_graphql``'s callers."""
+        only fields inside them, and whether a withheld one was a suite's ``workflowRun``.
+        A suite missing more is read over REST by ``CommitCI.from_graphql``'s callers."""
         try:
-            return await self.graphql(query, variables)
+            return await self.graphql(query, variables), False
         except GraphQLError as exc:
             if exc.data is None or not exc.only_under_check_suites:
                 raise
@@ -1003,7 +1003,7 @@ class RepoClient:
                     "graphql_error_types": sorted(exc.types),
                 },
             )
-            return exc.data
+            return exc.data, exc.any_at_workflow_run
 
     async def open_pull_heads(self, numbers: Collection[int]) -> dict[int, str]:
         """The head commit of each of ``numbers`` that is open, read in one GraphQL query.
@@ -1595,7 +1595,7 @@ class RepoClient:
 
     async def commit_ci(self, sha: str) -> CommitCI:
         """``sha``'s latest check runs and commit statuses, in one GraphQL query when they fit."""
-        data = await self.ci_graphql(_COMMIT_CI_QUERY, {"oid": self.inside(sha)})
+        data, _ = await self.ci_graphql(_COMMIT_CI_QUERY, {"oid": self.inside(sha)})
         repository = data.get("repository")
         commit = repository.get("object") if isinstance(repository, Mapping) else None
         if not isinstance(commit, Mapping):
@@ -2028,6 +2028,12 @@ class GraphQLError(ValueError):
         """Where each error is in the answer; ``None`` for one about the whole query."""
         errors = self.errors if isinstance(self.errors, list) else [self.errors]
         return [error.get("path") if isinstance(error, Mapping) else None for error in errors]
+
+    @property
+    def any_at_workflow_run(self) -> bool:
+        """Whether any error is at or under a check suite's ``workflowRun``."""
+        errors = self.errors if isinstance(self.errors, list) else [self.errors]
+        return any(self.at_workflow_run(error) for error in errors)
 
     @property
     def only_under_check_suites(self) -> bool:

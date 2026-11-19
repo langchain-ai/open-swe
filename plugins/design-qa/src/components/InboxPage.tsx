@@ -7,14 +7,15 @@ import { Select } from "@langchain/macaw-components/Select"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { StatusBadge } from "@langchain/macaw-components/StatusBadge"
 import { Switch } from "@langchain/macaw-components/Switch"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { cn } from "@langchain/macaw-components/utils/cn"
-import { useHostContext } from "@openswe/plugin-sdk/react"
-import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
+import type { Person, ReviewOutcome } from "@openswe/plugin-sdk"
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/ssr/CaretLeft"
 import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
+import { PushPinIcon } from "@phosphor-icons/react/dist/ssr/PushPin"
 import { useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { Fragment, useState } from "react"
 
 import { Assessment } from "../lib/assessment"
 import type { FrontendReviewRun } from "../lib/capture"
@@ -29,6 +30,7 @@ import {
   useInboxPage,
   useInboxPreferences,
   useInboxSearch,
+  usePeople,
   useRepositoryCaptures,
   useMedia,
   useRepositories,
@@ -40,9 +42,11 @@ import {
 import { InboxOrder, PAGE_SIZES, SORTS } from "../lib/inboxOrder"
 import type { InboxRoute, InboxScope } from "../lib/route"
 import { RouteLink, useRouter } from "../lib/router"
+import { Author } from "./Author"
 import { OpenPullRequestInput } from "./OpenPullRequestInput"
 import { ShareRepositories } from "./ShareRepositories"
 import { CaptureAction } from "./CaptureAction"
+import { PinButton } from "./PinButton"
 import { UpdateBanner } from "./UpdateBanner"
 
 /** Open pull requests and their capture status, as cards. */
@@ -99,6 +103,12 @@ export function InboxPage() {
                   display: "My PRs",
                   "aria-label": `My PRs${current.scope === "mine" ? ", selected" : ""}`,
                 },
+                {
+                  value: "pinned",
+                  display: "Pinned",
+                  icon: PushPinIcon,
+                  "aria-label": `Pinned${current.scope === "pinned" ? ", selected" : ""}`,
+                },
               ]}
             />
             <Button
@@ -111,16 +121,44 @@ export function InboxPage() {
               Share repositories
             </Button>
           </div>
-          <PullRequests key={current.scope} route={current} />
+          <PullRequests key={current.scope} route={current} shared={shared} />
         </>
       )}
     </main>
   )
 }
 
-function PullRequests({ route }: { route: InboxRoute }) {
+const DESCRIPTIONS: Record<InboxScope, string> = {
+  "review-requested":
+    "Open PRs with a GitHub review request for you or a team you belong to, in the repositories you shared. Comment mentions are not included.",
+  mine: "Your open PRs and their capture status, in the repositories you shared.",
+  pinned:
+    "PRs you pinned stay here until you unpin them. Only you see your pins.",
+}
+
+const EMPTY: Record<InboxScope, { title: string; body: string }> = {
+  "review-requested": {
+    title: "No open PRs requesting your review",
+    body: "PRs appear here when you or a team you belong to are requested as reviewers. Open any PR above to view its QA page.",
+  },
+  mine: {
+    title: "No open PRs in your shared repositories",
+    body: "Your open PRs appear here, including those without captures. Open any PR above to view its QA page.",
+  },
+  pinned: {
+    title: "No pinned PRs",
+    body: "Pin a PR from its card or its QA page to keep it here.",
+  },
+}
+
+function PullRequests({
+  route,
+  shared,
+}: {
+  route: InboxRoute
+  shared: readonly string[]
+}) {
   const { scope } = route
-  const { user } = useHostContext()
   const { navigate } = useRouter()
   const queryClient = useQueryClient()
   const search = useInboxSearch(scope)
@@ -128,13 +166,21 @@ function PullRequests({ route }: { route: InboxRoute }) {
   const [showSkipped, setShowSkipped] = useState(false)
   const { preferences, change } = useInboxPreferences()
   const { pageSize, sort } = preferences
-  const pulls = search.data?.pulls ?? []
+  const readable = new Set(shared.map((name) => name.toLowerCase()))
+  // A pin stays in storage while its repository isn't shared, out of the list.
+  const pulls = (search.data?.pulls ?? []).filter(
+    ({ repository }) => scope !== "pinned" || readable.has(repository)
+  )
   const captures = useRepositoryCaptures([
     ...new Set(pulls.map(({ repository }) => repository)),
   ])
-  const skipped = pulls.filter(({ repository, number }) =>
-    DesignQa.skipped(captures.byRepository.get(repository), number)
-  )
+  // A pin is kept on purpose, even of a PR Design QA skipped.
+  const skipped =
+    scope === "pinned"
+      ? []
+      : pulls.filter(({ repository, number }) =>
+          DesignQa.skipped(captures.byRepository.get(repository), number)
+        )
   const filter = text.trim().toLowerCase()
   const matching = pulls.filter(
     (pull) =>
@@ -154,10 +200,20 @@ function PullRequests({ route }: { route: InboxRoute }) {
   const first = index * pageSize
   const shown = ordered.slice(first, first + pageSize)
   const page = useInboxPage(scope, shown)
+  // A page still loading shows the last one's cards, but not one just unpinned.
+  const listed = new Set(
+    ordered.map(({ repository, number }) => `${repository}#${number}`)
+  )
+  const items =
+    shown.length > 0
+      ? (page.data?.items ?? []).filter(({ repository, pull }) =>
+          listed.has(`${repository}#${pull.number}`)
+        )
+      : []
+  const people = usePeople(items.map(({ pull }) => pull.author))
   if (isForbidden(search.error) || isForbidden(page.error))
     return <ShareRepositories unshared />
 
-  const items = shown.length > 0 ? (page.data?.items ?? []) : []
   const loading =
     search.isPending || captures.pending || (shown.length > 0 && page.isPending)
   const fetching = search.isFetching || page.isFetching
@@ -169,14 +225,12 @@ function PullRequests({ route }: { route: InboxRoute }) {
       aria-label={
         scope === "mine"
           ? "My PRs for Design QA"
-          : "Requested PRs for Design QA"
+          : scope === "pinned"
+            ? "Pinned PRs for Design QA"
+            : "Requested PRs for Design QA"
       }
     >
-      <p className="mb-space-3 text-xs text-secondary">
-        {scope === "mine"
-          ? "Your open PRs and their capture status, in the repositories you shared."
-          : "Open PRs with a GitHub review request for you or a team you belong to, in the repositories you shared. Comment mentions are not included."}
-      </p>
+      <p className="mb-space-3 text-xs text-secondary">{DESCRIPTIONS[scope]}</p>
       <div className="mb-space-4 flex flex-wrap items-center gap-space-3">
         <Input
           size="sm"
@@ -270,18 +324,14 @@ function PullRequests({ route }: { route: InboxRoute }) {
               ? "No PRs match your filter"
               : skipped.length > 0 && !showSkipped
                 ? "Nothing to check in Design QA"
-                : scope === "mine"
-                  ? "No open PRs in your shared repositories"
-                  : "No open PRs requesting your review"}
+                : EMPTY[scope].title}
           </h2>
           <p className="max-w-sm text-sm text-secondary">
             {filter
               ? "Try a different title, repository, or PR number."
               : skipped.length > 0 && !showSkipped
                 ? `Design QA skipped ${skipped.length === 1 ? "the 1 open PR" : `all ${skipped.length} open PRs`} here, such as changes with no frontend files.`
-                : scope === "mine"
-                  ? "Your open PRs appear here, including those without captures. Open any PR above to view its QA page."
-                  : "PRs appear here when you or a team you belong to are requested as reviewers. Open any PR above to view its QA page."}
+                : EMPTY[scope].body}
           </p>
         </Card>
       ) : (
@@ -296,7 +346,11 @@ function PullRequests({ route }: { route: InboxRoute }) {
             <PullRequestCard
               key={`${item.repository}#${item.pull.number}`}
               item={item}
-              login={user.login}
+              author={
+                item.pull.author
+                  ? people.get(item.pull.author.toLowerCase())
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -362,35 +416,78 @@ function PullRequests({ route }: { route: InboxRoute }) {
   )
 }
 
-function reviewStatus(run: FrontendReviewRun, stale: boolean) {
-  if (run.status === "pending")
-    return { label: "Queued", color: "secondary" } as const
-  if (run.status === "running")
-    return { label: "Capturing", color: "primary" } as const
-  if (run.status === "blocked")
-    return { label: "Capture blocked", color: "warning" } as const
-  if (run.status === "failed")
-    return { label: "Capture failed", color: "error" } as const
-  if (stale) return { label: "Earlier commit", color: "warning" } as const
-  if (run.report?.ai_review_status === "running")
-    return { label: "AI reviewing", color: "primary" } as const
-  if (run.report?.ai_review_status === "failed")
-    return { label: "AI review failed", color: "warning" } as const
-  if (run.report?.ai_review_status === "complete")
-    return { label: "Review ready", color: "success" } as const
-  return { label: "Screenshots ready", color: "secondary" } as const
+type Status = {
+  label: string
+  color: "primary" | "secondary" | "warning" | "error"
+  /** Why, shown on hover: a capture attempt's reason. */
+  reason?: string
 }
 
-function PullRequestCard({ item, login }: { item: InboxItem; login: string }) {
+/**
+ * What a card says about its capture beyond the screenshot: a later attempt
+ * that failed, and anything keeping its capture from being current and
+ * reviewed. A ready capture says nothing.
+ */
+function cardStatuses(
+  run: FrontendReviewRun | null,
+  outcome: ReviewOutcome | null,
+  stale: boolean
+): Status[] {
+  const attempt =
+    (outcome?.status === "blocked" || outcome?.status === "failed") &&
+    (!run || Date.parse(outcome.created_at) > Date.parse(run.created_at))
+      ? outcome
+      : null
+  const statuses: Status[] = attempt
+    ? [
+        {
+          label:
+            attempt.status === "blocked" ? "Capture blocked" : "Capture failed",
+          color: attempt.status === "blocked" ? "warning" : "error",
+          reason: attempt.reason,
+        },
+      ]
+    : []
+  if (!run)
+    return statuses.length
+      ? statuses
+      : [{ label: "Not captured", color: "secondary" }]
+  if (run.status === "pending")
+    return [...statuses, { label: "Queued", color: "secondary" }]
+  if (run.status === "running")
+    return [...statuses, { label: "Capturing", color: "primary" }]
+  if (run.status === "blocked" || run.status === "failed")
+    return statuses.length
+      ? statuses
+      : [
+          {
+            label:
+              run.status === "blocked" ? "Capture blocked" : "Capture failed",
+            color: run.status === "blocked" ? "warning" : "error",
+            reason: run.error ?? undefined,
+          },
+        ]
+  if (stale) return [...statuses, { label: "Earlier commit", color: "warning" }]
+  if (run.report?.ai_review_status === "running")
+    return [...statuses, { label: "AI reviewing", color: "primary" }]
+  if (run.report?.ai_review_status === "failed")
+    return [...statuses, { label: "AI review failed", color: "warning" }]
+  return statuses
+}
+
+function PullRequestCard({
+  item,
+  author,
+}: {
+  item: InboxItem
+  author: Person | undefined
+}) {
   const { pull: pr, run } = item
   const repository = splitRepository(item.repository)
   const stale = Boolean(
     run && "headSha" in pr && pr.headSha && run.head_sha !== pr.headSha
   )
-  const status = run
-    ? reviewStatus(run, stale)
-    : { label: "Not captured", color: "secondary" as const }
-  const overview = run ? runOverview(run) : null
+  const statuses = cardStatuses(run, item.outcome, stale)
   const report = !stale && run?.status === "complete" ? run.report : null
   const reviewed = report?.ai_review_status === "complete"
   const risk = reviewed && report.risk ? Assessment.risk(report.risk) : null
@@ -398,36 +495,20 @@ function PullRequestCard({ item, login }: { item: InboxItem; login: string }) {
     reviewed && report.design_system
       ? Assessment.designSystem(report.design_system)
       : null
-  const requested = [
-    ...("requestedReviewers" in pr &&
-    pr.requestedReviewers.some(
-      (reviewer) => reviewer.toLowerCase() === login.toLowerCase()
-    )
-      ? ["you"]
-      : []),
-    ...("requestedTeams" in pr
-      ? pr.requestedTeams.map((team) => `@${team}`)
-      : []),
-  ]
-  const summary =
-    item.outcome?.reason ||
-    run?.error ||
-    run?.report?.risk?.reason ||
-    Assessment.summary(run?.report?.summary ?? "")
-      .flatMap((block) => (block.kind === "text" ? [block.text] : block.items))
-      .join(" · ") ||
-    "Open this PR to inspect its capture details."
+  const closed =
+    "state" in pr && pr.state !== "open"
+      ? pr.merged
+        ? "Merged"
+        : "Closed"
+      : null
   if (!repository) return null
+  const ref = { ...repository, number: pr.number }
 
   return (
     <Card className="flex h-full min-w-0 flex-col overflow-hidden p-0">
       <RouteLink
-        to={{
-          page: "pull",
-          pr: { ...repository, number: pr.number },
-          run: run?.id ?? null,
-        }}
-        className="flex h-full min-w-0 flex-col rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        to={{ page: "pull", pr: ref, run: run?.id ?? null }}
+        className="flex min-w-0 flex-1 flex-col rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         <div className="flex aspect-[16/6] items-center justify-center overflow-hidden border-b border-default bg-surface-level-3">
           <Thumbnail
@@ -436,7 +517,7 @@ function PullRequestCard({ item, login }: { item: InboxItem; login: string }) {
               pull: pr.number,
               run: run?.id ?? "",
             }}
-            name={overview?.cover?.after_url ?? null}
+            name={run ? (runOverview(run).cover?.after_url ?? null) : null}
           />
         </div>
         <div className="flex flex-1 flex-col gap-space-2 p-space-4">
@@ -447,69 +528,67 @@ function PullRequestCard({ item, login }: { item: InboxItem; login: string }) {
             >
               {item.repository} #{pr.number}
             </span>
-            {pr.draft && (
+            {(closed ?? pr.draft) && (
               <Badge color="secondary" size="xs">
-                Draft
+                {closed ?? "Draft"}
               </Badge>
             )}
           </div>
           <h2 className="line-clamp-2 text-sm font-semibold text-primary">
             {pr.title}
           </h2>
-          <div className="flex flex-wrap items-center gap-space-2">
-            <Badge color={status.color} size="sm">
-              {status.label}
-            </Badge>
-            {risk && (
-              <StatusBadge variant={risk.tone} size="sm">
-                {risk.label}
-              </StatusBadge>
-            )}
-            {designSystem && (
-              <StatusBadge variant={designSystem.tone} size="sm">
-                {designSystem.label}
-              </StatusBadge>
-            )}
-          </div>
-          {requested.length > 0 && (
-            <p
-              className="truncate text-xs text-secondary"
-              title={`Requested: ${requested.join(", ")}`}
-            >
-              Requested: {requested.join(", ")}
-            </p>
+          {statuses.length > 0 || risk || designSystem ? (
+            <div className="flex flex-wrap items-center gap-space-2">
+              {statuses.map((status) => (
+                <Fragment key={status.label}>
+                  <Tooltip title={status.reason}>
+                    <Badge color={status.color} size="sm">
+                      {status.label}
+                    </Badge>
+                  </Tooltip>
+                  {status.reason && (
+                    <span className="sr-only">{status.reason}</span>
+                  )}
+                </Fragment>
+              ))}
+              {risk && (
+                <StatusBadge variant={risk.tone} size="sm">
+                  {risk.label}
+                </StatusBadge>
+              )}
+              {designSystem && (
+                <StatusBadge variant={designSystem.tone} size="sm">
+                  {designSystem.label}
+                </StatusBadge>
+              )}
+            </div>
+          ) : null}
+          {(pr.author || run) && (
+            <div className="mt-auto flex min-w-0 items-center justify-between gap-space-2 pt-space-1 text-xs text-secondary">
+              {pr.author ? (
+                <Author login={pr.author} person={author} />
+              ) : (
+                <span />
+              )}
+              {run && (
+                <span className="shrink-0 text-tertiary">
+                  Run {new Date(run.created_at).toLocaleDateString()}
+                </span>
+              )}
+            </div>
           )}
-          <p className="text-xs text-secondary">
-            {overview?.total
-              ? `${overview.paired}/${overview?.total} states captured on both sides · ${overview.interactions} interaction${overview.interactions === 1 ? "" : "s"}`
-              : "No states captured"}
-          </p>
-          <p className="line-clamp-3 text-xs leading-relaxed text-secondary">
-            {summary}
-          </p>
-          {stale && (
-            <p className="text-xs text-warning-secondary">
-              Saved evidence is for an earlier commit.
-            </p>
-          )}
-          <p className="text-xs text-tertiary">
-            {run
-              ? `Run ${new Date(run.created_at).toLocaleDateString()}`
-              : "No saved screenshots yet"}
-          </p>
-          <span className="mt-auto flex items-center justify-between pt-space-2 text-xs font-medium text-primary">
-            Open Design QA
-            <ArrowUpRightIcon size={16} aria-hidden="true" />
-          </span>
         </div>
       </RouteLink>
-      <div className="mt-auto p-space-4 pt-0">
+      <div className="flex items-center justify-between gap-space-2 p-space-4 pt-0">
         <CaptureAction
-          pr={{ ...repository, number: pr.number }}
+          pr={ref}
           outcome={item.outcome}
           currentHeadSha={"headSha" in pr ? pr.headSha : undefined}
           hasCapture={Boolean(run)}
+          disabled={closed !== null}
+          showOutcome={false}
         />
+        <PinButton pr={ref} title={pr.title} compact />
       </div>
     </Card>
   )
@@ -532,10 +611,7 @@ function Thumbnail({ media, name }: { media: RunMedia; name: string | null }) {
           className="h-full w-full object-cover object-top"
         />
       ) : (
-        <div className="flex flex-col items-center gap-space-2 text-secondary">
-          <EyeIcon size={28} aria-hidden="true" />
-          <span className="text-xs">Capture details inside</span>
-        </div>
+        <EyeIcon size={28} className="text-icon-secondary" aria-hidden="true" />
       )}
     </div>
   )

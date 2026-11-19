@@ -8,11 +8,7 @@ export interface Verdict {
   label: string
 }
 
-export type SummaryBlock =
-  | { kind: "points"; items: string[] }
-  | { kind: "text"; text: string }
-
-/** How a capture's AI assessment reads: its risk, its design system check and its recap. */
+/** How a capture's AI assessment reads: its risk and its design system check. */
 export class Assessment {
   /** A risk score as it reads: 1–2 low, 3 medium, 4–5 high. */
   static risk(risk: RiskAssessment): Verdict {
@@ -52,27 +48,5 @@ export class Assessment {
       errors,
       warnings,
     }
-  }
-
-  /** What the design system check read, or that the repository had nothing to read. */
-  static sources(review: DesignSystemReview): string {
-    return review.sources.length
-      ? `Checked against ${review.sources.join(", ")}.`
-      : "The repository has no design system documents, so only consistency with the surrounding UI was checked."
-  }
-
-  /** A recap's lines, with each run of `- `, `* ` or `• ` lines as one list. */
-  static summary(summary: string): SummaryBlock[] {
-    const blocks: SummaryBlock[] = []
-    for (const raw of summary.split("\n")) {
-      const line = raw.trim()
-      if (!line) continue
-      const point = /^[-*•]\s+(.*)$/.exec(line)?.[1]
-      const last = blocks.at(-1)
-      if (point === undefined) blocks.push({ kind: "text", text: line })
-      else if (last?.kind === "points") last.items.push(point)
-      else blocks.push({ kind: "points", items: [point] })
-    }
-    return blocks
   }
 }

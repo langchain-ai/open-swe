@@ -8,6 +8,7 @@ Always record one with `record_app_review_outcome`:
   The diff changes nothing visible, or the changed frontend has no preview, or the review guidelines name no base for it.
 - `blocked`: something fixable.
   The preview is deploying, failed or doesn't serve the head commit, a sign-in failed, or the guidelines name no base at all.
+  When no preview is up yet, as on a pull request that just opened, say only that the preview isn't deployed yet.
 - `failed`: a capture or save error.
 - `complete`: only after saving at least one matched pair.
 

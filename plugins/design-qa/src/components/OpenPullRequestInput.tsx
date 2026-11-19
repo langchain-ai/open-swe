@@ -5,7 +5,7 @@ import { useId, useState } from "react"
 import { parsePullRequestInput } from "../lib/pullRequest"
 import { useRouter } from "../lib/router"
 
-/** Opens the Design QA page of a pull request someone types or pastes. */
+/** Opens the Design QA page of a pull request someone types or pastes, once they submit it. */
 export function OpenPullRequestInput({
   shared,
 }: {
@@ -53,13 +53,6 @@ export function OpenPullRequestInput({
           onChange={(next) => {
             setValue(next)
             setInvalid(false)
-          }}
-          onPaste={(event) => {
-            const text = event.clipboardData.getData("text")
-            if (parsePullRequestInput(text, shared)) {
-              event.preventDefault()
-              open(text)
-            }
           }}
         />
         <Button size="md" type="submit">

@@ -865,10 +865,10 @@ async def test_a_pull_requests_head_checks_read_every_suite_or_none(overflow: bo
         }
 
     repo = Mock(
-        graphql=AsyncMock(
+        ci_graphql=AsyncMock(
             side_effect=[
-                page("next", suite(10, 1, (1, "SUCCESS"))),
-                page(None, suite(20, None, (2, "SKIPPED"), (3, None))),
+                (page("next", suite(10, 1, (1, "SUCCESS"))), False),
+                (page(None, suite(20, None, (2, "SKIPPED"), (3, None))), False),
             ]
         )
     )

@@ -1,6 +1,6 @@
 import type { PullRequestRef } from "./pullRequest"
 
-export type InboxScope = "review-requested" | "mine"
+export type InboxScope = "review-requested" | "mine" | "pinned"
 
 /** An inbox tab and which of its pages, counting from 0. */
 export interface InboxRoute {
@@ -25,6 +25,7 @@ const RUN = /^[\w-]{1,100}$/
 const SCOPES: Record<InboxScope, string> = {
   "review-requested": "requested",
   mine: "mine",
+  pinned: "pinned",
 }
 const PAGE = /^[1-9]\d{0,4}$/
 

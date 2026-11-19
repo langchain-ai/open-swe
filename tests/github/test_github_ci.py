@@ -285,6 +285,7 @@ async def test_ci_reads_keep_checks_when_github_withholds_suite_fields(
             ),
         },
     }
+    answers["query PullRequestHeadChecks("] = answers["query PullRequestCI("]
     actions = {"id": 15368, "slug": "github-actions"}
     rest = {
         "/check-runs": {
@@ -313,6 +314,7 @@ async def test_ci_reads_keep_checks_when_github_withholds_suite_fields(
 
     commit_ci = await repo.commit_ci(sha)
     pull_ci = await repo.pull_request(1).ci()
+    head = await repo.pull_request(1).head_checks()
 
     pinned = github_ci.RequiredCheck("tests", 15368)
     for ci in (commit_ci, pull_ci.checks):
@@ -322,8 +324,17 @@ async def test_ci_reads_keep_checks_when_github_withholds_suite_fields(
         ]
         assert [status["context"] for status in ci.statuses] == ["deploy"]
         assert pinned.reported_by(ci.runs, ci.statuses)
+    if field == "workflowRun":
+        # Without workflow identities a failed redeploy could hide behind an earlier success.
+        assert head.runs is None
+    else:
+        assert head.runs is not None
+        assert [(run["id"], run["conclusion"]) for run in head.runs] == [
+            (10, "failure"),
+            (20, "success"),
+        ]
     graphql_reads = urls.count(github_http.GITHUB_GRAPHQL)
-    assert graphql_reads == 2 and (len(urls) > graphql_reads) == (field == "app")
+    assert graphql_reads == 3 and (len(urls) > graphql_reads) == (field == "app")
 
 
 async def test_commit_ci_raises_graphql_errors_outside_workflow_runs(
