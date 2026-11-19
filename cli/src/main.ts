@@ -31,9 +31,11 @@ Usage:
   robin --help | --version
 
 Run options:
-  --thread <id>    Continue an existing thread
-  --model <id>     Agent model id (requires --effort)
-  --effort <name>  Reasoning effort for --model
+  --thread <id>      Continue an existing thread
+  --model <id>       Agent model id (requires --effort)
+  --effort <name>    Reasoning effort for --model
+  --sandbox <id>     Attach an existing LangSmith sandbox (new thread only)
+  --work-dir <path>  Working directory inside --sandbox
 
 A new thread works on the GitHub repository this directory's origin names.
 Piped input is attached below the prompt, or is the prompt when none is given.
@@ -142,6 +144,8 @@ interface RunOptions {
   thread: string | undefined
   model: string | undefined
   effort: string | undefined
+  sandbox: string | undefined
+  workDir: string | undefined
   prompt: string
 }
 
@@ -155,6 +159,17 @@ async function runCommand(options: RunOptions): Promise<number> {
   const prompt = composePrompt(options.prompt, await readPipedStdin())
   if (!prompt) {
     fail("a prompt is required, as arguments or on stdin")
+    return 2
+  }
+  if (
+    options.thread !== undefined &&
+    (options.sandbox !== undefined || options.workDir !== undefined)
+  ) {
+    fail("--sandbox and --work-dir can only be used when starting a new thread")
+    return 2
+  }
+  if (options.workDir !== undefined && options.sandbox === undefined) {
+    fail("--work-dir requires --sandbox")
     return 2
   }
   const config = await readConfig()
@@ -174,11 +189,18 @@ async function runCommand(options: RunOptions): Promise<number> {
   // The repository is stamped on the thread when it is created; the server
   // rejects it on any later run.
   if (creating) {
-    const repo = await originRepo(process.cwd())
-    if (repo !== null) configurable["repo"] = repoFullName(repo)
-    else {
+    if (options.sandbox !== undefined) {
+      configurable["sandbox_id"] = options.sandbox
       configurable["repo_explicitly_none"] = true
-      note("No GitHub origin here; the thread starts without a repository.")
+      if (options.workDir !== undefined)
+        configurable["work_dir"] = options.workDir
+    } else {
+      const repo = await originRepo(process.cwd())
+      if (repo !== null) configurable["repo"] = repoFullName(repo)
+      else {
+        configurable["repo_explicitly_none"] = true
+        note("No GitHub origin here; the thread starts without a repository.")
+      }
     }
   }
   if (options.model !== undefined) {
@@ -242,6 +264,8 @@ const CLI_OPTIONS = {
   thread: { type: "string" },
   model: { type: "string" },
   effort: { type: "string" },
+  sandbox: { type: "string" },
+  "work-dir": { type: "string" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
 } as const
@@ -294,6 +318,8 @@ export async function main(argv: readonly string[]): Promise<number> {
         thread: values.thread,
         model: values.model,
         effort: values.effort,
+        sandbox: values.sandbox,
+        workDir: values["work-dir"],
         prompt: positionals.slice(1).join(" "),
       })
     default:

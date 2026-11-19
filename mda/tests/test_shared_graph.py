@@ -783,6 +783,29 @@ async def test_deleted_bound_workspace_recovers_under_its_name_and_reports_loss(
     client.delete_sandbox.assert_not_called()
 
 
+async def test_missing_external_sandbox_is_not_replaced(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MDA_DEPLOYMENT_NAME", "open-swe-mda-prod")
+    spec = _catalog("lookup", "grant", snapshot="snapshot").sandbox
+    assert spec is not None
+    external_spec = spec.model_copy(update={"sandbox_id": "tb-task-1", "external": True})
+    sandbox = definition(external_spec.create, "tb-task-1")
+    monkeypatch.setattr(mda_runtime, "_managed_sandboxes", {})
+    client = MagicMock()
+    client.get_sandbox.side_effect = ResourceNotFoundError("deleted")
+    monkeypatch.setattr(mda_runtime, "_sandbox_client_for", lambda _sandbox: client)
+    monkeypatch.setattr(
+        "rt.managed_sandbox._planned", lambda _runtime: (MagicMock(), external_spec)
+    )
+    backend = mda_runtime._managed_sandbox_backend(sandbox, _thread("thread-ext"))
+
+    opened = await opened_sandbox(MagicMock(backend=backend))
+
+    assert opened.sandbox_id is None
+    assert opened.error is not None and "BoundSandboxMissingError" in opened.error
+    assert opened.workspace_lost is False
+    client.create_sandbox.assert_not_called()
+
+
 @pytest.mark.parametrize("bound", [False, True])
 async def test_explicit_recreation_can_replace_a_failed_uncached_sandbox(
     monkeypatch: pytest.MonkeyPatch, bound: bool

@@ -112,11 +112,19 @@ class ThreadWorkspace:
             logger.exception("Could not connect to sandbox for files", extra={"sandbox": current})
             raise HTTPException(503, "Could not connect to the workspace.") from exc
         if root is None:
-            work_dir = await resolve_sandbox_work_dir(sandbox)
-            _, repo_name, _ = _metadata_repo(metadata)
-            root = (
-                await resolve_checkout_dir(sandbox, work_dir, repo_name) if repo_name else work_dir
-            )
+            from openswe.sandboxes.external import ExternalSandbox
+
+            external_dir = ExternalSandbox.configured_work_dir(metadata)
+            if external_dir is not None:
+                root = external_dir
+            else:
+                work_dir = await resolve_sandbox_work_dir(sandbox)
+                _, repo_name, _ = _metadata_repo(metadata)
+                root = (
+                    await resolve_checkout_dir(sandbox, work_dir, repo_name)
+                    if repo_name
+                    else work_dir
+                )
         return cls(thread_id, current, sandbox, root)
 
     async def run_script(

@@ -418,6 +418,10 @@ def _worker_metadata(
         )
         if key in values
     }
+    if values.get("sandbox_owner") == "external":
+        worker_metadata["sandbox_owner"] = "external"
+        if isinstance(values.get("sandbox_work_dir"), str):
+            worker_metadata["sandbox_work_dir"] = values["sandbox_work_dir"]
     worker_metadata.update(
         source="dashboard",
         origin="task",
@@ -465,6 +469,7 @@ async def index_worker(
         or persisted.owner_type != expected.owner_type
         or persisted.task_id != expected.task_id
         or persisted.sandbox_host_thread_id != expected.sandbox_host_thread_id
+        or persisted.sandbox_owner != expected.sandbox_owner
         or persisted.admin_thread != expected.admin_thread
         or persisted.visibility != expected.visibility
         or persisted.github_token_repositories != expected.github_token_repositories

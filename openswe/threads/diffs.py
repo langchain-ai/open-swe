@@ -178,7 +178,11 @@ async def get_dashboard_thread_working_tree_diff(
     except Exception as exc:  # noqa: BLE001
         logger.exception("Could not connect to sandbox %s for working tree diff", sandbox_id)
         raise HTTPException(503, "Could not connect to the workspace.") from exc
-    work_dir = await resolve_sandbox_work_dir(sandbox)
+    from openswe.sandboxes.external import ExternalSandbox
+
+    work_dir = ExternalSandbox.configured_work_dir(metadata) or await resolve_sandbox_work_dir(
+        sandbox
+    )
     _, repo_name, _ = _metadata_repo(metadata)
     repo_path = await resolve_checkout_dir(sandbox, work_dir, repo_name) if repo_name else None
     return await read_turn_diff(sandbox, work_dir, "HEAD", None, repo_path=repo_path)

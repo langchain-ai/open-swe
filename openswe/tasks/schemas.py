@@ -38,8 +38,9 @@ class ThreadMetadata(BaseModel):
     task_id: UUID | None = None
     sandbox_host_thread_id: str | None = None
     sandbox_id: str | None = None
-    # "mda": Managed Deep Agents names, creates and replaces the sandbox; the backend binds to it.
-    sandbox_owner: Literal["mda"] | None = None
+    # "mda": Managed Deep Agents owns the sandbox; "external": caller-supplied LangSmith sandbox.
+    sandbox_owner: Literal["mda", "external"] | None = None
+    sandbox_work_dir: str | None = None
     sandbox_base_proxy_config: dict[str, JsonValue] | None = None
     visibility: Literal["public", "private"] = "public"
     admin_thread: bool = False

@@ -590,3 +590,66 @@ async def test_legacy_run_digest_is_frozen_and_rejects_modified_records(monkeypa
     record["create"]["extra_fields"] = {"proxy_config": {"rules": ["injected"]}}
     with pytest.raises(ValueError, match="profile has changed"):
         await ExecutionProfile.kept(digest)
+
+
+@pytest.mark.asyncio
+async def test_external_sandbox_skips_credentials_proxy_and_recreation(monkeypatch) -> None:
+    import importlib
+
+    from openswe.sandboxes.lifecycle import SandboxCredentialPolicy, refresh_thread_github_proxy
+    from openswe.sandboxes.managed import ManagedSandbox
+    from openswe.tasks.schemas import ThreadMetadata
+    from openswe.tools.recreate_sandbox import recreate_sandbox
+
+    recreate_mod = importlib.import_module("openswe.tools.recreate_sandbox")
+    metadata: dict[str, object] = {
+        "owner_type": "system",
+        "sandbox_id": "tb-task-1",
+        "sandbox_owner": "external",
+        "sandbox_work_dir": "/app",
+    }
+    monkeypatch.setattr(
+        "openswe.sandboxes.managed.get_sandbox_metadata", AsyncMock(return_value=metadata)
+    )
+    monkeypatch.setattr(
+        "openswe.sandboxes.lifecycle.get_sandbox_metadata", AsyncMock(return_value=metadata)
+    )
+    monkeypatch.setattr(recreate_mod, "get_sandbox_metadata", AsyncMock(return_value=metadata))
+    configure_proxy = AsyncMock()
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.configure_sandbox_proxy", configure_proxy)
+
+    managed = await ManagedSandbox.for_thread("thread-ext", allow_github=True)
+    assert managed is not None
+    assert managed.sandbox_id == "tb-task-1"
+    assert managed.external is True
+    assert managed.github_proxy is None
+    assert not await SandboxCredentialPolicy(
+        ThreadMetadata.model_validate(metadata)
+    ).allows_github()
+    assert await refresh_thread_github_proxy("thread-ext") is None
+    worker_metadata: dict[str, object] = {
+        "owner_type": "system",
+        "sandbox_id": "tb-task-1",
+        "sandbox_host_thread_id": "thread-ext",
+        "task_id": "01950000-0000-7000-8000-000000000001",
+    }
+    by_thread = {"thread-ext": metadata, "thread-worker": worker_metadata}
+    monkeypatch.setattr(
+        "openswe.sandboxes.lifecycle.get_sandbox_metadata",
+        AsyncMock(side_effect=lambda tid: by_thread[tid]),
+    )
+    monkeypatch.setattr(
+        "openswe.sandboxes.lifecycle.SandboxCreateConfig.bound_profile",
+        AsyncMock(return_value=None),
+    )
+    assert not await SandboxCredentialPolicy(
+        ThreadMetadata.model_validate(worker_metadata)
+    ).allows_github()
+    assert await refresh_thread_github_proxy("thread-worker") is None
+    configure_proxy.assert_not_awaited()
+
+    monkeypatch.setattr(
+        "openswe.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-ext"}}
+    )
+    recreated = await recreate_sandbox()
+    assert recreated["success"] is False

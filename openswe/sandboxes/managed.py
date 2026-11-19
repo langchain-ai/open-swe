@@ -43,6 +43,8 @@ class ManagedSandbox(BaseModel):
     # (``bind_sandbox``): preparing it reaches no sandbox, and the deployment allows it
     # (``MDA_BIND_SANDBOX_AFTER_PREPARE``).
     bind_after_prepare: bool = False
+    # Externally created LangSmith sandbox (evals): adopted without setup, proxy writes, or replacement.
+    external: bool = False
 
     @classmethod
     async def for_thread(
@@ -72,18 +74,38 @@ class ManagedSandbox(BaseModel):
         # The metadata of the thread whose sandbox this is: a worker's coordinator's.
         sandbox_metadata = raw
         owner: str | None = None
+        external = metadata.sandbox_owner == "external"
         if metadata.task_id is not None:
             owner = metadata.sandbox_host_thread_id
             if owner is None or metadata.sandbox_id is None:
                 return None
             sandbox_metadata = await get_sandbox_metadata(owner)
             host = ThreadMetadata.model_validate(sandbox_metadata)
-            if host.sandbox_owner != "mda" or host.sandbox_id != metadata.sandbox_id:
+            if (
+                host.sandbox_owner not in ("mda", "external")
+                or host.sandbox_id != metadata.sandbox_id
+            ):
+                return None
+            external = host.sandbox_owner == "external"
+        elif external:
+            if metadata.sandbox_id is None:
                 return None
         elif metadata.sandbox_id is not None and metadata.sandbox_owner != "mda":
             if not await hand_gone_sandbox_to_mda(thread_id, metadata.sandbox_id):
                 return None
             sandbox_metadata = {**raw, "sandbox_id": None}
+        if external:
+            return cls(
+                create=LangSmithCreateOptions.resolve(),
+                thread_id=owner,
+                sandbox_id=metadata.sandbox_id,
+                github_proxy=None,
+                bind_after_prepare=not (
+                    prepare_reaches_sandbox or owner is not None or slack_files_pending(raw)
+                )
+                and ENV.MDA_BIND_SANDBOX_AFTER_PREPARE.get_bool(default=True),
+                external=True,
+            )
         config = await SandboxCreateConfig.for_thread(
             sandbox_metadata, thread_id=owner or thread_id
         )

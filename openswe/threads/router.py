@@ -57,7 +57,12 @@ from openswe.agent_api.connections import ACTING_USER_KEY, SENDER_USER_KEY, acti
 from openswe.api.agent_server_auth import backend_call
 from openswe.dispatch import CHANNEL_METADATA_KEY, channel_of
 from openswe.threads import index
-from openswe.threads.index import IndexedThread, ThreadExistsError, ThreadSearch
+from openswe.threads.index import (
+    IndexedThread,
+    SandboxAlreadyBoundError,
+    ThreadExistsError,
+    ThreadSearch,
+)
 from openswe.threads.runtimes import (
     LOCAL_HEADER,
     RUNTIMES,
@@ -330,6 +335,11 @@ class ThreadRouter:
         except ThreadExistsError:
             await send_json(send, 409, {"detail": f"Thread {thread_id} already exists"})
             return
+        except SandboxAlreadyBoundError as exc:
+            await send_json(
+                send, 409, {"detail": f"Sandbox {exc} is already bound to another thread"}
+            )
+            return
         await send_json(send, 200, thread.as_langgraph())
 
     async def _index_new(
@@ -472,6 +482,11 @@ class ThreadRouter:
             return
         if thread.runtime == "local":
             await _refuse_local(scope, send, thread)
+            return
+        if thread.metadata.get("sandbox_owner") == "external":
+            await send_json(
+                send, 409, {"detail": "Threads attached to an external sandbox cannot be copied"}
+            )
             return
         made = _object.validate_python(
             await RUNTIMES.runs_on(thread.runtime).client.http.post(

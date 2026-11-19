@@ -33,6 +33,7 @@ async def resolve_checkout_dir(
     name = shlex.quote(posixpath.basename(repo_name))
     result = await sandbox_backend.aexecute(
         f"test -e {shlex.quote(repo_dir)}/.git || "
+        f"{{ test -e {shlex.quote(work_dir)}/.git && printf %s {shlex.quote(work_dir)}; }} || "
         f"{{ test -e {workspace_repo}/.git && printf %s {workspace_repo}; }} || "
         f'{{ test -e "$HOME"/{name}/.git && printf %s "$HOME"/{name}; }}'
     )

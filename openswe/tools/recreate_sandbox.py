@@ -43,6 +43,8 @@ async def recreate_sandbox(
         return {"success": False, "error": "No thread_id in current run config"}
 
     metadata = ThreadMetadata.model_validate(await get_sandbox_metadata(thread_id))
+    if metadata.sandbox_owner == "external":
+        return {"success": False, "error": "External sandboxes cannot be recreated"}
     if metadata.sandbox_owner == "mda" and metadata.task_id is None:
         # MDA names and replaces this sandbox; the call's access policy has already run.
         options = await request_mda_replacement(thread_id, source=source)

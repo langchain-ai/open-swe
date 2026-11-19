@@ -380,18 +380,23 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         update, opened = await self._before_agent(state, runtime)
         held = {**state.get(STATE_KEY, {}), **_held(update)}
         run = self._backend.run
+        external = bool(run.planned.sandbox and run.planned.sandbox.external)
         if self._in_sandbox:
             # A sandbox MDA could not open is not asked for again here: the run's first tool
             # call opens it, or says why it cannot.
             files = getattr(runtime, "backend", None) if opened else None
             boot = self._boot_sandbox
             sandbox_setup(run).start(
-                files, run.git_identity, None if boot is None else partial(boot, runtime)
+                files,
+                run.git_identity,
+                None if boot is None else partial(boot, runtime),
+                skip_setup=external,
             )
         else:
             # Without a sandbox of MDA's, the thread's files are the backend's to reach.
             files = RemoteFiles(self._backend, run_id)
-        turn_git(run).start(files, held.get("work_dir"), sandbox_setup(run).done)
+        if not external:
+            turn_git(run).start(files, held.get("work_dir"), sandbox_setup(run).done)
         return self._carrying(state, update)
 
     @property

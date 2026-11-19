@@ -55,8 +55,12 @@ def _configure(
     async def work_dir(_backend: _Backend) -> str:
         return "/workspace/project"
 
+    async def sandbox_metadata(_thread_id: str) -> dict[str, object]:
+        return {}
+
     client = _AsyncClient()
     monkeypatch.setattr(download_tool, "get_sandbox_backend", get_backend)
+    monkeypatch.setattr(download_tool, "get_sandbox_metadata", sandbox_metadata)
     monkeypatch.setattr(download_tool, "resolve_sandbox_work_dir", work_dir)
     monkeypatch.setattr(download_tool, "unwrap_sandbox_backend", lambda value: value)
     monkeypatch.setattr(download_tool, "get_async_sandbox_client", lambda: client)

@@ -192,6 +192,8 @@ class TurnContext:
     local_access: bool = False
     # The thread ran on its owner's machine before it moved to a cloud sandbox.
     moved_off_mac: bool = False
+    # Externally created sandbox (evals): omit /workspace preload and repo-setup assumptions.
+    external_sandbox: bool = False
     # Why the run's managed tool catalog could not be read, if it could not.
     tool_catalog_note: str = ""
     # The sender's other recent threads, whose activity changes from turn to turn.
@@ -199,7 +201,9 @@ class TurnContext:
 
     def environment(self) -> str:
         environment = prompt(
-            "system/working-environment",
+            "system/working-environment-external"
+            if self.external_sandbox
+            else "system/working-environment",
             working_dir=self.working_dir,
         )
         if self.local_access:

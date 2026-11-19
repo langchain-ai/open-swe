@@ -453,3 +453,91 @@ async def test_a_machine_stream_ends_on_a_thread_another_machine_started(
 
     async with aclosing(_stream(transcript.thread_id, 0, theirs)) as stream:
         assert await anext(stream) == "event: revoked\ndata: {}\n\n"
+
+
+async def test_external_sandbox_requires_bot_and_enforces_unique_binding(
+    machine: _FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import httpx2
+
+    from openswe.sandboxes.providers.langsmith_api import SandboxAPI
+
+    sandboxes: dict[str, dict[str, object]] = {
+        "robin-stopped": {"name": "robin-stopped"},
+        "tb-task-1": {"name": "tb-task-1", "labels": {"robin.external": "true"}},
+    }
+
+    async def fake_request(
+        self: SandboxAPI, method: str, path: str, *, json: object = None, timeout: float = 10.0
+    ) -> httpx2.Response:
+        name = path.removeprefix("/boxes/")
+        req = httpx2.Request(method, f"{self.endpoint}{path}")
+        if name not in sandboxes:
+            resp = httpx2.Response(404, request=req, json={"detail": "not found"})
+            self.raise_for_status(resp)
+        return httpx2.Response(200, request=req, json=sandboxes[name])
+
+    monkeypatch.setattr(SandboxAPI, "request", fake_request)
+    with pytest.raises(HTTPException) as workflow_refused:
+        await runs._enrich_system_run_start_command(
+            str(uuid7()),
+            _workflow_caller(),
+            _command("Solve task", thread_type="system", sandbox_id="tb-task-1"),
+            metadata={},
+            creating=True,
+        )
+    assert workflow_refused.value.status_code == 403
+
+    with pytest.raises(HTTPException) as missing_refused:
+        await runs._enrich_system_run_start_command(
+            str(uuid7()),
+            _bot_caller(),
+            _command("Solve task", thread_type="system", sandbox_id="missing-box"),
+            metadata={},
+            creating=True,
+        )
+    assert missing_refused.value.status_code == 404
+
+    with pytest.raises(HTTPException) as unlabeled_refused:
+        await runs._enrich_system_run_start_command(
+            str(uuid7()),
+            _bot_caller(),
+            _command("Solve task", thread_type="system", sandbox_id="robin-stopped"),
+            metadata={},
+            creating=True,
+        )
+    assert unlabeled_refused.value.status_code == 403
+
+    thread_id = str(uuid7())
+    await runs._enrich_system_run_start_command(
+        thread_id,
+        _bot_caller(),
+        _command("Solve task", thread_type="system", sandbox_id="tb-task-1", work_dir="/app"),
+        metadata={},
+        creating=True,
+    )
+    created = machine.threads.created[-1]["metadata"]
+    assert created["sandbox_id"] == "tb-task-1"
+    assert created["sandbox_owner"] == "external"
+    assert created["sandbox_work_dir"] == "/app"
+    assert created["repo_explicitly_none"] is True
+
+    await index.create(thread_id, runtime="mda", metadata=created)
+    same = await index.create(thread_id, runtime="mda", metadata=created, if_exists="do_nothing")
+    assert same.thread_id == thread_id
+
+    with pytest.raises(HTTPException) as duplicate_refused:
+        await runs._enrich_system_run_start_command(
+            str(uuid7()),
+            _bot_caller(),
+            _command("Solve again", thread_type="system", sandbox_id="tb-task-1"),
+            metadata={},
+            creating=True,
+        )
+    assert duplicate_refused.value.status_code == 409
+    with pytest.raises(index.SandboxAlreadyBoundError):
+        await index.create(
+            str(uuid7()),
+            runtime="mda",
+            metadata={"sandbox_id": "tb-task-1", "sandbox_owner": "external"},
+        )

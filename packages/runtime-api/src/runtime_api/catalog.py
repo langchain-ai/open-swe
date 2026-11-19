@@ -126,6 +126,8 @@ class SandboxSpec(BaseModel):
     bind_after_prepare: bool = False
     # Who commits in the sandbox: the thread's owner, written before the run's first command.
     git_identity: GitIdentity = GitIdentity()
+    # Externally created LangSmith sandbox (evals): adopt as-is without setup, proxy writes, or replacement.
+    external: bool = False
 
     @field_validator("github_proxy")
     @classmethod

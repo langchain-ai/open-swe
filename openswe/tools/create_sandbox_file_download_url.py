@@ -8,9 +8,14 @@ from langgraph.config import get_config
 
 from openswe.dashboard.agent_overrides import resolve_github_login
 from openswe.run_config import RunConfig
+from openswe.sandboxes.external import ExternalSandbox
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
-from openswe.sandboxes.state import get_sandbox_backend, unwrap_sandbox_backend
+from openswe.sandboxes.state import (
+    get_sandbox_backend,
+    get_sandbox_metadata,
+    unwrap_sandbox_backend,
+)
 from openswe.short_links.models import ShortLink, is_https_target
 from openswe.tools.access import direct_user_run
 from openswe.users import User
@@ -29,7 +34,13 @@ async def resolve_sandbox_file(file_path: str) -> tuple[Any, str, str]:
         raise ValueError("no thread_id in run config")
 
     backend_proxy = await get_sandbox_backend(thread_id)
-    work_dir = posixpath.normpath(await resolve_sandbox_work_dir(backend_proxy))
+    metadata = await get_sandbox_metadata(thread_id)
+    configured_dir = ExternalSandbox.configured_work_dir(metadata)
+    if configured_dir is None and isinstance(
+        host_id := metadata.get("sandbox_host_thread_id"), str
+    ):
+        configured_dir = ExternalSandbox.configured_work_dir(await get_sandbox_metadata(host_id))
+    work_dir = posixpath.normpath(configured_dir or await resolve_sandbox_work_dir(backend_proxy))
     path = posixpath.normpath(
         file_path.strip()
         if file_path.strip().startswith("/")

@@ -85,6 +85,12 @@ class SandboxCredentialPolicy:
     metadata: ThreadMetadata
 
     async def allows_github(self) -> bool:
+        if self.metadata.sandbox_owner == "external":
+            return False
+        if self.metadata.task_id is not None and self.metadata.sandbox_host_thread_id:
+            host = await get_sandbox_metadata(self.metadata.sandbox_host_thread_id)
+            if host.get("sandbox_owner") == "external":
+                return False
         if self.metadata.owner_type != "user":
             return True
         owner = await self.metadata.owner()
@@ -356,10 +362,18 @@ async def refresh_thread_github_proxy(
     whichever replica gets the call, whatever that replica has connected to before.
     """
     metadata = await get_sandbox_metadata(thread_id)
+    if metadata.get("sandbox_owner") == "external":
+        return None
     sandbox_id = metadata.get("sandbox_id")
     if not isinstance(sandbox_id, str):
         return None
     bound = await SandboxCreateConfig.bound_profile(thread_id, metadata)
+    if metadata.get("task_id") is not None and isinstance(
+        host_id := metadata.get("sandbox_host_thread_id"), str
+    ):
+        host = await get_sandbox_metadata(host_id)
+        if host.get("sandbox_owner") == "external":
+            return None
     base_proxy_config = (
         SandboxCreateConfig.from_options(bound.create).proxy_config or {}
         if bound is not None
@@ -474,6 +488,7 @@ async def _connect_existing_sandbox(
     base_proxy_config: dict[str, Any] | None = None,
     mda_writes_proxy: bool = False,
     allow_github: bool = True,
+    external: bool = False,
 ) -> SandboxBackendProtocol:
     """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
 
@@ -496,6 +511,8 @@ async def _connect_existing_sandbox(
         except Exception as exc:
             logger.warning("Failed to connect to existing sandbox %s", sandbox_id)
             raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
+    if external:
+        return sandbox_backend
     if mda_writes_proxy or not allow_github:
         try:
             if not allow_github:
@@ -752,6 +769,7 @@ async def ensure_sandbox_for_thread(
         if bound is not None
         else {}
     )
+    external = sandbox_metadata.get("sandbox_owner") == "external"
     allow_github = await SandboxCredentialPolicy(
         ThreadMetadata.model_validate(sandbox_metadata)
     ).allows_github()
@@ -772,6 +790,7 @@ async def ensure_sandbox_for_thread(
                 sandbox_metadata, github_proxy_repositories, github_proxy_permissions
             ),
             allow_github=allow_github,
+            external=external,
         )
     except (SandboxGoneError, SandboxUnreachableError) as exc:
         if require_existing:
@@ -781,7 +800,11 @@ async def ensure_sandbox_for_thread(
                 "The coordinator must recover its sandbox before workers attach",
             ) from exc
         owned_by_mda = sandbox_metadata.get("sandbox_owner") == "mda"
-        if not owned_by_mda and (isinstance(exc, SandboxGoneError) or abandon_unreachable):
+        if (
+            not owned_by_mda
+            and not external
+            and (isinstance(exc, SandboxGoneError) or abandon_unreachable)
+        ):
             await _hand_to_mda(thread_id, sandbox_id)
             raise SandboxHandedOverError(thread_id, sandbox_id, str(exc)) from exc
         # MDA recreates a deleted sandbox of its own under its name when the next run opens it.
@@ -821,6 +844,22 @@ async def bind_mda_sandbox(
     raw = await get_sandbox_metadata(thread_id)
     metadata = ThreadMetadata.model_validate(raw)
     if metadata.task_id is not None:
+        return
+    if metadata.sandbox_owner == "external":
+        if metadata.sandbox_id is None or (sandbox_id is None and open_error is not None):
+            raise SandboxUnreachableError(
+                thread_id,
+                metadata.sandbox_id,
+                "Could not open this thread's external sandbox",
+                reason=open_error,
+            )
+        if sandbox_id not in (None, metadata.sandbox_id):
+            raise SandboxUnreachableError(
+                thread_id,
+                metadata.sandbox_id,
+                "Managed Deep Agents opened a different sandbox than this thread is bound to",
+                reason=f"Expected {metadata.sandbox_id}; opened {sandbox_id}. The binding was preserved.",
+            )
         return
     if (
         metadata.sandbox_owner == "mda"
@@ -1010,6 +1049,8 @@ async def hand_sandbox_to_mda(
     old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
     if not old_sandbox_id:
         raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
+    if metadata.get("sandbox_owner") == "external":
+        raise ValueError("External sandboxes cannot be recreated")
     if metadata.get("sandbox_owner") == "mda":
         raise ValueError("Managed Deep Agents owns this thread's sandbox; only it may replace it")
 

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final, Literal, cast
 
+import httpx
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError, model_validator
@@ -61,6 +62,7 @@ from openswe.plugins.records import PluginChat
 from openswe.projects.store import PROJECT_ID_KEY, PROJECTS, ProjectError
 from openswe.prompts import prompt
 from openswe.run_config import PluginChatConfig
+from openswe.sandboxes.external import ExternalSandbox
 from openswe.slack.client import (
     SlackNotice,
     fetch_latest_slack_thread_message,
@@ -1040,6 +1042,9 @@ async def _enrich_run_start_command(
         offloading = offload_requested(params)
         if any(client_configurable.get(key) is not None for key in _MAC_THREAD_KEYS):
             raise HTTPException(410, MAC_THREAD)
+        external_sandbox = await ExternalSandbox.resolve(
+            client_configurable, Principal.of_login(login, email), creating=creating
+        )
         content = _command_message_content(params)
         replies = _command_message_replies(params)
         relayed_from = _relayed_from(params)
@@ -1102,23 +1107,37 @@ async def _enrich_run_start_command(
                 )
             except ProjectError as exc:
                 raise HTTPException(exc.status_code, str(exc)) from exc
-            thread = await create_dashboard_thread_record(
-                thread_id,
-                login=login,
-                email=email,
-                repo_config=repo_config,
-                repo_explicitly_none=identity.user_id is not None
-                or client_configurable.get("repo_explicitly_none") is True,
-                visibility=visibility,
-                prompt=_command_prompt_text(content)
-                or ", ".join(f.file_name or "file" for f in command_files),
-                images=command_images,
-                model_id=client_configurable.get("agent_model_id"),
-                effort=client_configurable.get("agent_effort"),
-                model_selection=model_selection or "auto",
-                extra_metadata={PROJECT_ID_KEY: str(project.id)} if project is not None else None,
-                profile=await profile_read or {},
-            )
+            extra_metadata: dict[str, JsonValue] = {}
+            if project is not None:
+                extra_metadata[PROJECT_ID_KEY] = str(project.id)
+            if external_sandbox is not None:
+                extra_metadata.update(external_sandbox.metadata())
+            try:
+                thread = await create_dashboard_thread_record(
+                    thread_id,
+                    login=login,
+                    email=email,
+                    repo_config=repo_config,
+                    repo_explicitly_none=identity.user_id is not None
+                    or client_configurable.get("repo_explicitly_none") is True
+                    or (external_sandbox is not None and not repo_config),
+                    visibility=visibility,
+                    prompt=_command_prompt_text(content)
+                    or ", ".join(f.file_name or "file" for f in command_files),
+                    images=command_images,
+                    model_id=client_configurable.get("agent_model_id"),
+                    effort=client_configurable.get("agent_effort"),
+                    model_selection=model_selection or "auto",
+                    extra_metadata=extra_metadata or None,
+                    profile=await profile_read or {},
+                )
+            except httpx.HTTPStatusError as exc:
+                if external_sandbox is not None and exc.response.status_code == 409:
+                    raise HTTPException(
+                        409,
+                        f"Sandbox {external_sandbox.sandbox_id!r} is already bound to another thread",
+                    ) from exc
+                raise
             metadata = thread_metadata(thread)
             run_model, run_effort = normalize_model_choice(
                 metadata.get("resolved_model"), metadata.get("resolved_effort")
@@ -1786,6 +1805,7 @@ async def _create_system_thread_record(
     prompt: str,
     title: str | None,
     repo_config: dict[str, str],
+    external_sandbox: ExternalSandbox | None = None,
 ) -> dict[str, Any]:
     """Stamp a system-owned thread rather than a person-owned one.
 
@@ -1814,12 +1834,24 @@ async def _create_system_thread_record(
     if repo_config:
         metadata["repo_owner"] = repo_config["owner"]
         metadata["repo_name"] = repo_config["name"]
+    elif external_sandbox is not None:
+        metadata["repo_explicitly_none"] = True
+    if external_sandbox is not None:
+        metadata.update(external_sandbox.metadata())
     if principal.token_repositories is not None:
         metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = list(principal.token_repositories)
     client = langgraph_client()
-    await create_thread(
-        client, thread_id, title=metadata["title"], metadata=metadata, if_exists="raise"
-    )
+    try:
+        await create_thread(
+            client, thread_id, title=metadata["title"], metadata=metadata, if_exists="raise"
+        )
+    except httpx.HTTPStatusError as exc:
+        if external_sandbox is not None and exc.response.status_code == 409:
+            raise HTTPException(
+                409,
+                f"Sandbox {external_sandbox.sandbox_id!r} is already bound to another thread",
+            ) from exc
+        raise
     return as_thread_dict(await client.threads.get(thread_id))
 
 
@@ -1896,6 +1928,9 @@ async def _enrich_system_run_start_command(
 
     if any(client_configurable.get(key) is not None for key in _MAC_THREAD_KEYS):
         raise HTTPException(410, MAC_THREAD)
+    external_sandbox = await ExternalSandbox.resolve(
+        client_configurable, principal, creating=creating
+    )
     repo_config = await _system_repo_config(client_configurable, principal)
     if creating:
         title = client_configurable.get("title")
@@ -1906,6 +1941,7 @@ async def _enrich_system_run_start_command(
                 prompt=prompt,
                 title=title if isinstance(title, str) else None,
                 repo_config=repo_config,
+                external_sandbox=external_sandbox,
             )
         )
     else:

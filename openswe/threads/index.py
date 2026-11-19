@@ -107,6 +107,10 @@ class ThreadExistsError(Exception):
     """``create`` with ``if_exists="raise"`` found the thread already indexed."""
 
 
+class SandboxAlreadyBoundError(Exception):
+    """``create`` found an external sandbox already bound to another thread."""
+
+
 class IndexedThread(BaseModel):
     thread_id: str
     runtime: Runtime
@@ -265,6 +269,16 @@ class ThreadSearch(BaseModel):
         return int(counted or 0)
 
 
+async def has_sandbox(sandbox_id: str) -> bool:
+    """Whether any indexed thread is already bound to ``sandbox_id``."""
+    async with transaction() as conn:
+        row = await conn.scalar(
+            text("SELECT 1 FROM thread_index WHERE metadata @> CAST(:filter AS jsonb) LIMIT 1"),
+            {"filter": json.dumps({"sandbox_id": sandbox_id})},
+        )
+    return row is not None
+
+
 async def create(
     thread_id: str,
     *,
@@ -276,7 +290,29 @@ async def create(
     updated_at: datetime | None = None,
 ) -> IndexedThread:
     """Index a thread; with ``do_nothing`` an existing one is returned as it is."""
+    meta = dict(metadata or {})
+    external_sandbox_id = (
+        meta.get("sandbox_id")
+        if meta.get("sandbox_owner") == "external"
+        and meta.get("task_id") is None
+        and isinstance(meta.get("sandbox_id"), str)
+        else None
+    )
     async with transaction() as conn:
+        if external_sandbox_id is not None:
+            await conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                {"key": f"external_sandbox:{external_sandbox_id}"},
+            )
+            taken = await conn.scalar(
+                text(
+                    "SELECT 1 FROM thread_index "
+                    "WHERE thread_id <> :thread_id AND metadata @> CAST(:filter AS jsonb) LIMIT 1"
+                ),
+                {"thread_id": thread_id, "filter": json.dumps({"sandbox_id": external_sandbox_id})},
+            )
+            if taken is not None:
+                raise SandboxAlreadyBoundError(external_sandbox_id)
         row = (
             (
                 await conn.execute(
@@ -295,7 +331,7 @@ async def create(
                         "id": uuid7(),
                         "thread_id": thread_id,
                         "runtime": runtime,
-                        "metadata": json.dumps(dict(metadata or {})),
+                        "metadata": json.dumps(meta),
                         "status": status,
                         "created_at": created_at,
                         "updated_at": updated_at,

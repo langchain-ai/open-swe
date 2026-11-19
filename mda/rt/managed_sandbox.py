@@ -142,7 +142,7 @@ def _planned(runtime: object) -> tuple[Run, SandboxSpec] | None:
     try:
         run = _run_of(runtime)
         spec = run.planned.sandbox
-    except BackendCallError:
+    except BackendCallError, RuntimeError:
         # Not started yet, or not an Open SWE run, so nothing may open a sandbox for it.
         return None
     return None if spec is None else (run, spec)
@@ -416,7 +416,12 @@ async def opened_sandbox(runtime: Runtime) -> OpenedSandbox:
     Where MDA writes the proxy config, writing it waits for the sandbox to boot, so the first
     write is left to the boot.
     """
-    opened = await _opening(getattr(runtime, "backend", None), wait=False)
+    planned = _planned(runtime)
+    opened = await _opening(
+        getattr(runtime, "backend", None),
+        wait=False,
+        replace_missing=not (planned is not None and planned[1].external),
+    )
     if opened.sandbox_id is not None and (proxy := _written_proxy(runtime)) is not None:
         proxy.defer(opened.sandbox_id)
     return opened
@@ -430,7 +435,8 @@ async def booted_sandbox(runtime: Runtime) -> OpenedSandbox:
     none, nor the workspace's egress rules: it counts as one that never booted. So does one
     the run reports behind its preparation that the thread could not be bound to.
     """
-    if (planned := _planned(runtime)) is not None:
+    planned = _planned(runtime)
+    if planned is not None:
         bound = await SandboxBinding.of(planned[0]).settled()
         if bound is not None and bound.error is not None:
             return OpenedSandbox(error=bound.error)
@@ -441,10 +447,14 @@ async def booted_sandbox(runtime: Runtime) -> OpenedSandbox:
             raise
         except Exception as exc:
             return OpenedSandbox(error=_cause(exc))
-    return await _opening(getattr(runtime, "backend", None), wait=True)
+    return await _opening(
+        getattr(runtime, "backend", None),
+        wait=True,
+        replace_missing=not (planned is not None and planned[1].external),
+    )
 
 
-async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
+async def _opening(backend: object, *, wait: bool, replace_missing: bool = True) -> OpenedSandbox:
     """``backend``'s sandbox, retried while the sandbox service fails transiently.
 
     A bound sandbox that is gone is replaced, and the run told its workspace was lost.
@@ -453,7 +463,9 @@ async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
     for backoff in OPEN_BACKOFF_SECONDS:
         try:
             return OpenedSandbox(sandbox_id=await open_sandbox(backend, wait=wait))
-        except BoundSandboxMissingError:
+        except BoundSandboxMissingError as exc:
+            if not replace_missing:
+                return _not_opened(exc)
             try:
                 await replace_sandbox(backend, missing_only=True)
                 return OpenedSandbox(
@@ -533,7 +545,7 @@ class ManagedSandboxMiddleware(AgentMiddleware):
         if request.tool_call["name"] != "recreate_sandbox" or not isinstance(result, ToolMessage):
             return result
         spec = self._backend.run.planned.sandbox
-        if spec is None:
+        if spec is None or spec.external:
             return result
         try:
             reply = _json_object.validate_json(result.text)

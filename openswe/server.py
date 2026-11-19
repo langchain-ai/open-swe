@@ -1467,10 +1467,24 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
         )
         bound = await get_sandbox_metadata(self._thread_id)
+        sandbox_meta = bound
+        if (
+            bound.get("sandbox_owner") != "external"
+            and bound.get("task_id") is not None
+            and isinstance(bound.get("sandbox_host_thread_id"), str)
+        ):
+            sandbox_meta = await get_sandbox_metadata(bound["sandbox_host_thread_id"])
+        external_sandbox = sandbox_meta.get("sandbox_owner") == "external"
+        raw_work_dir = sandbox_meta.get("sandbox_work_dir")
+        external_work_dir = raw_work_dir if isinstance(raw_work_dir, str) else ""
         # Files a Slack message brought are written once the sandbox is bound: by this turn's
         # preparation, or by the next one's where MDA is still opening the sandbox.
-        if self._sandbox_pending or (
-            self._sandbox_id is not None and not slack_files_pending(bound)
+        if external_sandbox and not slack_files_pending(bound):
+            triggering_user_identity = await triggering_user_identity_task
+            work_dir = external_work_dir
+        elif not external_sandbox and (
+            self._sandbox_pending
+            or (self._sandbox_id is not None and not slack_files_pending(bound))
         ):
             triggering_user_identity = await triggering_user_identity_task
             work_dir = sandbox_setup.WORK_DIR
@@ -1478,14 +1492,17 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             triggering_user_identity, sandbox_backend = await self._attach_sandbox(
                 triggering_user_identity_task, bound
             )
-            if isinstance(sandbox_backend, TimeoutLangSmithSandbox):
+            if not external_sandbox and isinstance(sandbox_backend, TimeoutLangSmithSandbox):
                 sandbox_backend.reset_git_identity(
                     await ThreadMetadata.model_validate(bound).git_identity()
                 )
             async with aphase(self._thread_id, "prepare.slack_files"):
                 await upload_files(self._thread_id, bound, sandbox_backend)
-            async with aphase(self._thread_id, "prepare.work_dir"):
-                work_dir = await resolve_sandbox_work_dir(sandbox_backend)
+            if external_sandbox:
+                work_dir = external_work_dir
+            else:
+                async with aphase(self._thread_id, "prepare.work_dir"):
+                    work_dir = await resolve_sandbox_work_dir(sandbox_backend)
         del github_token
         if stale_execution := take_stale_boot(self._thread_id):
             await StaleExecutionReporter.report(self._thread_id, stale_execution)
@@ -1551,6 +1568,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             is True,
             local_access=bool(cfg.local_access_bridge_id),
             moved_off_mac=bound.get(MOVED_OFF_MAC_KEY) is True,
+            external_sandbox=external_sandbox,
             tool_catalog_note=self._tool_catalog_note,
             recent_threads=await recent_threads,
         )
@@ -1558,7 +1576,9 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         system_prompt = SystemPrompt.execution_update(
             state,
             await rendered_prompt if rendered_prompt is not None else None,
-            execution=execution.prompt() if execution is not None else "",
+            execution=""
+            if external_sandbox
+            else (execution.prompt() if execution is not None else ""),
         )
         return {
             "work_dir": work_dir,
