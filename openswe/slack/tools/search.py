@@ -29,9 +29,10 @@ PURGE_JOB: Final = "slack_search_grant_purge"
 PURGE_SCHEDULE: Final = "17 * * * *"
 
 _NO_ACTION_TOKEN = (
-    "Slack attached no search grant to the message that started this run. Slack grants "
-    "search only for a message that @mentions Robin or is sent to it in a DM. Ask the "
-    "person to @mention Robin in a new message to search."
+    "This run has no Slack permission for workspace-wide search, so it was not run. "
+    "Slack grants it only to the turn started by a recent message that @mentions Robin "
+    "or is a DM. You can still read specific channels and threads with "
+    "slack_read_channel_messages and slack_read_thread_messages."
 )
 _SHARED_CHANNEL = (
     "Search is unavailable in a channel shared with another organization, because its "
@@ -42,8 +43,9 @@ _BUDGET_SPENT = (
     "already found."
 )
 _ERRORS = {
-    "invalid_action_token": "Slack no longer accepts this message's search grant. Ask the "
-    "person to @mention Open SWE again to search.",
+    "invalid_action_token": "Slack no longer allows workspace-wide search for this "
+    "message, usually because its permission expired. You can still read specific "
+    "channels and threads with slack_read_channel_messages and slack_read_thread_messages.",
     "missing_scope": "The Slack app is missing the search:read.public scope. A workspace "
     "admin needs to add it and reinstall the app.",
     "feature_not_enabled": "Slack search is not enabled for this workspace or app.",
