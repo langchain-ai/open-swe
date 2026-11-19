@@ -11,6 +11,8 @@ dependencies = [
     # Jev, the gateway's classifier, which both sides ask (classifier.py).
     "langchain-typesafe==0.1.0",
     "httpx2>=2.12.0",
+    # fetch_url's page conversion, which both sides run (web_pages.py).
+    "markdownify>=1.2.3",
 ]
 
 [build-system]

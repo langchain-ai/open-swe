@@ -1,7 +1,7 @@
 from typing import Any
 
 import httpx2
-from markdownify import markdownify
+from runtime_api.web_pages import PageText
 
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.utils.url_safety import UnsafeUrlError, request_with_safe_redirects
@@ -22,8 +22,7 @@ async def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
             )
             response.raise_for_status()
 
-            # Convert HTML content to markdown
-            markdown_content = markdownify(response.text)
+            markdown_content = await PageText.markdown(response.text)
 
         if len(markdown_content) > FETCH_URL_MAX_CHARS:
             markdown_content = (

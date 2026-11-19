@@ -20,11 +20,11 @@ from uuid import uuid4
 import httpx2
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.tools import ToolRuntime
-from markdownify import markdownify
 from pydantic import ConfigDict, JsonValue, SkipValidation, TypeAdapter, validate_call
 from runtime_api.catalog import ToolSpec
 from runtime_api.operations import OperationResult
 from runtime_api.sandbox_setup import WORK_DIR
+from runtime_api.web_pages import PageText
 
 from rt import local_results as results
 from rt.backend import Run
@@ -154,7 +154,7 @@ async def fetch_url(call: SkipValidation[_Call], /, url: str, timeout: int = 30)
         async with httpx2.AsyncClient(timeout=timeout, trust_env=False) as client:
             response = await request_public(client, "GET", url, headers={"User-Agent": _USER_AGENT})
             response.raise_for_status()
-            markdown = results.truncated_markdown(markdownify(response.text))
+            markdown = results.truncated_markdown(await PageText.markdown(response.text))
         return {
             "url": str(response.url),
             "markdown_content": markdown,
