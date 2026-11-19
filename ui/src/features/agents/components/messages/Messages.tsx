@@ -70,7 +70,7 @@ function QueuedMessages({
               <SentReply key={replyIndex} reply={reply} />
             ))}
             {message.content && (
-              <div className="break-words whitespace-pre-wrap">
+              <div className="[overflow-wrap:anywhere] whitespace-pre-wrap">
                 <SkillPromptText text={message.content} />
               </div>
             )}
