@@ -1,12 +1,11 @@
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import langgraph_sdk
 import pytest
 
 from openswe.run_config import RunConfig
 from openswe.tools import access as tool_access
 from openswe.tools.access import Policy, ack, resolve_access
+from tests.conftest import serve_threads_from
 from tests.support.slack_api import SlackAPI
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -23,13 +22,7 @@ def metadata(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         "owner_type": "user",
         "participant_logins": ["alice"],
     }
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(get=AsyncMock(side_effect=lambda _id: {"metadata": saved}))
-        ),
-    )
+    serve_threads_from(monkeypatch, AsyncMock(side_effect=lambda _id: {"metadata": saved}))
     return saved
 
 

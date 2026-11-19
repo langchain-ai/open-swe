@@ -12,6 +12,7 @@ from openswe.dashboard.workspace_settings import WorkspaceSettings
 from openswe.slack import solo_threads, staged_files
 from openswe.slack.channels import SlackChannel
 from openswe.users.models import User, UserIdentity
+from tests.conftest import serve_threads_from
 from tests.slack.test_slack_solo_threads import _Harness
 
 slack_breakout_tool = importlib.import_module("openswe.slack.tools.start_new_thread")
@@ -766,7 +767,7 @@ async def test_breakout_preserves_requester_and_credential_scope(
         "" if direct else "1700000000.000002"
     )
     get_thread.return_value = {"metadata": child_metadata}
-    monkeypatch.setattr("langgraph_sdk.get_client", lambda: client)
+    serve_threads_from(monkeypatch, get_thread)
     monkeypatch.setattr("openswe.run_config.get_config", lambda: {"configurable": child_config})
     user_owned = owner_type == "user" or bool(actor and not background)
     assert child_metadata["owner_type"] == ("user" if user_owned else "system")

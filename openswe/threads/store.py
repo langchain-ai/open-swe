@@ -12,7 +12,7 @@ reaches MDA through MDA's trusted-backend ingress.
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import nullcontext
 from typing import Final, NamedTuple
 
@@ -139,6 +139,31 @@ class ThreadStore:
 
     async def search(self, query: index.ThreadSearch) -> list[IndexedThread]:
         return await query.run()
+
+    async def get_many(self, thread_ids: Sequence[str]) -> dict[str, IndexedThread]:
+        """Indexed threads by id, importing any unindexed legacy threads on first read."""
+        unique = list(dict.fromkeys(thread_ids))
+        if not unique:
+            return {}
+        found = {
+            thread.thread_id: thread
+            for thread in await self.search(index.ThreadSearch(ids=unique, limit=len(unique)))
+        }
+        missing = [thread_id for thread_id in unique if thread_id not in found]
+        if missing:
+            loaded = await asyncio.gather(
+                *(self.get(thread_id) for thread_id in missing), return_exceptions=True
+            )
+            for thread_id, item in zip(missing, loaded, strict=True):
+                if isinstance(item, BaseException):
+                    logger.warning(
+                        "Could not read thread from store",
+                        exc_info=item,
+                        extra={"agent_thread_id": thread_id},
+                    )
+                elif item is not None:
+                    found[thread_id] = item
+        return found
 
     async def get(self, thread_id: str) -> IndexedThread | None:
         """The indexed thread; one only the Agent Server knows is indexed on first use."""

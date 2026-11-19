@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -18,18 +19,15 @@ class _Threads:
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
-        return outcome
-
-
-class _Client:
-    def __init__(self, threads: _Threads) -> None:
-        self.threads = threads
+        if outcome is None:
+            return None
+        return SimpleNamespace(as_langgraph=lambda: outcome)
 
 
 @pytest.fixture
 def threads(monkeypatch: pytest.MonkeyPatch) -> _Threads:
     fake = _Threads()
-    monkeypatch.setattr(thread_reads.langgraph_sdk, "get_client", lambda: _Client(fake))
+    monkeypatch.setattr(thread_reads.THREADS, "get", fake.get)
     return fake
 
 

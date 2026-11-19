@@ -8,7 +8,6 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import httpx2
-import langgraph_sdk
 import pytest
 from fastapi import HTTPException
 from mcp.types import Tool
@@ -17,6 +16,7 @@ from openswe.encryption import decrypt_token
 from openswe.mcp import cards, managed, routes, runtime
 from openswe.mcp.transport import MCPCredentialMissing, MCPDiscoveryError
 from openswe.users.models import User
+from tests.conftest import serve_threads_from
 
 ORIGINAL_PAGES = managed.ManagedTools._pages
 ORIGINAL_CACHED = managed.ManagedTools._cached
@@ -106,13 +106,7 @@ def lmt(monkeypatch):
 
 def private_thread(monkeypatch, owner: str) -> dict[str, str]:
     metadata = {"visibility": "private", "owner_type": "user", "owner_login": owner}
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(get=AsyncMock(side_effect=lambda _: {"metadata": metadata}))
-        ),
-    )
+    serve_threads_from(monkeypatch, AsyncMock(side_effect=lambda _: {"metadata": metadata}))
     monkeypatch.setattr(
         "openswe.run_config.get_config",
         lambda: {"configurable": {"thread_id": "t", "github_login": owner}},

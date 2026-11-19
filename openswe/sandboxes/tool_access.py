@@ -34,7 +34,7 @@ def tools_base_url() -> str | None:
 
 async def sandbox_host_thread_id(thread_id: str) -> str:
     """The thread whose capability a shared sandbox carries: its creator, not a guest."""
-    thread = await read_thread(thread_id, get_client())
+    thread = await read_thread(thread_id)
     host = (thread.get("metadata") or {}).get(SANDBOX_HOST_THREAD_KEY)
     return host if isinstance(host, str) and host else thread_id
 

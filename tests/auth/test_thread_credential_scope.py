@@ -2,7 +2,6 @@ import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import langgraph_sdk
 import pytest
 
 from openswe import credential_scope
@@ -11,17 +10,13 @@ from openswe.dashboard import profiles
 from openswe.github import thread_token
 from openswe.github import token as auth
 from openswe.github.http import GitHubClient
+from tests.conftest import serve_threads_from
 
 
 @pytest.fixture
 def thread_metadata(monkeypatch):
     metadata = {"visibility": "public", "owner_type": "user", "owner_login": "alice"}
-    get_thread = AsyncMock(side_effect=lambda _id: {"metadata": metadata})
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(threads=SimpleNamespace(get=get_thread)),
-    )
+    serve_threads_from(monkeypatch, AsyncMock(side_effect=lambda _id: {"metadata": metadata}))
     return metadata
 
 
@@ -379,13 +374,7 @@ async def test_metadata_lookup_failure_cannot_use_personal_credentials(
     monkeypatch,
     credentials,
 ):
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(get=AsyncMock(side_effect=RuntimeError("store unavailable")))
-        ),
-    )
+    serve_threads_from(monkeypatch, AsyncMock(side_effect=RuntimeError("store unavailable")))
     with pytest.raises(RuntimeError, match="store unavailable"):
         await auth.resolve_github_token(config(), "thread-1")
     credentials.assert_not_awaited()

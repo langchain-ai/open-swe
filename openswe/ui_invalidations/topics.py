@@ -305,27 +305,21 @@ async def _readable_plugin_documents(session: Session, keys: set[str]) -> set[st
 
 async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
     # Thread summaries import this module.
+    from openswe.threads.store import THREADS
     from openswe.threads.summary import thread_is_readable
-    from openswe.utils.json_types import thread_metadata
-    from openswe.utils.thread_ops import langgraph_client
 
-    client = langgraph_client()
-    ordered = sorted(thread_ids)
-    threads = await asyncio.gather(
-        *(client.threads.get(thread_id) for thread_id in ordered), return_exceptions=True
-    )
-    readable: set[str] = set()
-    for thread_id, thread in zip(ordered, threads, strict=True):
-        if isinstance(thread, BaseException):
-            logger.warning(
-                "Could not read thread for queue invalidations",
-                exc_info=thread,
-                extra={"agent_thread_id": thread_id},
-            )
-            continue
-        if thread_is_readable(thread_metadata(thread), session.get("sub"), session.get("email")):
-            readable.add(thread_id)
-    return readable
+    if not thread_ids:
+        return set()
+    sub = session.get("sub")
+    email = session.get("email")
+    login = sub.strip() if isinstance(sub, str) and sub.strip() else None
+    viewer_email = email if isinstance(email, str) else None
+    threads = await THREADS.get_many(sorted(thread_ids))
+    return {
+        thread_id
+        for thread_id, thread in threads.items()
+        if thread_is_readable(thread.metadata, login, viewer_email)
+    }
 
 
 Topic.WORKSPACES = Topic("workspaces")

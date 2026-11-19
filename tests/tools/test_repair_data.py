@@ -8,6 +8,7 @@ from sqlalchemy.exc import DBAPIError
 
 from openswe.database import postgres
 from openswe.tools.repair_data import execute_database_sql, write_database_rows
+from tests.conftest import serve_threads_from
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -16,14 +17,10 @@ pytestmark = pytest.mark.usefixtures("registry_db")
 def admin_context(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
     monkeypatch.setenv("OPENSWE_ENV", "preview")
-    client = SimpleNamespace(
-        threads=SimpleNamespace(
-            get=AsyncMock(
-                return_value={"metadata": {"visibility": "private", "owner_type": "user"}}
-            )
-        )
+    serve_threads_from(
+        monkeypatch,
+        AsyncMock(return_value={"metadata": {"visibility": "private", "owner_type": "user"}}),
     )
-    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
     config = {
         "configurable": {
             "thread_id": "t-1",
@@ -52,14 +49,10 @@ async def test_access_gate_blocks_writes(admin_context, monkeypatch, change):
     if change == "nonadmin":
         admin_context["configurable"]["github_login"] = "other"
     else:
-        client = SimpleNamespace(
-            threads=SimpleNamespace(
-                get=AsyncMock(
-                    return_value={"metadata": {"visibility": "public", "owner_type": "user"}}
-                )
-            )
+        serve_threads_from(
+            monkeypatch,
+            AsyncMock(return_value={"metadata": {"visibility": "public", "owner_type": "user"}}),
         )
-        monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
     result = await write_database_rows("users", "insert", {"id": 1}, confirm=True)
     assert result["ok"] is False
     result = await execute_database_sql("DELETE FROM alembic_version", confirm=True)

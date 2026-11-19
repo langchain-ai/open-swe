@@ -587,7 +587,6 @@ async def slack_file_mention(monkeypatch, registry_db):
     client = slack_webhooks.get_langgraph_client()
     client.threads = Threads()
     monkeypatch.setattr(lifecycle, "client", client)
-    monkeypatch.setattr(state, "get_client", lambda: client)
     monkeypatch.setattr(staged_files, "get_client", lambda: client)
 
     monkeypatch.setattr(state.THREADS, "get", client.threads.indexed_get)
@@ -766,8 +765,6 @@ def test_slack_followup_publishes_as_the_owner(
 ) -> None:
     import importlib
 
-    import langgraph_sdk
-
     from openswe.dashboard import profiles
 
     opr = importlib.import_module("openswe.tools.open_pull_request")
@@ -776,7 +773,6 @@ def test_slack_followup_publishes_as_the_owner(
     client = slack_webhooks.get_langgraph_client()
     saved_metadata = {"visibility": "public", "owner_type": "user", "owner_login": "alice"}
     client.threads = _FakeThreadsClient(thread={"metadata": saved_metadata})
-    monkeypatch.setattr(langgraph_sdk, "get_client", lambda: client)
     monkeypatch.setattr(webhook_common, "thread_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(webhook_common.User, "login_for_slack", AsyncMock(return_value="bob"))
     monkeypatch.setattr(
@@ -818,6 +814,7 @@ def test_slack_followup_publishes_as_the_owner(
     assert run_config["configurable"]["slack_thread"]["team_id"] == "T123"
     run_config["configurable"]["thread_id"] = run_create["thread_id"]
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
+    monkeypatch.setattr(webhook_common.THREADS, "get", client.threads.indexed_get)
 
     assert asyncio.run(opr._resolve_pr_author_token()) == ("alice-token", "user")
     assert saved_metadata["owner_login"] == "alice"

@@ -10,10 +10,11 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
+from typing import cast
 
-import langgraph_sdk
-from langgraph_sdk.client import LangGraphClient
 from langgraph_sdk.schema import Thread
+
+from openswe.threads.store import THREADS
 
 _SHARED: ContextVar[dict[str, asyncio.Future[Thread]] | None] = ContextVar(
     "shared_thread_reads", default=None
@@ -26,7 +27,7 @@ async def shared_thread_reads() -> AsyncIterator[None]:
 
     Only lookups of fields the block does not itself write (ownership,
     visibility, participants) use it; anything that needs the live record keeps
-    reading through the client. A block inside another shares the outer one's reads.
+    reading through ``THREADS`` directly. A block inside another shares the outer one's reads.
     """
     if _SHARED.get() is not None:
         yield
@@ -38,14 +39,19 @@ async def shared_thread_reads() -> AsyncIterator[None]:
         _SHARED.reset(token)
 
 
-async def read_thread(thread_id: str, client: LangGraphClient | None = None) -> Thread:
-    client = client or langgraph_sdk.get_client()
+async def read_thread(thread_id: str) -> Thread:
+    async def fetch() -> Thread:
+        indexed = await THREADS.get(thread_id)
+        if indexed is None:
+            raise LookupError(f"Thread {thread_id} is not indexed")
+        return cast("Thread", indexed.as_langgraph())
+
     shared = _SHARED.get()
     if shared is None:
-        return await client.threads.get(thread_id)
+        return await fetch()
     read = shared.get(thread_id)
     if read is None:
-        read = shared[thread_id] = asyncio.ensure_future(client.threads.get(thread_id))
+        read = shared[thread_id] = asyncio.ensure_future(fetch())
     try:
         return await asyncio.shield(read)
     except Exception:

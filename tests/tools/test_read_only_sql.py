@@ -2,12 +2,12 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
 from importlib import import_module
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from openswe.tools import read_only_sql as query_tool
+from tests.conftest import serve_threads_from
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -21,14 +21,10 @@ def _config(**configurable: object) -> dict[str, dict[str, object]]:
 
 @pytest.fixture(autouse=True)
 def private_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = SimpleNamespace(
-        threads=SimpleNamespace(
-            get=AsyncMock(
-                return_value={"metadata": {"visibility": "private", "owner_type": "user"}}
-            )
-        )
+    serve_threads_from(
+        monkeypatch,
+        AsyncMock(return_value={"metadata": {"visibility": "private", "owner_type": "user"}}),
     )
-    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
 
 
 @pytest.mark.asyncio

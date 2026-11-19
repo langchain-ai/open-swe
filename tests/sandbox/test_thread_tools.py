@@ -13,6 +13,7 @@ from langchain_core.tools import StructuredTool
 from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.sandboxes import tool_access
 from openswe.sandboxes.tool_runtime import ToolSurface
+from tests.conftest import serve_threads_from
 
 TEST_SIGNING_KEY = "test-tools-signing-key-" * 3
 
@@ -87,6 +88,7 @@ async def test_capability_carries_binding_and_is_revoked_on_rebinding(
     client = MagicMock()
     client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
     monkeypatch.setattr(tool_access, "get_client", lambda: client)
+    serve_threads_from(monkeypatch, client.threads.get)
     issued = await tool_access.issue_tool_access("thread-a", "sandbox-a")
     assert issued is not None
     url, token = issued
@@ -135,9 +137,9 @@ async def test_proxy_refresh_preserves_tools_and_custom_rules(
     monkeypatch.setattr(langsmith.httpx2, "AsyncClient", MagicMock(return_value=client_context))
     patch_proxy = AsyncMock()
     monkeypatch.setattr(langsmith, "_patch_proxy_config", patch_proxy)
-    client = MagicMock()
-    client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
-    monkeypatch.setattr(tool_access, "get_client", lambda: client)
+    serve_threads_from(
+        monkeypatch, AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
+    )
     custom = {"name": "custom", "match_hosts": ["custom.example.test"]}
     await langsmith.configure_sandbox_proxy(
         "sandbox-a",

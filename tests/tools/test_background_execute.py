@@ -27,7 +27,7 @@ from openswe.tasks import service as task_service
 from openswe.tools import threads
 from openswe.tools.background_execute import TASK_ROOT, background_execute, current_backend
 from openswe.utils.background_task_state import update_background_task_state
-from tests.conftest import serve_runs_from
+from tests.conftest import serve_runs_from, serve_threads_from
 
 TOOLS_URL = "https://agent.example.test/dashboard/api/sandbox-tools"
 FAKE_CURL = """#!/usr/bin/env python3
@@ -191,7 +191,9 @@ async def _callback_client(monkeypatch: pytest.MonkeyPatch) -> tuple[httpx.Async
     client = MagicMock()
     client.threads.get = AsyncMock(return_value={"metadata": {"sandbox_id": "sandbox-a"}})
     monkeypatch.setattr(tool_access, "get_client", lambda: client)
-    issued = await tool_access.issue_tool_access("thread-a", "sandbox-a")
+    with monkeypatch.context() as issuing:
+        serve_threads_from(issuing, client.threads.get)
+        issued = await tool_access.issue_tool_access("thread-a", "sandbox-a")
     assert issued is not None
     app = FastAPI()
     app.include_router(tool_routes.router)

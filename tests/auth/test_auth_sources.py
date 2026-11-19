@@ -1,11 +1,10 @@
 import asyncio
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import langgraph_sdk
 import pytest
 
 from openswe.github import token as auth
+from tests.conftest import serve_threads_from
 
 
 def _slack_config(github_login: str | None = "mason-gh") -> dict:
@@ -38,16 +37,9 @@ def _stub_dashboard_store(
     async def fake_get_record(login: str):
         return {"token_expires_at": expires_at}
 
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(
-                get=AsyncMock(
-                    return_value={"metadata": {"visibility": "private", "owner_login": "mason-gh"}}
-                )
-            )
-        ),
+    serve_threads_from(
+        monkeypatch,
+        AsyncMock(return_value={"metadata": {"visibility": "private", "owner_login": "mason-gh"}}),
     )
     monkeypatch.setattr(profiles, "get_valid_access_token", fake_get_valid)
     monkeypatch.setattr(profiles, "get_oauth_token_record", fake_get_record)
@@ -157,13 +149,7 @@ def test_resolve_github_token_public_source_uses_bot(
 
     monkeypatch.setattr(auth, "_resolve_bot_installation_token", fake_bot)
 
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": {}}))
-        ),
-    )
+    serve_threads_from(monkeypatch, AsyncMock(return_value={"metadata": {}}))
     config = {"configurable": {"source": source, "github_login": "octo", "thread_id": "t1"}}
     token, _ = asyncio.run(auth.resolve_github_token(config, "t1"))
     assert token == "bot-tok"

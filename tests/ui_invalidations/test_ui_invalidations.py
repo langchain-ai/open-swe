@@ -101,20 +101,59 @@ async def test_a_reconnecting_reader_is_told_only_what_committed_within_its_wind
 
 
 async def test_only_readers_of_a_private_thread_hear_its_queue(
-    monkeypatch: pytest.MonkeyPatch,
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    private = {"source": "dashboard", "visibility": "private", "owner_login": "alice"}
-    threads = {"t-private": private, "t-shared": {"source": "dashboard"}}
+    from openswe.threads import index, runtimes
 
-    async def get(thread_id: str) -> dict[str, object]:
-        return {"thread_id": thread_id, "metadata": threads[thread_id]}
+    class _NoLegacy:
+        async def indexed(self, thread_id: str) -> None:
+            return None
 
-    client = SimpleNamespace(threads=SimpleNamespace(get=get))
-    monkeypatch.setattr("openswe.utils.thread_ops.langgraph_client", lambda: client)
-    topics = [Topic.THREAD_QUEUES.keyed(thread_id) for thread_id in threads]
+    monkeypatch.setattr(runtimes.Runtimes, "local", property(lambda _: _NoLegacy()))
+    monkeypatch.setattr(
+        "openswe.utils.thread_ops.langgraph_client",
+        lambda: (_ for _ in ()).throw(AssertionError("must not call HTTP thread client")),
+    )
 
-    assert await Topic.audible({"sub": "alice"}, topics) == set(topics)
+    await index.create(
+        "t-private",
+        runtime="mda",
+        metadata={"source": "dashboard", "visibility": "private", "owner_login": "alice"},
+    )
+    await index.create(
+        "t-shared",
+        runtime="mda",
+        metadata={"source": "dashboard", "visibility": "public", "owner_login": "alice"},
+    )
+    await index.create(
+        "t-review-alice",
+        runtime="mda",
+        metadata={
+            "source": "review_chat",
+            "github_login": "alice",
+            "repo_owner": "acme",
+            "repo_name": "app",
+            "pr_number": 7,
+        },
+    )
+    await index.create(
+        "t-incident",
+        runtime="mda",
+        metadata={"source": "incidents_agent", "visibility": "public", "owner_type": "system"},
+    )
+
+    all_ids = ("t-private", "t-shared", "t-review-alice", "t-incident", "t-missing")
+    topics = [Topic.THREAD_QUEUES.keyed(thread_id) for thread_id in all_ids]
+
+    assert await Topic.audible({"sub": "alice"}, topics) == {
+        "thread-queues/t-private",
+        "thread-queues/t-shared",
+        "thread-queues/t-review-alice",
+    }
     assert await Topic.audible({"sub": "bob"}, topics) == {"thread-queues/t-shared"}
+    # An unlinked LangSmith session cannot read public GitHub-workspace dashboard threads.
+    unlinked = f"user:{uuid7()}"
+    assert await Topic.audible({"sub": unlinked, "provider": "langsmith"}, topics) == set()
 
 
 @pytest.mark.parametrize("visibility", ["private", "public"])

@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from typing import Literal, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import langgraph_sdk
 import pytest
 from langgraph.graph.state import RunnableConfig
 
@@ -18,6 +17,9 @@ from openswe.schedules.policy import AutomationPolicy
 from openswe.server import PrepareAgentRunMiddleware, _registered_tool_name, agent_catalog
 from openswe.threads import index
 from openswe.threads.inbox import ThreadInbox
+from openswe.threads.index import IndexedThread
+from openswe.utils import thread_reads
+from tests.conftest import ThreadStoreOverClient
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -33,13 +35,11 @@ _MODEL_DEFAULTS = {
 @pytest.fixture(autouse=True)
 def saved_thread_scope(monkeypatch):
     metadata = {"visibility": "private", "owner_login": "octocat"}
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(get=AsyncMock(side_effect=lambda _id: {"metadata": metadata}))
-        ),
-    )
+
+    async def scope(thread_id: str) -> IndexedThread:
+        return ThreadStoreOverClient.indexed(thread_id, {"metadata": metadata})
+
+    monkeypatch.setattr(thread_reads, "THREADS", SimpleNamespace(get=scope))
     return metadata
 
 

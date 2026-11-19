@@ -29,11 +29,18 @@ async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
         effort="high",
         cancelled=True,
     )
-    client = MagicMock()
-    client.threads.get = AsyncMock(
-        return_value={"metadata": {"owner_type": "user", "owner_login": "owner"}}
+    monkeypatch.setattr(
+        thread_reads.THREADS,
+        "get",
+        AsyncMock(
+            return_value=MagicMock(
+                as_langgraph=lambda: {
+                    "thread_id": "worker",
+                    "metadata": {"owner_type": "user", "owner_login": "owner"},
+                }
+            )
+        ),
     )
-    monkeypatch.setattr(thread_reads.langgraph_sdk, "get_client", lambda: client)
     monkeypatch.setattr(
         task_coordination.TaskMembership, "context_for_thread", AsyncMock(return_value=context)
     )

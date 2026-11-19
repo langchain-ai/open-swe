@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
@@ -12,6 +11,7 @@ from openswe.tools import workspaces as env_tools
 from openswe.users import User
 from openswe.utils.authorship import CollaboratorIdentity
 from openswe.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate, WorkspaceRoutingUpdate
+from tests.conftest import serve_threads_from
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -25,14 +25,10 @@ def _config(**configurable: object) -> RunnableConfig:
 
 @pytest.fixture(autouse=True)
 def private_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = SimpleNamespace(
-        threads=SimpleNamespace(
-            get=AsyncMock(
-                return_value={"metadata": {"visibility": "private", "owner_type": "user"}}
-            )
-        )
+    serve_threads_from(
+        monkeypatch,
+        AsyncMock(return_value={"metadata": {"visibility": "private", "owner_type": "user"}}),
     )
-    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
 
 
 # --- snapshot precedence ---
@@ -103,9 +99,14 @@ async def test_snapshot_reads_need_a_private_admin_surface(
 ) -> None:
     """Logs and audit history stay out of shared threads; writes still reach the store."""
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    shared = {"metadata": {"visibility": "public", "owner_type": "user", "admin_thread": True}}
-    client = SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value=shared)))
-    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: client)
+    serve_threads_from(
+        monkeypatch,
+        AsyncMock(
+            return_value={
+                "metadata": {"visibility": "public", "owner_type": "user", "admin_thread": True}
+            }
+        ),
+    )
     get = AsyncMock(return_value=_READY)
     with (
         patch(

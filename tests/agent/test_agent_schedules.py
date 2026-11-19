@@ -37,8 +37,10 @@ from openswe.schedules.store import (
 )
 from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
 from openswe.threads import router
+from openswe.threads.index import IndexedThread
 from openswe.users import User
 from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
+from tests.conftest import ThreadStoreOverClient
 from tests.mda_helpers import stub_mda_runtime
 
 
@@ -171,10 +173,10 @@ def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
     monkeypatch.setattr(schedules, "langgraph_client", lambda: client)
     monkeypatch.setattr(schedules, "queue", client.jobs)
 
-    async def indexed(thread_id: str) -> SimpleNamespace | None:
+    async def indexed(thread_id: str) -> IndexedThread | None:
         if thread_id not in client.threads.ids:
             return None
-        return SimpleNamespace(metadata=(await client.threads.get(thread_id))["metadata"])
+        return ThreadStoreOverClient.indexed(thread_id, await client.threads.get(thread_id))
 
     monkeypatch.setattr(schedules.THREADS, "get", indexed)
     return client
@@ -1441,7 +1443,6 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     await schedules.launch_scheduled_agent_run(record["id"])
     run_config = fake_client.runs.created[0]["config"]
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
-    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: fake_client)
 
     assert await server._admin_thread(run_config, None) is True
     assert RunConfig.from_config(run_config).github_login is None
@@ -1523,7 +1524,6 @@ async def test_a_personal_automation_is_an_admin_thread_only_for_an_admin_creato
     await schedules.launch_scheduled_agent_run(ADMIN_SCHEDULE)
     run_config = fake_client.runs.created[0]["config"]
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
-    monkeypatch.setattr("openswe.utils.thread_reads.langgraph_sdk.get_client", lambda: fake_client)
 
     # It runs as its creator on their private thread, with admin access only if they have it.
     assert RunConfig.from_config(run_config).github_login == creator

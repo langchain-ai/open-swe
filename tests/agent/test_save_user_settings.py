@@ -1,17 +1,15 @@
 from collections.abc import Callable
 from copy import deepcopy
 from importlib import import_module
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-import langgraph_sdk
 import pytest
 
 from openswe.dashboard.personal_settings import SettingValue, patch_personal_settings
 from openswe.dashboard.user_preferences import USER_PREFERENCES
 from openswe.tools.read_user_settings import read_user_settings
 from openswe.tools.save_user_settings import save_user_settings
-from tests.conftest import FakeUserRecords
+from tests.conftest import FakeUserRecords, serve_threads_from
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -42,13 +40,7 @@ def saved_scope(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         "owner_login": "alice",
         "participant_logins": ["alice", "bob"],
     }
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(get=AsyncMock(side_effect=lambda _id: {"metadata": metadata}))
-        ),
-    )
+    serve_threads_from(monkeypatch, AsyncMock(side_effect=lambda _id: {"metadata": metadata}))
     return metadata
 
 
@@ -165,11 +157,7 @@ async def test_unauthorized_calls_never_read_or_write_settings(
 async def test_unavailable_thread_scope_fails_closed(
     monkeypatch: pytest.MonkeyPatch, requester: dict[str, object]
 ) -> None:
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(side_effect=TimeoutError))),
-    )
+    serve_threads_from(monkeypatch, AsyncMock(side_effect=TimeoutError))
     with patch(
         "openswe.tools.save_user_settings.patch_personal_settings", new_callable=AsyncMock
     ) as save:

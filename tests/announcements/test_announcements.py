@@ -14,6 +14,7 @@ from openswe.jobs import queue
 from openswe.slack.http import SlackRequestError
 from openswe.tools.send_announcement import send_announcement
 from openswe.users.models import User, UserIdentity
+from tests.conftest import serve_threads_from
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -151,12 +152,9 @@ async def test_only_admins_announce_and_a_test_reaches_only_the_admin(
 async def test_the_tool_previews_until_the_admin_confirms(
     admin: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    threads = SimpleNamespace(
-        get=AsyncMock(return_value={"metadata": {"visibility": "private", "owner_type": "user"}})
-    )
-    monkeypatch.setattr(
-        "openswe.utils.thread_reads.langgraph_sdk.get_client",
-        lambda: SimpleNamespace(threads=threads),
+    serve_threads_from(
+        monkeypatch,
+        AsyncMock(return_value={"metadata": {"visibility": "private", "owner_type": "user"}}),
     )
     config = {
         "configurable": {

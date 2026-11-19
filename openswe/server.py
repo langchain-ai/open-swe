@@ -424,7 +424,7 @@ async def _resolve_repo_custom_instructions(
 async def _thread_participant_identities(thread_id: str) -> list[CollaboratorIdentity]:
     """Git identities of everyone who has posted in this thread."""
     try:
-        thread = await read_thread(thread_id, client)
+        thread = await read_thread(thread_id)
         logins = participant_logins(thread_metadata(thread).get(PARTICIPANT_LOGINS_KEY))
         return await resolve_participant_identities(
             login for login in logins if not login.startswith("user:")
@@ -941,7 +941,7 @@ async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
     if not thread_id:
         return None
     try:
-        thread = await read_thread(thread_id, client)
+        thread = await read_thread(thread_id)
     except Exception:
         logger.warning(
             "Could not read the thread's sandbox; treating it as hosted",

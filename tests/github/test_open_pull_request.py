@@ -1,16 +1,15 @@
 import asyncio
 import sys
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
-import langgraph_sdk
 import pytest
 from runtime_api.operations import PullRequestHead
 
 import openswe.tools.open_pull_request  # noqa: F401
 from openswe.agent_api.git_metadata import collect_pr_targets
+from tests.conftest import serve_threads_from
 
 opr = sys.modules["openswe.tools.open_pull_request"]
 
@@ -121,13 +120,7 @@ def _set_config(
             else {"visibility": "private", "owner_login": configurable.get("github_login")}
         )
     )
-    monkeypatch.setattr(
-        langgraph_sdk,
-        "get_client",
-        lambda: SimpleNamespace(
-            threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": metadata}))
-        ),
-    )
+    serve_threads_from(monkeypatch, AsyncMock(return_value={"metadata": metadata}))
     monkeypatch.setattr("openswe.run_config.get_config", lambda: {"configurable": configurable})
     monkeypatch.setattr(opr, "get_config", lambda: {"configurable": configurable}, raising=False)
 
