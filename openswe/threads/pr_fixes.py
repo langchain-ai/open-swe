@@ -7,7 +7,6 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, ClassVar, Literal
 
 from fastapi import HTTPException
-from langgraph_sdk.schema import Thread
 from pydantic import AliasGenerator, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
@@ -19,12 +18,13 @@ from openswe.input_messages import SystemIdentity, build_run_input
 from openswe.prompts import prompt
 from openswe.review.findings import Finding, ReviewerThreadMissingError, list_findings
 from openswe.thread_ids import reviewer_thread_id
-from openswe.threads import index
 from openswe.threads.access import _ensure_dashboard_github_token
+from openswe.threads.index import IndexedThread
 from openswe.threads.runs import (
     _build_dashboard_configurable,
     create_dashboard_thread_record,
 )
+from openswe.threads.store import THREADS
 from openswe.threads.summary import _assert_thread_postable
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_ops import langgraph_client
@@ -298,23 +298,21 @@ async def _pr_thread_ids(owner: str, repo: str, number: int) -> list[str]:
 
 async def find_pr_threads(
     owner: str, repo: str, number: int, login: str, email: str | None, *, unlisted: bool = False
-) -> list[Thread]:
+) -> list[IndexedThread]:
     """The PR's threads ``login`` may post to, its primary thread first.
 
     The primary thread is the conversation that opened the PR, so every PR action
     continues it; a thread linked later, such as one a GitHub comment started,
     comes first only when the caller can't post to the primary.
     """
-    client = langgraph_client()
-    candidates: dict[str, Thread] = {}
+    candidates: dict[str, IndexedThread] = {}
     for thread_id in await _pr_thread_ids(owner, repo, number):
         if thread_id in candidates:
             continue
-        try:
-            thread = await client.threads.get(thread_id)
-        except Exception:  # noqa: BLE001
+        thread = await THREADS.get(thread_id)
+        if thread is None:
             continue
-        metadata = thread_metadata(thread)
+        metadata = thread.metadata
         if metadata.get("kind") or metadata.get("graph_id") not in (None, "agent"):
             continue
         if (metadata.get("unlisted") is True) is not unlisted:
@@ -355,10 +353,10 @@ async def _find_or_create_pr_thread(
     candidates = [
         thread
         for thread in await find_pr_threads(owner, repo, number, login, email, unlisted=unlisted)
-        if await index.live_thread_id(thread["thread_id"]) == thread["thread_id"]
+        if thread.runtime != "local"
     ]
     if candidates:
-        return candidates[0]["thread_id"]
+        return candidates[0].thread_id
     thread = await create_dashboard_thread_record(
         str(uuid.uuid4()),
         login=login,
@@ -410,9 +408,7 @@ async def pull_request_thread_running(
         raise HTTPException(422, "invalid pull request")
     await require_repo_access_for_user(login, f"{owner}/{repo}")
     threads = await find_pr_threads(owner, repo, number, login, email)
-    return PullRequestThreadStatus(
-        running=any(thread.get("status") == "busy" for thread in threads)
-    )
+    return PullRequestThreadStatus(running=any(thread.status == "busy" for thread in threads))
 
 
 async def start_pull_request_thread(
