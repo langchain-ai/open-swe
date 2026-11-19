@@ -250,6 +250,13 @@ const THREAD_STATE_SELECT = [
   "values.messages",
 ]
 
+/**
+ * The fields the thread stream's lookups for a running run select. A read
+ * started early is handed over only when its URL equals the stream's, so these
+ * stay the SDK's fields in the SDK's order.
+ */
+const RUNNING_RUN_SELECT = ["run_id", "kwargs"]
+
 /** Stands for the thread's id in {@link THREAD_READS}. */
 const THREAD_ID = "{threadId}"
 
@@ -262,11 +269,12 @@ const THREAD_READS = {
    * The stream's first lookup for a running run, which it sends with the state
    * read and joins once both have answered.
    */
-  runningRun: `/threads/${THREAD_ID}/runs?${new URLSearchParams({
-    limit: "1",
-    offset: "0",
-    status: "running",
-  })}`,
+  runningRun: `/threads/${THREAD_ID}/runs?${new URLSearchParams([
+    ["limit", "1"],
+    ["offset", "0"],
+    ["status", "running"],
+    ...RUNNING_RUN_SELECT.map((field) => ["select", field]),
+  ])}`,
   /** What `fetchTranscript` requests: the transcript view's whole thread. */
   transcript: `/threads/${THREAD_ID}/transcript`,
   /** What `agentsApi.getThread` requests. The thread page waits on it to show the thread. */
