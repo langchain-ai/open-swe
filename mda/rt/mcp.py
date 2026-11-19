@@ -3,7 +3,9 @@
 The backend serves its MCP servers' tools as operations, with credentials it keeps.
 A server whose credential is an MDA connection (``McpServerSpec``) it cannot reach,
 so the run connects to it here: once per run it lists the server's tools, keeping
-those the catalog allows under the names the backend gives them. Each call reads the
+those the catalog allows under the names the backend gives them. A server that does
+not accept a connection within ``_CONNECT_TIMEOUT_SECONDS`` is left out, so it cannot
+hold up the start of every run for the full ``_TIMEOUT_SECONDS``. Each call reads the
 credential again (``managed_deepagents.connections``), as the deployment or as the
 person the run acts for, and sends it only to the server's own HTTPS origin, at a
 public address, as the backend reaches its own.
@@ -44,6 +46,7 @@ from rt.tools import _content, called
 logger = logging.getLogger(__name__)
 
 _TIMEOUT_SECONDS: Final = 30
+_CONNECT_TIMEOUT_SECONDS: Final = 2
 # The argument each tool's call gets its ToolRuntime in, which no server tool may take.
 _RUNTIME: Final = "runtime"
 
@@ -60,10 +63,21 @@ def _http_client(
     follow_redirects: bool = False,  # noqa: ARG001
 ) -> httpx2.AsyncClient:
     """The MCP client's HTTP client; FastMCP asks for redirects, but every request stays on
-    the server's origin."""
+    the server's origin.
+
+    Whatever bounds the MCP client asks for, connecting gets ``_CONNECT_TIMEOUT_SECONDS``:
+    a server that answers takes far less, and one that never accepts the connection
+    would otherwise hold the run for as long as a slow tool may take to answer.
+    """
+    bounds = timeout or httpx2.Timeout(_TIMEOUT_SECONDS)
     return httpx2.AsyncClient(
         headers=headers,
-        timeout=timeout or httpx2.Timeout(_TIMEOUT_SECONDS),
+        timeout=httpx2.Timeout(
+            connect=_CONNECT_TIMEOUT_SECONDS,
+            read=bounds.read,
+            write=bounds.write,
+            pool=bounds.pool,
+        ),
         auth=auth,
         transport=PublicOrigin(url, name="MCP server", error=McpServerError),
         follow_redirects=False,
@@ -142,7 +156,11 @@ class McpServer:
             # What the request raised can quote what it carried, the credential included.
             logger.warning(
                 "Leaving out an MCP server that did not list its tools",
-                extra={"mcp_name": self.spec.name, "error_type": type(exc).__name__},
+                extra={
+                    "mcp_name": self.spec.name,
+                    "error_type": type(exc).__name__,
+                    "cause_type": self._cause(exc),
+                },
             )
             return []
         allowed: list[Tool] = []
@@ -157,6 +175,16 @@ class McpServer:
                 continue
             allowed.append(tool)
         return allowed
+
+    @staticmethod
+    def _cause(error: BaseException) -> str | None:
+        """The type of what ``error`` was raised over, such as the ``ConnectTimeout`` the MCP
+        client reports as a timed-out request; its type alone, since its text can quote what
+        the request carried."""
+        cause = error.__cause__ or error.__context__
+        while isinstance(cause, BaseExceptionGroup) and cause.exceptions:
+            cause = cause.exceptions[0]
+        return None if cause is None else type(cause).__name__
 
     def unavailable(self, error: Exception) -> str:
         """Why the server's connection gave no credential, naming no secret."""
