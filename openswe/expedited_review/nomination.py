@@ -5,6 +5,7 @@ import hashlib
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from uuid import UUID
 
 from openswe.audit_logs.context import current_audit_log
@@ -28,6 +29,7 @@ from openswe.github.comments import derive_pr_state
 from openswe.github.http import GitHubClient, RepoFileUnreadableError, or_none
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoSettings
+from openswe.human_review.deadlines import BROADCAST_STEP, schedule
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.requests import ChannelChoice, HumanReviewRequest
 from openswe.human_review.standard import Origin
@@ -466,10 +468,15 @@ class ExpeditedReviewNomination:
         except BaseException:
             await self.rollback(approval, displaced)
             raise
-        with apm_span("expedited_review.broadcast", span_tags):
-            await card.broadcast_configured()
-        with apm_span("expedited_review.remove_superseded", span_tags):
-            await card.remove_superseded()
+        # Copying the card to the review channel and clearing older ones read GitHub and
+        # Slack again, for seconds; whoever asked for the review waits on neither.
+        with apm_span("expedited_review.schedule_broadcast", span_tags):
+            scheduled = await schedule(card.request, BROADCAST_STEP, timedelta(0))
+        if not scheduled:
+            with apm_span("expedited_review.broadcast", span_tags):
+                await card.broadcast_configured()
+            with apm_span("expedited_review.remove_superseded", span_tags):
+                await card.remove_superseded()
         with apm_span("expedited_review.prompt_author_ready", span_tags):
             readiness_warning = await card.prompt_author_ready()
         with apm_span("expedited_review.log_nomination", span_tags):

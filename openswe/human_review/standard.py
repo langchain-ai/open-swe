@@ -48,7 +48,7 @@ from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoFileUnreadableError, RepoSettings
 from openswe.human_review.card import accept_button, decline_button, mention, snooze_button
 from openswe.human_review.coverage import Area, Coverage
-from openswe.human_review.deadlines import PUBLISH_STEP
+from openswe.human_review.deadlines import BROADCAST_STEP, PUBLISH_STEP
 from openswe.human_review.deadlines import schedule as _schedule
 from openswe.human_review.lifecycle import ReviewCard, ReviewPicks
 from openswe.human_review.merging import merge_pull_request
@@ -1839,4 +1839,9 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         if dm and not await card.refresh_author_dm(None):
             raise RuntimeError("Could not update the author's confirmation DM")
         return {"status": "published"}
+    if step == BROADCAST_STEP:
+        card = ReviewCard(request)
+        await card.broadcast_configured()
+        await card.remove_superseded()
+        return {"status": "broadcast"}
     return {"status": "unknown_step"}

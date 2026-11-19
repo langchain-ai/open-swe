@@ -18,7 +18,7 @@ from openswe.github import http as github_http
 from openswe.github.http import RepoClient
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.human_review import lifecycle, standard
-from openswe.human_review.deadlines import PUBLISH_STEP
+from openswe.human_review.deadlines import BROADCAST_STEP, PUBLISH_STEP, schedule
 from openswe.human_review.lifecycle import ReviewCard
 from openswe.human_review.people import Outcome
 from openswe.human_review.requests import HumanReviewParticipant, HumanReviewRequest
@@ -324,6 +324,25 @@ async def test_github_readiness_does_not_authorize_posting_its_card(
         assert not (await _stored(approval)).awaiting_ready
         ReviewCard.refresh.assert_awaited_once()
     assert harness.marked_ready == ([token] if (draft or not app_available) and token else [])
+
+
+async def test_a_posted_cards_broadcast_runs_once_after_the_request_answers(
+    open_approval: OpenApproval, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Copying the card on and clearing older ones runs from the queue, once per card."""
+    approval = await open_approval()
+    broadcast, cleanup = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(ReviewCard, "broadcast_configured", broadcast)
+    monkeypatch.setattr(ReviewCard, "remove_superseded", cleanup)
+
+    assert await schedule(approval, BROADCAST_STEP, timedelta(0))
+    assert await schedule(approval, BROADCAST_STEP, timedelta(0))
+
+    assert len(await queue.find({"request_id": str(approval.id), "step": BROADCAST_STEP})) == 1
+    broadcast.assert_not_awaited()
+    assert await standard.run_deadline(str(approval.id), BROADCAST_STEP) == {"status": "broadcast"}
+    broadcast.assert_awaited_once()
+    cleanup.assert_awaited_once()
 
 
 @pytest.mark.parametrize("failed_posts", [0, 2])
