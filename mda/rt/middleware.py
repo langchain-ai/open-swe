@@ -69,7 +69,7 @@ from langgraph.types import Command
 from langgraph_sdk.errors import APIConnectionError, APIStatusError
 from langsmith import trace
 from pydantic import BaseModel, JsonValue, TypeAdapter
-from runtime_api.catalog import JOINED_TASK_CONTEXT, InboxSpec
+from runtime_api.catalog import JOINED_TASK_CONTEXT, InboxSpec, ModelSpec
 from runtime_api.endpoint import call
 from runtime_api.loop import (
     INBOX,
@@ -552,10 +552,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             return self._carrying(state, await self._offload(state, runtime))
         return self._carrying(state, await self._before_model(state))
 
-    async def _offload(self, state: RunState, runtime: Runtime) -> dict[str, object]:
-        """Summarize the conversation now, as the run was asked to, and end the run."""
-        # Where MDA's own summarization keeps the history: the sandbox, or else the run's
-        # artifacts root on the backend, never the root of a person's machine.
+    def history_files(self, runtime: Runtime) -> BackendProtocol:
+        """Where summarization keeps the conversation it hides: the sandbox, or else the
+        run's artifacts root on the backend, never the root of a person's machine."""
         files = (
             getattr(runtime, "backend", None)
             if self._in_sandbox
@@ -564,9 +563,13 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             )
         )
         if not isinstance(files, BackendProtocol):
-            raise BackendCallError("The run has no files to offload the conversation to")
+            raise BackendCallError("The run has no files to keep the conversation in")
+        return files
+
+    async def _offload(self, state: RunState, runtime: Runtime) -> dict[str, object]:
+        """Summarize the conversation now, as the run was asked to, and end the run."""
         update, outcome = await RequestedOffload(
-            self._models.get(self._backend.run), files
+            self._models.get(self._backend.run), self.history_files(runtime)
         ).offload(state, runtime)
         return {
             **update,
@@ -683,6 +686,27 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             self._replies.report(request, response)
         return response
 
+    def call_model(self, request: ModelRequest) -> BaseChatModel | None:
+        """The model ``request`` goes to before any fallback: the one the run's loop planned
+        for it, or else the run's own; None for a run without models."""
+        planned = self._planned(request)
+        model = None if planned is None else self._planned_model(planned, request)
+        return self._own_model() if model is None else build_model(model)
+
+    @staticmethod
+    def _planned(request: ModelRequest) -> ModelCall | None:
+        """What the run's loop planned for this call; None for a call it planned nothing for."""
+        raw = request.state.get("open_swe_call")
+        return ModelCall.model_validate(raw) if isinstance(raw, Mapping) else None
+
+    @staticmethod
+    def _planned_model(planned: ModelCall, request: ModelRequest) -> ModelSpec | None:
+        """The model ``planned`` sends ``request`` to: its vision model once the
+        conversation holds an image; None leaves the run's own."""
+        return (
+            planned.vision if planned.vision is not None and _has_image(request) else planned.model
+        )
+
     async def _call_planned(
         self,
         request: ModelRequest,
@@ -696,13 +720,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             models = self._backend.run.catalog.models
             if models is not None:
                 trace.record_model(models.model.model_id)
-        raw = request.state.get("open_swe_call")
-        if not isinstance(raw, Mapping):
+        planned = self._planned(request)
+        if planned is None:
             return await handler(request)
-        planned = ModelCall.model_validate(raw)
-        model = (
-            planned.vision if planned.vision is not None and _has_image(request) else planned.model
-        )
+        model = self._planned_model(planned, request)
         if model is not None:
             request = request.override(model=build_model(model))
             trace.record_model(model.model_id)

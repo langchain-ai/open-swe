@@ -79,6 +79,7 @@ from rt.run_tools import (
 )
 from rt.skills import RunSkillsMiddleware, SkillFiles
 from rt.slack_move import SlackMoveMiddleware
+from rt.summarization import RunSummarizationMiddleware
 from rt.task_retry import task_retry
 from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY, RootAgentTraceMiddleware
@@ -140,8 +141,9 @@ class GraphInputs(BaseModel):
     # Where the Agent Server reports a launched worker's run ending.
     worker_webhook: str | None = None
     # The models the agent and its subagent are built with. What deepagents does with
-    # the graph's own model, such as summarizing a long conversation, then uses the
-    # run's model and credentials; routing may still send a call to another model.
+    # the graph's own model then uses the run's model and credentials; routing may
+    # still send a call to another model, which the agent's summarization is sized for
+    # (``rt.summarization``).
     model: ModelSpec | None = None
     subagent_model: ModelSpec | None = None
 
@@ -235,6 +237,12 @@ def _parts(graph: Graph) -> _Parts:
     backend_tools = BackendTools(backend)
     skills = RunSkillsMiddleware(backend, skill_files)
     managed_sandbox = ManagedSandboxMiddleware(backend)
+    backend_run = BackendRunMiddleware(
+        backend,
+        opened_sandbox,
+        booted_sandbox,
+        read_ahead=[skill_files.list_ahead, RUN_GATEWAY.read_ahead],
+    )
     # The backend's transcript and usage see every reply and every tool call.
     reports: list[AgentMiddleware] = [
         ReportRepliesMiddleware(backend),
@@ -266,12 +274,9 @@ def _parts(graph: Graph) -> _Parts:
     middleware = cast(
         list[AgentMiddleware],
         [
-            BackendRunMiddleware(
-                backend,
-                opened_sandbox,
-                booted_sandbox,
-                read_ahead=[skill_files.list_ahead, RUN_GATEWAY.read_ahead],
-            ),
+            backend_run,
+            # Takes the place of deepagents' own, sized for the model the run plans for each call.
+            RunSummarizationMiddleware(backend_run),
             managed_sandbox,
             AutomationBudgetMiddleware(backend),
             *reports,
