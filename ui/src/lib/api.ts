@@ -493,6 +493,8 @@ export interface ManagedServer {
   has_credential: boolean
   /** The caller registered it for themselves alone. */
   personal: boolean
+  icon_url?: string | null
+  icon_dark_url?: string | null
 }
 
 /** A service someone can connect: an OAuth consent page or an API key page. */

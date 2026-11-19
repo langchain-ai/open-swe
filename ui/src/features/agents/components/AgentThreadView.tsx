@@ -48,6 +48,7 @@ import {
   writeStoredPanelCollapsed,
 } from "@/features/agents/lib/gitPanelPreferences"
 import { Messages } from "@/features/agents/components/messages"
+import { resolveContextModel } from "@/features/agents/lib/contextUsage"
 import type {
   LoadEarlier,
   MessagesScrollControl,
@@ -273,9 +274,6 @@ export function AgentThreadView({
   }
   const scrollControlRef = useRef<MessagesScrollControl | null>(null)
   const routed = source.routed
-  const activeModel = models.find(
-    (model) => model.id === activeSelection?.modelId
-  )
   const login = session.data?.login
   const displayName = session.data?.display_name || undefined
   // A message sent from here keeps the label it showed while pending until the
@@ -671,6 +669,12 @@ export function AgentThreadView({
     [submitMessage, thread.id]
   )
   const contextUsage = source.contextUsage
+  const usageModel = resolveContextModel(
+    models,
+    contextUsage?.model,
+    routed?.modelId,
+    thread.model
+  )
 
   // Own the git panel's collapsed state so file links can reveal the panel.
   const [panelCollapsed, setPanelCollapsed] = useState(() =>
@@ -1146,8 +1150,8 @@ export function AgentThreadView({
                   })}
                 contextUsage={{
                   usedTokens: contextUsage?.tokens,
-                  contextWindow: activeModel?.context_window ?? null,
-                  model: contextUsage?.model,
+                  contextWindow: usageModel?.context_window,
+                  model: usageModel?.label ?? contextUsage?.model,
                   costUsd: thread.costUsd,
                 }}
               />

@@ -1168,16 +1168,8 @@ export const ChatComposer = memo(function ChatComposer({
         />
 
         <ChatComposerToolbar
-          actions={
-            <>
-              <ContextWindowMeter {...contextUsage} />
-              <ComposerPrimaryAction run={run} />
-            </>
-          }
-        >
-          <ChatComposerAttachmentMenu disabled={disabled} />
-          <div className="flex min-w-0 flex-wrap items-center gap-space-1">
-            {modelSelectionEnabled && models.length > 0 && (
+          modelSelector={
+            modelSelectionEnabled && models.length > 0 ? (
               <ModelPicker
                 disabled={disabled}
                 models={models}
@@ -1187,10 +1179,17 @@ export const ChatComposer = memo(function ChatComposer({
                 requireImageSupport={imageCount > 0}
                 routed={routed}
                 selection={selection}
-                triggerClassName="h-7 max-w-full rounded-md px-space-2 text-xs/relaxed text-tertiary hover:bg-surface-level-2 hover:text-primary"
               />
-            )}
-          </div>
+            ) : null
+          }
+          actions={
+            <>
+              <ContextWindowMeter {...contextUsage} />
+              <ComposerPrimaryAction run={run} />
+            </>
+          }
+        >
+          <ChatComposerAttachmentMenu disabled={disabled} />
         </ChatComposerToolbar>
       </MacawChatComposer>
 

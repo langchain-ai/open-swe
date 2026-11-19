@@ -148,7 +148,7 @@ it("labels the shared date range and changes it independently of usage scope", a
   ).toBe(false)
   fireEvent.click(range)
   const option = await screen.findByRole("option", { name: "Last 24h" })
-  fireEvent.keyDown(option, { key: "Enter" })
+  fireEvent.click(option)
   expect(onPeriodChange).toHaveBeenCalledWith("24h")
   fireEvent.click(screen.getByRole("button", { name: "threads" }))
   expect(onPeriodChange).toHaveBeenCalledTimes(1)

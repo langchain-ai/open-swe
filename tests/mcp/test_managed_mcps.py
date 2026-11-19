@@ -846,6 +846,21 @@ async def test_connect_links_come_from_lmt_for_the_kits_oauth_and_secret_service
     assert [server.name for server in await tools.unconnected()] == ["Notion", "Exa", "Sentry"]
 
 
+async def test_personal_tools_view_preserves_optional_lmt_icons(lmt):
+    icon_url = "https://smith.example.com/logos/linear.svg"
+    icon_dark_url = "https://smith.example.com/logos/linear-dark.svg"
+    linear, notion, exa, *_ = lmt.servers["alice"]
+    linear.update(icon_url=icon_url, icon_dark_url=icon_dark_url)
+    exa.update(icon_url={"unexpected": True})
+
+    view = await routes.api_my_managed_tools({"sub": "alice"})
+    by_id = {item["id"]: item for item in view.model_dump()["servers"]}
+    assert by_id[LINEAR_ID]["icon_url"] == icon_url
+    assert by_id[LINEAR_ID]["icon_dark_url"] == icon_dark_url
+    assert by_id[notion["id"]]["icon_url"] is None
+    assert by_id[exa["id"]]["icon_url"] is None
+
+
 async def test_discovery_denies_shared_threads_before_reading_integrations(monkeypatch):
     tool = importlib.import_module("openswe.tools.discover_managed_tools")
     monkeypatch.setattr(tool, "private_credential_login", AsyncMock(return_value=None))

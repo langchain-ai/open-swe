@@ -1,6 +1,7 @@
 import { AIMessage } from "@langchain/core/messages"
 import type { BaseMessage } from "@langchain/core/messages"
 import type { Message } from "@/features/agents/lib/types"
+import type { ModelOption } from "@/lib/api"
 
 interface UsageMetadata {
   input_tokens?: unknown
@@ -13,6 +14,20 @@ interface UsageMetadata {
 export interface ContextUsage {
   tokens: number
   model: string | null
+}
+
+export function resolveContextModel(
+  models: ReadonlyArray<Pick<ModelOption, "id" | "label" | "context_window">>,
+  ...candidates: Array<string | null | undefined>
+) {
+  for (const id of candidates) {
+    if (!id) continue
+    const match =
+      models.find((model) => model.id === id) ??
+      models.find((model) => model.id.slice(model.id.indexOf(":") + 1) === id)
+    if (match) return match
+  }
+  return undefined
 }
 
 function tokenValue(value: unknown): number {
@@ -49,13 +64,6 @@ export function latestContextUsage(
 
 export function formatCost(usd: number): string {
   return usd > 0 && usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`
-}
-
-export function formatTokenCount(count: number): string {
-  if (!Number.isFinite(count) || count <= 0) return "0"
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`
-  return String(Math.round(count))
 }
 
 /** Each run's cost, attributed to the last turn it ran in and summed per turn. */

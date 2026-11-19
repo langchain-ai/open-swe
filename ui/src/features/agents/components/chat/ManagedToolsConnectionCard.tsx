@@ -7,6 +7,7 @@ import { useParams } from "@tanstack/react-router"
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/ssr/LockSimple"
 import { PlugsConnectedIcon } from "@phosphor-icons/react/dist/ssr/PlugsConnected"
 
+import { ConnectorLogo } from "@/components/ConnectorLogo"
 import { SignInWithLangSmithButton } from "@/features/settings/components/ConnectionsSection"
 import {
   ConnectButton,
@@ -15,7 +16,11 @@ import {
   useConnectPopup,
 } from "@/features/settings/components/ManagedToolsSection"
 import { api, managedToolConnectUrl } from "@/lib/api"
-import type { ConnectableServer, NewManagedServer } from "@/lib/api"
+import type {
+  ConnectableServer,
+  ManagedServer,
+  NewManagedServer,
+} from "@/lib/api"
 import type { ManagedToolsCardOffer } from "@/features/agents/lib/managedToolsCard"
 
 const SIGN_IN: Record<NewManagedServer["kind"], string> = {
@@ -115,9 +120,11 @@ export function ManagedToolsConnectionCard({
   }
 
   const live = view.data?.servers
-  const connected = (server: ConnectableServer) =>
-    live?.some((own) => own.id === server.id && own.connected) ?? false
-  const done = live !== undefined && offer.missing.every(connected)
+  const rows = offer.missing.map((server) => ({
+    server,
+    current: live?.find((own) => own.id === server.id),
+  }))
+  const done = rows.every(({ current }) => current?.connected === true)
   const names = offer.missing.map((server) => server.name).join(", ")
   return (
     <Card
@@ -133,11 +140,11 @@ export function ManagedToolsConnectionCard({
       }
     >
       <ul className="mt-space-4 flex flex-col gap-space-2">
-        {offer.missing.map((server) => (
+        {rows.map(({ server, current }) => (
           <ServiceRow
             key={server.id}
             server={server}
-            connected={connected(server)}
+            current={current}
             href={managedToolConnectUrl(
               server.id,
               threadId ? { threadId, cardId } : undefined
@@ -157,29 +164,24 @@ export function ManagedToolsConnectionCard({
 
 function ServiceRow({
   server,
-  connected,
+  current,
   href,
   connecting,
   onConnect,
 }: {
   server: ConnectableServer
-  connected: boolean
+  current?: ManagedServer
   href: string
   connecting: boolean
   onConnect: (serverId: string) => void
 }) {
   return (
     <li className="flex items-center gap-space-3 rounded-lg bg-surface-level-1 px-space-3 py-space-2">
-      <span
-        aria-hidden
-        className="flex size-7 shrink-0 items-center justify-center rounded-md bg-surface-level-3 text-xs font-medium text-secondary uppercase select-none"
-      >
-        {server.name.slice(0, 1)}
-      </span>
+      <ConnectorLogo name={server.name} icons={current} className="size-7" />
       <span className="min-w-0 flex-1 truncate font-medium text-primary">
         {server.name}
       </span>
-      {connected ? (
+      {current?.connected ? (
         <StatusBadge variant="success" size="sm">
           Connected
         </StatusBadge>

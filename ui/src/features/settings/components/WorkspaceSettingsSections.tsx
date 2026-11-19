@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { ModelSelect } from "@/components/ModelSelect"
 import { Select } from "@langchain/macaw-components/Select"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
@@ -179,7 +180,6 @@ export function ModelPairControl({
   disabled,
   parentModel,
 }: ModelPairControlProps) {
-  const modelItems = models.map((m) => ({ value: m.id, label: m.label }))
   const [localModel, setLocalModel] = useState<string>(model ?? "")
   const [localEffort, setLocalEffort] = useState<string>(effort ?? "")
 
@@ -215,9 +215,10 @@ export function ModelPairControl({
 
   return (
     <div className="flex items-center gap-space-2">
-      <Select
+      <ModelSelect
         aria-label={`${label} model`}
-        options={modelItems}
+        models={models}
+        variant="outlined"
         value={localModel || undefined}
         onChange={handleModelChange}
         disabled={disabled}

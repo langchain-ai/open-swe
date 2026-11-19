@@ -147,6 +147,13 @@ html.dark,
     --skeleton-highlight: var(--bg-surface-level-4);
 }
 
+.dark .context-window-meter,
+.dark [role="dialog"][aria-label="Context window"] {
+    --bg-warning-strong: var(--bg-error-strong);
+    --text-warning-primary: var(--text-error-secondary);
+    --text-warning-secondary: var(--text-error-secondary);
+}
+
 :root {
     --bg-user-message: var(--bg-surface-level-2);
     /* The shimmer swept over skeletons: a step lighter than their fill. */

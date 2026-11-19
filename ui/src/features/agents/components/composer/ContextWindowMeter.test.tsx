@@ -1,55 +1,58 @@
 /** @vitest-environment jsdom */
 
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import {
   cleanup,
   fireEvent,
   render,
   screen,
-  waitFor,
+  within,
 } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { ContextWindowMeter } from "./ContextWindowMeter"
 
-afterEach(() => cleanup())
-
-/** The numbers live in a popover, so the collapsed ring carries the accessible label. */
-function meterLabel() {
-  return screen
-    .getByTestId("context-window-indicator")
-    .getAttribute("aria-label")
-}
+afterEach(cleanup)
 
 describe("ContextWindowMeter", () => {
-  it("renders nothing without usage or a limit", () => {
-    const { container } = render(<ContextWindowMeter />)
-    expect(container.firstChild).toBeNull()
-  })
-
-  it("stays hidden until usage is reported, even with a known limit", () => {
+  it("stays hidden until usage is reported", () => {
     const { container } = render(<ContextWindowMeter contextWindow={200_000} />)
     expect(container.firstChild).toBeNull()
   })
 
-  it("reports a percentage once usage and limit are both known", () => {
-    render(<ContextWindowMeter usedTokens={84_000} contextWindow={200_000} />)
-    expect(meterLabel()).toBe("Context window 42% used")
-  })
-
-  it("reports usage without a known limit", () => {
-    render(<ContextWindowMeter usedTokens={84_000} />)
-    expect(meterLabel()).toBe("Context window 84.0K tokens")
-  })
-
-  it("warns on hover once the context limit is in reach", async () => {
-    render(<ContextWindowMeter usedTokens={180_000} contextWindow={200_000} />)
-    expect(meterLabel()).toBe("Context window 90% used")
-
-    fireEvent.click(screen.getByTestId("context-window-indicator"))
-
-    await waitFor(() =>
-      expect(screen.getByText(/Approaching the context limit/)).toBeTruthy()
+  it("opens details with the model, context limit, and thread cost", async () => {
+    render(
+      <ContextWindowMeter
+        usedTokens={180_000}
+        contextWindow={200_000}
+        model="Opus"
+        costUsd={0.005}
+      />,
+      { wrapper: TooltipProvider }
     )
-    expect(screen.getByText("180.0K/200.0K")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: /90% used/ }))
+    const details = within(
+      await screen.findByRole("dialog", { name: "Context window" })
+    )
+    expect(details.getByText("Context nearly full")).toBeTruthy()
+    expect(details.getByText("Opus")).toBeTruthy()
+    expect(details.getByText("Thread cost")).toBeTruthy()
+    expect(details.getByText("<$0.01")).toBeTruthy()
+  })
+
+  it("shows consumption even without a reported context limit", async () => {
+    render(<ContextWindowMeter usedTokens={84_000} />, {
+      wrapper: TooltipProvider,
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: /84,000 tokens used, limit unknown/ })
+    )
+    const details = within(
+      await screen.findByRole("dialog", { name: "Context window" })
+    )
+    expect(
+      details.getByText(/provider has not reported a context limit/)
+    ).toBeTruthy()
+    expect(details.queryByRole("progressbar")).toBeNull()
   })
 })

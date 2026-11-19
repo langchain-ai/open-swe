@@ -142,6 +142,9 @@ class ManagedServer(BaseModel):
     personal: bool = False
     """The caller registered it for themselves; nobody else sees it."""
 
+    icon_url: str | None = None
+    icon_dark_url: str | None = None
+
     @classmethod
     def from_lmt(cls, item: object) -> ManagedServer | None:
         if not isinstance(item, dict):
@@ -151,6 +154,7 @@ class ManagedServer(BaseModel):
             return None
         connection = item.get("connection")
         kind = connection.get("type") if isinstance(connection, dict) else None
+        icon_url, icon_dark_url = item.get("icon_url"), item.get("icon_dark_url")
         return cls(
             id=server_id,
             name=name,
@@ -159,6 +163,8 @@ class ManagedServer(BaseModel):
             connected=item.get("connected") is True,
             has_credential=item.get("has_credential") is True,
             personal=item.get("scope") == "personal",
+            icon_url=icon_url if isinstance(icon_url, str) else None,
+            icon_dark_url=icon_dark_url if isinstance(icon_dark_url, str) else None,
         )
 
     @property

@@ -435,8 +435,11 @@ test.describe("transcript rendering", () => {
     await waitForThreadIdle(page, threadId);
     await waitForThreadNotBusy(page, threadId);
 
-    await page.getByRole("button", { name: /GPT-6\.1 Sol/ }).click();
-    await page.getByText("GPT-6.1 Sol", { exact: true }).last().hover();
+    const modelPicker = page.getByRole("combobox", {
+      name: "Model",
+      exact: true,
+    });
+    await modelPicker.click();
     await page.getByRole("option", { name: /Opus 5\.5/ }).click();
     await typeIntoComposer(page, "Use Opus for this thread");
     await waitForStateToContain(page, threadId, "Use Opus for this thread");
@@ -461,9 +464,7 @@ test.describe("transcript rendering", () => {
     await expect(
       page.getByText("Could not load model settings. Reload to try again."),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: /Opus 5\.5/ })).toHaveCount(
-      0,
-    );
+    await expect(modelPicker).toHaveCount(0);
     const followUp = "Keep Opus with model settings unavailable";
     await typeIntoComposer(page, followUp);
     await waitForStateToContain(page, threadId, followUp);

@@ -15,6 +15,7 @@ import {
   SettingsRowsSkeleton,
   SettingsSection,
 } from "@/components/AppShell"
+import { ConnectorLogo } from "@/components/ConnectorLogo"
 import { api, managedToolConnectUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import type {
@@ -204,9 +205,17 @@ function ServerTile({
 }) {
   return (
     <div className="flex h-full min-w-0 flex-col justify-between gap-space-2 p-space-3">
-      <Text as="span" variant="md" weight="medium" className="break-words">
-        {server.name}
-      </Text>
+      <div className="flex min-w-0 items-center gap-space-2">
+        <ConnectorLogo name={server.name} icons={server} />
+        <Text
+          as="span"
+          variant="md"
+          weight="medium"
+          className="min-w-0 break-words"
+        >
+          {server.name}
+        </Text>
+      </div>
       <Text as="span" variant="xs" color="secondary">
         {AUTH_LABELS[server.kind]}
       </Text>
@@ -532,6 +541,9 @@ export function BotToolsSection() {
               <SettingsRow
                 key={server.id}
                 label={server.name}
+                leadingIcon={
+                  <ConnectorLogo name={server.name} icons={server} />
+                }
                 description={
                   server.connected
                     ? undefined

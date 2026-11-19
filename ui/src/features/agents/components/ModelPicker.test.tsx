@@ -1,12 +1,6 @@
 /** @vitest-environment jsdom */
 
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  within,
-} from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ModelPicker } from "./ModelPicker"
@@ -14,244 +8,108 @@ import type { ModelOption } from "@/lib/api"
 
 afterEach(() => cleanup())
 
-const MODELS: Array<ModelOption> = [
+const MODELS: ModelOption[] = [
   {
-    id: "openai:gpt-5.6-sol",
-    label: "GPT-5.6 Sol",
-    efforts: ["none", "low", "medium", "high", "xhigh"],
-    default_effort: "xhigh",
+    id: "openai:gpt-6.1-sol",
+    label: "GPT-6.1 Sol",
+    efforts: ["low", "high"],
+    default_effort: "high",
     supports_images: true,
     context_window: 272_000,
   },
   {
-    id: "google_genai:gemini-3.8-flash",
-    label: "Gemini 3.8 Flash",
-    efforts: ["minimal", "low", "medium", "high"],
+    id: "google_genai:gemini-4-carbon",
+    label: "Gemini 4 Carbon",
+    efforts: ["low", "medium"],
     default_effort: "medium",
     supports_images: true,
   },
   {
     id: "fireworks:accounts/fireworks/models/kimi-k3",
     label: "Kimi K3",
-    efforts: ["low", "high", "max"],
+    efforts: ["high"],
     default_effort: "high",
     supports_images: false,
   },
 ]
 
-function openPicker(
+function renderPicker(
   props: Partial<React.ComponentProps<typeof ModelPicker>> = {}
 ) {
-  const onSelectionChange = props.onSelectionChange ?? vi.fn()
+  const onSelectionChange = vi.fn()
   render(
     <ModelPicker
       models={MODELS}
-      selection={{ modelId: "openai:gpt-5.6-sol", effort: "high" }}
+      selection={{ modelId: "openai:gpt-6.1-sol", effort: "high" }}
       onSelectionChange={onSelectionChange}
       {...props}
     />
   )
-  fireEvent.click(screen.getByRole("button", { expanded: false }))
-  return { onSelectionChange, panel: screen.getByTestId("model-picker-panel") }
-}
-
-function openModelPane() {
-  fireEvent.click(screen.getByRole("option", { name: "GPT-5.6 Sol" }))
+  const trigger = screen.getByRole("combobox", { name: /^Model$/ })
+  return { onSelectionChange, trigger }
 }
 
 describe("ModelPicker", () => {
-  it("reaches Auto and models with the keyboard while routing automatically", () => {
-    const { onSelectionChange, panel } = openPicker({ selection: null })
-
-    fireEvent.keyDown(panel, { key: "ArrowRight" })
-    fireEvent.keyDown(panel, { key: "ArrowDown" })
-    fireEvent.keyDown(panel, { key: "Enter" })
-    expect(onSelectionChange).toHaveBeenLastCalledWith({
-      modelId: "openai:gpt-5.6-sol",
-      effort: "xhigh",
-    })
-
-    fireEvent.click(screen.getByRole("button", { expanded: false }))
-    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
-      key: "ArrowRight",
-    })
-    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
-      key: "Enter",
-    })
-    expect(onSelectionChange).toHaveBeenLastCalledWith(null)
-  })
-
-  it("labels the trigger with the selected model and effort", () => {
-    render(
-      <ModelPicker
-        models={MODELS}
-        selection={{ modelId: "openai:gpt-5.6-sol", effort: "xhigh" }}
-        onSelectionChange={vi.fn()}
-      />
-    )
-
-    expect(
-      screen.getByRole("button", { name: /GPT-5.6 Sol Extra High/ })
-    ).toBeTruthy()
-  })
-
-  it("shows the routed mode on the trigger and the model on hover", () => {
-    render(
-      <ModelPicker
-        models={MODELS}
-        selection={null}
-        onSelectionChange={vi.fn()}
-        routed={{ route: "fast", modelId: "google_genai:gemini-3.8-flash" }}
-      />
-    )
-
-    const trigger = screen.getByRole("button", { name: "Auto Fast" })
-    expect(trigger).toBeTruthy()
-    expect(trigger.title).toBe("Routed model: Gemini 3.8 Flash")
-  })
-
-  it("shows plain Auto when no routed model is known yet", () => {
-    render(
-      <ModelPicker
-        models={MODELS}
-        selection={null}
-        onSelectionChange={vi.fn()}
-      />
-    )
-
-    expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy()
-  })
-
-  it("shows the selected model's context, reasoning and model row", () => {
-    const { panel } = openPicker()
-
-    expect(panel.textContent).toContain("Context")
-    expect(panel.textContent).toContain("272.0K")
-    expect(
-      within(screen.getByRole("listbox", { name: "Reasoning effort" }))
-        .getAllByRole("option")
-        .map((option) => option.textContent)
-    ).toEqual(["None", "Low", "Medium", "High", "Extra High"])
-    expect(screen.getByRole("option", { name: "GPT-5.6 Sol" })).toBeTruthy()
-    expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
-  })
-
-  it("omits the context section for models without a context window", () => {
-    openPicker({
-      selection: { modelId: "google_genai:gemini-3.8-flash", effort: "medium" },
-    })
-
-    expect(screen.getByTestId("model-picker-panel").textContent).not.toContain(
-      "Context"
-    )
-  })
-
-  it("selects a reasoning effort for the selected model", () => {
-    const { onSelectionChange } = openPicker()
-
+  it("uses the new model’s default effort when switching models", async () => {
+    const { onSelectionChange, trigger } = renderPicker()
+    fireEvent.click(trigger)
     fireEvent.click(
-      within(
-        screen.getByRole("listbox", { name: "Reasoning effort" })
-      ).getByRole("option", { name: "Low" })
+      await screen.findByRole("option", { name: "Gemini 4 Carbon" })
     )
 
     expect(onSelectionChange).toHaveBeenCalledWith({
-      modelId: "openai:gpt-5.6-sol",
-      effort: "low",
-    })
-    expect(screen.queryByTestId("model-picker-panel")).toBeNull()
-  })
-
-  it("lists every model with its effort and filters on search", () => {
-    openPicker()
-    openModelPane()
-
-    const models = screen.getByRole("listbox", { name: "Models" })
-    expect(
-      within(models)
-        .getAllByRole("option")
-        .map((option) => option.textContent)
-    ).toEqual([
-      "Auto",
-      "GPT-5.6 Sol High",
-      "Gemini 3.8 Flash Medium",
-      "Kimi K3 High",
-    ])
-
-    fireEvent.change(screen.getByLabelText("Search models"), {
-      target: { value: "kimi" },
-    })
-
-    expect(
-      within(screen.getByRole("listbox", { name: "Models" }))
-        .getAllByRole("option")
-        .map((option) => option.textContent)
-    ).toEqual(["Kimi K3 High"])
-  })
-
-  it("selects a model row with that model's default effort", () => {
-    const { onSelectionChange } = openPicker()
-    openModelPane()
-
-    fireEvent.click(screen.getByRole("option", { name: "Kimi K3 High" }))
-
-    expect(onSelectionChange).toHaveBeenCalledWith({
-      modelId: "fireworks:accounts/fireworks/models/kimi-k3",
-      effort: "high",
-    })
-    expect(screen.queryByTestId("model-picker-panel")).toBeNull()
-  })
-
-  it("disables models without image support when images are attached", () => {
-    const { onSelectionChange } = openPicker({ requireImageSupport: true })
-    openModelPane()
-
-    const kimi = screen.getByRole("option", { name: "Kimi K3 High" })
-    expect(kimi).toHaveProperty("disabled", true)
-
-    fireEvent.click(kimi)
-    expect(onSelectionChange).not.toHaveBeenCalled()
-  })
-
-  it("opens the model pane with ArrowRight and returns with ArrowLeft", () => {
-    const { panel } = openPicker()
-
-    fireEvent.keyDown(panel, { key: "ArrowRight" })
-    expect(screen.getByRole("listbox", { name: "Models" })).toBeTruthy()
-
-    fireEvent.keyDown(panel, { key: "ArrowLeft" })
-    expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
-  })
-
-  it("moves reasoning focus with the arrow keys and applies it on Enter", () => {
-    const { onSelectionChange, panel } = openPicker()
-
-    fireEvent.keyDown(panel, { key: "ArrowUp" })
-    fireEvent.keyDown(panel, { key: "Enter" })
-
-    expect(onSelectionChange).toHaveBeenCalledWith({
-      modelId: "openai:gpt-5.6-sol",
+      modelId: "google_genai:gemini-4-carbon",
       effort: "medium",
     })
   })
 
-  it("closes on Escape", () => {
-    openPicker()
-
-    fireEvent.keyDown(screen.getByTestId("model-picker-panel"), {
-      key: "Escape",
+  it("shows the routing tier and leaves reasoning to Auto", async () => {
+    const { trigger } = renderPicker({
+      selection: null,
+      routed: { route: "fast" },
     })
+    expect(trigger.textContent).toContain("Auto Fast")
+    expect(
+      screen.queryByRole("combobox", { name: "Reasoning effort" })
+    ).toBeNull()
 
-    expect(screen.queryByTestId("model-picker-panel")).toBeNull()
+    fireEvent.click(trigger)
+    expect(
+      (await screen.findByRole("option", { name: "Auto Fast" })).textContent
+    ).toBe("Auto Fast")
+    expect(
+      screen.getByRole("option", { name: "GPT-6.1 Sol" }).textContent
+    ).toBe("GPT-6.1 Sol")
   })
 
-  it("returns to the main pane when Escape closes the model pane", () => {
-    const { panel } = openPicker()
-    openModelPane()
+  it("clears the explicit selection when choosing Auto", async () => {
+    const { onSelectionChange, trigger } = renderPicker()
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByRole("option", { name: /^Auto/ }))
 
-    fireEvent.keyDown(panel, { key: "Escape" })
+    expect(onSelectionChange).toHaveBeenCalledWith(null)
+  })
 
-    expect(screen.queryByRole("listbox", { name: "Models" })).toBeNull()
-    expect(screen.getByTestId("model-picker-panel")).toBeTruthy()
+  it("changes reasoning without changing the selected model", async () => {
+    const { onSelectionChange } = renderPicker()
+    fireEvent.click(screen.getByRole("combobox", { name: "Reasoning effort" }))
+    fireEvent.click(await screen.findByRole("option", { name: "Low" }))
+
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      modelId: "openai:gpt-6.1-sol",
+      effort: "low",
+    })
+  })
+
+  it("keeps models that cannot accept an attached image unavailable", async () => {
+    const { onSelectionChange, trigger } = renderPicker({
+      requireImageSupport: true,
+    })
+    fireEvent.click(trigger)
+    const kimi = await screen.findByRole("option", { name: /Kimi K3/ })
+    expect(kimi.getAttribute("aria-disabled")).toBe("true")
+
+    fireEvent.click(kimi)
+    expect(onSelectionChange).not.toHaveBeenCalled()
   })
 })

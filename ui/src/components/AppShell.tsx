@@ -172,6 +172,7 @@ export function SettingsSection({
 
 interface SettingsRowProps {
   label: string
+  leadingIcon?: ReactNode
   description?: ReactNode
   control: ReactNode
   htmlFor?: string
@@ -184,6 +185,7 @@ interface SettingsRowProps {
 /** Label + description on the left, a single control on the right. */
 export function SettingsRow({
   label,
+  leadingIcon,
   description,
   control,
   htmlFor,
@@ -193,32 +195,35 @@ export function SettingsRow({
 }: SettingsRowProps) {
   return (
     <div className="flex flex-col gap-space-2 px-space-4 py-space-3 sm:flex-row sm:items-center sm:justify-between sm:gap-space-6">
-      <label className="flex flex-col gap-space-1" htmlFor={htmlFor}>
-        <span className="flex items-center gap-space-2">
-          <Text
-            as="span"
-            variant="md"
-            weight="medium"
-            color={comingSoon ? "secondary" : "primary"}
-          >
-            {label}
-          </Text>
-          {(comingSoon || badge) && (
-            <Badge
-              color="secondary"
-              rounded="sm"
-              size="xxs"
-              className={comingSoon ? undefined : badgeClassName}
+      <label className="flex min-w-0 items-start gap-space-3" htmlFor={htmlFor}>
+        {leadingIcon}
+        <span className="flex min-w-0 flex-col gap-space-1">
+          <span className="flex items-center gap-space-2">
+            <Text
+              as="span"
+              variant="md"
+              weight="medium"
+              color={comingSoon ? "secondary" : "primary"}
             >
-              {comingSoon ? "Coming soon" : (badge ?? "")}
-            </Badge>
+              {label}
+            </Text>
+            {(comingSoon || badge) && (
+              <Badge
+                color="secondary"
+                rounded="sm"
+                size="xxs"
+                className={comingSoon ? undefined : badgeClassName}
+              >
+                {comingSoon ? "Coming soon" : (badge ?? "")}
+              </Badge>
+            )}
+          </span>
+          {description && (
+            <Text as="span" variant="sm" color="secondary">
+              {description}
+            </Text>
           )}
         </span>
-        {description && (
-          <Text as="span" variant="sm" color="secondary">
-            {description}
-          </Text>
-        )}
       </label>
       <div className={cn("sm:shrink-0", comingSoon && "opacity-50")}>
         {control}

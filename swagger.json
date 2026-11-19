@@ -3895,6 +3895,28 @@
             "title": "Has Credential",
             "type": "boolean"
           },
+          "icon_dark_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Dark Url"
+          },
+          "icon_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Url"
+          },
           "id": {
             "title": "Id",
             "type": "string"

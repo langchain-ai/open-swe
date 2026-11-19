@@ -255,7 +255,7 @@ describe("ChatComposer model selection", () => {
       modelSelectionEnabled: false,
       restoreDraft: { key: 1, text: "/model", images: [] },
     })
-    expect(screen.queryByRole("button", { name: "Auto" })).toBeNull()
+    expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull()
     expect(screen.queryByRole("option", { name: /Pick a model/ })).toBeNull()
     cleanup()
 
@@ -264,7 +264,7 @@ describe("ChatComposer model selection", () => {
       modelSelectionEnabled: true,
       restoreDraft: { key: 2, text: "/model", images: [] },
     })
-    expect(screen.getByRole("button", { name: "Auto" })).toBeTruthy()
+    expect(screen.getByRole("combobox", { name: "Model" })).toBeTruthy()
     expect(
       await screen.findByRole("option", { name: /Pick a model/ })
     ).toBeTruthy()
