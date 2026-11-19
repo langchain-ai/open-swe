@@ -93,6 +93,9 @@ async def test_invalid_channel_and_unavailable_slack_do_not_create_bindings(
     assert (
         await client.put("/dashboard/api/routing/slack-channels/D0DM", json={"mode": "ask"})
     ).status_code == 400
+    assert (
+        await client.put("/dashboard/api/routing/slack-channels/C0TEST", json={"mode": "mentions"})
+    ).status_code == 422
     monkeypatch.setattr(SlackChannel, "load", AsyncMock(side_effect=ChannelLookupUnavailable(17)))
     retry = await client.put(
         "/dashboard/api/routing/slack-channels/C0TEST", json={"mode": "kitchen"}

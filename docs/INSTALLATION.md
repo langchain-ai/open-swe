@@ -516,7 +516,7 @@ The manifest already registers the OIDC redirect; make sure the `openid`, `email
 When they are unset the link is simply hidden.
 
 **Kitchen and Ask channels.**
-Admins choose Mention-only, Kitchen, or Ask per channel under **Integrations** (`/admin/integrations`), or with `bind_slack_channel(channel_id=..., mode="mentions"|"kitchen"|"ask")`.
+Admins can enable Kitchen or Ask under **Integrations** (`/admin/integrations`), or with `bind_slack_channel(channel_id=..., mode="kitchen"|"ask")`.
 A channel must be bound to use Kitchen or Ask, and Robin must have joined it.
 In a Kitchen or Ask channel, a top-level human message starts a new agent thread and replies continue it without tagging Robin; ordinary untagged replies queue behind an active run.
 Ask channels answer ordinary questions without requiring a Robin account; unlinked askers can receive public assistance without personal credentials.
@@ -531,7 +531,6 @@ Requested PRs still require independent human validation and approval.
 Jev decides whether untagged messages need a response: new reports, questions for Robin, and choices of an offered action continue the work; human-to-human discussion and updates needing no action stay quiet.
 Ordinary Kitchen channels retain their existing behavior.
 
-Other channels still require mentions.
 To enable private channels, update the Slack app with the current manifest and reinstall it so Slack sends the `message.groups` event (the base manifest already includes the `groups:history` scope).
 
 Existing Slack app installations must update their event subscriptions; saving the dashboard setting alone does not change them.

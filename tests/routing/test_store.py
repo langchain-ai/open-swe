@@ -83,11 +83,12 @@ async def test_channel_reconfiguration_keeps_one_binding_and_removal_is_idempote
     await INTEGRATIONS.configure_channel("C0TEST", mode="ask", actor=None)
     async with postgres.session() as session:
         before = (await session.scalars(select(SlackChannelBinding))).one()
-    await INTEGRATIONS.configure_channel("C0TEST", mode="mentions", actor=None)
+    await INTEGRATIONS.configure_channel("C0TEST", mode="kitchen", actor=None)
     async with postgres.session() as session:
         after = (await session.scalars(select(SlackChannelBinding))).one()
     assert before.id == after.id
-    assert not await INTEGRATIONS.is_kitchen_channel("C0TEST")
+    assert not await INTEGRATIONS.is_ask_channel("C0TEST")
     await INTEGRATIONS.remove_channel("C0TEST")
     await INTEGRATIONS.remove_channel("C0TEST")
     assert (await INTEGRATIONS.settings()).slack_channels == []
+    assert not await INTEGRATIONS.is_kitchen_channel("C0TEST")

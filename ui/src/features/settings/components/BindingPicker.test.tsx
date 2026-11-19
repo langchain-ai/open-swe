@@ -116,7 +116,9 @@ describe("BindingPicker", () => {
     expect(screen.queryByRole("switch")).toBeNull()
     expect(screen.queryByLabelText("Slack channel ID")).toBeNull()
     fireEvent.click(screen.getByRole("checkbox", { name: "#engineering" }))
-    fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save and enable Kitchen" })
+    )
     expect(onChange).toHaveBeenCalledWith(["CJOINED01"])
 
     vi.mocked(useSlackChannelDirectory).mockReturnValue({
@@ -133,7 +135,9 @@ describe("BindingPicker", () => {
     })
     expect(joined.disabled).toBe(false)
     fireEvent.click(joined)
-    fireEvent.click(screen.getByRole("button", { name: "Save 2 channels" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save and enable Kitchen" })
+    )
     expect(onChange).toHaveBeenLastCalledWith(["CJOINED01", "CABSENT01"])
   })
 

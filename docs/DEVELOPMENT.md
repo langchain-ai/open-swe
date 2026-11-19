@@ -195,7 +195,7 @@ Within a few seconds you should see a 👀 reaction, a run in your LangSmith pro
 GitHub-triggered runs act as the commenting user, so that account has to have signed in to your local dashboard once.
 The App's **Advanced** tab lists every delivery and its response, and ngrok's inspector at `http://localhost:4040` shows what arrived.
 
-Use **Defaults** (`/settings`) for global behavior and sandbox configuration, and **Integrations** (`/admin/integrations`) to bind repositories and choose Mention-only, Kitchen, or Ask for Slack channels.
+Use **Defaults** (`/settings`) for global behavior and sandbox configuration, and **Integrations** (`/admin/integrations`) to bind repositories and enable Kitchen or Ask for Slack channels.
 Bindings do not select different execution settings; see [Defaults, routing, and sandbox images](reference/execution.md).
 
 **Incident channels.**

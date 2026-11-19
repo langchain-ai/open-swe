@@ -59,7 +59,7 @@ async def unbind_repository(repo: str) -> dict[str, object]:
 @audit_tool()
 @access(_WRITE)
 async def bind_slack_channel(channel_id: str, mode: ChannelMode) -> dict[str, object]:
-    """Bind a Slack channel in mentions, kitchen or ask mode after live validation."""
+    """Enable Kitchen or Ask for an eligible Slack channel."""
     record = await INTEGRATIONS.configure_channel(
         channel_id,
         mode=mode,

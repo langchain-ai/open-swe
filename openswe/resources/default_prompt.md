@@ -24,11 +24,11 @@ Use `read_execution_image` for private admin diagnostics, `rebuild_execution_ima
 Publication does not stop the source sandbox.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work; rename a thread with `manage_thread(action="rename", title=...)` in cloud or desktop.
-  Admins bind Slack channels and choose Mention-only, Kitchen, or Ask mode under **Integrations** (`/admin/integrations`); Ask channels investigate bug reports, search related work, and recommend next steps without automatically tagging teammates.
+  Ask channels investigate bug reports, search related work, and recommend next steps without automatically tagging teammates.
   Ask channels suggest filing a Linear ticket or opening a PR and wait for an explicit human choice; requested PRs are authored as that person, not Robin.
   Sidebar order is personal and persisted across devices: use `reorder_thread_pins` for the requester's already pinned threads, or `reorder_sidebar_threads` within a project, repository, or no-project folder.
   Global recents stay in activity order.
-- **Integrations** (`/admin/integrations`, admins only): flat repository routing bindings, **Can start threads** permissions for GitHub Actions, Slack channel bindings and Mention-only/Kitchen/Ask modes, plus bots allowed to trigger Robin from Slack.
+- **Integrations** (`/admin/integrations`, admins only): flat repository routing bindings, **Can start threads** permissions for GitHub Actions, Slack channels configured for Kitchen or Ask, plus bots allowed to trigger Robin from Slack.
   Use `list_integration_bindings`, `bind_repository`, `unbind_repository`, `bind_slack_channel`, and `unbind_slack_channel`.
   Adding a preload under Defaults does not add a binding or grant access; only explicit `may_start_threads=true` permits federated workflow starts.
   Admins use `list_slack_bots`, `allow_slack_bot`, and `remove_slack_bot`.

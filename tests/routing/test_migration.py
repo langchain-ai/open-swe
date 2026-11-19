@@ -140,7 +140,10 @@ async def test_expand_migration_preserves_bindings_flags_queue_identity_and_lega
             await conn.execute(
                 text("SELECT channel_id, mode FROM integration_slack_channel ORDER BY channel_id")
             )
-        ).all() == [("C0ASK", "ask"), ("C0KITCHEN", "kitchen"), ("C0MENTIONS", "mentions")]
+        ).all() == [("C0ASK", "ask"), ("C0KITCHEN", "kitchen")]
+        assert set(
+            await conn.scalars(text("SELECT id FROM slack_channel WHERE id LIKE 'C0%'"))
+        ) == {"C0ASK", "C0KITCHEN", "C0MENTIONS"}
         assert (
             await conn.scalar(
                 text("SELECT routing_repository_id FROM merge_queue WHERE id = :id"), {"id": queue}

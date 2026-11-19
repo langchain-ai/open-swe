@@ -882,7 +882,7 @@ export interface RepositorySettings {
   may_start_threads: boolean
 }
 
-export type ChannelMode = "mentions" | "kitchen" | "ask"
+export type ChannelMode = "kitchen" | "ask"
 
 export interface RoutingSettings {
   repos: RepositorySettings[]

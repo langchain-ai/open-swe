@@ -120,10 +120,12 @@ export function SlackChannelPicker({
       .filter((part): part is string => part !== null)
       .join(" · "),
     icon: <SlackChannelIcon channel={channel} />,
-    disabled: !channel.is_member,
-    warning: channel.is_member
-      ? undefined
-      : "Invite Robin to this channel, then refresh to select it.",
+    disabled: !channel.is_member || channel.is_ext_shared,
+    warning: channel.is_ext_shared
+      ? "Kitchen and Ask require an internal channel."
+      : channel.is_member
+        ? undefined
+        : "Invite Robin to this channel, then refresh to select it.",
   }))
   for (const id of selected) {
     if (!items.some((item) => item.id === id))
@@ -132,8 +134,9 @@ export function SlackChannelPicker({
   return (
     <BindingPicker
       triggerLabel="Choose channels"
+      additionsLabel="Save and enable Kitchen"
       title="Slack channels"
-      description="Bind channels where Robin responds to mentions. Set Mention-only, Kitchen, or Ask after saving."
+      description="New channels start in Kitchen. You can switch them to Ask from the channel list."
       noun="channel"
       pluralNoun="channels"
       items={items}

@@ -25,7 +25,6 @@ type RoutingChange =
 
 const QUERY_KEY = ["routing"]
 const CHANNEL_MODES: Array<SelectOption<ChannelMode>> = [
-  { value: "mentions", label: "Mention-only" },
   { value: "kitchen", label: "Kitchen" },
   { value: "ask", label: "Ask" },
 ]
@@ -195,11 +194,13 @@ export function RoutingSettings() {
       </SettingsSection>
       <SettingsSection
         title="Slack channels"
-        description="Mention-only requires an @mention. Kitchen and Ask receive every human message without a mention; Ask investigates reports and proposes next steps. Kitchen and Ask require an internal channel Robin has joined. Personal kitchen preferences remain separate."
+        description="Enable Kitchen or Ask in internal channels Robin has joined. Both let Robin respond without an @mention. Ask investigates reports and suggests next steps."
       >
         <SettingsPanel>
           {channels.length === 0 ? (
-            <p className="text-sm text-secondary">No bound channels.</p>
+            <p className="text-sm text-secondary">
+              No channels configured for Kitchen or Ask.
+            </p>
           ) : (
             <ul className="divide-y divide-default">
               {channels.map((row) => {
@@ -259,7 +260,7 @@ export function RoutingSettings() {
                   .map((id) => ({
                     kind: "channel" as const,
                     id,
-                    mode: "mentions" as const,
+                    mode: "kitchen" as const,
                   })),
               ]
               if (changes.length) save.mutate(changes)

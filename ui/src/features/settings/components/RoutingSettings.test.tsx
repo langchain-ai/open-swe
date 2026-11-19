@@ -52,6 +52,7 @@ class RoutingSettingsServer {
         channels: [
           { id: "CTEAM0001", name: "team" },
           { id: "COTHER001", name: "other" },
+          { id: "CNEW00001", name: "new" },
         ].map((channel) => ({
           ...channel,
           is_member: true,
@@ -166,6 +167,28 @@ it("adds a repository with Actions permission off without rewriting unrelated bi
   expect(
     await screen.findByRole("switch", { name: "Let acme/new start threads" })
   ).toBeTruthy()
+})
+
+it("requires an explicit Kitchen action to add a channel", async () => {
+  const server = new RoutingSettingsServer()
+  server.render()
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Choose channels" })
+  )
+  fireEvent.click(await screen.findByRole("checkbox", { name: "#new" }))
+  expect(server.writes).toHaveLength(0)
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save and enable Kitchen" })
+  )
+  await vi.waitFor(() =>
+    expect(server.writes).toEqual([
+      {
+        path: "/routing/slack-channels/CNEW00001",
+        method: "PUT",
+        body: { mode: "kitchen" },
+      },
+    ])
+  )
 })
 
 it("removes only the chosen channel binding", async () => {

@@ -126,7 +126,7 @@ async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
         ("snapshotctl", {"action": "stop"}),
         ("bind_repository", {"repo": "secret"}),
         ("unbind_repository", {"repo": "secret"}),
-        ("bind_slack_channel", {"channel_id": "secret", "mode": "mentions"}),
+        ("bind_slack_channel", {"channel_id": "secret", "mode": "kitchen"}),
         ("unbind_slack_channel", {"channel_id": "secret"}),
         ("save_organization_skill", {"name": "secret", "description": "secret"}),
         ("delete_organization_skill", {"name": "secret"}),

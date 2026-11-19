@@ -51,6 +51,7 @@ export interface BindingPickerProps {
   selected: Array<string>
   onChange: (ids: Array<string>) => void
   searchPlaceholder: string
+  additionsLabel?: string
   matchesItem?: (item: PickerItem, search: string) => boolean
   filter?: PickerFilter
   filters?: Array<PickerFilter>
@@ -77,6 +78,7 @@ export function BindingPicker({
   selected,
   onChange,
   searchPlaceholder,
+  additionsLabel,
   matchesItem = matchesSearch,
   filter,
   filters,
@@ -403,7 +405,9 @@ export function BindingPicker({
                   setOpen(false)
                 }}
               >
-                {`Save ${draft.length} ${draft.length === 1 ? noun : pluralNoun}`}
+                {additionsLabel && draft.some((id) => !selected.includes(id))
+                  ? additionsLabel
+                  : `Save ${draft.length} ${draft.length === 1 ? noun : pluralNoun}`}
               </Button>
             </div>
           </div>

@@ -22,7 +22,7 @@ from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
-type ChannelMode = Literal["mentions", "kitchen", "ask"]
+type ChannelMode = Literal["kitchen", "ask"]
 
 
 class IntegrationRecord(Base, kw_only=True):
@@ -53,12 +53,14 @@ class RepositoryBinding(IntegrationRecord):
 
 class SlackChannelBinding(IntegrationRecord):
     __tablename__ = "integration_slack_channel"
-    __table_args__ = (CheckConstraint("mode IN ('mentions', 'kitchen', 'ask')"),)
+    __table_args__ = (
+        CheckConstraint("mode IN ('kitchen', 'ask')", name="integration_slack_channel_mode_check"),
+    )
 
     channel_id: Mapped[str] = mapped_column(
         ForeignKey("slack_channel.id", ondelete="CASCADE"), unique=True
     )
-    mode: Mapped[ChannelMode] = mapped_column(Text, default="mentions", server_default="mentions")
+    mode: Mapped[ChannelMode] = mapped_column(Text)
 
 
 class RepositorySettings(BaseModel):
@@ -225,7 +227,7 @@ class IntegrationStore:
         channel = await SlackChannel.load(normalized, use_cache=False, raise_unavailable=True)
         if channel is None:
             raise ValueError("Choose a Slack channel Robin can access")
-        if mode in {"kitchen", "ask"} and not channel.can_be_kitchen:
+        if not channel.can_be_kitchen:
             raise ValueError("Kitchen and Ask require an internal channel Robin has joined")
         async with postgres.session() as session:
             row = SlackChannelBinding(
