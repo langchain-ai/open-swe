@@ -98,7 +98,6 @@ class ProfileUpdate(KitchenChannelPreference):
     concierge_mode: bool | None = None
     experimental_classify: bool | None = None
     experimental_force_code_mode: bool | None = None
-    experimental_cloud_first_desktop: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
@@ -390,7 +389,6 @@ async def put_my_profile(update: ProfileUpdate, reader: DashboardReadDep) -> dic
         concierge_mode=update.concierge_mode,
         experimental_classify=update.experimental_classify,
         experimental_force_code_mode=update.experimental_force_code_mode,
-        experimental_cloud_first_desktop=update.experimental_cloud_first_desktop,
     )
     # Channel validation may call Slack; it must precede the write transaction.
     if patch.personal_kitchen_channel_id is not None:

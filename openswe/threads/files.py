@@ -107,7 +107,7 @@ class ThreadWorkspace:
         if sandbox_id is not None and current != sandbox_id:
             raise HTTPException(404, "The workspace changed. Open the file again.")
         try:
-            sandbox = await connect_sandbox(current, thread_id=thread_id)
+            sandbox = await connect_sandbox(current)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Could not connect to sandbox for files", extra={"sandbox": current})
             raise HTTPException(503, "Could not connect to the workspace.") from exc

@@ -26,12 +26,6 @@ import {
 import { ProjectSelector } from "@/features/projects/components/ProjectSelector"
 import type { Project } from "@/features/projects/lib/projects"
 import {
-  LocalBranchSelector,
-  LocalProjectSelector,
-  LocalWorkspaceSelector,
-  RunTargetSelector,
-} from "./RunTargetSelector"
-import {
   COMPOSER_PATH_DRAG_MIME,
   detectComposerTrigger,
   replaceTextRange,
@@ -43,12 +37,6 @@ import type {
   ComposerPromptEditorHandle,
 } from "./ComposerPromptEditor"
 import type { ComposerSlashCommand, ComposerTrigger } from "./composerTrigger"
-import type { RunTarget } from "./RunTargetSelector"
-import type {
-  DesktopProject,
-  DesktopProjectRef,
-  DesktopWorkspaceMode,
-} from "@/desktop"
 import type {
   FollowUpBehavior,
   ModelOption,
@@ -227,24 +215,6 @@ export interface ChatComposerProps {
   onRepoChange?: (repo: string | null) => void
   /** The signed-in person while they must link GitHub; the repo picker then asks them to. */
   gitHubLinkUser?: SessionUser
-  /** Desktop-only execution target. Omit this prop to keep the control out of the web UI. */
-  runTarget?: RunTarget
-  onRunTargetChange?: (next: RunTarget) => void
-  /** The thread is still moving to the run target, checkout and all. */
-  runTargetPending?: boolean
-  localRepos?: Array<DesktopProject>
-  selectedLocalRepoPath?: string | null
-  selectedLocalRepoBranch?: string | null
-  localRepoBranches?: Array<DesktopProjectRef>
-  localWorkspaceMode?: DesktopWorkspaceMode
-  localWorktreeLabel?: string
-  onLocalWorkspaceModeChange?: (next: DesktopWorkspaceMode) => void
-  onSelectLocalRepo?: (cwd: string) => void
-  onClearLocalRepo?: () => void
-  onAddLocalRepo?: () => void
-  onRemoveLocalRepo?: (cwd: string) => void
-  onRefreshLocalRepoBranch?: () => void
-  onSelectLocalRepoBranch?: (branch: string) => void
   /** Projects a new cloud thread can be filed in; the picker shows with `onProjectChange`. */
   projects?: Array<Project>
   selectedProjectId?: string | null
@@ -412,22 +382,6 @@ export const ChatComposer = memo(function ChatComposer({
   selectedRepo = null,
   onRepoChange,
   gitHubLinkUser,
-  runTarget,
-  onRunTargetChange,
-  runTargetPending,
-  localRepos = [],
-  selectedLocalRepoPath = null,
-  selectedLocalRepoBranch = null,
-  localRepoBranches = [],
-  localWorkspaceMode = "local",
-  localWorktreeLabel,
-  onLocalWorkspaceModeChange,
-  onSelectLocalRepo,
-  onClearLocalRepo,
-  onAddLocalRepo,
-  onRemoveLocalRepo,
-  onRefreshLocalRepoBranch,
-  onSelectLocalRepoBranch,
   projects = [],
   selectedProjectId = null,
   targetPending = false,
@@ -962,18 +916,9 @@ export const ChatComposer = memo(function ChatComposer({
         ? "Files can be sent once the agent finishes its run."
         : null)
 
-  const executionTarget = runTarget &&
-    (runTarget === "local" ||
-      (typeof window !== "undefined" && window.openSweDesktop)) && (
-      <RunTargetSelector
-        onChange={onRunTargetChange}
-        pending={runTargetPending}
-        value={runTarget}
-      />
-    )
-  const targetControls = (onRepoChange || runTarget) && (
+  const targetControls = onRepoChange && (
     <>
-      {runTarget !== "local" && onProjectChange && onCreateProject && (
+      {onProjectChange && onCreateProject && (
         <ProjectSelector
           onCreate={onCreateProject}
           onRepoChange={gitHubLinkUser ? undefined : onRepoChange}
@@ -984,56 +929,21 @@ export const ChatComposer = memo(function ChatComposer({
           selectedRepo={selectedRepo}
         />
       )}
-      {runTarget !== "local" && onRepoChange && gitHubLinkUser && (
+      {gitHubLinkUser && (
         <GitHubLinkRepoSelector user={gitHubLinkUser} side="top" />
       )}
-      {runTarget !== "local" &&
-        onRepoChange &&
-        !gitHubLinkUser &&
-        !onProjectChange && (
-          <RepoSelector
-            emptySelectionLabel="Don't work in a repository"
-            noMatchesLabel="No matching repositories"
-            onRepoChange={onRepoChange}
-            placeholder="Select repository"
-            repos={repos}
-            searchPlaceholder="Search repositories…"
-            selectedRepo={selectedRepo}
-            side="top"
-          />
-        )}
-      {runTarget === "local" && (
-        <LocalProjectSelector
-          onAdd={onAddLocalRepo}
-          onClear={onClearLocalRepo}
-          onRemove={onRemoveLocalRepo}
-          onSelect={onSelectLocalRepo}
-          projects={localRepos}
-          selectedPath={selectedLocalRepoPath}
+      {!gitHubLinkUser && !onProjectChange && (
+        <RepoSelector
+          emptySelectionLabel="Don't work in a repository"
+          noMatchesLabel="No matching repositories"
+          onRepoChange={onRepoChange}
+          placeholder="Select repository"
+          repos={repos}
+          searchPlaceholder="Search repositories…"
+          selectedRepo={selectedRepo}
           side="top"
         />
       )}
-      {runTarget === "local" &&
-        localRepoBranches.length > 0 &&
-        onRefreshLocalRepoBranch &&
-        onSelectLocalRepoBranch && (
-          <LocalBranchSelector
-            refs={localRepoBranches}
-            disabled={!selectedLocalRepoPath}
-            onRefresh={onRefreshLocalRepoBranch}
-            onSelectBranch={onSelectLocalRepoBranch}
-            selectedBranch={selectedLocalRepoBranch}
-          />
-        )}
-      {runTarget === "local" &&
-        localRepoBranches.length > 0 &&
-        onSelectLocalRepoBranch && (
-          <LocalWorkspaceSelector
-            onChange={onLocalWorkspaceModeChange}
-            value={localWorkspaceMode}
-            worktreeLabel={localWorktreeLabel}
-          />
-        )}
     </>
   )
 
@@ -1198,7 +1108,6 @@ export const ChatComposer = memo(function ChatComposer({
           <div className={cn("contents", targetPending && "invisible")}>
             {targetControls}
           </div>
-          <div className="ml-auto shrink-0">{executionTarget}</div>
         </div>
       )}
     </div>

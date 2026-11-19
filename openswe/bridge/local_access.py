@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from typing import Self
 
-from openswe.bridge.backend import BridgeSandboxBackend
+from openswe.bridge.connection import BridgeConnection
 from openswe.bridge.local_access_policy import LocalAccess, LocalReviews
 from openswe.bridge.protocol import JsonObject, LocalActionParams
 from openswe.run_config import RunConfig
@@ -57,8 +57,8 @@ class LocalAccessRun:
 
     async def perform(self, params: LocalActionParams) -> JsonObject:
         review = LocalReviews.current()
-        backend = await BridgeSandboxBackend.connect(self.thread_id, self.bridge_id)
-        return await backend.alocal_action(
+        connection = await BridgeConnection.connect(self.bridge_id)
+        return await connection.local_action(
             params.model_copy(
                 update={
                     "expires_at": time.time() + APPROVAL_SECONDS,

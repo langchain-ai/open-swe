@@ -512,7 +512,7 @@ class TokenRun:
             result = await run_hooks(preparation, "before_agent", state, runtime)
             if not bind_later:
                 await self._sandbox.finish_git_identity()
-            # A sandbox the backend connected to, such as a bridged machine, got a fresh token.
+            # A sandbox the backend connected to got a fresh token.
             expires_at = proxy_token_set_since(self.run.thread_id, started)
             return Prepared(
                 **result.model_dump(),
@@ -689,7 +689,7 @@ class TokenRun:
                 exc_info=True,
             )
             return None
-        return coordination.context_message() if coordination is not None else None
+        return coordination.context_message()
 
     def _operation_state(self, request: RunOperation) -> dict[str, object]:
         """The graph state an operation reads, as the call carries it."""
@@ -767,7 +767,7 @@ class TokenRun:
 
         async def read() -> TaskContext:
             coordination = await TaskCoordinationMiddleware.for_thread(self.run.thread_id)
-            return TaskContext() if coordination is None else coordination.task_context()
+            return coordination.task_context()
 
         return await in_graph_context(
             {**self.config, "run_name": "task_context"}, lambda _runtime: read()

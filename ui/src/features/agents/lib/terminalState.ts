@@ -252,12 +252,3 @@ export function closeTerminal(
       .filter((group) => group.terminalIds.length > 0),
   })
 }
-
-export function reconcileTerminalIds(
-  state: TerminalUiState,
-  serverIds: ReadonlyArray<string>
-): TerminalUiState {
-  const normalized = normalizeTerminalState(state)
-  const terminalIds = uniqueIds([...normalized.terminalIds, ...serverIds])
-  return normalizeTerminalState({ ...normalized, terminalIds })
-}

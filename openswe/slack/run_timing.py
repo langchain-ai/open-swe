@@ -25,7 +25,7 @@ from typing import ClassVar, Final
 
 from runtime_api.slack import SEND_DOTTED_ORDER_KEY, SEND_PROJECT_KEY, SEND_TRACE_ID_KEY
 
-from openswe.dashboard.ttft import DashboardRunTimeline, DashboardSandbox, DashboardSendTrace
+from openswe.dashboard.ttft import DashboardRunTimeline, DashboardSendTrace
 from openswe.invocation import resolve_invocation_id
 
 logger = logging.getLogger(__name__)
@@ -238,15 +238,13 @@ class SlackRunTimeline:
         if timeline is None or not isinstance(thread_id, str):
             return
         thread = await DashboardRunTimeline.thread_metadata(thread_id, timeline.run_id)
-        sandbox = DashboardSandbox.of_thread(thread) if thread is not None else None
         # A completion delivered again was timed the first time, and closed the trace.
         if (
             thread is not None
-            and sandbox is not None
             and timeline.marks
             and not DashboardRunTimeline.timed_already(thread, timeline.run_id, key=TIMED_RUNS_KEY)
         ):
-            timeline.record(thread_id=thread_id, sandbox=sandbox)
+            timeline.record(thread_id=thread_id)
             await DashboardRunTimeline.mark_timed(
                 thread_id, thread, timeline.run_id, key=TIMED_RUNS_KEY
             )
@@ -255,7 +253,6 @@ class SlackRunTimeline:
                 timeline.trace.record_stages(
                     [*timeline.stages(), *timeline.first_reply_stage()],
                     run_id=timeline.run_id,
-                    sandbox=sandbox,
                 )
             except Exception:
                 logger.warning("Failed to trace a Slack message's stages", exc_info=True)
@@ -287,12 +284,12 @@ class SlackRunTimeline:
             (self._STAGES[name], began, ended) for (_, began), (name, ended) in pairwise(points)
         ]
 
-    def record(self, *, thread_id: str, sandbox: DashboardSandbox) -> None:
+    def record(self, *, thread_id: str) -> None:
         seconds = self.seconds()
         try:
             DashboardRunTimeline.record_latencies(
                 {_METRICS[name]: value for name, value in seconds.items()},
-                attributes={"source": "slack", "sandbox": sandbox.value},
+                attributes={"source": "slack"},
             )
         except Exception:
             logger.warning("Failed to record Slack run timing histograms", exc_info=True)
@@ -301,7 +298,6 @@ class SlackRunTimeline:
             extra={
                 "agent_thread_id": thread_id,
                 "run_id": self.run_id,
-                "slack_sandbox": sandbox.value,
                 **{f"{name}_ms": round(value * 1000) for name, value in seconds.items()},
             },
         )

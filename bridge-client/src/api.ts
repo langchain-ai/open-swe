@@ -1,8 +1,8 @@
 import { arrayAt, isRecord, numberAt, recordAt, stringAt } from "./json"
 import type { JsonObject } from "./json"
 
-/** Which app is serving the bridge; the agent owes only the CLI a printable result. */
-export type BridgeClient = "cli" | "desktop"
+/** The app serving the bridge: the desktop app, offering approved local actions. */
+export type BridgeClient = "desktop"
 
 export interface BridgeSession {
   bridgeId: string

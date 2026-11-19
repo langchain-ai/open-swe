@@ -1,12 +1,7 @@
 # Robin CLI
 
-`robin` starts a normal cloud Robin agent on a remote deployment and makes the current directory on the machine running it that agent's sandbox.
-The remote agent's shell commands, file uploads and file downloads all execute here.
-
-The deployment cannot dial that machine, so the CLI long-polls the backend for sandbox requests, runs them locally, and posts the results back.
-
-> The agent runs commands **unsandboxed**, as you, in whatever directory you started it from.
-> It can read, write and delete anything you can.
+`robin` starts a Robin thread on a remote deployment from the command line and waits for it to finish.
+The agent works in the thread's cloud sandbox, on the GitHub repository the current directory's `origin` names; nothing runs on the machine running `robin`.
 
 ## Install
 
@@ -58,7 +53,7 @@ The CLI uses the first credential it finds:
 1. **A person's session** — `OPEN_SWE_SESSION`, or the one `robin login` stored.
 
 A service key and a workflow are machines: their threads are always `system` threads.
-A person's threads are always private: whoever can prompt one runs commands on this machine.
+A person's threads are always private.
 
 ### Sign in as a person
 
@@ -88,7 +83,7 @@ permissions:
   id-token: write
 steps:
   - uses: actions/checkout@v4
-  - run: robin run "is the test suite green?"
+  - run: robin run "fix the flaky upload test and open a pull request"
     env:
       OPEN_SWE_BACKEND_URL: https://robin.example.com
 ```
@@ -104,7 +99,7 @@ With neither set, the backend is `backendUrl` in `~/.open-swe/config.json`, the 
 Development builds of the desktop app keep a separate profile and never change the shared file.
 
 The binary never reads a `.env`.
-It is compiled with `--no-compile-autoload-dotenv`, because it runs inside your repository and a `.env` there would otherwise enter both its environment and the agent's shell.
+It is compiled with `--no-compile-autoload-dotenv`, because it runs inside your repository and a `.env` there would otherwise enter its environment.
 
 ## Run
 
@@ -115,55 +110,31 @@ robin run "add retries to the upload path"
 
 What happens:
 
-1. A sandbox bridge is registered for the current directory and starts serving the remote agent's requests.
-   Every run gets its own bridge, so two runs in one directory never serve each other's requests.
-   The thread's bridge is remembered in `~/.open-swe/bridges.json` for `--thread`.
-1. A thread is created on the deployment, with `origin` repo detected from `git remote get-url origin`, and its dashboard URL is printed to stderr.
+1. A thread is created on the deployment for the GitHub repository `git remote get-url origin` names, and its dashboard URL is printed to stdout, the only thing the CLI prints there.
+   Outside a checkout with a GitHub `origin`, the thread starts without a repository.
+   The agent clones the repository in its cloud sandbox, so commits you have not pushed are not there.
 1. The agent works.
    Nothing it says or runs is printed; follow it on the dashboard.
    The CLI asks the backend about once a second whether the thread has anything left to run.
    If the backend can't answer, for example while it restarts, the CLI retries with backoff; it gives up after 10 retries in a row.
-1. The agent ends the run by calling `cli_result` with `stdout` and an `exit_code`.
-   Once the thread has nothing left to run, the CLI reads that call from the thread's messages, prints its `stdout` verbatim as its only output on stdout, releases the bridge, and exits with that code.
-   Only calls after the CLI's own prompt count, so on a thread continued with `--thread`, an earlier command's result is never printed.
+1. Once the thread has nothing left to run, the CLI exits: 0 when the agent's last run completed, 1 when it failed, was cancelled, or stopped to wait for an answer, in which case it prints the run's status and the thread's URL to stderr.
 
-The agent may hand parts of the work to task workers, which run on this machine through the same bridge.
-While any worker is still running, a result is not final: the CLI keeps the bridge open, notes each worker's dashboard link and state on stderr as it changes, and waits through the runs that workers' reports wake the agent for.
-It exits on the last result the agent reported, once no worker is left running and no report is still on its way to the agent.
-A later result marked `unchanged` keeps the one before it.
+The agent may hand parts of the work to task workers.
+While any worker is still running, the CLI notes each worker's dashboard link and state on stderr as it changes, and waits through the runs that workers' reports wake the agent for.
 
-So a run composes like any other command:
-
-```sh
-robin run "is the test suite green?" && echo passing
-git diff | robin run "review this diff" > review.txt
-```
-
-The agent reports exit codes the way `grep` and `test` do: 0 when the task was done or the answer is yes, 1 when it failed or the answer is no, 2 when it could not tell.
-A run that fails or is cancelled prints its status and the thread's dashboard URL to stderr, and exits 1.
-A task that ends without calling `cli_result` says so on stderr, and exits 1 too.
-The server re-prompts the agent twice before giving up on a missing result.
-
-Ctrl-C once cancels the run and every worker still running, releases the bridge and exits with 130, as an interrupted command does.
+Ctrl-C once cancels the run and every worker still running, and exits with 130, as an interrupted command does.
 Ctrl-C twice exits immediately, also with 130.
 
 Options:
 
 | Flag | Meaning |
 | --- | --- |
-| `--thread <id>` | Continue a thread robin started on this machine, from the directory it serves. Refused while another robin process is serving it. |
+| `--thread <id>` | Continue an existing thread you can post to. |
 | `--model <id>` | Agent model id, with `--effort`; the backend refuses a model or effort it does not support. |
 | `--effort <name>` | Reasoning effort for `--model`. |
 
 Piped input is attached below the prompt inside `<stdin>` tags, or is the whole prompt when no arguments are given.
 Stdin is only read when it is a pipe or a redirected file, so a CI runner's open stdin never blocks a run.
-
-## Environment the agent gets
-
-The child shell inherits your environment minus anything whose name ends in `_API_KEY`, `_TOKEN`, `_SECRET` or `PASSWORD` — except `GITHUB_TOKEN` and `GH_TOKEN`, so `gh` and `git` keep working.
-`GIT_TERMINAL_PROMPT=0`, `CI=1` and `PAGER=GIT_PAGER=cat` are set so nothing waits on a terminal.
-
-Commands time out after 300 s (killed with `SIGTERM`, then `SIGKILL`), and output is capped at 1 MiB, keeping the first and last 512 KiB.
 
 ## Development
 

@@ -11,7 +11,7 @@ class FileTooLargeError(Exception):
 class RangeReadable(Protocol):
     """A sandbox backend that can return a byte range of a file.
 
-    Backends without it, such as a bridge to the user's own machine, are read whole.
+    Backends without it are read whole.
     """
 
     async def aread_range(self, path: str, start: int, end: int, *, limit: int) -> bytes:

@@ -550,60 +550,6 @@ describe("ChatComposer drafts", () => {
 })
 
 describe("ChatComposer options", () => {
-  it.each([false, true])(
-    "shows the Cloud target only in the desktop app (desktop: %s)",
-    (desktop) => {
-      vi.stubGlobal("openSweDesktop", desktop ? {} : undefined)
-      try {
-        renderComposer(false, { runTarget: "cloud" })
-        expect(Boolean(screen.queryByText("Cloud"))).toBe(desktop)
-      } finally {
-        vi.unstubAllGlobals()
-      }
-    }
-  )
-
-  it("offers a project picker locally and shows branch controls only for Git folders", async () => {
-    const local = {
-      runTarget: "local" as const,
-      onRunTargetChange: vi.fn(),
-      onSelectLocalRepo: vi.fn(),
-      onAddLocalRepo: vi.fn(),
-      onRemoveLocalRepo: vi.fn(),
-      onSelectLocalRepoBranch: vi.fn(),
-      onRefreshLocalRepoBranch: vi.fn(),
-      onLocalWorkspaceModeChange: vi.fn(),
-    }
-    renderComposer(false, local)
-    expect(screen.getByRole("button", { name: "This Mac" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: /Choose project/ })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "No branch" })).toBeNull()
-    cleanup()
-
-    renderComposer(false, {
-      ...local,
-      selectedLocalRepoPath: "/projects/demo",
-      selectedLocalRepoBranch: "main",
-      localRepoBranches: [
-        { name: "main", current: true, isDefault: true, worktreePath: null },
-      ],
-    })
-    expect(await screen.findByRole("button", { name: "main" })).toBeTruthy()
-  })
-
-  it("shows a started thread's project, or no project, without a picker", () => {
-    renderComposer(false, {
-      runTarget: "local",
-      selectedLocalRepoPath: "/projects/demo",
-    })
-    expect(screen.getByText("demo")).toBeTruthy()
-    expect(screen.queryByRole("button", { name: /Choose project/ })).toBeNull()
-    cleanup()
-
-    renderComposer(false, { runTarget: "local", selectedLocalRepoPath: null })
-    expect(screen.getByText("No project")).toBeTruthy()
-  })
-
   it("asks someone without GitHub to link it before choosing a repository", async () => {
     const onRepoChange = vi.fn()
     renderComposer(false, {

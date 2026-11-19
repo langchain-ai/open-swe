@@ -106,10 +106,7 @@ describe("product analytics", () => {
     vi.useFakeTimers()
     const started = new Date("2026-11-04T12:00:00Z")
     vi.setSystemTime(started)
-    analytics.track("agents_thread_created", {
-      run_target: "cloud",
-      has_attachments: true,
-    })
+    analytics.track("agents_thread_created", { has_attachments: true })
     const initializing = analytics.initialize(() => deferred.load())
     analytics.page("/usage", "/usage")
     deferred.resolve(await deferred.client.load())
@@ -123,7 +120,7 @@ describe("product analytics", () => {
     )
     expect(deferred.client.track).toHaveBeenCalledWith(
       "agents_thread_created",
-      expect.objectContaining({ run_target: "cloud", has_attachments: true }),
+      expect.objectContaining({ has_attachments: true }),
       expect.objectContaining({
         timestamp: expect.any(Date),
         context: { page: { path: "/agents/:id" } },
@@ -158,10 +155,7 @@ describe("product analytics", () => {
     })
     analytics.track(
       "agents_thread_created",
-      {
-        run_target: "cloud",
-        has_attachments: false,
-      },
+      { has_attachments: false },
       alice.user_id
     )
     deferred.resolve(await deferred.client.load())

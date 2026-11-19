@@ -19,8 +19,6 @@ const terminals: TerminalGroupsController = {
     activeTerminalGroupId: "",
     nextTerminalNumber: 1,
   },
-  metadataById: new Map(),
-  error: null,
   addGroup: vi.fn(),
   closeGroup: vi.fn(),
   closeTerminal: vi.fn(),
@@ -51,8 +49,7 @@ it("collapses only when the last surface closes and allows reopening the empty l
   const props = {
     threadRef,
     terminals,
-    terminalTarget: { kind: "cloud", threadId: threadRef.threadId } as const,
-    cwd: "",
+    terminalTarget: { threadId: threadRef.threadId },
     terminalAvailable: false,
     diffAvailable: true,
     renderDiff: () => <div>Changes content</div>,

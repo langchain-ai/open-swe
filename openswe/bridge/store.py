@@ -1,6 +1,6 @@
-"""The queue a CLI answers a cloud run's sandbox requests through.
+"""The queue the desktop app answers a cloud run's approved local actions through.
 
-The graph worker and the HTTP handler holding the CLI's long poll are usually
+The graph worker and the HTTP handler holding the desktop's long poll are usually
 different processes, so everything they agree on is in Postgres: a request moves
 ``pending -> claimed -> done | failed`` and nothing else, the claim takes
 ``FOR UPDATE SKIP LOCKED`` so two claimers never carry the same request, and the
@@ -38,11 +38,10 @@ from openswe.bridge.constants import (
     ALIVE_THRESHOLD_SECONDS,
     CHANNEL,
     CLOSED_EVENT,
-    HANDOFF_FROM_KEY,
+    LOCAL_ACCESS_CLIENT,
+    LOCAL_ACCESS_ROOT,
     REQUEST_EVENT,
     RESULT_EVENT,
-    SANDBOX_ID_PREFIX,
-    BridgeClient,
 )
 from openswe.bridge.protocol import BridgeMethod, JsonObject
 from openswe.database import postgres
@@ -71,8 +70,8 @@ _rotation_lock = asyncio.Lock()
 class BridgeUnavailableError(RuntimeError):
     """The bridge a run is bound to is closed, stale, or gone.
 
-    Raised on the graph side, where it means the machine running the CLI is not answering
-    this run — never that the bridge should be replaced by anything else.
+    Raised on the graph side, where it means the owner's desktop is not answering this
+    run's local action.
     """
 
     def __init__(self, bridge_id: str, cause: str) -> None:
@@ -81,19 +80,19 @@ class BridgeUnavailableError(RuntimeError):
 
 
 class BridgeInUseError(Exception):
-    """A reopen of a bridge another CLI process is still serving."""
+    """A reopen of a bridge another desktop process is still serving."""
 
     def __init__(self, bridge_id: str) -> None:
         self.bridge_id = bridge_id
-        super().__init__(f"Sandbox bridge {bridge_id} is in use by another CLI process")
+        super().__init__(f"Sandbox bridge {bridge_id} is in use by another process")
 
 
 class Bridge(BaseModel):
-    """One CLI's registration, as the ``sandbox_bridge`` row holds it."""
+    """One desktop's registration, as the ``sandbox_bridge`` row holds it."""
 
     bridge_id: str
     owner_id: str
-    client: BridgeClient = "cli"
+    client: str
     hostname: str
     root_path: str
     label: str | None = None
@@ -105,24 +104,10 @@ class Bridge(BaseModel):
     def of(cls, row: RowMapping) -> Self:
         return cls.model_validate(dict(row))
 
-    @classmethod
-    def sandbox_id_for(cls, bridge_id: str) -> str:
-        return f"{SANDBOX_ID_PREFIX}{bridge_id}"
-
-    @classmethod
-    def bridge_id_of(cls, sandbox_id: str | None) -> str | None:
-        """The bridge a ``sandbox_id`` names, or ``None`` when it names a real sandbox."""
-        if not sandbox_id or not sandbox_id.startswith(SANDBOX_ID_PREFIX):
-            return None
-        return sandbox_id.removeprefix(SANDBOX_ID_PREFIX) or None
-
     @property
     def local_access_only(self) -> bool:
-        return self.client == "desktop" and self.root_path == "local-access://approved-actions"
-
-    @property
-    def sandbox_id(self) -> str:
-        return self.sandbox_id_for(self.bridge_id)
+        """Whether the desktop serving it answers approved local actions, and nothing else."""
+        return self.client == LOCAL_ACCESS_CLIENT and self.root_path == LOCAL_ACCESS_ROOT
 
     def serves(self, sender_id: str | None) -> bool:
         """Whether a run sent by ``sender_id`` may act on this machine: only its owner's may."""
@@ -136,40 +121,8 @@ class Bridge(BaseModel):
         return quiet_for.total_seconds() <= ALIVE_THRESHOLD_SECONDS
 
 
-class SandboxBridgeBinding(BaseModel):
-    """The thread metadata that binds a thread to one machine's bridge.
-
-    ``sandbox_id`` is the same key a hosted sandbox uses, so every reader that
-    already resolves a thread's sandbox from metadata resolves this one too.
-    """
-
-    sandbox_id: str
-    sandbox_kind: Literal["bridge"] = "bridge"
-    sandbox_bridge_client: BridgeClient = "cli"
-
-    @classmethod
-    def of(cls, bridge: Bridge) -> Self:
-        if bridge.local_access_only:
-            raise HTTPException(409, "An approved-actions bridge cannot be a thread sandbox")
-        return cls(sandbox_id=bridge.sandbox_id, sandbox_bridge_client=bridge.client)
-
-    def dump(self) -> dict[str, str]:
-        return self.model_dump(mode="json")
-
-    @staticmethod
-    def reaches_a_machine(metadata: Mapping[str, object]) -> bool:
-        """Whether a run of the thread would act on a person's machine.
-
-        A thread moving to the cloud still copies its checkout from the bridge it left.
-        """
-        return any(
-            isinstance(sandbox_id, str) and Bridge.bridge_id_of(sandbox_id) is not None
-            for sandbox_id in (metadata.get("sandbox_id"), metadata.get(HANDOFF_FROM_KEY))
-        )
-
-
 class ClaimedRequest(BaseModel):
-    """One request handed to the CLI, in the shape the wire contract gives it."""
+    """One request handed to the desktop, in the shape the wire contract gives it."""
 
     request_id: str
     method: str
@@ -208,20 +161,18 @@ class BridgeStore:
         cls,
         *,
         owner_id: str,
-        client: BridgeClient = "cli",
         hostname: str,
-        root_path: str,
         label: str | None,
         bridge_id: str | None,
     ) -> Bridge | None:
-        """Open a new bridge, or reopen one the caller already owns.
+        """Open a new local-access bridge, or reopen one the caller already owns.
 
-        A reopen is how a restarted CLI picks its thread back up, so it also
+        A reopen is how a restarted desktop picks its runs back up, so it also
         re-queues whatever the previous connection claimed and never answered:
         those requests still have a waiter on the graph side.
 
         A bridge another process is still heartbeating is refused rather than
-        shared: two CLIs serving one queue would run each other's requests.
+        shared: two desktops serving one queue would run each other's requests.
         """
         if bridge_id is None:
             async with postgres.transaction() as conn:
@@ -236,9 +187,9 @@ class BridgeStore:
                     {
                         "bridge_id": uuid.uuid4().hex,
                         "owner_id": owner_id,
-                        "client": client,
+                        "client": LOCAL_ACCESS_CLIENT,
                         "hostname": hostname,
-                        "root_path": root_path,
+                        "root_path": LOCAL_ACCESS_ROOT,
                         "label": label,
                     },
                 )
@@ -249,7 +200,8 @@ class BridgeStore:
                 conn,
                 f"""
                 UPDATE sandbox_bridge
-                SET hostname = :hostname,
+                SET client = :client,
+                    hostname = :hostname,
                     root_path = :root_path,
                     label = :label,
                     last_heartbeat_at = clock_timestamp(),
@@ -265,8 +217,9 @@ class BridgeStore:
                 {
                     "bridge_id": bridge_id,
                     "owner_id": owner_id,
+                    "client": LOCAL_ACCESS_CLIENT,
                     "hostname": hostname,
-                    "root_path": root_path,
+                    "root_path": LOCAL_ACCESS_ROOT,
                     "label": label,
                     "threshold": ALIVE_THRESHOLD_SECONDS,
                 },
@@ -300,7 +253,7 @@ class BridgeStore:
         """The bridge, optionally pinned to its owner.
 
         The graph side has no login to pin to — it reaches a bridge only through
-        the ``sandbox_id`` the owner's own request already stamped on the thread.
+        the ``local_access_bridge_id`` its owner's own request offered the run.
         """
         async with postgres.read_only_transaction() as conn:
             rows = await cls._rows(
@@ -313,15 +266,6 @@ class BridgeStore:
                 {"bridge_id": bridge_id, "owner_id": owner_id},
             )
         return Bridge.of(rows[0]) if rows else None
-
-    @classmethod
-    async def is_connected(cls, sandbox_id: str | None) -> bool:
-        """Whether the bridge a thread's ``sandbox_id`` names is being served right now."""
-        bridge_id = Bridge.bridge_id_of(sandbox_id)
-        if bridge_id is None:
-            return False
-        bridge = await cls.load(bridge_id)
-        return bridge is not None and bridge.is_alive
 
     @classmethod
     async def require_open(cls, bridge_id: str, *, owner_id: str) -> Bridge:
@@ -351,11 +295,11 @@ class BridgeStore:
 
     @classmethod
     async def release_unheld(cls, bridge_id: str, *, held: Sequence[str]) -> int:
-        """Return to the queue whatever this bridge claimed that its CLI does not hold.
+        """Return to the queue whatever this bridge claimed that its desktop does not hold.
 
-        A claim commits before its poll response reaches the CLI, so a response
+        A claim commits before its poll response reaches the desktop, so a response
         lost in transit would otherwise leave the request claimed with a waiter
-        on the graph side and nobody running it. The CLI names every request it
+        on the graph side and nobody running it. The desktop names every request it
         is running on each poll; anything else claimed was never received.
         """
         async with postgres.transaction() as conn:
@@ -373,7 +317,7 @@ class BridgeStore:
             )
         if rows:
             logger.info(
-                "Re-queued sandbox bridge requests the CLI never received",
+                "Re-queued sandbox bridge requests the desktop never received",
                 extra={"bridge_id": bridge_id, "requeued_requests": len(rows)},
             )
         return len(rows)
@@ -515,7 +459,7 @@ class BridgeStore:
         """Close the caller's bridge and fail everything it left unanswered.
 
         Idempotent: closing an already-closed bridge still reports success, so a
-        CLI that shuts down twice does not have to care which call won.
+        desktop that shuts down twice does not have to care which call won.
         """
         async with postgres.transaction() as conn:
             owned = await cls._rows(

@@ -143,13 +143,6 @@ export default function CustomizeScreen() {
         />
         <Separator inset={62} />
         <ToggleRow
-          title="Runtime"
-          symbol="desktopcomputer"
-          value={preferences.showRuntime}
-          onChange={(showRuntime) => update({ showRuntime })}
-        />
-        <Separator inset={62} />
-        <ToggleRow
           title="Last Updated"
           symbol="clock"
           value={preferences.showLastUpdated}

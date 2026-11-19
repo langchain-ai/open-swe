@@ -1,7 +1,7 @@
-"""Who may be offered approved local actions, and which bridges may back a thread.
+"""Who may be offered approved local actions.
 
 Kept free of the agent stack (deepagents, ``openswe.tools``) because the webapp's
-run-start and thread-move routes import it.
+run-start route imports it.
 """
 
 import logging
@@ -12,8 +12,7 @@ from contextvars import ContextVar
 from fastapi import HTTPException
 from runtime_api.operations import LocalReview
 
-from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
-from openswe.dashboard.settings import get_settings
+from openswe.bridge.store import BridgeStore
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -29,8 +28,6 @@ class LocalAccess:
         if not isinstance(requested, str) or not requested.strip():
             raise HTTPException(422, "local_access_bridge_id must be a non-empty string")
         actor = await User.for_login("github", login)
-        if not await cls.enabled_for(metadata, actor):
-            raise HTTPException(409, "Cloud-first desktop access is disabled")
         owner_login = metadata.get("owner_login")
         owner = (
             await User.for_login("github", owner_login) if isinstance(owner_login, str) else None
@@ -42,20 +39,10 @@ class LocalAccess:
             or actor.id != owner.id
         ):
             raise HTTPException(403, "Local access requires its owner's private thread")
-        if SandboxBridgeBinding.reaches_a_machine(metadata):
-            raise HTTPException(409, "Local access requires a cloud sandbox")
         bridge = await BridgeStore.require_open(requested.strip(), owner_id=owner_id)
         if not bridge.local_access_only:
             raise HTTPException(409, "This desktop does not support approved local actions")
         return bridge.bridge_id
-
-    @staticmethod
-    async def enabled_for(metadata: Mapping[str, object], person: User | None) -> bool:
-        """Cloud-first desktop is on globally or by this person's opt-in."""
-        if person is not None and person.typed_preferences.experimental_cloud_first_desktop:
-            return True
-        settings = await get_settings()
-        return settings.get("cloud_first_desktop_enabled") is True
 
     @classmethod
     async def offer_for_run(
@@ -63,8 +50,8 @@ class LocalAccess:
     ) -> str | None:
         """Offer local access to a run, or run without it when it is not available.
 
-        A client's view of the flag, the thread or its desktop can be stale, so an
-        ineligible offer drops the local tools instead of failing the message.
+        A client's view of the thread or its desktop can be stale, so an ineligible
+        offer drops the local tools instead of failing the message.
         Malformed requests still fail.
         """
         try:
@@ -74,17 +61,6 @@ class LocalAccess:
                 raise
             logger.info("Running without local access", extra={"reason": exc.detail})
             return None
-
-    @classmethod
-    async def allow_binding(cls, bridge: Bridge, metadata: Mapping[str, object]) -> None:
-        if bridge.local_access_only:
-            raise HTTPException(409, "An approved-actions bridge cannot be a thread sandbox")
-        if bridge.client == "desktop":
-            settings = await get_settings()
-            if settings.get("cloud_first_desktop_enabled") is True:
-                raise HTTPException(
-                    409, "Cloud-first mode does not create or move This Mac threads"
-                )
 
 
 class LocalReviews:

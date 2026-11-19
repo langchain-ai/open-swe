@@ -17,6 +17,7 @@ from sqlalchemy import RowMapping, text
 
 from openswe.agent_api.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.database.postgres import transaction
+from openswe.sandboxes.this_mac import MacSandbox
 from openswe.thread_ids import mda_successor_thread_id
 from openswe.threads.creation import TITLE_LOCKED_KEY
 from openswe.ui_invalidations import Topic
@@ -119,6 +120,11 @@ class IndexedThread(BaseModel):
     @classmethod
     def from_row(cls, row: RowMapping) -> Self:
         return cls.model_validate(dict(row))
+
+    @property
+    def on_a_mac(self) -> bool:
+        """Whether this is a This Mac thread, which ran on its owner's machine and runs no more."""
+        return MacSandbox.names(self.metadata.get("sandbox_id"))
 
     @classmethod
     def from_agent_server(cls, thread: Mapping[str, object]) -> Self | None:

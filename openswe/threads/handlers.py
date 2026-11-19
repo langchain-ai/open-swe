@@ -6,14 +6,13 @@ import posixpath
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from functools import partial
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import HTTPException
 from langgraph.constants import END
 from langgraph_sdk.errors import NotFoundError
 from pydantic import JsonValue
 
-from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_checks import PullRequestState, get_pull_request_check_states
 from openswe.github.pull_request_context import PullRequestFixScope, get_pull_request_context
@@ -34,7 +33,6 @@ from openswe.threads.listing import (
     settle_review_walkthrough,
 )
 from openswe.threads.machine_reads import machine_thread
-from openswe.threads.moves import SandboxMove
 from openswe.threads.principals import Principal
 from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.threads.runs import (
@@ -423,8 +421,6 @@ async def share_thread(
         raise HTTPException(403, "only the thread owner can share it")
     if metadata.get("visibility") != "private":
         raise HTTPException(409, "thread is not private")
-    if SandboxBridgeBinding.reaches_a_machine(metadata):
-        raise HTTPException(409, "a thread running on its owner's machine cannot be shared")
     if _thread_is_busy(thread):
         raise HTTPException(409, "stop the run before sharing this thread")
     for status in ("pending", "running"):
@@ -463,38 +459,6 @@ async def share_thread(
         {**as_thread_dict(thread), "metadata": {**metadata, **metadata_update}},
         viewer_login=requester_login,
     )
-
-
-async def move_thread(
-    thread_id: str,
-    login: str,
-    *,
-    email: str | None = None,
-    bridge_id: str | None,
-    target: Literal["cloud"] | None,
-) -> dict[str, object]:
-    """Move a thread onto its owner's machine or off it to the cloud, before its next message."""
-    thread = await _authorized_thread(thread_id, login, email=email)
-    bridge = (
-        None
-        if bridge_id is None
-        else await BridgeStore.require_open(
-            bridge_id, owner_id=Principal.of_login(login, email).sender_id
-        )
-    )
-    move = await SandboxMove.requested(
-        thread_id, thread_metadata(thread), login=login, bridge=bridge, target=target
-    )
-    if move is None:
-        raise HTTPException(409, "this thread already runs there")
-    try:
-        await move.carry_out()
-    except Exception as exc:
-        raise HTTPException(502, f"could not move this thread: {exc}") from exc
-    updated = await THREADS.get(thread_id)
-    if updated is None:
-        raise HTTPException(404, "thread not found")
-    return await _thread_summary(updated.as_langgraph(), viewer_login=login)
 
 
 async def continue_thread_privately(

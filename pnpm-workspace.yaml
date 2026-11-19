@@ -12,7 +12,7 @@ allowBuilds:
   electron: true
   electron-winstaller: false
   esbuild: true
-  node-pty: true
+  node-pty: set this to true or false
   unrs-resolver: true
 
 # unplugin's typings import "bun"; a hoisted @types/bun would inject Bun globals into ui's tsc.

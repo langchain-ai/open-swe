@@ -6,7 +6,6 @@ from pathlib import Path
 
 from runtime_api.provenance import Provenance
 
-from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
 from openswe.input_messages import RunMessage, dynamic_context_hash, run_context
 from openswe.prompts import prompt
@@ -179,16 +178,9 @@ class TurnContext:
 
     Each part reaches the model as a ``run`` context block, added when it differs
     from the one the model last saw.
-
-    ``local_checkout`` says the working directory already *is* the user's own
-    repository — a thread bridged to their machine — so the clone-or-sync and
-    git-identity steps a hosted sandbox needs would rewrite their checkout.
-    ``local_checkout_client`` is the app serving that machine: only the CLI
-    prints a result the run must hand it.
     """
 
     working_dir: str
-    working_folder: bool = False
     source: str = "dashboard"
     slack_context: bool = False
     automation_slack_reply: bool = False
@@ -197,10 +189,9 @@ class TurnContext:
     slack_by_the_way: bool = False
     slack_follow_up_suggestions: bool = False
     implementation_walkthrough_enabled: bool = False
-    sandbox_file_downloads: bool = False
     local_access: bool = False
-    local_checkout: bool = False
-    local_checkout_client: BridgeClient = "cli"
+    # The thread ran on its owner's machine before it moved to a cloud sandbox.
+    moved_off_mac: bool = False
     # Why the run's managed tool catalog could not be read, if it could not.
     tool_catalog_note: str = ""
     # The sender's other recent threads, whose activity changes from turn to turn.
@@ -208,26 +199,23 @@ class TurnContext:
 
     def environment(self) -> str:
         environment = prompt(
-            "system/working-environment-local"
-            if self.local_checkout
-            else "system/working-environment",
+            "system/working-environment",
             working_dir=self.working_dir,
-            desktop=self.local_checkout_client == "desktop",
-            working_folder=self.working_folder,
         )
         if self.local_access:
             environment += "\n\n" + prompt("system/local-access")
+        if self.moved_off_mac:
+            environment += "\n\n" + prompt("system/moved-off-mac")
         if self.implementation_walkthrough_enabled:
             environment += "\n\n" + prompt("system/implementation-walkthrough")
-        if self.sandbox_file_downloads:
-            environment += "\n\n" + prompt("system/sandbox-file-downloads")
+        environment += "\n\n" + prompt("system/sandbox-file-downloads")
         if note := self.tool_catalog_note.strip():
             environment += "\n\n" + note
         return environment
 
     def source_guidance(self) -> str:
         sections = [prompt("system/source-context", source_guidance=self._source_guidance())]
-        if not self.local_checkout and (scope := _render_repository_scope_section()):
+        if scope := _render_repository_scope_section():
             sections.append(scope)
         return "\n\n".join(sections)
 

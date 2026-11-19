@@ -283,7 +283,6 @@ _LOCAL_TOOLS: Final[Mapping[str, _LocalTool]] = {
     "fetch_url": _with_call(fetch_url),
     "http_request": _with_call(http_request, offloads=True),
     "slack_no_reply_needed": _LocalTool(_no_reply_needed),
-    "cli_result": _plain(results.cli_result),
     "record_human_input": _LocalTool(_record_human_input),
     "note_on_diff": _plain(results.note_on_diff),
     "propose_review_comment": _plain(results.propose_review_comment),

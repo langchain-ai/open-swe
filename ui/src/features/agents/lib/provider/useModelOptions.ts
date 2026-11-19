@@ -1,5 +1,5 @@
 import type { ModelOption } from "@/lib/api"
-import { useOptions, useProfile } from "@/lib/profile"
+import { useOptions } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 
 export interface ModelSelection {
@@ -11,7 +11,6 @@ export interface ModelOptionsResult {
   models: Array<ModelOption>
   defaultRepo: string | null
   defaultSelection: ModelSelection | null
-  cloudFirstDesktopEnabled: boolean
   modelSelectionEnabled: boolean
   isLoading: boolean
   isError: boolean
@@ -59,7 +58,6 @@ export function persistModelSelection(
 
 export function useModelOptions(): ModelOptionsResult {
   const optionsQuery = useOptions()
-  const profile = useProfile()
   const session = useSession()
   const models = optionsQuery.data?.models ?? []
   const defaultSelection = optionsQuery.data
@@ -70,10 +68,6 @@ export function useModelOptions(): ModelOptionsResult {
     models,
     defaultRepo: optionsQuery.data?.default_repo ?? null,
     defaultSelection,
-    // On globally, or by the person's own opt-in under Experiments.
-    cloudFirstDesktopEnabled:
-      optionsQuery.data?.cloud_first_desktop_enabled === true ||
-      profile.data?.experimental_cloud_first_desktop === true,
     modelSelectionEnabled: optionsQuery.data?.model_selection_enabled === true,
     isLoading: optionsQuery.isLoading || session.isLoading,
     isError: optionsQuery.isError && !optionsQuery.data,

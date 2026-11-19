@@ -53,7 +53,6 @@ interface RightPanelTabsProps {
   surfaces: ReadonlyArray<RightPanelSurface>
   activeSurfaceId: string | null
   pendingSurfaceIds: ReadonlySet<string>
-  terminalLabelsById: ReadonlyMap<string, string>
   onActivate: (surface: RightPanelSurface) => void
   onCloseSurface: (surface: RightPanelSurface) => void
   onCloseOtherSurfaces: (surface: RightPanelSurface) => void
@@ -468,10 +467,7 @@ function RightPanelEmptyState({
   )
 }
 
-export function surfaceTitle(
-  surface: RightPanelSurface,
-  terminalLabelsById: ReadonlyMap<string, string>
-): string {
+export function surfaceTitle(surface: RightPanelSurface): string {
   switch (surface.kind) {
     case "diff":
       return "Changes"
@@ -482,7 +478,7 @@ export function surfaceTitle(
         surface.relativePath.lastIndexOf("/") + 1
       )
     case "terminal":
-      return terminalLabelsById.get(surface.resourceId) ?? "Terminal"
+      return "Terminal"
     case "agents":
       return "Agents"
     case "preview":
@@ -581,7 +577,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             {props.surfaces.map((surface, index) => {
               const active = surface.id === props.activeSurfaceId
               const pending = props.pendingSurfaceIds.has(surface.id)
-              const title = surfaceTitle(surface, props.terminalLabelsById)
+              const title = surfaceTitle(surface)
               return (
                 <ContextMenu key={surface.id}>
                   <ContextMenuTrigger asChild>

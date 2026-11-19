@@ -249,9 +249,10 @@ def test_a_tools_parameters_are_worked_out_once_while_it_lives() -> None:
 async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
 
     from langchain_core.messages import messages_to_dict
+    from runtime_api.catalog import TaskContext
     from runtime_api.models import provider_model_kwargs
 
     from openswe.agent_api import run_calls, run_sandbox
@@ -295,7 +296,11 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         "openswe.middleware.model_selection._select_jev_route",
         AsyncMock(return_value=RouteSelection("fast")),
     )
-    monkeypatch.setattr(TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        TaskCoordinationMiddleware,
+        "for_thread",
+        AsyncMock(return_value=MagicMock(task_context=MagicMock(return_value=TaskContext()))),
+    )
     asked = messages_to_dict([_said("Fix the login", "human-1")])
     route = await TokenRun.answer(parts, run, "route_model", {"run_id": "run-1", "humans": asked})
     context = await TokenRun.answer(parts, run, "task_context", {"run_id": "run-1"})
@@ -557,7 +562,6 @@ async def test_a_runs_task_context_is_worked_out_as_it_starts_and_a_cancelled_wo
 
     from runtime_api.catalog import TaskContext
 
-    from openswe.middleware import task_coordination
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.tasks import store
 
@@ -574,8 +578,6 @@ async def test_a_runs_task_context_is_worked_out_as_it_starts_and_a_cancelled_wo
         model="openai:gpt-5.5",
         effort="high",
     )
-    thread = AsyncMock(return_value={"metadata": {}})
-    monkeypatch.setattr(task_coordination, "read_thread", thread)
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", membership)
     monkeypatch.setattr(store.TaskDelegation, "get", AsyncMock(return_value=delegation))
 
@@ -597,10 +599,6 @@ async def test_a_runs_task_context_is_worked_out_as_it_starts_and_a_cancelled_wo
     # with it (``tasks.service.cancel_worker``).
     delegation.cancelled = True
     with pytest.raises(PermissionError, match="This worker was cancelled"):
-        await task_context()
-
-    thread.side_effect = PermissionError("Thread access revoked")
-    with pytest.raises(PermissionError, match="Thread access revoked"):
         await task_context()
 
 
@@ -763,7 +761,7 @@ async def test_the_runtime_runs_only_the_backends_own_tools_that_read_nothing_of
         monkeypatch.setenv("MDA_EXA_CONNECTION", exa_connection)
     surface = ToolSurface(base_tools=[web_search, fetch_url, http_request, publish_artifact])
     await surface.prepare()
-    # A bridged client's tool of the same name is the client's to run.
+    # A client's tool of the same name is the client's to run.
     client = {"kind": "function", "name": "http_request", "parameters": {"type": "object"}}
     config: RunnableConfig = {"configurable": {"client_tools": [client]}}
 
@@ -1666,7 +1664,7 @@ async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_cha
 
 
 async def test_the_files_api_reaches_the_threads_files_as_the_run() -> None:
-    """A bridge checks who the run is for, which it reads from the run's own config."""
+    """A sandbox backend may check who the run is for, which it reads from the run's own config."""
     from deepagents.backends.protocol import (
         BackendProtocol,
         ExecuteResponse,
@@ -2002,7 +2000,9 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
     )
     monkeypatch.setattr(async_workers.service.Actor, "resolve", AsyncMock(return_value="actor"))
     monkeypatch.setattr(
-        async_workers.TaskCoordinationMiddleware, "for_thread", AsyncMock(return_value=None)
+        async_workers.TaskCoordinationMiddleware,
+        "for_thread",
+        AsyncMock(return_value=async_workers.TaskCoordinationMiddleware("coordinator", None)),
     )
     client = MagicMock()
     client.runs.cancel = AsyncMock()
@@ -2038,9 +2038,7 @@ async def test_a_registered_worker_tells_its_coordinators_run_the_task_it_now_co
     coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
     task = store.Task(title="Fix login", coordinator_thread_id="coordinator")
     membership = store.TaskMembership(thread_id="coordinator", task_id=task.id, role="coordinator")
-    coordination = TaskCoordinationMiddleware(
-        "coordinator", True, store.TaskContext(task, membership)
-    )
+    coordination = TaskCoordinationMiddleware("coordinator", store.TaskContext(task, membership))
     for_thread = AsyncMock(return_value=coordination)
     monkeypatch.setattr(async_workers.TaskCoordinationMiddleware, "for_thread", for_thread)
     monkeypatch.setattr(

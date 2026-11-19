@@ -26,11 +26,11 @@ _RECOVERY_PATCH_TIMEOUT_SECONDS = 120
 _UNSAFE_REF_CHARACTERS = set(" ~^:?*[\\\x7f") | {chr(code) for code in range(32)}
 
 
-async def connect_sandbox(sandbox_id: str, *, thread_id: str) -> SandboxBackendProtocol:
+async def connect_sandbox(sandbox_id: str) -> SandboxBackendProtocol:
     # deferred: pulls deepagents -> langchain_anthropic -> anthropic at import time
     from openswe.sandboxes.connect import connect_sandbox as _connect_sandbox
 
-    return await _connect_sandbox(sandbox_id, thread_id=thread_id)
+    return await _connect_sandbox(sandbox_id)
 
 
 def _recovery_patch_script() -> str:
@@ -102,7 +102,7 @@ async def get_dashboard_thread_recovery_patch(
         raise HTTPException(404, "thread has no recoverable sandbox")
 
     try:
-        sandbox = await connect_sandbox(sandbox_id, thread_id=thread_id)
+        sandbox = await connect_sandbox(sandbox_id)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Could not connect to sandbox %s for recovery", sandbox_id, exc_info=True)
         raise HTTPException(502, "could not connect to thread sandbox") from exc
@@ -174,7 +174,7 @@ async def get_dashboard_thread_working_tree_diff(
     if not isinstance(sandbox_id, str) or not sandbox_id:
         return _missing_diff()
     try:
-        sandbox = await connect_sandbox(sandbox_id, thread_id=thread_id)
+        sandbox = await connect_sandbox(sandbox_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Could not connect to sandbox %s for working tree diff", sandbox_id)
         raise HTTPException(503, "Could not connect to the workspace.") from exc

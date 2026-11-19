@@ -13,7 +13,7 @@ when the call returned if it streamed nothing. The run's completion webhook read
 the run's messages, so every send is timed however its client reads the run: a
 transcript dashboard starts runs that stream no messages to the thread.
 
-Each mark goes to an OTLP latency histogram labelled by client and sandbox, and to a
+Each mark goes to an OTLP latency histogram labelled by client, and to a
 span of the send's own LangSmith trace (``DashboardSendTrace``), which the run itself
 nests in.
 """
@@ -36,7 +36,6 @@ from langsmith.utils import tracing_is_enabled
 from pydantic import JsonValue
 from runtime_api.loop import FIRST_OUTPUT_AT_KEY, FIRST_TEXT_AT_KEY
 
-from openswe.bridge.store import Bridge
 from openswe.config import ENV
 from openswe.threads.runtimes import MdaRuntime
 from openswe.trace_metadata import BILLING_FIELDS, RunOrigin
@@ -80,20 +79,6 @@ class DashboardClient(StrEnum):
         if user_agent.startswith("Mozilla/") and "Electron/" not in user_agent:
             return cls.WEB
         return cls.OTHER
-
-
-class DashboardSandbox(StrEnum):
-    """Where a dashboard thread's agent works, as a bounded metric label."""
-
-    BRIDGE = "bridge"
-    CLOUD = "cloud"
-
-    @classmethod
-    def of_thread(cls, metadata: Mapping[str, object]) -> DashboardSandbox:
-        """Where the thread's runs work now, not where a move carried its checkout from."""
-        sandbox_id = metadata.get("sandbox_id")
-        bridged = isinstance(sandbox_id, str) and Bridge.bridge_id_of(sandbox_id) is not None
-        return cls.BRIDGE if bridged else cls.CLOUD
 
 
 class DashboardSendTrace:
@@ -419,7 +404,6 @@ class DashboardSendTrace:
         stages: Sequence[tuple[str, int, int]],
         *,
         run_id: str,
-        sandbox: DashboardSandbox | None,
     ) -> None:
         """Post a span per stage, each with an id of its own trace and name, so tracing
         them again rewrites the same spans."""
@@ -435,7 +419,6 @@ class DashboardSendTrace:
                     "metadata": {
                         **shared,
                         "agent_run_id": run_id,
-                        **({"sandbox_kind": sandbox.value} if sandbox is not None else {}),
                     }
                 },
             ).post()
@@ -641,17 +624,11 @@ class DashboardRunTimeline:
         # A completion may be delivered again. The marks are reported once, as the thread
         # records them, and the trace is closed once, as its end shows; each is retried by
         # a later delivery when it did not happen the first time.
-        sandbox = DashboardSandbox.of_thread(thread) if thread is not None else None
-        if (
-            thread is not None
-            and sandbox is not None
-            and timeline.marks
-            and not cls.timed_already(thread, timeline.run_id)
-        ):
-            timeline.report(thread_id=thread_id, sandbox=sandbox)
+        if thread is not None and timeline.marks and not cls.timed_already(thread, timeline.run_id):
+            timeline.report(thread_id=thread_id)
             await cls.mark_timed(thread_id, thread, timeline.run_id)
         if timeline.trace is not None and not await timeline.trace.ended():
-            timeline.trace_stages(sandbox)
+            timeline.trace_stages()
             await timeline.trace.close(run, failed=failed)
 
     @classmethod
@@ -724,7 +701,7 @@ class DashboardRunTimeline:
         """Each mark the run reached, in seconds after the send."""
         return {name: (at - self.received_at_ms) / 1000 for name, at in self.marks.items()}
 
-    def trace_stages(self, sandbox: DashboardSandbox | None) -> None:
+    def trace_stages(self) -> None:
         """Span each stage of the send on its trace, even when the run gave no output."""
         if self.trace is None:
             return
@@ -734,18 +711,18 @@ class DashboardRunTimeline:
             *self.first_reply_stage(),
         ]
         try:
-            self.trace.record_stages(stages, run_id=self.run_id, sandbox=sandbox)
+            self.trace.record_stages(stages, run_id=self.run_id)
         except Exception:
             logger.warning("Failed to trace a dashboard send's stages", exc_info=True)
 
-    def report(self, *, thread_id: str, sandbox: DashboardSandbox) -> None:
+    def report(self, *, thread_id: str) -> None:
         """Record the marks the run reached to the histograms and the log; never raises."""
         run_id = self.run_id
         seconds = self.seconds()
         if not seconds:
             return
         try:
-            self._record_histograms(seconds, sandbox)
+            self._record_histograms(seconds)
         except Exception:
             logger.warning("Failed to record dashboard run timing histograms", exc_info=True)
         logger.info(
@@ -754,18 +731,16 @@ class DashboardRunTimeline:
                 "agent_thread_id": thread_id,
                 "run_id": run_id,
                 "dashboard_client": self.client.value,
-                "dashboard_sandbox": sandbox.value,
                 **{f"{name}_ms": round(value * 1000) for name, value in seconds.items()},
             },
         )
 
-    def _record_histograms(self, seconds: Mapping[str, float], sandbox: DashboardSandbox) -> None:
+    def _record_histograms(self, seconds: Mapping[str, float]) -> None:
         self.record_latencies(
             {self._METRICS[name]: value for name, value in seconds.items()},
             attributes={
                 "source": "dashboard",
                 "client": self.client.value,
-                "sandbox": sandbox.value,
             },
         )
 

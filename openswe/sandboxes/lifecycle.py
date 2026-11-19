@@ -22,8 +22,6 @@ from pydantic import JsonValue
 from runtime_api.connections import ConnectionRef
 from runtime_api.sandbox_setup import GitIdentity
 
-from openswe.bridge.backend import BridgeSandboxBackend
-from openswe.bridge.store import Bridge
 from openswe.config import ENV
 from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS, ExecutionDefaults
 from openswe.execution import SANDBOX_EXECUTION, ExecutionProfile
@@ -40,7 +38,6 @@ from openswe.github.sandbox_access import (
 from openswe.review.findings import REVIEWER_SHADOW_THREAD_KIND, REVIEWER_THREAD_KIND
 from openswe.run_config import RunConfig
 from openswe.sandboxes.configuration import SandboxResources
-from openswe.sandboxes.handoff import complete_handoff
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import (
     LangSmithCreateOptions,
@@ -360,7 +357,7 @@ async def refresh_thread_github_proxy(
     """
     metadata = await get_sandbox_metadata(thread_id)
     sandbox_id = metadata.get("sandbox_id")
-    if not isinstance(sandbox_id, str) or Bridge.bridge_id_of(sandbox_id) is not None:
+    if not isinstance(sandbox_id, str):
         return None
     bound = await SandboxCreateConfig.bound_profile(thread_id, metadata)
     base_proxy_config = (
@@ -749,16 +746,6 @@ async def ensure_sandbox_for_thread(
             if sandbox_metadata.get("sandbox_owner") == "mda"
             else "Managed Deep Agents opens this thread's sandbox when its run starts",
         )
-    bridge_id = Bridge.bridge_id_of(sandbox_id)
-    if bridge_id is not None:
-        # The sandbox is the user's own machine: there is nothing to boot, no
-        # managed proxy to reconfigure, and no global git config of theirs to
-        # rewrite. An unreachable bridge fails the run, as any bound sandbox does.
-        async with aphase(thread_id, "sandbox.bridge_connect", sandbox_id=sandbox_id):
-            bridged = await BridgeSandboxBackend.connect(thread_id, bridge_id)
-        async with aphase(thread_id, "sandbox.handoff"):
-            await complete_handoff(thread_id, sandbox_metadata, bridged)
-        return set_sandbox_backend(thread_id, bridged)
     bound = await SANDBOX_EXECUTION.bound(thread_id, sandbox_id)
     base_proxy_config = (
         SandboxCreateConfig.from_options(bound.create).proxy_config or {}
@@ -806,8 +793,6 @@ async def ensure_sandbox_for_thread(
     # run while the initialization that failed is only logged.
     from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY
 
-    async with aphase(thread_id, "sandbox.handoff"):
-        await complete_handoff(thread_id, sandbox_metadata, sandbox_backend)
     published = set_sandbox_backend(thread_id, sandbox_backend)
     if sandbox_metadata.get(RUNNING_BACKGROUND_TASKS_KEY):
         from openswe.background_tasks import reconcile_background_tasks
@@ -1025,8 +1010,6 @@ async def hand_sandbox_to_mda(
     old_sandbox_id = cached.id if cached is not None and cached.has_backend else metadata_sandbox_id
     if not old_sandbox_id:
         raise ValueError(f"Thread {thread_id} has no sandbox to recreate")
-    if Bridge.bridge_id_of(old_sandbox_id) is not None:
-        raise ValueError("A thread bridged to a local machine cannot be given a cloud sandbox")
     if metadata.get("sandbox_owner") == "mda":
         raise ValueError("Managed Deep Agents owns this thread's sandbox; only it may replace it")
 

@@ -6,7 +6,6 @@ import {
   type JsonObject,
 } from "./json.ts"
 import type { Credential } from "./credentials.ts"
-import { BridgeHttpApi } from "open-swe-bridge-client"
 import * as z from "zod"
 
 const identitySchema = z.object({
@@ -34,7 +33,6 @@ const activitySchema = z.object({
 })
 
 const stateSchema = z.object({
-  values: z.object({ messages: z.array(z.unknown()) }),
   interrupts: z.array(z.unknown()).nullish(),
   tasks: z
     .array(z.object({ interrupts: z.array(z.unknown()).nullish() }))
@@ -51,18 +49,11 @@ export type WorkerActivity = z.infer<typeof workerSchema>
  */
 export type TaskActivity = z.infer<typeof activitySchema>
 
-/** What the CLI reads of a thread's state. */
-export interface ThreadState {
-  /** The coordinator's own messages, oldest first. */
-  messages: unknown[]
-  /** Paused on `interrupt()`: its run ended as `success`, and only the state shows the pause. */
-  waiting: boolean
-}
-
-/** One thread the CLI serves, as its coordinator and that coordinator's workers. */
+/** One thread the CLI follows, as its coordinator and that coordinator's workers. */
 export interface CoordinatorThread {
   activity(after: string | null): Promise<TaskActivity>
-  state(): Promise<ThreadState>
+  /** Paused on `interrupt()`: its run ended as `success`, and only the state shows the pause. */
+  waiting(): Promise<boolean>
   /** The status of one of the coordinator's runs, as its runtime reports it, such as `success` or `error`. */
   runStatus(runId: string): Promise<string>
   /** Cancels the workers still running, then the coordinator's own runs. */
@@ -193,22 +184,11 @@ export class ApiClient {
     await this.send("GET", "/threads?limit=1")
   }
 
-  /** The bridge routes, for `Bridge` to serve this machine through. */
-  bridges(): BridgeHttpApi {
-    return new BridgeHttpApi((method, path, options) =>
-      this.json(method, path, options)
-    )
-  }
-
-  /**
-   * Start a run on `threadId`; returns the run id when the server reports one.
-   * The prompt keeps `messageId`, so the thread's state shows where it starts.
-   */
+  /** Start a run on `threadId`; returns the run id when the server reports one. */
   async startRun(
     threadId: string,
     configurable: JsonObject,
-    prompt: string,
-    messageId: string
+    prompt: string
   ): Promise<string | null> {
     const payload = await this.json(
       "POST",
@@ -219,7 +199,7 @@ export class ApiClient {
           method: "run.start",
           params: {
             input: {
-              messages: [{ id: messageId, type: "human", content: prompt }],
+              messages: [{ type: "human", content: prompt }],
             },
             config: { configurable },
           },
@@ -260,19 +240,17 @@ export class ApiClient {
     return parsed.data
   }
 
-  async threadState(threadId: string): Promise<ThreadState> {
+  async threadWaiting(threadId: string): Promise<boolean> {
     const parsed = stateSchema.safeParse(
       await this.json("GET", `/threads/${encodeURIComponent(threadId)}/state`)
     )
     if (!parsed.success)
       throw new ProtocolError("thread state response is malformed")
-    const { values, interrupts, tasks } = parsed.data
-    return {
-      messages: values.messages,
-      waiting:
-        (interrupts?.length ?? 0) > 0 ||
-        (tasks ?? []).some((task) => (task.interrupts?.length ?? 0) > 0),
-    }
+    const { interrupts, tasks } = parsed.data
+    return (
+      (interrupts?.length ?? 0) > 0 ||
+      (tasks ?? []).some((task) => (task.interrupts?.length ?? 0) > 0)
+    )
   }
 
   async runStatus(threadId: string, runId: string): Promise<string> {
@@ -300,7 +278,7 @@ export class ApiClient {
   coordinator(threadId: string): CoordinatorThread {
     return {
       activity: (after) => this.taskActivity(threadId, after),
-      state: () => this.threadState(threadId),
+      waiting: () => this.threadWaiting(threadId),
       runStatus: (runId) => this.runStatus(threadId, runId),
       stop: async () => {
         try {

@@ -24,22 +24,18 @@ import { GhosttyTerminalSurface } from "@/features/agents/terminal/ghostty/surfa
 
 interface TerminalPanelProps {
   target: TerminalTarget
-  cwd: string
   /** The terminal group this tab renders; splits live inside it. */
   groupId: string
   terminals: TerminalGroupsController
-  onOpenFile?: (path: string) => void
   onAddToChat?: (text: string) => void
 }
 
 interface TerminalViewportProps {
   target: TerminalTarget
   terminalId: string
-  cwd: string
   active: boolean
   focusRequest: number
   onFocus: () => void
-  onOpenFile?: (path: string) => void
   onAddToChat?: (text: string) => void
   clearRequest: number
   restartRequest: number
@@ -82,11 +78,9 @@ function terminalTheme(): GhosttyTheme {
 function TerminalViewport({
   target,
   terminalId,
-  cwd,
   active,
   focusRequest,
   onFocus,
-  onOpenFile,
   onAddToChat,
   clearRequest,
   restartRequest,
@@ -96,11 +90,10 @@ function TerminalViewport({
   const previousRef = useRef({ buffer: "", version: 0 })
   const [error, setError] = useState<string | null>(null)
   const [selection, setSelection] = useState<string | null>(null)
-  const targetId = target.kind === "local" ? target.sessionId : target.threadId
+  const { threadId } = target
   const state = useAttachedTerminal(
     target,
     terminalId,
-    cwd,
     clearRequest,
     restartRequest
   )
@@ -108,14 +101,12 @@ function TerminalViewport({
   useEffect(() => {
     latestStateRef.current = state
   }, [state])
-  // Read through refs: naming these as dependencies would tear down and
+  // Read through a ref: naming it as a dependency would tear down and
   // recreate the surface whenever the parent re-renders.
-  const onOpenFileRef = useRef(onOpenFile)
   const activeRef = useRef(active)
   useEffect(() => {
-    onOpenFileRef.current = onOpenFile
     activeRef.current = active
-  }, [onOpenFile, active])
+  }, [active])
 
   useEffect(() => {
     const mount = mountRef.current
@@ -147,22 +138,8 @@ function TerminalViewport({
       onCopy: (text) => void navigator.clipboard.writeText(text),
       beforeKey: () => true,
       onLinkActivate: (text, event) => {
-        if (!(event.metaKey || event.ctrlKey)) return
-        if (/^https?:\/\//i.test(text)) {
-          if (target.kind === "local")
-            void window.openSweDesktop?.openExternal(text)
-          else window.open(text, "_blank", "noopener,noreferrer")
-          return
-        }
-        const openFile = onOpenFileRef.current
-        if (target.kind !== "local" || !openFile) return
-        const path = text.replace(/:\d+(?::\d+)?$/, "")
-        void window.openSweDesktop
-          ?.resolveLocalProjectPath({ localSessionId: targetId, path })
-          .then((relativePath) => {
-            if (relativePath) openFile(relativePath)
-          })
-          .catch(() => {})
+        if ((event.metaKey || event.ctrlKey) && /^https?:\/\//i.test(text))
+          window.open(text, "_blank", "noopener,noreferrer")
       },
     })
       .then((created) => {
@@ -204,7 +181,7 @@ function TerminalViewport({
       if (surfaceRef.current === surface) surfaceRef.current = null
       surface?.dispose()
     }
-  }, [cwd, target.kind, targetId, terminalId])
+  }, [threadId, terminalId])
 
   useEffect(() => {
     const surface = surfaceRef.current
@@ -259,7 +236,7 @@ function TerminalViewport({
           />
         </div>
       )}
-      {target.kind === "cloud" && state.status === "starting" && (
+      {state.status === "starting" && (
         <div className="absolute top-2 left-2 flex items-center gap-space-2 rounded-md border border-default bg-surface-level-1/95 px-space-2 py-space-1 text-xs text-secondary shadow-sm">
           <Spinner size="xxs" />
           {state.buffer ? "Reconnecting…" : "Connecting…"}
@@ -358,10 +335,8 @@ export function TerminalActions({
 
 export function TerminalPanel({
   target,
-  cwd,
   groupId,
   terminals,
-  onOpenFile,
   onAddToChat,
 }: TerminalPanelProps) {
   const [focusRequest, setFocusRequest] = useState(0)
@@ -380,12 +355,6 @@ export function TerminalPanel({
       className="relative flex h-full min-h-0 flex-col"
       data-hotkeys="ignore"
     >
-      {terminals.error && (
-        <div className="absolute inset-x-2 top-2 z-floating-bar rounded-md border border-error bg-surface-level-1/95 px-space-3 py-space-2 text-xs text-error-secondary shadow-sm">
-          {terminals.error}
-        </div>
-      )}
-
       <div
         className="grid min-h-0 flex-1"
         style={
@@ -412,14 +381,12 @@ export function TerminalPanel({
             <TerminalViewport
               target={target}
               terminalId={terminalId}
-              cwd={terminals.metadataById.get(terminalId)?.cwd ?? cwd}
               active={activeTerminalId === terminalId}
               focusRequest={focusRequest}
               onFocus={() => {
                 terminals.focus(terminalId)
                 setFocusRequest((value) => value + 1)
               }}
-              onOpenFile={onOpenFile}
               onAddToChat={onAddToChat}
               clearRequest={terminals.clearRequests.get(terminalId) ?? 0}
               restartRequest={terminals.restartRequests.get(terminalId) ?? 0}

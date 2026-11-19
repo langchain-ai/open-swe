@@ -27,9 +27,6 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock("@/lib/session", () => ({
   useSession: () => ({ data: { login: "owner" } }),
 }))
-vi.mock("@/features/agents/lib/desktopLocal", () => ({
-  useLocalThread: () => null,
-}))
 vi.mock("@/features/agents/lib/sidebarPrefs", () => ({
   useSidebarPrefs: () => ({ prefs: { filters: {} } }),
 }))
@@ -61,7 +58,6 @@ describe("AgentThreadHeader", () => {
     vi.stubGlobal("openSweDesktop", { copyPageLink })
     render(
       <AgentThreadHeader
-        target="Cloud"
         panelCollapsed={false}
         thread={
           {
@@ -107,11 +103,7 @@ describe("AgentThreadHeader", () => {
     } as AgentThread
     const { rerender } = render(
       <TooltipProvider>
-        <AgentThreadHeader
-          target="Cloud"
-          panelCollapsed={false}
-          thread={thread}
-        />
+        <AgentThreadHeader panelCollapsed={false} thread={thread} />
       </TooltipProvider>
     )
     fireEvent.keyDown(
@@ -127,7 +119,6 @@ describe("AgentThreadHeader", () => {
     rerender(
       <TooltipProvider>
         <AgentThreadHeader
-          target="Cloud"
           panelCollapsed={false}
           thread={{ ...thread, visibility: "public" }}
         />
@@ -139,23 +130,11 @@ describe("AgentThreadHeader", () => {
     await waitFor(() => expect(copyPageLink).toHaveBeenCalledOnce())
   })
 
-  it.each(["Cloud", "This Mac", "Local CLI"] as const)(
-    "only shows the run target indicator for local targets: %s",
-    (target) => {
-      render(<AgentThreadHeader target={target} panelCollapsed={false} />)
-      const indicator = screen.queryByRole("img", {
-        name: `Runs on ${target}`,
-      })
-      expect(Boolean(indicator)).toBe(target !== "Cloud")
-    }
-  )
-
   it("saves a trimmed title once on Enter then blur", async () => {
     const onRename = vi.fn().mockResolvedValue(undefined)
     render(
       <TooltipProvider>
         <AgentThreadHeader
-          target="Cloud"
           panelCollapsed={false}
           thread={{ id: "thread-1", title, repoFullName: "" } as AgentThread}
           onRename={onRename}
@@ -192,7 +171,6 @@ describe("AgentThreadHeader", () => {
     render(
       <TooltipProvider>
         <AgentThreadHeader
-          target="Cloud"
           panelCollapsed={false}
           thread={{ id: "thread-1", title, repoFullName: "" } as AgentThread}
           onRename={onRename}
@@ -234,7 +212,6 @@ describe("AgentThreadHeader", () => {
     render(
       <TooltipProvider>
         <AgentThreadHeader
-          target="Cloud"
           panelCollapsed={false}
           thread={{ id: "thread-1", title, repoFullName: "" } as AgentThread}
           onRename={onRename}
@@ -255,7 +232,6 @@ describe("AgentThreadHeader", () => {
     render(
       <TooltipProvider>
         <AgentThreadHeader
-          target="Cloud"
           panelCollapsed={false}
           thread={
             {

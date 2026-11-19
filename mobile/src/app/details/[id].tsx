@@ -8,7 +8,7 @@ import {
   View,
 } from "react-native"
 
-import { isLocal, sourceTitle, STATUS_TITLES } from "../../core/models"
+import { sourceTitle, STATUS_TITLES } from "../../core/models"
 import { Separator, Symbol } from "../../design/components"
 import { Theme } from "../../design/theme"
 import { useAgentStore } from "../../state/appModel"
@@ -36,7 +36,6 @@ export default function ThreadDetailsSheet() {
       : []),
     ...(thread.model ? [["Model", thread.model] as [string, string]] : []),
     ["Source", sourceTitle(thread.source)],
-    ["Runtime", isLocal(thread) ? "Local machine" : "Cloud sandbox"],
     ...(thread.ownerLogin
       ? [["Owner", thread.ownerLogin] as [string, string]]
       : []),

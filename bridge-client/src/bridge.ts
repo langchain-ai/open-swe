@@ -4,10 +4,10 @@ import {
   httpStatus,
   type BridgeApi,
   type BridgeClient,
+  type BridgeReply,
   type BridgeRequest,
   type BridgeSession,
 } from "./api"
-import { LocalExecutor, type DispatchOutcome } from "./executor"
 import { errorMessage, type JsonObject } from "./json"
 
 const POLL_WAIT_SECONDS = 25
@@ -17,10 +17,10 @@ const MAX_BACKOFF_MS = 10_000
 const REPLY_ATTEMPTS = 3
 /**
  * Below the server's cap of 1024. An id this far back is long settled, so
- * leaving it out of a poll cannot get its command run again.
+ * leaving it out of a poll cannot get it served again.
  */
 const MAX_HELD_SENT = 1_000
-/** How long `close` waits for stopped commands to report before releasing the bridge. */
+/** How long `close` waits for requests in flight to report before releasing the bridge. */
 const CLOSE_GRACE_MS = 5_000
 /** Margin over the server's long-poll window before the request is abandoned. */
 const POLL_TIMEOUT_MS = (POLL_WAIT_SECONDS + 15) * 1_000
@@ -41,36 +41,31 @@ export class BridgeGoneError extends Error {
 
 export interface BridgeOptions {
   client: BridgeClient
-  /** A getter when the checkout can move; it is read for every request. */
-  rootPath: string | (() => string)
+  /** What the bridge serves, which the backend records with it. */
+  rootPath: string
   label: string | null
-  /** The bridge a resumed thread is bound to; a new thread always gets its own. */
+  /** A bridge to reopen in place; null opens a new one. */
   bridgeId: string | null
   /** What to tell the user when the backend stops accepting the credential. */
   credentialRejected: string
   /** Where non-fatal trouble is reported; the loop itself never throws. */
   log: (message: string) => void
-  /** The environment the agent's commands start from, before secrets are stripped. */
-  env?: Record<string, string | undefined>
-  /** Methods the host app serves itself, ahead of the local executor's. */
-  handlers?: Record<string, BridgeHandler>
+  /** The methods the host app serves; any other request is answered with an error. */
+  handlers: Record<string, BridgeHandler>
 }
 
 export type BridgeHandler = (
   params: Record<string, unknown>
 ) => Promise<JsonObject>
 
-function resolveRoot(root: string | (() => string)): string {
-  return typeof root === "string" ? root : root()
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((done) => setTimeout(done, ms))
 }
 
 /**
- * The machine half of a sandbox bridge: long-polls the backend for the remote
- * agent's requests, runs them in the local checkout, and posts the results.
+ * The machine half of a bridge: long-polls the backend for a cloud run's
+ * requests, answers each with the host app's handler for its method, and posts
+ * the results.
  */
 export class Bridge {
   private active = false
@@ -79,23 +74,12 @@ export class Bridge {
   private readonly held = new Set<string>()
   private readonly pollControllers = new Set<AbortController>()
   private onFatal: ((error: Error) => void) | null = null
-  private readonly executor: LocalExecutor
 
   private constructor(
     private readonly api: BridgeApi,
     readonly session: BridgeSession,
-    private readonly options: BridgeOptions,
-    readonly reopened: boolean
-  ) {
-    this.executor = new LocalExecutor(
-      options.rootPath,
-      options.env ? { env: options.env } : {}
-    )
-  }
-
-  get rootPath(): string {
-    return resolveRoot(this.options.rootPath)
-  }
+    private readonly options: BridgeOptions
+  ) {}
 
   get running(): boolean {
     return this.active
@@ -103,13 +87,13 @@ export class Bridge {
 
   static async open(api: BridgeApi, options: BridgeOptions): Promise<Bridge> {
     const session = await api.createBridge(Bridge.registration(options))
-    return new Bridge(api, session, options, options.bridgeId !== null)
+    return new Bridge(api, session, options)
   }
 
   private static registration(options: BridgeOptions) {
     return {
       client: options.client,
-      rootPath: resolveRoot(options.rootPath),
+      rootPath: options.rootPath,
       hostname: hostname(),
       label: options.label,
       bridgeId: options.bridgeId,
@@ -131,10 +115,8 @@ export class Bridge {
     this.heartbeatTimer = null
     for (const controller of this.pollControllers) controller.abort()
     this.pollControllers.clear()
-    // Closing is quitting: a build or test run the agent started must not hold
-    // the app or the CLI open, so its process group is killed, and a reply that
-    // cannot be posted is not waited on past the grace period.
-    this.executor.stopAll()
+    // Closing is quitting: a reply that cannot be posted is not waited on past
+    // the grace period.
     let grace: ReturnType<typeof setTimeout> | undefined
     await Promise.race([
       Promise.allSettled(this.inFlight),
@@ -259,14 +241,14 @@ export class Bridge {
 
   private async serve(request: BridgeRequest): Promise<void> {
     // Held until the server has the answer. A result that could not be
-    // delivered stays held, so the command is never run a second time.
+    // delivered stays held, so the request is never served a second time.
     this.held.add(request.requestId)
-    let reply: DispatchOutcome
+    let reply: BridgeReply
     try {
-      const handler = this.options.handlers?.[request.method]
+      const handler = this.options.handlers[request.method]
       reply = handler
         ? { result: await handler(request.params) }
-        : await this.executor.dispatch(request.method, request.params)
+        : { error: `unsupported method ${request.method}` }
     } catch (cause) {
       reply = { error: errorMessage(cause) }
     }

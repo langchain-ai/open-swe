@@ -1,6 +1,4 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir, platform } from "node:os"
-import { join } from "node:path"
 
 import {
   DEFAULT_DEVELOPMENT_BACKEND_URL,
@@ -15,15 +13,10 @@ import {
 } from "../../desktop/src/shared-config.ts"
 import { normalizeBackend } from "./api.ts"
 import { resolveCredential, type Credential } from "./credentials.ts"
-import { errorCode, isRecord, parseJson, stringAt } from "./json.ts"
 
 /** ``$HOME`` wins so a test, or a sandboxed run, can point at its own home. */
 function home(): string {
   return process.env["HOME"] || homedir()
-}
-
-function configDir(): string {
-  return join(home(), ".open-swe")
 }
 
 function configFile(): string {
@@ -35,43 +28,9 @@ function sharedConfig(): SharedConfig {
   return readSharedConfig(configFile())
 }
 
-function bridgesFile(): string {
-  return join(configDir(), "bridges.json")
-}
-
-const DIR_MODE = 0o700
-const FILE_MODE = 0o600
-
 export interface RunConfig {
   backend: string
   credential: Credential
-}
-
-/** The bridge a thread this machine started is bound to, and the directory it serves. */
-export interface ThreadBridge {
-  bridgeId: string
-  root: string
-}
-
-/** Threads this machine started, by id, so `--thread` can reopen their bridge. */
-export type BridgeMemory = Record<string, ThreadBridge>
-
-async function readFileOrNull(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, "utf8")
-  } catch (cause) {
-    if (errorCode(cause) === "ENOENT") return null
-    throw cause
-  }
-}
-
-async function writePrivate(path: string, value: unknown): Promise<void> {
-  await mkdir(configDir(), { recursive: true, mode: DIR_MODE })
-  await chmod(configDir(), DIR_MODE)
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, {
-    mode: FILE_MODE,
-  })
-  await chmod(path, FILE_MODE)
 }
 
 /**
@@ -117,29 +76,4 @@ export async function storeSession(
 
 export async function forgetSession(backend: string): Promise<boolean> {
   return unshareSession(configFile(), backend)
-}
-
-export async function readBridgeMemory(): Promise<BridgeMemory> {
-  const text = await readFileOrNull(bridgesFile())
-  const parsed = text === null ? null : parseJson(text)
-  const threads = isRecord(parsed) ? parsed["threads"] : null
-  const memory: BridgeMemory = {}
-  if (!isRecord(threads)) return memory
-  for (const [threadId, entry] of Object.entries(threads)) {
-    const record = isRecord(entry) ? entry : null
-    const bridgeId = stringAt(record, "bridgeId")
-    const root = stringAt(record, "root")
-    if (bridgeId !== null && root !== null)
-      memory[threadId] = { bridgeId, root }
-  }
-  return memory
-}
-
-export async function rememberThreadBridge(
-  threadId: string,
-  bridge: ThreadBridge
-): Promise<void> {
-  const memory = await readBridgeMemory()
-  memory[threadId] = bridge
-  await writePrivate(bridgesFile(), { threads: memory })
 }

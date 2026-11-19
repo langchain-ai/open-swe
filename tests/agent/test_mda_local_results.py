@@ -18,7 +18,6 @@ from langchain_core.tools import BaseTool
 from langchain_core.tools import tool as as_tool
 from langgraph.types import Command
 
-from openswe.bridge.cli_result import cli_result
 from openswe.prompts import prompt
 from openswe.slack.tools.no_reply_needed import slack_no_reply_needed
 from openswe.tools.note_on_diff import note_on_diff
@@ -76,8 +75,6 @@ def _mdas(answer: object) -> str:
         (propose_pr_review, _MDA.propose_pr_review, {"event": "COMMENT", "body": "  Looks good  "}),
         (propose_pr_review, _MDA.propose_pr_review, {"event": "REQUEST_CHANGES", "body": " "}),
         (propose_pr_review, _MDA.propose_pr_review, {"event": "COMMENT", "body": "x" * 10_001}),
-        (cli_result, _MDA.cli_result, {"stdout": "ok", "exit_code": 0}),
-        (cli_result, _MDA.cli_result, {"stdout": "", "exit_code": 256, "unchanged": True}),
     ],
 )
 async def test_a_tool_mda_runs_answers_as_the_backends(

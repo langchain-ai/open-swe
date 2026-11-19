@@ -20,7 +20,6 @@ from e2e_env import (
     BASE_BRANCH,
     BASE_URL,
     DEMO_CHANNEL,
-    FAKE_GITHUB_API,
     FEATURE_BRANCH,
     FEATURE_FILE,
     OWNER,
@@ -291,32 +290,6 @@ _IFRAME_HTML = """<!doctype html>
 </body>
 </html>
 """
-
-_DESKTOP_PR_PAYLOAD = json.dumps(
-    {
-        "head": FEATURE_BRANCH,
-        "base": BASE_BRANCH,
-        "title": PR_TITLE,
-        "body": "Adds a `greet()` helper as requested.",
-        "draft": True,
-    }
-)
-_DESKTOP_IMPLEMENT_SCRIPT = f"""
-set -e
-git checkout -b {FEATURE_BRANCH}
-cat > {FEATURE_FILE} <<'EOF'
-def greet(name):
-    return f"Hello, {{name}}!"
-EOF
-git add {FEATURE_FILE}
-git -c "user.email=dev@example.com" -c "user.name=Dev User" commit -m "{PR_TITLE}"
-git push origin {FEATURE_BRANCH}
-curl --fail --silent --show-error \
-  --request POST \
-  --header 'content-type: application/json' \
-  --data '{_DESKTOP_PR_PAYLOAD}' \
-  "{FAKE_GITHUB_API}/repos/{OWNER}/{REPO}/pulls"
-""".strip()
 
 
 class SystemPromptRecord:
@@ -794,15 +767,6 @@ def _multi_pr_reply_step(messages: list[BaseMessage]) -> AIMessage:
                 "id": "call-multi-pr-reply",
             }
         ],
-    )
-
-
-def _desktop_reply_step(messages: list[BaseMessage]) -> AIMessage:
-    url = _pr_url_from_messages(messages) or "(PR url unavailable)"
-    return AIMessage(
-        content=(
-            f"Done! I added `{FEATURE_FILE}` and opened [{PR_TITLE}]({url}) on the fake GitHub."
-        )
     )
 
 
@@ -1432,15 +1396,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content="Rendered the iframe preview."),
     ),
-    "desktop": (
-        _tool_step(
-            "Implementing the change in the selected local project.",
-            "execute",
-            {"command": _DESKTOP_IMPLEMENT_SCRIPT},
-            "call-desktop-impl",
-        ),
-        _dynamic_step(_desktop_reply_step),
-    ),
     # Code-mode calls, each labeled with the description the dashboard shows.
     "eval_description": (
         _tool_step(
@@ -1837,10 +1792,6 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
         lambda ctx: ctx.human_count <= 1 and FILE_PREVIEWS_MARKER in ctx.first_text,
     ),
     ScriptRule("iframe", lambda ctx: ctx.human_count <= 1 and _is_iframe_request(ctx.first_text)),
-    ScriptRule(
-        "desktop",
-        lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,
-    ),
     ScriptRule(
         "expedite_fix",
         lambda ctx: EXPEDITE_MARKER in ctx.first_text and "/baby-sit --continue" in ctx.last_text,

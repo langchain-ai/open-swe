@@ -57,12 +57,6 @@ const stub = vi.hoisted(() => {
     rename: mutation(),
     noop: fn(),
     pullRequestFor: () => undefined,
-    projects: {
-      projects: [],
-      loaded: true,
-      addProject: fn(),
-      removeProject: fn(),
-    },
     session: { data: { login: "octocat" } },
     theme: { toggleTheme: fn() },
   }
@@ -131,10 +125,6 @@ vi.mock("@/features/agents/lib/prChecks", () => ({
 
 vi.mock("@/features/agents/lib/useRunCompletionNotifier", () => ({
   useRunCompletionNotifier: () => {},
-}))
-
-vi.mock("@/features/agents/lib/desktopProjects", () => ({
-  useDesktopProjects: () => stub.projects,
 }))
 
 window.matchMedia = ((query: string) => ({

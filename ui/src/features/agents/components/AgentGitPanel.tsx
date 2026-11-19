@@ -34,12 +34,6 @@ import {
   useRightPanelStore,
 } from "@/features/agents/lib/rightPanelStore"
 import { useTerminalGroups } from "@/features/agents/lib/terminalGroups"
-import {
-  useMacCheckout,
-  useLocalThreadDiff,
-  useLocalThreadPrDiff,
-} from "@/features/agents/lib/desktopLocal"
-import type { TerminalTarget } from "@/features/agents/lib/terminalSession"
 import { normalizeSelection } from "@/features/agents/utils/passageReply"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 
@@ -86,18 +80,8 @@ export function AgentGitPanel({
     () => ({ scope: "cloud" as const, threadId: thread.id }),
     [thread.id]
   )
-  // A "This Mac" thread's checkout is right here, so its terminals, files and
-  // diff come from this machine; anywhere else, from the sandbox endpoints.
-  const localThread = useMacCheckout(thread)
-  const cwd = localThread ? (localThread.worktreePath ?? localThread.cwd) : ""
-  const terminalTarget = useMemo<TerminalTarget>(
-    () =>
-      localThread
-        ? { kind: "local", sessionId: thread.id }
-        : { kind: "cloud", threadId: thread.id },
-    [localThread, thread.id]
-  )
-  const terminals = useTerminalGroups(terminalTarget, cwd)
+  const terminalTarget = useMemo(() => ({ threadId: thread.id }), [thread.id])
+  const terminals = useTerminalGroups(terminalTarget)
   const openSurface = useRightPanelStore((state) => state.open)
   const activeSurfaceId = useRightPanelStore(
     (state) =>
@@ -107,10 +91,7 @@ export function AgentGitPanel({
     if (revealChangesKey > 0) openSurface(threadRef, "diff")
   }, [openSurface, revealChangesKey, threadRef])
 
-  // The cloud terminal is a LangSmith sandbox's; a Mac's is this app's own.
-  const terminalAvailable =
-    Boolean(localThread) ||
-    (Boolean(thread.sandboxId) && !thread.sandboxBridgeClient)
+  const terminalAvailable = Boolean(thread.sandboxId)
 
   // The browser can be opened once the agent's first run names it, and its
   // panel shows on its own when it opens, once per thread view.
@@ -145,41 +126,27 @@ export function AgentGitPanel({
 
   const isRunning = thread.status === "running"
   const diffVisible = !collapsed && activeSurfaceId === "diff"
-  // Also the source of the branch and PR metadata for a local thread, so it
-  // stays enabled in either scope: it is what says the branch has a PR at all.
-  const localCheckpointDiff = useLocalThreadDiff(
-    thread.id,
-    Boolean(localThread) && diffVisible,
-    isRunning
-  )
-  const localRepository = localCheckpointDiff.data?.repository
   // Served from GitHub, so it needs a repository — with or without a PR.
-  const branchScopeAvailable = localThread
-    ? Boolean(localRepository?.pr)
-    : Boolean(thread.repoFullName) && Boolean(thread.branch)
+  const branchScopeAvailable =
+    Boolean(thread.repoFullName) && Boolean(thread.branch)
   const selectScope = useDiffPanelStore((state) => state.selectScope)
   const scope = useDiffPanelStore((state) =>
     selectThreadDiffScope(
       state.byThreadKey,
       threadRef,
       branchScopeAvailable,
-      localThread ? undefined : Boolean(thread.pr)
+      Boolean(thread.pr)
     )
-  )
-  const localBranchDiff = useLocalThreadPrDiff(
-    thread.id,
-    Boolean(localThread) && diffVisible && scope === "branch",
-    isRunning
   )
 
   const turnDiff = useAgentThreadWorkingTreeDiff(
     thread.id,
-    !localThread && diffVisible && scope === "working-tree",
+    diffVisible && scope === "working-tree",
     isRunning
   )
   const branchDiff = useAgentThreadBranchDiff(
     thread.id,
-    !localThread && diffVisible && scope === "branch"
+    diffVisible && scope === "branch"
   )
   const source = useThreadSource()
   const session = useSession()
@@ -188,10 +155,8 @@ export function AgentGitPanel({
   const hydrating = source.isHydrating
   const edits = completedEdits(source.messages)
   const lastSeenRun = useRef({ running, hydrating: true, editsAtStart: 0 })
-  const isLocal = Boolean(localThread)
-  const refetchBranch = (isLocal ? localBranchDiff : branchDiff).refetch
+  const refetchBranch = branchDiff.refetch
   const refetchWorkingTree = turnDiff.refetch
-  const refetchLocalWorkingTree = localCheckpointDiff.refetch
   useEffect(() => {
     const previous = lastSeenRun.current
     const tracking = previous.running && !previous.hydrating
@@ -211,18 +176,10 @@ export function AgentGitPanel({
 
     let cancelled = false
     void (async () => {
-      const localTree = isLocal ? await refetchLocalWorkingTree() : null
-      const branchResult =
-        !isLocal || (localTree?.isSuccess && localTree.data.repository?.pr)
-          ? await refetchBranch()
-          : null
+      const branchResult = await refetchBranch()
       let nextScope: "branch" | "working-tree" = "branch"
-      if (
-        !branchResult?.isSuccess ||
-        !branchResult.data.files.length ||
-        ("status" in branchResult.data && branchResult.data.status !== "ready")
-      ) {
-        const treeResult = localTree ?? (await refetchWorkingTree())
+      if (!branchResult.isSuccess || !branchResult.data.files.length) {
+        const treeResult = await refetchWorkingTree()
         if (
           !treeResult.isSuccess ||
           treeResult.data.status !== "ready" ||
@@ -245,29 +202,17 @@ export function AgentGitPanel({
     collapsed,
     edits,
     hydrating,
-    isLocal,
     onCollapsedChange,
     openSurface,
     refetchBranch,
-    refetchLocalWorkingTree,
     refetchWorkingTree,
     running,
     selectScope,
     threadRef,
   ])
 
-  const localDiff = scope === "branch" ? localBranchDiff : localCheckpointDiff
-  const diff = localThread
-    ? {
-        files: localDiff.data?.files ?? [],
-        status: localDiff.data?.status,
-        truncated: localDiff.data?.truncated,
-        isPending: localDiff.isPending,
-        isFetching: localDiff.isFetching,
-        error: localDiff.error,
-        refetch: localDiff.refetch,
-      }
-    : scope === "branch"
+  const diff =
+    scope === "branch"
       ? {
           files: branchDiff.data?.files ?? [],
           // The branch endpoint answers from GitHub: a successful response is
@@ -289,10 +234,6 @@ export function AgentGitPanel({
           refetch: turnDiff.refetch,
         }
   const files = useMemo(() => toPanelFiles(diff.files), [diff.files])
-  const branch = localThread
-    ? (localRepository?.branch ?? thread.branch)
-    : thread.branch
-  const pr = localThread ? (localRepository?.pr ?? undefined) : thread.pr
 
   // Refresh whenever the window regains focus: the diff is read live, so a
   // push or a review landing elsewhere should be visible on return.
@@ -306,8 +247,7 @@ export function AgentGitPanel({
 
   const [recoveringPatch, setRecoveringPatch] = useState(false)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
-  // The patch is built in a hosted sandbox; a Mac's checkout is already on disk.
-  const canDownloadRecovery = !thread.sandboxBridgeClient && !isRunning
+  const canDownloadRecovery = !isRunning
   const downloadRecoveryPatch = useCallback(async () => {
     setRecoveringPatch(true)
     setRecoveryError(null)
@@ -337,7 +277,6 @@ export function AgentGitPanel({
       threadRef={threadRef}
       terminals={terminals}
       terminalTarget={terminalTarget}
-      cwd={cwd}
       terminalAvailable={terminalAvailable}
       diffAvailable
       {...(thread.planStatus
@@ -383,8 +322,8 @@ export function AgentGitPanel({
           isFetching={diff.isFetching}
           error={diff.error}
           truncated={diff.truncated}
-          branch={branch}
-          pr={pr}
+          branch={thread.branch}
+          pr={thread.pr}
           revealFilePath={revealFilePath}
           fullScreen={fullScreen}
           onRefresh={() => void diff.refetch()}

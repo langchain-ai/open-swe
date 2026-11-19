@@ -6,19 +6,17 @@ export function DeleteThreadDialog({
   onOpenChange,
   isDeleting,
   onConfirm,
-  detail = "Are you sure you want to delete this thread?",
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   isDeleting: boolean
   onConfirm: () => void
-  detail?: string
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         title="Delete thread"
-        description={detail}
+        description="Are you sure you want to delete this thread?"
         showClose={false}
         className="w-[min(28rem,calc(100vw-2rem))]"
       >

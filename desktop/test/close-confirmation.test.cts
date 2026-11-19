@@ -24,7 +24,6 @@ test("quit confirmation cancels or quits without duplicate prompts", async () =>
   assert.deepEqual(prompts[0].buttons, ["Cancel", "Quit"]);
   assert.equal(prompts[0].defaultId, 0);
   assert.equal(prompts[0].cancelId, 0);
-  assert.match(prompts[0].detail, /disconnects.*This Mac threads/);
   respond({ response: 0 });
   await canceled;
   assert.equal(quitCount, 0);

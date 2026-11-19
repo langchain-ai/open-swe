@@ -65,6 +65,7 @@ from openswe.threads.runtimes import (
     ChannelWrite,
     now_ms,
 )
+from openswe.threads.start_request import RunRefused
 from openswe.threads.store import READ_ONLY, THREADS, channel_write_refusal, for_mda
 from openswe.threads.succession import RUN_KEYS
 
@@ -423,6 +424,12 @@ class ThreadRouter:
         if thread.runtime == "local":
             await _refuse_local(scope, send, thread)
             return
+        if thread.on_a_mac:
+            try:
+                thread = await THREADS.move_off_mac(thread)
+            except RunRefused as refused:
+                await send_json(send, refused.status_code, {"detail": refused.detail})
+                return
         # The person the run acts as, which only the backend writes, for a run that
         # person started (``dispatch.prepare_durable_run``); never whom it is attributed
         # to. A run that acts as no one is the channel's own.

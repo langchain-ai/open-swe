@@ -120,10 +120,6 @@ class SandboxSpec(BaseModel):
     # The connection the sandbox's GitHub rules carry, where MDA writes its proxy config
     # (``runtime_api.sandbox_proxy``); None leaves the proxy config to the backend.
     github_proxy: ConnectionRef | None = None
-    # Whether preparing a turn may use GitHub in the sandbox, as carrying over the checkout of
-    # a thread that moved does: MDA then writes the proxy config before it prepares, not
-    # behind its first model call. A backend from before this field may, and says nothing.
-    prepare_uses_github: bool = True
     # Whether the run may prepare before its sandbox is open and report the sandbox afterwards
     # (``runtime_api.loop.BIND_SANDBOX``), so its first model call waits for neither: nothing
     # preparing this run does reaches the sandbox. A backend from before that call says nothing.
@@ -151,8 +147,6 @@ class FilesSpec(BaseModel):
     # Paths under these prefixes are the backend's (skills, offloaded images): the
     # runtime's file tools reach them through the files API rather than the sandbox.
     backend_paths: list[str] = []
-    # Where large results and binary reads are offloaded; the backend serves blobs under it.
-    artifacts_root: str = "/"
     # Shell commands the backend checks before they run: its push and pull request guards.
     guards: list[ShellGuard] = []
     # Checks on what ``read_file`` returns.
@@ -223,14 +217,6 @@ class ReplyRules(Nudging):
     replies: list[str] = []
     # Whom ``nudges`` are sent as.
     nudge_sender: str = ""
-    max_nudges: int = 2
-
-
-class CliResultRules(Nudging):
-    """A bridged CLI waits on the run's ``tool`` call; a run that ends without one is asked
-    again, ``nudge`` up to ``max_nudges`` times."""
-
-    tool: str
     max_nudges: int = 2
 
 
@@ -307,7 +293,6 @@ class LoopRules(BaseModel):
     # How the run picks each call's route; None: it picks none.
     routing: RoutingRules | None = None
     reply: ReplyRules | None = None
-    cli_result: CliResultRules | None = None
     # The task the thread may belong to, as its coordinator or a worker, as the run
     # started; None where it may not. A coordinator's first worker hands back the context
     # of the task it then joined (``runtime_api.workers.Worker``).

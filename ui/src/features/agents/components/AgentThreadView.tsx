@@ -1,7 +1,6 @@
 import { useRightPanelStore } from "@/features/agents/lib/rightPanelStore"
 import { productAnalytics } from "@/lib/analytics"
 import { CopyErrorButton } from "@/components/CopyErrorButton"
-import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
   ReviewChatActionsContext,
   ReviewExcerptChips,
@@ -21,7 +20,6 @@ import {
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
-import { Icon } from "@langchain/macaw-components/Icon"
 import { ConversationLoading } from "@/features/agents/components/ConversationLoading"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
@@ -62,9 +60,8 @@ import {
   useRenameAgentThread,
   useAgentThreadPullRequestStatus,
   useAgentThreadQueuedMessages,
-  useMoveThread,
 } from "@/features/agents/lib/queries"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import {
   materializeImages,
@@ -77,15 +74,7 @@ import type {
   RestoredDraft,
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
-import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
 import { agentsApi } from "@/features/agents/lib/api"
-import {
-  localThreadKeys,
-  runsOnAMac,
-  useLocalRepoRefs,
-  useLocalThread,
-  useLocalThreadPr,
-} from "@/features/agents/lib/desktopLocal"
 import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -142,15 +131,7 @@ export function AgentThreadView({
   const isMobile = useIsMobile()
   const skills = useAgentSkills()
   const session = useSession()
-  // A "This Mac" thread runs in its checkout on the Mac whose app started it,
-  // so elsewhere it is read-only while that Mac is not serving it.
-  const localRecord = useLocalThread(thread.id)
-  const localThread = runsOnAMac(thread) ? localRecord : null
-  const runsElsewhere =
-    runsOnAMac(thread) && !localThread && !thread.sandboxBridgeOnline
-  // A move carries the checkout across before the thread takes another message.
-  const moveThread = useMoveThread(thread)
-  const moving = moveThread.isPending ? moveThread.variables : null
+  const queryClient = useQueryClient()
   // A Slack bot's thread is steered from its Slack thread, never from here.
   const botThread = thread.triggerKind === "slack_bot"
   const historicalSession = thread.source === "claude_code"
@@ -160,78 +141,11 @@ export function AgentThreadView({
     thread.ownerLogin.toLowerCase() === session.data.login.toLowerCase()
   )
   const canPost =
-    !runsElsewhere &&
-    moving === null &&
     !botThread &&
     !historicalSession &&
-    // Whoever posts in a thread on someone's machine runs commands there.
-    (!thread.sandboxBridgeClient || ownsThread) &&
     (thread.threadCategory !== "automation" ||
       thread.automationCanPost === true) &&
     (!thread.adminThread || session.data?.is_admin === true)
-  // The bridge outlives a thread view but not the app; serve the checkout
-  // again for whatever this thread runs next, wherever that run is started.
-  const localBridge = useQuery({
-    queryKey: ["local-bridge", thread.id],
-    queryFn: async () =>
-      (await window.openSweDesktop?.ensureLocalBridge(thread.id)) ?? false,
-    enabled: Boolean(localThread),
-    retry: false,
-    refetchOnWindowFocus: "always",
-  })
-  const refetchLocalBridge = localBridge.refetch
-  const ensureLocalBridge = useCallback(async () => {
-    if (!localThread) return
-    const result = await refetchLocalBridge({ throwOnError: true })
-    if (result.isError) throw result.error
-  }, [localThread, refetchLocalBridge])
-  // A "This Mac" thread works in a checkout other threads on this machine may
-  // share, so its branch and worktree are shown, and switched, from here.
-  const localRefsQuery = useLocalRepoRefs(
-    localThread?.managedTaskFolder ? undefined : localThread?.cwd
-  )
-  const localRepoRefs = localRefsQuery.data
-  const refetchLocalRepoRefs = localRefsQuery.refetch
-  const localWorktreePath = localThread?.worktreePath ?? null
-  const localBranch = localThread
-    ? (localRepoRefs.find((candidate) =>
-        localWorktreePath
-          ? candidate.worktreePath === localWorktreePath
-          : candidate.current
-      )?.name ?? null)
-    : null
-  const localPr = useLocalThreadPr(thread.id, Boolean(localThread)).data ?? null
-  const queryClient = useQueryClient()
-  const selectLocalBranch = useCallback(
-    async (branch: string) => {
-      try {
-        await window.openSweDesktop?.setLocalBranch({
-          threadId: thread.id,
-          branch,
-        })
-      } catch (error) {
-        reportError({ title: "Couldn't switch the thread's branch", error })
-      }
-      void queryClient.invalidateQueries({ queryKey: localThreadKeys.all })
-      void queryClient.invalidateQueries({
-        queryKey: localThreadKeys.pr(thread.id),
-      })
-      await refetchLocalRepoRefs()
-    },
-    [queryClient, refetchLocalRepoRefs, thread.id]
-  )
-  const bridgeError =
-    localThread && localBridge.error
-      ? localBridge.error instanceof Error
-        ? localBridge.error.message
-        : "This Mac could not be reached"
-      : null
-  const runsHere: RunTarget = runsOnAMac(thread) ? "local" : "cloud"
-  const canMove =
-    (runsElsewhere || Boolean(window.openSweDesktop)) &&
-    thread.sandboxBridgeClient !== "cli" &&
-    thread.visibility === "private" &&
-    ownsThread
   // The review page shows its PR's status itself; don't poll it a second time here.
   const pullRequestStatus = useAgentThreadPullRequestStatus(
     thread.id,
@@ -242,7 +156,6 @@ export function AgentThreadView({
     : pullRequestStatus.data?.pullRequests
 
   const {
-    cloudFirstDesktopEnabled,
     models,
     defaultSelection,
     modelSelectionEnabled,
@@ -360,11 +273,9 @@ export function AgentThreadView({
       )
       const restoreSelection = () => selectionIntent.restore(messageId)
       try {
-        await ensureLocalBridge()
+        // The owner's private thread may ask to act on this Mac, each action approved here.
         let localAccessBridgeId: string | undefined
         if (
-          cloudFirstDesktopEnabled &&
-          !runsOnAMac(thread) &&
           thread.visibility === "private" &&
           ownsThread &&
           window.openSweDesktop?.ensureLocalAccessBridge
@@ -405,11 +316,9 @@ export function AgentThreadView({
     },
     [
       activeSelection,
-      cloudFirstDesktopEnabled,
-      thread,
+      thread.visibility,
       ownsThread,
       selectionIntent,
-      ensureLocalBridge,
       followUpBehavior,
       isStreaming,
       modelSelectionEnabled,
@@ -880,43 +789,12 @@ export function AgentThreadView({
             onRename={(title) =>
               renameThread.mutateAsync({ threadId: thread.id, title })
             }
-            target={
-              localThread || thread.sandboxBridgeClient === "desktop"
-                ? "This Mac"
-                : thread.sandboxBridgeClient === "cli"
-                  ? "Local CLI"
-                  : "Cloud"
-            }
             panelCollapsed={panelCollapsed}
             thread={thread}
           />
         )}
-        {(runsElsewhere || bridgeError) && (
-          <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3">
-            <Banner
-              intent={bridgeError ? "error" : "info"}
-              icon={
-                <Icon
-                  icon={LaptopRegularIcon}
-                  size="md"
-                  className={
-                    bridgeError ? "text-icon-error" : "text-icon-brand"
-                  }
-                />
-              }
-            >
-              {bridgeError
-                ? `This thread's checkout on This Mac can't be served: ${bridgeError}`
-                : `This thread runs in a checkout on another Mac that isn't serving it right now. Open it in the Robin app there to continue it${canMove ? ", or move it to Cloud" : ""}.`}
-            </Banner>
-          </div>
-        )}
-        {cloudFirstDesktopEnabled && !runsOnAMac(thread) && (
-          <>
-            <LocalAccessRequests threadId={thread.id} />
-            <LocalAccessGrantBanner threadId={thread.id} />
-          </>
-        )}
+        <LocalAccessRequests threadId={thread.id} />
+        <LocalAccessGrantBanner threadId={thread.id} />
         {thread.status === "error" && !reconnect.label && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3 empty:hidden">
             <Banner
@@ -1049,15 +927,7 @@ export function AgentThreadView({
             <AgentComposerDock>
               {!embedded && (
                 <ThreadPullRequests
-                  pullRequests={
-                    // A local branch's PR may come from `gh`, which the thread
-                    // record never hears about.
-                    thread.pullRequests?.length
-                      ? thread.pullRequests
-                      : localPr
-                        ? [localPr]
-                        : []
-                  }
+                  pullRequests={thread.pullRequests ?? []}
                   health={pullRequestHealth}
                   healthUnavailable={pullRequestStatus.isError}
                   onFix={fixPullRequest}
@@ -1078,23 +948,19 @@ export function AgentThreadView({
                     : undefined
                 }
                 placeholder={
-                  moving
-                    ? `Moving this thread to ${moving === "local" ? "This Mac" : "Cloud"}…`
-                    : runsElsewhere
-                      ? "This thread's Mac isn't serving it right now"
-                      : botThread
-                        ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
-                        : historicalSession
-                          ? "This historical Claude Code session is read-only"
-                          : canPost
-                            ? reviewChat
-                              ? "Review with Robin"
-                              : hasConversation
-                                ? "Work with Robin"
-                                : "Send the first message"
-                            : thread.adminThread
-                              ? "Only Robin admins can send messages in this thread"
-                              : "You can't send messages in this thread"
+                  botThread
+                    ? `Started by ${thread.triggeringBot?.name ?? "a Slack bot"}. Reply in Slack to steer it`
+                    : historicalSession
+                      ? "This historical Claude Code session is read-only"
+                      : canPost
+                        ? reviewChat
+                          ? "Review with Robin"
+                          : hasConversation
+                            ? "Work with Robin"
+                            : "Send the first message"
+                        : thread.adminThread
+                          ? "Only Robin admins can send messages in this thread"
+                          : "You can't send messages in this thread"
                 }
                 autoFocus={canPost && !embedded}
                 canOffload={!isStreaming}
@@ -1115,39 +981,6 @@ export function AgentThreadView({
                 onSelectionChange={handleSelectionChange}
                 mentionPaths={mentionPaths}
                 skills={skills.data}
-                {...(localThread
-                  ? {
-                      runTarget: "local" as const,
-                      // A task folder is the thread's own, not a project.
-                      selectedLocalRepoPath: localThread.managedTaskFolder
-                        ? null
-                        : localThread.cwd,
-                      localRepoBranches: localRepoRefs,
-                      selectedLocalRepoBranch: localBranch,
-                      onRefreshLocalRepoBranch: () =>
-                        void refetchLocalRepoRefs(),
-                      onSelectLocalRepoBranch: localRepoRefs.length
-                        ? (branch: string) => void selectLocalBranch(branch)
-                        : undefined,
-                      localWorkspaceMode: localWorktreePath
-                        ? ("worktree" as const)
-                        : ("local" as const),
-                      localWorktreeLabel: "Worktree",
-                    }
-                  : {})}
-                {...(canMove &&
-                  // Cloud-first mode moves nothing onto a Mac, but a thread
-                  // already on one can still move to the cloud.
-                  (!cloudFirstDesktopEnabled || runsHere === "local") && {
-                    runTarget: moving ?? runsHere,
-                    runTargetPending: moving !== null,
-                    onRunTargetChange:
-                      isStreaming || moving
-                        ? undefined
-                        : (next: RunTarget) => {
-                            if (next !== runsHere) moveThread.mutate(next)
-                          },
-                  })}
                 contextUsage={{
                   usedTokens: contextUsage?.tokens,
                   contextWindow: usageModel?.context_window,

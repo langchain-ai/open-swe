@@ -26,9 +26,6 @@
       "repo": "open-swe"
     },
     "asar": true,
-    "asarUnpack": [
-      "node_modules/node-pty/**/*"
-    ],
     "npmRebuild": true,
     "icon": "../ui/public/logo-mark.png",
     "directories": {
@@ -102,7 +99,6 @@
   },
   "dependencies": {
     "electron-updater": "6.8.9",
-    "node-pty": "1.1.0",
     "open-swe-bridge-client": "workspace:*"
   }
 }

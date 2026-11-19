@@ -141,7 +141,7 @@ async def _task_context(run: RemoteRun) -> str | None:
             exc_info=True,
         )
         return None
-    return coordination.context_message() if coordination is not None else None
+    return coordination.context_message()
 
 
 async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:

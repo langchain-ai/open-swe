@@ -28,7 +28,6 @@ from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
     JOINED_TASK_CONTEXT,
     Catalog,
-    CliResultRules,
     LoopRules,
     ModelSpec,
     ReplyRules,
@@ -682,7 +681,7 @@ async def test_an_answer_written_for_an_unreachable_model_is_final(
     monkeypatch: pytest.MonkeyPatch, surface: str
 ) -> None:
     """Asking again would wait out the same outage: it is posted as it is, no nudges."""
-    rules = LoopRules(reply=_REPLY, cli_result=CliResultRules(tool="cli_result", nudge=["Send it"]))
+    rules = LoopRules(reply=_REPLY)
     backend, calls = _backend(monkeypatch, {"reply_on_behalf": Done()}, rules)
     loop = RunLoop(backend)
     asked = HumanMessage(content="Fix it", id="human-1")

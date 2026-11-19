@@ -100,7 +100,6 @@ async def test_finished_thread_summary_still_reports_outstanding_review(
             "metadata": {"workflow_push_approvals": {"fp": {"status": "pending"}}},
         },
         latest_run_status="success",
-        bridge_status=False,
     )
     assert summary["status"] == "finished"
     assert summary["pendingWorkflowApproval"] is True

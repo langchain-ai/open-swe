@@ -57,15 +57,7 @@ export function AgentThreadPage(props: {
   if (pending)
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <AgentThreadHeader
-          startingThread={pending.thread}
-          target={
-            pending.thread.sandboxBridgeClient === "desktop"
-              ? "This Mac"
-              : "Cloud"
-          }
-          panelCollapsed
-        />
+        <AgentThreadHeader startingThread={pending.thread} panelCollapsed />
         <Messages
           messages={pending.thread.messages}
           isStreaming
@@ -232,7 +224,6 @@ function AgentThreadLoading({ threadId }: { threadId: string }) {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {!embedded && (
         <AgentThreadHeader
-          target="Cloud"
           panelCollapsed={readStoredPanelCollapsed(threadId)}
           loading
         />
@@ -267,7 +258,6 @@ function AgentThreadAwaitingSummary({ threadId }: { threadId: string }) {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {!embedded && (
         <AgentThreadHeader
-          target="Cloud"
           panelCollapsed={readStoredPanelCollapsed(threadId)}
           loading
         />

@@ -6,7 +6,6 @@ import {
   gitState,
   GIT_STATE_TITLES,
   isEmptyDiff,
-  isLocal,
   workspaceName,
   type AgentThread,
 } from "../core/models"
@@ -86,14 +85,6 @@ function Subtitle({
         additions={thread.diffStats.additions}
         deletions={thread.diffStats.deletions}
       />
-    )
-  }
-  if (preferences.showRuntime && isLocal(thread)) {
-    parts.push(
-      <View key="local" style={styles.inline}>
-        <Symbol name="desktopcomputer" size={13} color={Theme.textTertiary} />
-        <Text style={styles.meta}>Local</Text>
-      </View>
     )
   }
   if (thread.repoFullName) {

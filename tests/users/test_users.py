@@ -143,34 +143,20 @@ async def test_concurrent_first_sign_ins_settle_on_one_user() -> None:
     assert await _user_count() == 1
 
 
-@pytest.mark.parametrize("cloud_first", [None, False, True])
-async def test_preference_patches_merge_and_skip_unset_fields(cloud_first: bool | None) -> None:
+async def test_preference_patches_merge_and_skip_unset_fields() -> None:
     await User.sign_in("github", "8", login="bob")
     preferences: dict[str, object] = {
         "concierge_mode": True,
         "future": "kept",
         "experimental_local_auto_mode": True,
     }
-    if cloud_first is not None:
-        preferences["experimental_cloud_first_desktop"] = cloud_first
     async with postgres.session() as session:
         await session.execute(update(User).values(preferences=preferences))
 
     unchanged = await User.update_preferences("bob", UserPreferencesPatch())
     turned_off = await User.update_preferences("bob", UserPreferencesPatch(concierge_mode=False))
 
-    assert unchanged == UserPreferences(
-        concierge_mode=True, experimental_cloud_first_desktop=cloud_first is not False
-    )
-    assert turned_off == UserPreferences(
-        concierge_mode=False, experimental_cloud_first_desktop=cloud_first is not False
-    )
+    assert unchanged == UserPreferences(concierge_mode=True)
+    assert turned_off == UserPreferences(concierge_mode=False)
     stored = await User.for_login("github", "bob")
     assert stored is not None and stored.preferences == {**preferences, "concierge_mode": False}
-
-    await User.update_preferences(
-        "bob", UserPreferencesPatch(experimental_cloud_first_desktop=False)
-    )
-    opted_out = await User.for_login("github", "bob")
-    assert opted_out is not None
-    assert opted_out.typed_preferences.experimental_cloud_first_desktop is False

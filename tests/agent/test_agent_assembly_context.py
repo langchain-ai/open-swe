@@ -149,66 +149,12 @@ async def test_offloaded_images_are_served_from_a_thread_scoped_store() -> None:
 
     config = _base_config()
     captured = await _agent_catalog(config)
-    files = ThreadFiles(
-        "thread-ctx", RunConfig.from_config(config), skills=RunSkillStores(None), bridged=False
-    )
+    files = ThreadFiles("thread-ctx", RunConfig.from_config(config), skills=RunSkillStores(None))
     blobs = files.routes["/blobs/"]
     assert isinstance(blobs, StoreBackend)
     assert blobs._namespace(MagicMock()) == ("thread_blobs", "thread-ctx")
     surface = cast(ToolSurface, captured["surface"])
     assert "/blobs/" in surface.backend_paths
-
-
-@pytest.mark.parametrize(
-    ("binding", "connected", "available"),
-    [
-        ({}, False, True),
-        ({"sandbox_id": "bridge:desktop", "sandbox_bridge_client": "desktop"}, True, True),
-        ({"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, True, True),
-        ({"sandbox_id": "bridge:cli", "sandbox_bridge_client": "cli"}, False, False),
-    ],
-)
-async def test_task_tools_require_a_served_sandbox(
-    saved_thread_scope: dict[str, object],
-    binding: dict[str, str],
-    connected: bool,
-    available: bool,
-) -> None:
-    saved_thread_scope.update(owner_type="user", owner_login="owner")
-    saved_thread_scope.update(binding)
-
-    with patch("openswe.tasks.schemas.BridgeStore.is_connected", return_value=connected):
-        captured = await _agent_catalog()
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    names = {_registered_tool_name(tool) for tool in tools}
-    assert ("control_worker" in names) is available
-
-
-@pytest.mark.parametrize("role", ["coordinator", "worker"])
-async def test_existing_task_keeps_controls_without_delegation(
-    saved_thread_scope, role: Literal["coordinator", "worker"]
-):
-    from openswe.tasks.store import Task, TaskContext, TaskMembership
-
-    saved_thread_scope.update(
-        owner_type="user", owner_login="owner", sandbox_id="bridge:cli", sandbox_bridge_client="cli"
-    )
-    task = Task(
-        coordinator_thread_id="coordinator",
-        title="Existing task",
-        delegated=True,
-    )
-    context = TaskContext(task, TaskMembership(thread_id="thread-ctx", task_id=task.id, role=role))
-    with patch(
-        "openswe.middleware.task_coordination.TaskMembership.context_for_thread",
-        return_value=context,
-    ):
-        captured = await _agent_catalog()
-    tools = captured["tools"]
-    assert isinstance(tools, list)
-    names = {_registered_tool_name(tool) for tool in tools}
-    assert {"control_worker", "message_task_thread", "task_status"} <= names
 
 
 @pytest.mark.asyncio

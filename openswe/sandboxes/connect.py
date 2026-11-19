@@ -1,21 +1,10 @@
-"""Reach a thread's existing sandbox from outside its run, whichever kind it is."""
+"""Reach a thread's existing sandbox from outside its run."""
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from openswe.bridge.backend import BridgeSandboxBackend
-from openswe.bridge.store import Bridge
 from openswe.sandboxes.providers.registry import connect_existing_sandbox
 
 
-async def connect_sandbox(
-    sandbox_id: str, *, thread_id: str | None = None
-) -> SandboxBackendProtocol:
-    """The sandbox a thread's ``sandbox_id`` names.
-
-    A ``bridge:`` id is the user's own machine, which LangSmith has never heard
-    of; handing it one would fail as a missing sandbox.
-    """
-    bridge_id = Bridge.bridge_id_of(sandbox_id)
-    if bridge_id is not None:
-        return await BridgeSandboxBackend.connect(thread_id, bridge_id)
+async def connect_sandbox(sandbox_id: str) -> SandboxBackendProtocol:
+    """The sandbox a thread's ``sandbox_id`` names."""
     return await connect_existing_sandbox(sandbox_id)

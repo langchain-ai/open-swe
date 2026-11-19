@@ -160,7 +160,7 @@ class RunCatalog:
             **{name: surface.always_offered[name] for name in surface.disabled()},
             **self._backend_tools(),
         }
-        # A bridged client's own tool of the same name is the client's to run.
+        # A client's own tool of the same name is the client's to run.
         clients = {spec.name for spec in RunConfig.from_config(self.config).client_tools}
         return [
             ToolSpec(
@@ -259,7 +259,6 @@ class RunCatalog:
             described={name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS},
             files=FilesSpec(
                 backend_paths=list(surface.backend_paths),
-                artifacts_root=surface.artifacts_root,
                 checks=list(surface.file_checks),
             ),
             browser=surface.browser,

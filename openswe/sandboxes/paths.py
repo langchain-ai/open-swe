@@ -8,20 +8,11 @@ from collections.abc import AsyncIterable, Iterable
 from deepagents.backends.protocol import SandboxBackendProtocol
 from runtime_api import sandbox_setup
 
-from openswe.bridge.constants import SANDBOX_ID_PREFIX
-from openswe.sandboxes.state import SandboxBackendProxy
-
 logger = logging.getLogger(__name__)
 
 _WORK_DIR_CACHE_ATTR = "_open_swe_resolved_work_dir"
 _PROVIDER_ATTR_NAMES = ("sandbox", "_sandbox", "_backend")
 WORKSPACE_DIR = sandbox_setup.WORK_DIR
-
-
-def _is_local_checkout(sandbox_backend: SandboxBackendProtocol) -> bool:
-    """A bridged machine's working directory is the user's checkout itself."""
-    sandbox_id = getattr(sandbox_backend, "id", None)
-    return isinstance(sandbox_id, str) and sandbox_id.startswith(SANDBOX_ID_PREFIX)
 
 
 async def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: str) -> str:
@@ -30,8 +21,6 @@ async def resolve_repo_dir(sandbox_backend: SandboxBackendProtocol, repo_name: s
         raise ValueError("repo_name must be a non-empty string")
 
     work_dir = await resolve_sandbox_work_dir(sandbox_backend)
-    if _is_local_checkout(sandbox_backend):
-        return work_dir
     return posixpath.join(work_dir, repo_name)
 
 
@@ -39,8 +28,6 @@ async def resolve_checkout_dir(
     sandbox_backend: SandboxBackendProtocol, work_dir: str, repo_name: str
 ) -> str:
     """Resolve a checkout from its prepared directory, workspace, or legacy home."""
-    if _is_local_checkout(sandbox_backend):
-        return work_dir
     repo_dir = posixpath.join(work_dir, repo_name)
     workspace_repo = shlex.quote(posixpath.join(WORKSPACE_DIR, repo_name))
     name = shlex.quote(posixpath.basename(repo_name))
@@ -64,13 +51,12 @@ async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> s
     ):
         return cached_work_dir
 
-    local = _is_local_checkout(await _connected(sandbox_backend))
     checked_candidates: list[str] = []
-    async for candidate in _iter_work_dir_candidates(sandbox_backend, workspace=not local):
+    async for candidate in _iter_work_dir_candidates(sandbox_backend):
         checked_candidates.append(candidate)
         if await _is_writable_directory(sandbox_backend, candidate):
-            # A remote fallback is re-probed so a later /workspace replaces it.
-            if local or candidate in (WORKSPACE_DIR, declared_work_dir(sandbox_backend)):
+            # A fallback is re-probed so a later /workspace replaces it.
+            if candidate in (WORKSPACE_DIR, declared_work_dir(sandbox_backend)):
                 _cache_work_dir(sandbox_backend, candidate)
             return candidate
 
@@ -80,18 +66,7 @@ async def resolve_sandbox_work_dir(sandbox_backend: SandboxBackendProtocol) -> s
     raise RuntimeError(msg)
 
 
-async def _connected(sandbox_backend: SandboxBackendProtocol) -> SandboxBackendProtocol:
-    """The backend behind a proxy, connected so its id is known."""
-    return (
-        await sandbox_backend.ready()
-        if isinstance(sandbox_backend, SandboxBackendProxy)
-        else sandbox_backend
-    )
-
-
-async def _iter_work_dir_candidates(
-    sandbox_backend: SandboxBackendProtocol, *, workspace: bool
-) -> AsyncIterable[str]:
+async def _iter_work_dir_candidates(sandbox_backend: SandboxBackendProtocol) -> AsyncIterable[str]:
     seen: set[str] = set()
 
     for candidate in _iter_provider_paths(sandbox_backend, "get_work_dir"):
@@ -99,7 +74,7 @@ async def _iter_work_dir_candidates(
             seen.add(candidate)
             yield candidate
 
-    if workspace and WORKSPACE_DIR not in seen:
+    if WORKSPACE_DIR not in seen:
         seen.add(WORKSPACE_DIR)
         yield WORKSPACE_DIR
 

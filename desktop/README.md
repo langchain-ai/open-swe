@@ -9,44 +9,20 @@ It keeps the last complete UI on disk, including lazy routes, for offline use.
 No dashboard is embedded in the installer.
 First launch requires connectivity to download the UI; failure shows a retry screen.
 
-Cloud-first desktop is on by default for users who have not saved a choice; saved choices are preserved.
-With it on, new threads run in the cloud, and optional actions on your Mac each require native approval in a desktop app that supports them.
-Turn off **Cloud-first desktop** in **Settings → Experiments** to choose **This Mac** in the new-task composer and run an agent over a selected local project.
-Existing This Mac threads keep working regardless of the personal experiment.
-Admins can still require cloud-first mode globally with `cloud_first_desktop_enabled`.
-A This Mac thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted sandbox.
-The app serves it through a sandbox bridge: it long-polls the backend for the agent's `execute`, `upload_files` and `download_files` requests, runs them in the checkout, and posts the results back.
-This is the same bridge `robin run` uses, from the shared `bridge-client` package.
+Every thread runs in the cloud, in its own sandbox, exactly as it does from the web.
+In your private threads, the app also lets Robin ask to read or write a file on this Mac, copy a file into the thread's sandbox, or run a command here.
+Each action waits for your approval in a native dialog that names the thread and shows the exact path, contents or command; the thread's card links to the dialog but cannot decide.
+**Allow in <folder> for this thread** lets that thread act in the folder without asking for 30 minutes, for actions the runtime's reviewer clears and paths that cannot hold credentials.
+Grants live only in the running app: quitting or signing out ends them.
 
+The app serves these actions through a local-access bridge: it long-polls the backend for the run's `local_action` requests, asks you, runs what you approve, and posts the results back.
+It uses the shared `bridge-client` package.
 Commands run with your login shell's environment, minus anything secret-shaped except `GITHUB_TOKEN` and `GH_TOKEN`, so `git` and `gh` use your own identity and credentials.
-A thread runs only while the app that started it is open: quitting closes its bridge, and a run started meanwhile reports the Mac as unreachable.
-Opening the thread again, or sending a follow-up, reopens it.
-The thread is visible from the web and other computers, but only this Mac can continue it.
-
-In **Work mode**, new chats need no repository or folder selection.
-This Mac creates a private task folder per conversation under the app profile’s `tasks/<thread-id>` directory.
-**Use a folder** optionally selects existing material; several chats can select the same folder, without sharing their conversation histories.
-**Open task folder** opens the working location in Finder.
-Closing, archiving, or deleting a chat does not delete its automatic task files.
-These folders are starting locations, not filesystem security sandboxes.
-Git branch and worktree controls appear only for Git folders.
-
-Every chat lives in one list, whatever it works on.
-A chat started without a repository gets the general-purpose prompt; branch and worktree controls appear once a Git folder is chosen.
-
-The composer's local checkout selector chooses where a local thread runs.
-**Current checkout** (the default) runs the agent in the project directory itself, on whichever branch the branch picker selects.
-**New worktree** gives the thread its own git worktree, checked out from the selected base branch on a placeholder `open-swe/local-<id>` branch that the agent renames after it reads the request — so your own checkout is never touched and several local threads can run at once without contending for a working tree.
-Deleting a thread removes its worktree along with anything uncommitted in it.
-Only one agent may work in a given tree at a time, so starting a thread in a checkout another agent is running in, or switching that checkout's branch under it, is refused.
-
-The side panel's **Changes** tab diffs the project against a git snapshot taken when the session started, so it shows what the agent changed and not the working tree's prior state.
-It also shows the local checkout's branch and discovers its pull request when the GitHub CLI is installed and authenticated.
-The **Terminal** and file browser open in the same checkout, on this Mac.
+A thread can ask only while this app is open and signed in as the thread's owner; otherwise the run continues in the cloud without local actions.
 
 ## How it connects
 
-The UI runs at `open-swe://app`, with native IPC for local projects, threads, worktrees, terminals and files.
+The UI runs at `open-swe://app`, with native IPC for menus, sign-in, updates and approved local actions.
 `/desktop-ui.json` on the backend selects a GitHub Release archive by backend commit, SHA-256 and bridge protocol version.
 Downloads carry no session credentials, follow redirects only to GitHub release hosts, and are verified before activation.
 Each backend has its own cache.
@@ -77,7 +53,7 @@ Links for other deployments open in the default browser instead.
 Associated domains are fixed in the signed app, so macOS may still launch Robin before it hands a mismatched link back to the browser.
 
 The shared backend's GitHub App must allow `<backend-url>/dashboard/api/auth/callback` as a callback URL.
-Set `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` on that backend to control which GitHub users can create dashboard sessions, including the ones "This Mac" threads run under.
+Set `ALLOWED_GITHUB_ORGS` or `ALLOWED_GITHUB_USERS` on that backend to control which GitHub users can create dashboard sessions.
 
 ## Install on macOS
 
@@ -98,7 +74,7 @@ make install-desktop
 ```
 
 The command fast-forwards to the latest `main`, builds Robin, and installs it in `/Applications` (or `~/Applications` when needed).
-Run it again to update and replace the app; saved backend settings, login sessions, and projects are preserved.
+Run it again to update and replace the app; saved backend settings and login sessions are preserved.
 
 ## Local development
 
@@ -120,15 +96,15 @@ make web
 `pnpm run dev:desktop` is equivalent to `make desktop`.
 Both build `ui/` first and run the app on that build through `OPEN_SWE_DESKTOP_UI_ARCHIVE`, so the window shows this checkout's UI rather than the one the backend publishes.
 After changing `ui/`, rerun `make desktop`, or rebuild the UI and use View → Reload.
-The desktop app connects to the backend at `http://localhost:2024`, which runs "This Mac" threads too; the bridge needs that backend's PostgreSQL.
+The desktop app connects to the backend at `http://localhost:2024`; approved local actions reach it through the bridge, which needs that backend's PostgreSQL.
 
-The app keeps the original `com.langchain.openswe` bundle ID and `Open SWE` production Electron profile for existing sessions, projects, task folders, caches, and instance locks.
+The app keeps the original `com.langchain.openswe` bundle ID and `Open SWE` production Electron profile for existing sessions, caches, and instance locks.
 At startup, Electron uses the legacy profile name until `app.whenReady()` resolves, then switches its display name to Robin.
 Electron 44.9.1 initializes the macOS Keychain service and account names before that callback, so the app continues using the original Safe Storage key rather than creating a Robin key.
 A signed macOS upgrade pilot must verify cookie decryption and session continuity; Linux tests cannot establish that behavior.
 Packaged apps continue to share backend configuration and sessions with `robin` and `oswe` through `~/.open-swe/config.json`.
 Source launches retain the isolated `Open SWE Development` profile and do not share CLI configuration.
-The dev window is labeled **Robin Development**; existing development sessions and projects are preserved.
+The dev window is labeled **Robin Development**; existing development sessions are preserved.
 
 Development defaults to `http://localhost:2024`.
 Point to another backend with:
@@ -164,7 +140,7 @@ If an older copy remains in a different Applications directory, remove that app 
 Release assets use `Robin-*` names, with `Open-SWE-*` aliases for compatibility.
 The `desktop-v*` tags, original stable update feed, and `open-swe-desktop` Homebrew cask stay unchanged.
 There is one desktop product and version, not separate coding and general-purpose distributions.
-An update from an installed Open SWE app and a Homebrew reinstall still need macOS smoke tests to verify bundle replacement, preserved sessions/projects, and the CLI link.
+An update from an installed Open SWE app and a Homebrew reinstall still need macOS smoke tests to verify bundle replacement, preserved sessions, and the CLI link.
 
 ## macOS releases
 
@@ -236,7 +212,6 @@ Remote revocation failures do not prevent local sign out; a new login is require
 `/me` renews valid seven-day sessions on loading/focus; sessions inactive past expiry need login again.
 Sign out rather than disconnecting the login grant.
 
-Tasks and workers use private local bridges, with automatic task folders or an optional existing folder.
-Without a linked GitHub account, cloud moves, GitHub operations, and borrowed deployment bot/App credentials are unavailable.
+Without a linked GitHub account, GitHub operations and borrowed deployment bot/App credentials are unavailable.
 Deploy the login routes and desktop UI with both sign-in providers before distributing installers.
 Real confidential-client OAuth, macOS signing/install and update installation still need production smoke tests; Linux packaging and mocked integration tests do not establish deployment readiness.

@@ -1,6 +1,4 @@
-const { randomBytes } = require("node:crypto");
 const fs = require("node:fs");
-const { createHash } = require("node:crypto");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const {
@@ -28,51 +26,14 @@ const {
   redactSecrets,
   normalizeConsoleMessage,
 } = require("./diagnostics.cjs");
-const { LocalBridges } = require("./local-bridges.cjs");
 const { LocalAccessBridge } = require("./local-access.cjs");
 const { ApprovalQueue } = require("./approval-queue.cjs");
 const { ApprovalPanel } = require("./approval-panel.cjs");
 const { DesktopUi } = require("./desktop-ui.cjs");
-const { LocalThreadStore } = require("./local-thread-store.cjs");
-const {
-  addWorktree,
-  captureCheckpoint,
-  checkoutBranch,
-  checkpointRef,
-  currentBranch,
-  defaultBranch,
-  git,
-  localBranches,
-  deleteRefs,
-  originRepo,
-  readBranchDiff,
-  readDiff,
-  removeWorktree,
-  repoRoot,
-  repositoryMetadata,
-  restoreWorktree,
-  validBranchName,
-  watchProjectHead,
-} = require("./git-diff.cjs");
-const {
-  closeAllTerminals,
-  configureTerminalIpc,
-  closeThreadTerminals,
-  getUserShellEnv,
-} = require("./terminal-manager.cjs");
-const {
-  addProject,
-  linkProject,
-  readProjects,
-  removeProject,
-} = require("./project-store.cjs");
+const { getUserShellEnv } = require("./shell-env.cjs");
 const { beginLogin } = require("./login-server.cjs");
-const {
-  listWorkspaceFiles,
-  readWorkspacePath,
-} = require("./workspace-files.cjs");
 const { MenuCommands, isDesktopCommandId } = require("./commands.cjs");
-const { PREVIEW_SCHEME, PreviewFiles } = require("./preview-files.cjs");
+const { FramePolicy } = require("./frame-policy.cjs");
 const { DesktopLinks } = require("./desktop-links.cjs");
 const { DesktopEnvironments } = require("./desktop-environments.cjs");
 const { CloseConfirmation } = require("./close-confirmation.cjs");
@@ -155,17 +116,6 @@ protocol.registerSchemesAsPrivileged([
       codeCache: true,
     },
   },
-  {
-    // A preview page loads its own module scripts and fonts, which need CORS.
-    scheme: PREVIEW_SCHEME,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-      stream: true,
-    },
-  },
 ]);
 
 let backendUrl = null;
@@ -210,9 +160,6 @@ let setupWindow = null;
 let loginFlow = null;
 const connectFlows = new Map();
 let quitting = false;
-let localThreadStore = null;
-const previewFiles = new PreviewFiles(localWorkspaceRoot);
-let localBridges = null;
 let localAccessBridge = null;
 // Local actions waiting on the person, decided only in the desktop's own panel.
 const approvalQueue = new ApprovalQueue(() => {
@@ -362,181 +309,6 @@ function requireTrustedDesktopIpc(event) {
   if (!isAppUrl(senderUrl)) throw new Error("Forbidden");
 }
 
-function projectsPath() {
-  return path.join(app.getPath("userData"), "desktop-projects.json");
-}
-
-/**
- * Terminal identity for a project itself, so the new-thread screen can open
- * terminals before a thread exists. Short and stable, unlike the cwd.
- */
-function projectScopeId(cwd) {
-  return `project-${createHash("sha256").update(cwd).digest("hex").slice(0, 16)}`;
-}
-
-function withScopeId(project) {
-  return { ...project, scopeId: projectScopeId(project.cwd) };
-}
-
-function worktreesPath() {
-  return path.join(app.getPath("userData"), "worktrees");
-}
-
-function listProjects() {
-  return readProjects(projectsPath()).map(withScopeId);
-}
-
-function projectScopeSession(scopeId) {
-  const project = listProjects().find((item) => item.scopeId === scopeId);
-  return project ? { id: scopeId, cwd: project.cwd } : null;
-}
-
-/** The folders with the GitHub repository each is a clone of, for the dashboard to file them. */
-async function describedProjects() {
-  return Promise.all(
-    listProjects().map(async (project) => ({
-      ...project,
-      repo: await originRepo(project.cwd),
-    })),
-  );
-}
-
-async function sendProjectsChanged() {
-  const projects = await describedProjects();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("desktop:projects-changed", projects);
-  }
-}
-
-function pathIsInside(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return (
-    relative === "" ||
-    (!relative.startsWith(`..${path.sep}`) &&
-      relative !== ".." &&
-      !path.isAbsolute(relative))
-  );
-}
-
-/**
- * Worktrees the app made are the only ones it may take over or delete: one the
- * user created themselves is theirs, and the backend refuses to run in it.
- */
-function managedWorktree(candidate) {
-  return typeof candidate === "string" &&
-    path.isAbsolute(candidate) &&
-    pathIsInside(worktreesPath(), path.normalize(candidate))
-    ? path.normalize(candidate)
-    : null;
-}
-
-function registeredProject(cwd) {
-  try {
-    const canonical = fs.realpathSync(cwd);
-    return listProjects().some((project) => project.cwd === canonical)
-      ? canonical
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function localWorkspaceRoot(id: unknown): string {
-  const root =
-    threadRoot(localThreadStore.get(id)) ?? projectScopeSession(id)?.cwd;
-  if (!root) throw new Error("Local workspace not found");
-  return root;
-}
-
-function threadRoot(thread) {
-  if (thread?.managedTaskFolder) return localThreadStore.taskRoot(thread);
-  const project = thread ? registeredProject(thread.cwd) : null;
-  if (!project) return null;
-  return thread.worktreePath || project;
-}
-
-async function projectForRepo(repo) {
-  if (typeof repo !== "string" || !repo) return null;
-  for (const project of listProjects()) {
-    const origin = await originRepo(project.cwd);
-    if (origin?.toLowerCase() === repo.toLowerCase()) return project.cwd;
-  }
-  return null;
-}
-
-function resolveLocalProjectPath(localSessionId, value) {
-  const localSession = localThreadStore.get(localSessionId);
-  if (!localSession || typeof value !== "string" || value.length === 0)
-    return null;
-  try {
-    const root = threadRoot(localSession);
-    if (!root) return null;
-    const projectRoot = fs.realpathSync(root);
-    const windowsAbsolute = path.win32.isAbsolute(value);
-    if (windowsAbsolute && process.platform !== "win32") return null;
-    const candidate = fs.realpathSync(
-      path.isAbsolute(value) || windowsAbsolute
-        ? value
-        : path.resolve(projectRoot, value),
-    );
-    if (!pathIsInside(projectRoot, candidate)) return null;
-    const relative = path.relative(projectRoot, candidate);
-    return relative === "" ? "." : relative.split(path.sep).join("/");
-  } catch {
-    return null;
-  }
-}
-
-async function recordLocalCheckpoint(thread) {
-  const repo = await repoRoot(thread.worktreePath || thread.cwd);
-  if (!repo) return thread;
-  const ref = checkpointRef(thread.id);
-  await captureCheckpoint(repo, ref);
-  const branch = await currentBranch(repo);
-  return localThreadStore.setCheckpoint(thread.id, { repo, ref, branch });
-}
-
-async function syncThreadBranch(thread) {
-  if (!thread?.checkpoint.repo) return thread;
-  const branch = await currentBranch(thread.checkpoint.repo);
-  if (!branch || branch === thread.checkpoint.branch) return thread;
-  return (
-    localThreadStore.setCheckpoint(thread.id, {
-      ...thread.checkpoint,
-      branch,
-    }) ?? thread
-  );
-}
-
-/**
- * A worktree thread owns its checkout outright. A thread running in the
- * project's own checkout shares it with every other session, so the branch that
- * happens to be checked out is only this thread's while this thread is running.
- */
-async function diffThread(threadId) {
-  const thread = localThreadStore.get(threadId);
-  if (!thread) return thread;
-  if (thread.worktreePath) return syncThreadBranch(thread);
-  return (await threadRunning(threadId)) ? syncThreadBranch(thread) : thread;
-}
-
-/** Whether the backend has a run in flight on this thread. */
-async function threadRunning(threadId) {
-  if (!backendUrl) throw new Error("Robin is not connected to a backend");
-  const response = await backendFetch(
-    new URL(
-      `/dashboard/api/threads/${encodeURIComponent(threadId)}?mark_viewed=false`,
-      backendUrl,
-    ).toString(),
-    { signal: AbortSignal.timeout(10_000) },
-  );
-  if (response.status === 404) return false;
-  if (!response.ok)
-    throw new Error(`Could not read the thread's status (${response.status})`);
-  const thread = await response.json();
-  return thread?.status === "running";
-}
-
 /**
  * Sends one bridge call to the backend under the app's session. A long poll
  * brings its own abort signal; anything else gives up rather than hold a quit.
@@ -562,160 +334,6 @@ async function sendBridgeRequest(method, apiPath, { body, signal }) {
       { status: response.status },
     );
   return text ? JSON.parse(text) : null;
-}
-
-async function createThreadWorktree(thread, baseBranch) {
-  const repo = await repoRoot(thread.cwd);
-  if (!repo) throw new Error("Local projects must be git repositories");
-  const base =
-    (await validBranchName(repo, baseBranch)) ??
-    (await currentBranch(repo)) ??
-    "HEAD";
-  const token = randomBytes(4).toString("hex");
-  const worktree = path.join(
-    worktreesPath(),
-    `${path.basename(repo)}-${token}`,
-  );
-  await addWorktree(repo, worktree, `open-swe/local-${token}`, base, true);
-  return localThreadStore.setWorktree(thread.id, worktree, true);
-}
-
-function sendLocalThreadsChanged() {
-  if (mainWindow && !mainWindow.isDestroyed())
-    mainWindow.webContents.send("desktop:local-threads-changed");
-}
-
-/**
- * The agent's way out of the user's own checkout: a new branch in a new
- * worktree, which the thread then follows. The checkout itself is untouched.
- */
-async function handoffThreadToWorktree(threadId, params) {
-  const thread = localThreadStore.get(threadId);
-  if (!thread) throw new Error("This thread does not run on This Mac");
-  const repo = await repoRoot(thread.cwd);
-  if (!repo) throw new Error("Local projects must be git repositories");
-  const branch = await validBranchName(repo, params.branch);
-  if (!branch) throw new Error("A valid branch name is required");
-  const ref = (await localBranches(repo)).find((it) => it.name === branch);
-  if (params.user_checkout)
-    return moveThreadToUserCheckout(thread, repo, ref ?? { name: branch });
-  if (ref?.current || ref?.worktreePath)
-    return followCheckedOutBranch(thread, repo, ref);
-  if (thread.worktreePath)
-    throw new Error(
-      `This thread already works in its own worktree at ${thread.worktreePath}`,
-    );
-  const base =
-    (await validBranchName(repo, params.base_ref)) ??
-    (await defaultBranch(repo));
-  if (!base) throw new Error("Pass base_ref: no default branch was found");
-  const fromOrigin = params.start_from_origin !== false;
-  if (fromOrigin) await git(repo, ["fetch", "origin", base], null, 60_000);
-  const startPoint = fromOrigin ? `origin/${base}` : base;
-  const worktree = path.join(
-    worktreesPath(),
-    `${path.basename(repo)}-${randomBytes(4).toString("hex")}`,
-  );
-  await addWorktree(repo, worktree, branch, startPoint);
-  await closeThreadTerminals(threadId);
-  await recordLocalCheckpoint(
-    localThreadStore.setWorktree(threadId, worktree, true),
-  );
-  sendLocalThreadsChanged();
-  return { worktree_path: worktree, branch, base: startPoint };
-}
-
-/** Moves the thread to wherever `ref` is already checked out, as the branch picker does. */
-async function followCheckedOutBranch(thread, repo, ref) {
-  const target = ref.worktreePath ? managedWorktree(ref.worktreePath) : null;
-  if (ref.worktreePath && !target)
-    throw new Error(
-      `“${ref.name}” is checked out in ${ref.worktreePath}, which Robin does not manage.`,
-    );
-  await moveThreadWorkspace(thread, target);
-  sendLocalThreadsChanged();
-  return { worktree_path: target ?? repo, branch: ref.name };
-}
-
-/** Switches the user's own checkout to `ref`, as the project branch picker does, and moves the thread there. */
-async function moveThreadToUserCheckout(thread, repo, ref) {
-  if (ref.worktreePath)
-    throw new Error(
-      `“${ref.name}” is checked out in the worktree ${ref.worktreePath}, so it cannot also be checked out in ${repo}.`,
-    );
-  if (!ref.current) {
-    await git(repo, ["fetch", "origin", ref.name], null, 60_000).catch(
-      (error) => console.warn("Could not fetch the branch", error),
-    );
-    await checkoutBranch(repo, ref.name);
-  }
-  return followCheckedOutBranch(thread, repo, { ...ref, current: true });
-}
-
-/**
- * A branch can only be checked out in one working tree, so a thread starting on
- * one that already has a worktree of this app's runs in that worktree rather
- * than trying to create a second checkout of it.
- */
-async function startThreadWorktree(thread, baseBranch) {
-  const project = await repoRoot(thread.cwd);
-  const existing = project
-    ? (await localBranches(project)).find((ref) => ref.name === baseBranch)
-        ?.worktreePath
-    : null;
-  if (!existing || !managedWorktree(existing))
-    return createThreadWorktree(thread, baseBranch);
-  return localThreadStore.setWorktree(thread.id, existing);
-}
-
-async function moveThreadWorkspace(thread, worktreePath) {
-  if ((thread.worktreePath || null) === worktreePath) return thread;
-  await closeThreadTerminals(thread.id);
-  return recordLocalCheckpoint(
-    localThreadStore.setWorktree(thread.id, worktreePath),
-  );
-}
-
-async function ensureThreadWorktree(thread) {
-  if (!thread?.worktreePath || fs.existsSync(thread.worktreePath))
-    return thread;
-  const repo = registeredProject(thread.cwd) && (await repoRoot(thread.cwd));
-  const branch = thread.checkpoint.branch;
-  if (!repo || !branch) return thread;
-  await restoreWorktree(repo, thread.worktreePath, branch);
-  return thread;
-}
-
-async function discardLocalThread(thread) {
-  await localBridges.close(thread.id);
-  await closeThreadTerminals(thread.id);
-  localThreadStore.delete(thread.id);
-  if (thread.checkpoint.repo && thread.checkpoint.ref)
-    deleteRefs(thread.checkpoint.repo, [thread.checkpoint.ref]);
-  await discardThreadWorktree(thread).catch((error) =>
-    console.warn("Could not remove a local thread's worktree", error),
-  );
-}
-
-/**
- * Every worktree this app made for the thread, including ones it has since
- * moved off, minus any another thread is in or owns.
- */
-async function discardThreadWorktree(thread) {
-  const others = localThreadStore.list().filter((it) => it.id !== thread.id);
-  const owned = thread.ownedWorktrees.filter(
-    (worktree) =>
-      managedWorktree(worktree) &&
-      !others.some(
-        (other) =>
-          other.worktreePath === worktree ||
-          other.ownedWorktrees.includes(worktree),
-      ),
-  );
-  if (!owned.length) return;
-  const repo = await repoRoot(thread.cwd);
-  if (!repo) return;
-  for (const worktree of owned) await removeWorktree(repo, worktree);
 }
 
 function configureDesktopIpc() {
@@ -771,13 +389,9 @@ function configureDesktopIpc() {
     );
     updateInstallTimer.unref();
     try {
-      await Promise.all([
-        closeAllTerminals(),
-        localBridges?.closeAll(),
-        localAccessBridge?.close().finally(() => {
-          localAccessBridge = null;
-        }),
-      ]);
+      await localAccessBridge?.close().finally(() => {
+        localAccessBridge = null;
+      });
       if (!quitting) return false;
       autoUpdater.quitAndInstall(false, true);
       return true;
@@ -785,116 +399,6 @@ function configureDesktopIpc() {
       failDesktopUpdate(error);
       return false;
     }
-  });
-
-  ipcMain.handle("desktop:projects", (event) => {
-    requireTrustedDesktopIpc(event);
-    return describedProjects();
-  });
-
-  ipcMain.handle("desktop:link-project", async (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const cwd = input && typeof input.cwd === "string" ? input.cwd : null;
-    const project = cwd ? registeredProject(cwd) : null;
-    if (!project) throw new Error("Project is not registered");
-    const linked = linkProject(
-      projectsPath(),
-      project,
-      input.projectId ?? null,
-    );
-    await sendProjectsChanged();
-    return linked ? withScopeId(linked) : null;
-  });
-
-  const projectHeadWatches = new Map<number, () => void>();
-  ipcMain.handle("desktop:watch-project-head", async (event, cwd) => {
-    requireTrustedDesktopIpc(event);
-    const sender = event.sender;
-    projectHeadWatches.get(sender.id)?.();
-    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
-    if (!project) return;
-    let disposed = false;
-    let stop: (() => void) | undefined;
-    const close = () => {
-      disposed = true;
-      stop?.();
-      projectHeadWatches.delete(sender.id);
-      sender.removeListener("destroyed", close);
-      sender.removeListener("did-start-navigation", close);
-    };
-    projectHeadWatches.set(sender.id, close);
-    sender.once("destroyed", close);
-    sender.once("did-start-navigation", close);
-    try {
-      stop = await watchProjectHead(project, () => {
-        if (!disposed && !sender.isDestroyed())
-          sender.send("desktop:project-head-changed", cwd);
-      });
-      if (disposed) stop();
-    } catch {
-      if (!disposed) close();
-    }
-  });
-
-  ipcMain.handle("desktop:project-branches", async (event, cwd) => {
-    requireTrustedDesktopIpc(event);
-    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
-    if (!project) return { current: null, branches: [] };
-    const [current, branches] = await Promise.all([
-      currentBranch(project),
-      localBranches(project),
-    ]);
-    return { current, branches };
-  });
-
-  ipcMain.handle("desktop:checkout-project-branch", async (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const project =
-      input && typeof input.cwd === "string"
-        ? registeredProject(input.cwd)
-        : null;
-    if (!project) throw new Error("Project is not registered");
-    return checkoutBranch(project, input.branch);
-  });
-
-  ipcMain.handle("desktop:add-project", async (event) => {
-    requireTrustedDesktopIpc(event);
-    const options = {
-      title: "Add a project from This Mac",
-      properties: ["openDirectory", "createDirectory"],
-    };
-    const result = mainWindow
-      ? await dialog.showOpenDialog(mainWindow, options)
-      : await dialog.showOpenDialog(options);
-    if (result.canceled || !result.filePaths[0]) return null;
-    const project = addProject(projectsPath(), result.filePaths[0]);
-    void sendProjectsChanged();
-    return {
-      ...withScopeId(project),
-      repo: await originRepo(project.cwd),
-    };
-  });
-
-  ipcMain.handle("desktop:remove-project", async (event, cwd) => {
-    requireTrustedDesktopIpc(event);
-    const project = listProjects().find((item) => item.cwd === cwd);
-    if (!project) return false;
-    const options = {
-      type: "warning",
-      title: "Remove project",
-      message: `Remove “${project.name}” from Robin?`,
-      detail: `${project.cwd}\n\nThis does not delete files from your Mac.`,
-      buttons: ["Cancel", "Remove"],
-      defaultId: 0,
-      cancelId: 0,
-    };
-    const result = mainWindow
-      ? await dialog.showMessageBox(mainWindow, options)
-      : await dialog.showMessageBox(options);
-    if (result.response !== 1) return false;
-    const removed = removeProject(projectsPath(), project.cwd);
-    if (removed) void sendProjectsChanged();
-    return removed;
   });
 
   ipcMain.handle(
@@ -953,104 +457,6 @@ function configureDesktopIpc() {
     return true;
   });
 
-  ipcMain.handle("desktop:resolve-local-project-path", (event, input) => {
-    requireTrustedDesktopIpc(event);
-    return resolveLocalProjectPath(input?.localSessionId, input?.path);
-  });
-  /**
-   * Set up a "This Mac" thread the renderer is about to start in the cloud as
-   * `threadId`: its checkout (or a fresh worktree), the diff baseline, and the
-   * bridge the agent will run its commands through. The renderer names the
-   * bridge and repo on the thread's first `run.start`.
-   */
-  ipcMain.handle("desktop:prepare-local-thread", async (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const cwd =
-      typeof input?.cwd === "string" ? registeredProject(input.cwd) : null;
-    if (!cwd && input?.taskWorkspace !== true)
-      throw new Error("Choose a folder before starting a local agent");
-    if (!cwd && input?.cwd != null) throw new Error("Folder is not registered");
-    let thread = cwd
-      ? localThreadStore.create({ id: input?.threadId, cwd })
-      : localThreadStore.createTask(input?.threadId);
-    try {
-      if (cwd && input?.workspaceMode === "worktree")
-        thread = await startThreadWorktree(thread, input?.baseBranch);
-      if (!thread.managedTaskFolder)
-        thread = await recordLocalCheckpoint(thread);
-      const [bridgeId, repo] = await Promise.all([
-        localBridges.ensure(thread.id),
-        thread.managedTaskFolder
-          ? Promise.resolve(null)
-          : originRepo(threadRoot(thread)),
-      ]);
-      return { bridgeId, repo };
-    } catch (error) {
-      await discardLocalThread(thread);
-      throw error;
-    }
-  });
-  /**
-   * Move a cloud thread onto This Mac: the worktree it had here, or a fresh one
-   * of the project whose origin is the thread's repository, and the bridge its
-   * next run hands the cloud checkout over through.
-   */
-  ipcMain.handle("desktop:take-over-thread", async (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const existing = localThreadStore.get(input?.threadId);
-    if (existing?.managedTaskFolder) return localBridges.ensure(existing.id);
-    if (existing) {
-      // Its worktree and bridge may be the source of a handoff still pending.
-      // A thread that ran in the user's own checkout moves to a worktree, so
-      // the handoff never overwrites that checkout.
-      const thread = existing.worktreePath
-        ? await ensureThreadWorktree(existing)
-        : await recordLocalCheckpoint(
-            await createThreadWorktree(existing, null),
-          );
-      return localBridges.ensure(thread.id);
-    }
-    if (input?.repo != null && typeof input.repo !== "string")
-      throw new Error("Invalid thread repository");
-    if (!input?.repo?.trim()) {
-      const thread = localThreadStore.createTask(input?.threadId);
-      try {
-        return await localBridges.ensure(thread.id);
-      } catch (error) {
-        await discardLocalThread(thread);
-        throw error;
-      }
-    }
-    let cwd = await projectForRepo(input.repo);
-    if (!cwd) {
-      const options = {
-        title: `Choose your checkout of ${input.repo}`,
-        properties: ["openDirectory"],
-      };
-      const result = mainWindow
-        ? await dialog.showOpenDialog(mainWindow, options)
-        : await dialog.showOpenDialog(options);
-      const picked = result.canceled ? null : result.filePaths[0];
-      if (!picked)
-        throw new Error(
-          `Choose a checkout of ${input.repo} to move this thread`,
-        );
-      const origin = await originRepo(picked);
-      if (origin?.toLowerCase() !== input.repo.toLowerCase())
-        throw new Error(`${picked} is not a checkout of ${input.repo}`);
-      cwd = addProject(projectsPath(), picked).cwd;
-      void sendProjectsChanged();
-    }
-    let thread = localThreadStore.create({ id: input?.threadId, cwd });
-    try {
-      thread = await createThreadWorktree(thread, null);
-      thread = await recordLocalCheckpoint(thread);
-      return await localBridges.ensure(thread.id);
-    } catch (error) {
-      await discardLocalThread(thread);
-      throw error;
-    }
-  });
   ipcMain.handle("desktop:ensure-local-access-bridge", async (event) => {
     requireTrustedDesktopIpc(event);
     localAccessBridge ??= new LocalAccessBridge({
@@ -1099,159 +505,6 @@ function configureDesktopIpc() {
     if (typeof threadId !== "string")
       throw new Error("A thread id is required");
     localAccessBridge?.grants.revoke(threadId);
-  });
-  ipcMain.handle("desktop:ensure-local-bridge", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = await ensureThreadWorktree(localThreadStore.get(threadId));
-    if (!thread?.bridgeId)
-      throw new Error("This thread does not run on This Mac");
-    await localBridges.ensure(thread.id);
-    return true;
-  });
-  ipcMain.handle("desktop:open-task-folder", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const root = threadRoot(localThreadStore.get(threadId));
-    if (!root) throw new Error("Task folder is unavailable");
-    const error = await shell.openPath(root);
-    if (error) throw new Error(error);
-    return true;
-  });
-  ipcMain.handle("desktop:get-local-thread", (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    return localThreadStore.get(threadId);
-  });
-  ipcMain.handle("desktop:list-local-threads", (event) => {
-    requireTrustedDesktopIpc(event);
-    return localThreadStore.list();
-  });
-  /**
-   * Forget a thread the backend no longer has: stop serving it and remove the
-   * worktrees and refs this app made for it. Its files in the user's own
-   * checkout are theirs and stay.
-   */
-  ipcMain.handle("desktop:discard-local-thread", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(threadId);
-    if (!thread) return false;
-    await discardLocalThread(thread);
-    return true;
-  });
-  /**
-   * Move a thread onto a branch. A branch already checked out somewhere can
-   * only be worked on there, so the thread follows it: into that worktree, or
-   * back into the project's own checkout. Anything else is checked out in the
-   * tree the thread is already in.
-   */
-  ipcMain.handle("desktop:set-local-branch", async (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const thread = localThreadStore.get(input?.threadId);
-    if (!thread) throw new Error("Local thread not found");
-    const project = registeredProject(thread.cwd);
-    if (!project) throw new Error("Project is not registered");
-    const branch = await validBranchName(project, input?.branch);
-    if (!branch) throw new Error("Branch name is required");
-    if (await threadRunning(thread.id))
-      throw new Error("Stop the local agent before switching its branch");
-
-    const ref = (await localBranches(project)).find(
-      (candidate) => candidate.name === branch,
-    );
-    if (ref?.worktreePath) {
-      if (!managedWorktree(ref.worktreePath))
-        throw new Error(
-          `“${branch}” is checked out in ${ref.worktreePath}, which Robin does not manage.`,
-        );
-      return moveThreadWorkspace(thread, ref.worktreePath);
-    }
-    if (ref?.current) {
-      return moveThreadWorkspace(thread, null);
-    }
-    const root = threadRoot(thread);
-    await checkoutBranch(root, branch);
-    return syncThreadBranch(thread);
-  });
-
-  ipcMain.handle("desktop:get-local-diff", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = await diffThread(threadId);
-    if (
-      !thread ||
-      !registeredProject(thread.cwd) ||
-      !thread.checkpoint.repo ||
-      !thread.checkpoint.ref
-    )
-      return { status: "missing", files: [], truncated: false };
-    try {
-      const [diff, repository] = await Promise.all([
-        readDiff(thread.checkpoint.repo, thread.checkpoint.ref),
-        repositoryMetadata(thread.checkpoint.repo),
-      ]);
-      return { ...diff, repository };
-    } catch {
-      return { status: "error", files: [], truncated: false };
-    }
-  });
-  /** Worktree changes for a project, for screens with no thread yet. */
-  ipcMain.handle("desktop:get-project-diff", async (event, cwd) => {
-    requireTrustedDesktopIpc(event);
-    const project = typeof cwd === "string" ? registeredProject(cwd) : null;
-    const repo = project ? await repoRoot(project) : null;
-    if (!repo) return { status: "missing", files: [], truncated: false };
-    try {
-      const branch = await currentBranch(repo);
-      const [diff, repository] = await Promise.all([
-        readDiff(repo, "HEAD"),
-        repositoryMetadata(repo, undefined, branch),
-      ]);
-      return { ...diff, repository };
-    } catch {
-      return { status: "error", files: [], truncated: false };
-    }
-  });
-  ipcMain.handle("desktop:read-workspace-path", (event, input) => {
-    requireTrustedDesktopIpc(event);
-    const root = localWorkspaceRoot(input?.localSessionId);
-    return readWorkspacePath(root, input.relativePath);
-  });
-  ipcMain.handle("desktop:list-workspace-files", (event, localSessionId) => {
-    requireTrustedDesktopIpc(event);
-    return listWorkspaceFiles(localWorkspaceRoot(localSessionId));
-  });
-  ipcMain.handle("desktop:preview-workspace-file", (event, input) => {
-    requireTrustedDesktopIpc(event);
-    return previewFiles.mint(input?.localSessionId, input?.relativePath);
-  });
-  ipcMain.handle("desktop:get-local-pr-diff", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = await diffThread(threadId);
-    if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
-      return { status: "missing", files: [], truncated: false };
-    try {
-      const repository = await repositoryMetadata(thread.checkpoint.repo);
-      if (!repository.pr)
-        return { status: "missing", files: [], truncated: false, repository };
-      const diff = await readBranchDiff(
-        thread.checkpoint.repo,
-        repository.pr.baseRef,
-        thread.checkpoint.branch,
-      );
-      return { ...diff, repository };
-    } catch {
-      return { status: "error", files: [], truncated: false };
-    }
-  });
-  /** The checked-out branch's pull request, for the composer PR link. */
-  ipcMain.handle("desktop:get-local-pr", async (event, threadId) => {
-    requireTrustedDesktopIpc(event);
-    const thread = await diffThread(threadId);
-    if (!thread || !registeredProject(thread.cwd) || !thread.checkpoint.repo)
-      return null;
-    try {
-      const { pr } = await repositoryMetadata(thread.checkpoint.repo);
-      return pr;
-    } catch {
-      return null;
-    }
   });
 }
 
@@ -1450,7 +703,7 @@ async function proxyBackendRequest(
   if (!isTrustedProxyRequest(pageUrl)) {
     return new Response("Forbidden", { status: 403 });
   }
-  const credentials = PreviewFiles.proxyCredentials(
+  const credentials = FramePolicy.proxyCredentials(
     request.method,
     source.pathname,
     request.initiatorOrigin,
@@ -2139,7 +1392,7 @@ function createWindow(initialUrl = APP_URL) {
     const frames: { url: string; origin: string }[] = [];
     for (let frame = event.frame; frame; frame = frame.parent)
       frames.push({ url: frame.url, origin: frame.origin });
-    if (PreviewFiles.blocksNavigation(frames, event.url, initiatedByApp))
+    if (FramePolicy.blocksNavigation(frames, event.url, initiatedByApp))
       event.preventDefault();
   });
   window.webContents.on("will-redirect", (event) => {
@@ -2391,27 +1644,7 @@ if (!hasSingleInstanceLock) {
     primaryBackendUrl = backendUrl;
     void shareBackendSession();
 
-    localThreadStore = new LocalThreadStore(
-      path.join(app.getPath("userData"), "desktop-this-mac-threads.json"),
-    );
-    localBridges = new LocalBridges({
-      send: sendBridgeRequest,
-      rootFor: (threadId) => threadRoot(localThreadStore.get(threadId)),
-      bridgeIdFor: (threadId) =>
-        localThreadStore.get(threadId)?.bridgeId ?? null,
-      remember: (threadId, bridgeId) =>
-        localThreadStore.setBridge(threadId, bridgeId),
-      env: getUserShellEnv,
-      handlers: (threadId) => ({
-        worktree_handoff: (params) => handoffThreadToWorktree(threadId, params),
-      }),
-      log: (message, error) =>
-        error === undefined
-          ? console.warn(message)
-          : console.warn(message, error),
-    });
     protocol.handle("open-swe", serveDesktopUi);
-    protocol.handle(PREVIEW_SCHEME, (request) => previewFiles.serve(request));
     configurePermissions();
     configureFraming();
     configureDesktopIpc();
@@ -2419,14 +1652,6 @@ if (!hasSingleInstanceLock) {
     void loadAlternativeEnvironments();
     if (!desktopLinks.ready()) createWindow();
     configureAutoUpdater();
-    configureTerminalIpc({
-      ipcMain,
-      requireTrusted: requireTrustedDesktopIpc,
-      getWindow: () => mainWindow,
-      getSessionRoot: (id) =>
-        threadRoot(localThreadStore.get(id)) ?? projectScopeSession(id)?.cwd,
-      userDataPath: app.getPath("userData"),
-    });
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -2441,13 +1666,8 @@ if (!hasSingleInstanceLock) {
     if (quitting) return;
     event.preventDefault();
     quitting = true;
-    void Promise.all([
-      closeAllTerminals(),
-      localBridges?.closeAll(),
-      localAccessBridge?.close().finally(() => {
-        localAccessBridge = null;
-      }),
-    ]).finally(() => {
+    void (localAccessBridge?.close() ?? Promise.resolve()).finally(() => {
+      localAccessBridge = null;
       app.quit();
     });
   });

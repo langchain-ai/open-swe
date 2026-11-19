@@ -16,17 +16,14 @@ from openswe.input_messages import (
 )
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
-from openswe.tasks.schemas import Thread
 from openswe.tasks.store import TaskContext, TaskDelegation, TaskMembership
-from openswe.utils.thread_reads import read_thread
 
 logger = logging.getLogger(__name__)
 
 
 class TaskCoordinationMiddleware(OpenSWEMiddleware):
-    def __init__(self, thread_id: str, enabled: bool, context: TaskContext | None) -> None:
+    def __init__(self, thread_id: str, context: TaskContext | None) -> None:
         self.thread_id = thread_id
-        self.enabled = enabled
         self.context = context
         # The thread's role, told in the conversation so the system prompt never changes.
         self.instructions = run_context(
@@ -39,10 +36,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
         )
 
     @classmethod
-    async def for_thread(cls, thread_id: str) -> Self | None:
-        enabled = await Thread.model_validate(
-            await read_thread(thread_id)
-        ).metadata.delegation_supported()
+    async def for_thread(cls, thread_id: str) -> Self:
         context = await TaskMembership.delegation_for_thread(thread_id)
         if context is not None and context.membership.role == "worker":
             delegation = await TaskDelegation.get(thread_id)
@@ -50,7 +44,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
                 raise PermissionError(
                     "This worker was cancelled; create a new worker for further work"
                 )
-        return cls(thread_id, enabled, context) if enabled or context else None
+        return cls(thread_id, context)
 
     @property
     def is_worker(self) -> bool:
@@ -58,7 +52,7 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
 
     @property
     def can_delegate(self) -> bool:
-        return self.enabled and not self.is_worker
+        return not self.is_worker
 
     @property
     def coordinator_thread_id(self) -> str | None:

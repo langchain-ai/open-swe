@@ -99,7 +99,6 @@ async def test_recreating_an_old_sandbox_hands_the_thread_to_mda(
     ("metadata", "refusal"),
     [
         ({"sandbox_id": "sandbox-mda", "sandbox_owner": "mda"}, "only it may replace"),
-        ({"sandbox_id": "bridge:mac-1"}, "cannot be given a cloud sandbox"),
         ({}, "has no sandbox to recreate"),
     ],
 )

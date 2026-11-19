@@ -21,6 +21,7 @@ from openswe.input_messages import InputMessageContext, SystemIdentity
 from openswe.jobs import queue
 from openswe.prompts import prompt
 from openswe.sandboxes.connect import connect_sandbox
+from openswe.sandboxes.this_mac import MacSandbox
 from openswe.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, ToolAccess
 from openswe.slack.thinking import refresh_slack_background_status
 from openswe.source_context import SourceContext
@@ -168,7 +169,7 @@ async def reconcile_background_tasks(thread_id: str) -> dict[str, Any]:
 
 
 async def reconcile_background_task_callback(task_id: str, access: ToolAccess) -> dict[str, object]:
-    backend = await connect_sandbox(access.sandbox_id, thread_id=access.thread_id)
+    backend = await connect_sandbox(access.sandbox_id)
     # An unreadable list must fail with a 5xx so the runner retries instead of giving up.
     for task in await _list_tasks(backend, required=True):
         if task.get("task_id") == task_id:
@@ -203,13 +204,13 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
         if isinstance(tracked, list)
         else []
     )
-    sandbox_id = metadata.get("sandbox_id")
-    if not isinstance(sandbox_id, str) or not sandbox_id:
+    sandbox_id = MacSandbox.reachable_id(metadata)
+    if sandbox_id is None:
         if tracked_ids:
             metadata = await update_background_task_state(client, thread_id, reset=True)
         await refresh_slack_background_status(thread_id, metadata=metadata)
         return _Reconciled({"status": "missing_sandbox"}, None, tracked=True)
-    backend = await connect_sandbox(sandbox_id, thread_id=thread_id)
+    backend = await connect_sandbox(sandbox_id)
     tasks = await thread_tasks(backend, thread_id, metadata)
     running = [task for task in tasks if task.get("status") == "running"]
     terminal = [task for task in tasks if task.get("status") in TERMINAL_STATES]

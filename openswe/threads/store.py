@@ -27,6 +27,7 @@ from openswe.agent_api.client import (
     mda_graph_for,
 )
 from openswe.dispatch import channel_of
+from openswe.sandboxes.this_mac import MacSandbox
 from openswe.tasks.store import sidebar_memberships
 from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadStatus
@@ -52,6 +53,9 @@ READ_COMMANDS: Final = frozenset(
 )
 READ_ONLY: Final = (
     "This thread predates Managed Deep Agents and is read-only. Start a new thread to continue."
+)
+MAC_THREAD: Final = (
+    "This Mac threads are no longer supported. Start a new cloud thread to continue."
 )
 
 
@@ -438,6 +442,17 @@ class ThreadStore:
             response.status_code, response.content, response.headers.get("content-type")
         )
 
+    async def move_off_mac(self, thread: IndexedThread) -> IndexedThread:
+        """Move a This Mac thread to a new cloud sandbox, where its run starts instead.
+
+        Raises :class:`RunRefused` for a task worker, whose sandbox was its coordinator's.
+        """
+        if thread.metadata.get("task_id") is not None:
+            raise RunRefused(410, MAC_THREAD)
+        moved = await self.update(thread.thread_id, MacSandbox.move_update())
+        logger.info("Moved a This Mac thread to the cloud", extra={"thread_id": thread.thread_id})
+        return moved or thread
+
     async def start_run(
         self,
         thread_id: str,
@@ -464,6 +479,8 @@ class ThreadStore:
             )
             # Not 409, which callers read as "a run is already going" and retry or skip.
             raise RunRefused(410, READ_ONLY)
+        if thread.on_a_mac:
+            thread = await self.move_off_mac(thread)
         write = ChannelWrite()
         if (refusal := channel_write_refusal(thread)) is not None:
             # A run on a channel's thread: as its sender, in its conversation.

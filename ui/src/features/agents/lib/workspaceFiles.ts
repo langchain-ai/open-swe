@@ -31,59 +31,37 @@ export interface WorkspacePreviewLink {
 }
 
 export function workspaceTargetKey(target: TerminalTarget): string {
-  return target.kind === "local"
-    ? `local:${target.sessionId}`
-    : `cloud:${target.threadId}`
+  return target.threadId
 }
 
-/** Lists a directory or reads a file from the local session or cloud sandbox. */
+/** Lists a directory or reads a file from the thread's sandbox. */
 export function readWorkspacePath(
   target: TerminalTarget,
   relativePath: string
 ): Promise<WorkspacePath> {
-  if (target.kind === "cloud")
-    return agentsApi.getThreadPath(target.threadId, relativePath)
-  const desktop = window.openSweDesktop
-  if (!desktop) return Promise.reject(new Error("Desktop app required"))
-  return desktop.readWorkspacePath({
-    localSessionId: target.sessionId,
-    relativePath,
-  })
+  return agentsApi.getThreadPath(target.threadId, relativePath)
 }
 
-/** Mints a preview URL for a file in the local session or cloud sandbox. */
+/** Mints a preview URL for a file in the thread's sandbox. */
 export async function previewWorkspaceFile(
   target: TerminalTarget,
   relativePath: string
 ): Promise<WorkspacePreviewLink> {
-  if (target.kind === "cloud") {
-    const link = await agentsApi.createThreadFilePreview(
-      target.threadId,
-      relativePath
-    )
-    return {
-      // Absolute, so relative links inside the previewed file resolve against it.
-      url: new URL(dashboardApiUrl(link.path), window.location.href).href,
-    }
+  const link = await agentsApi.createThreadFilePreview(
+    target.threadId,
+    relativePath
+  )
+  return {
+    // Absolute, so relative links inside the previewed file resolve against it.
+    url: new URL(dashboardApiUrl(link.path), window.location.href).href,
   }
-  const desktop = window.openSweDesktop
-  if (!desktop?.previewWorkspaceFile)
-    throw new Error("Update the desktop app to preview local files.")
-  return desktop.previewWorkspaceFile({
-    localSessionId: target.sessionId,
-    relativePath,
-  })
 }
 
-/** Every non-ignored file in the local session or cloud sandbox. */
+/** Every non-ignored file in the thread's sandbox. */
 export function listWorkspaceFiles(
   target: TerminalTarget
 ): Promise<WorkspaceFileIndex> {
-  if (target.kind === "cloud")
-    return agentsApi.getThreadFileIndex(target.threadId)
-  const desktop = window.openSweDesktop
-  if (!desktop) return Promise.reject(new Error("Desktop app required"))
-  return desktop.listWorkspaceFiles(target.sessionId)
+  return agentsApi.getThreadFileIndex(target.threadId)
 }
 
 function errorText(cause: unknown): string {
@@ -123,7 +101,7 @@ export function useWorkspacePreview(
 
 /**
  * Saves a workspace file through a blob URL, which downloads the same way on the
- * web and in the desktop app, whatever scheme the preview link uses.
+ * web and in the desktop app.
  */
 export async function downloadWorkspaceFile(
   target: TerminalTarget,

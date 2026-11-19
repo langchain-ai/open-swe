@@ -4,7 +4,7 @@ import json
 import logging
 import posixpath
 from time import perf_counter
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NoReturn
 from uuid import UUID
 
 import httpx
@@ -61,7 +61,6 @@ from openswe.threads.handlers import (
     get_dashboard_thread_queued_messages,
     get_dashboard_thread_state,
     interrupt_transcript_turns,
-    move_thread,
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
@@ -98,7 +97,7 @@ from openswe.threads.runs import (
 from openswe.threads.runs_api import SdkRun, ThreadOnRuntime
 from openswe.threads.runtimes import RUNTIMES
 from openswe.threads.session_upload import UPLOAD_REQUEST_BODY, UploadStream, upload_session
-from openswe.threads.store import THREADS
+from openswe.threads.store import MAC_THREAD, THREADS
 from openswe.threads.summary import (
     ThreadReadPosition,
     _now_ms,
@@ -620,27 +619,12 @@ async def api_share_thread(
     return await share_thread(thread_id, session["sub"], email=session.get("email"))
 
 
-class ThreadMoveRequest(BaseModel):
-    """Where to move a thread: onto the caller's machine through a bridge, or to the cloud."""
-
-    sandbox_bridge_id: str | None = None
-    target: Literal["cloud"] | None = None
-
-
-@router.post("/threads/{thread_id}/move")
-@audit_endpoint
-async def api_move_thread(
-    thread_id: str,
-    body: ThreadMoveRequest,
-    session: dict[str, str] = SESSION_DEP,
-) -> dict[str, object]:
-    return await move_thread(
-        thread_id,
-        session["sub"],
-        email=session.get("email"),
-        bridge_id=body.sandbox_bridge_id,
-        target=body.target,
-    )
+@router.post(
+    "/threads/{thread_id}/move", status_code=410, response_model=None, include_in_schema=False
+)
+async def api_move_thread(thread_id: str) -> NoReturn:
+    """Every thread runs in the cloud: there is nowhere to move one."""
+    raise HTTPException(410, MAC_THREAD)
 
 
 @router.post("/threads/{thread_id}/continue-private")

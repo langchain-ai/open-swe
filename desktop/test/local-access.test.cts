@@ -128,10 +128,10 @@ test("denied local writes and commands have no effects; approved writes are exac
     assert.match(command.error, /denied/);
     assert.equal(await readFile(target, "utf8"), "original");
     harness.allow = true;
-    const legacy = await harness.action("execute", {
+    const bare = await harness.action("execute", {
       command: "printf changed > file.txt",
     });
-    assert.match(legacy.error, /individually approved/);
+    assert.match(bare.error, /unsupported method/);
     assert.equal(await readFile(target, "utf8"), "original");
     const allowed = await harness.action("local_action", {
       operation: "write",

@@ -1094,7 +1094,7 @@
         "type": "object"
       },
       "BridgeClaimBody": {
-        "description": "One long poll: how long to wait, how many to take, and what the CLI is already running.",
+        "description": "One long poll: how long to wait, how many to take, and what the desktop is already running.",
         "properties": {
           "held": {
             "items": {
@@ -1123,6 +1123,7 @@
         "type": "object"
       },
       "BridgeOpenBody": {
+        "description": "A desktop opening its approved-actions bridge, the only kind there is.",
         "properties": {
           "bridge_id": {
             "anyOf": [
@@ -1136,13 +1137,15 @@
             "title": "Bridge Id"
           },
           "client": {
-            "default": "cli",
-            "enum": [
-              "cli",
-              "desktop"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Client",
-            "type": "string"
+            "title": "Client"
           },
           "hostname": {
             "title": "Hostname",
@@ -1160,12 +1163,18 @@
             "title": "Label"
           },
           "root_path": {
-            "title": "Root Path",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Path"
           }
         },
         "required": [
-          "root_path",
           "hostname"
         ],
         "title": "BridgeOpenBody",
@@ -1195,7 +1204,7 @@
         "type": "object"
       },
       "BridgeReplyBody": {
-        "description": "The CLI's answer: a result, or the reason it could not produce one.",
+        "description": "The desktop's answer: a result, or the reason it could not produce one.",
         "properties": {
           "error": {
             "anyOf": [
@@ -1686,7 +1695,7 @@
         "type": "object"
       },
       "ClaimedRequest": {
-        "description": "One request handed to the CLI, in the shape the wire contract gives it.",
+        "description": "One request handed to the desktop, in the shape the wire contract gives it.",
         "properties": {
           "method": {
             "title": "Method",
@@ -5585,17 +5594,6 @@
             ],
             "title": "Experimental Classify"
           },
-          "experimental_cloud_first_desktop": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Cloud First Desktop"
-          },
           "experimental_force_code_mode": {
             "anyOf": [
               {
@@ -8844,18 +8842,6 @@
       "SettingsUpdate": {
         "description": "Global settings; omitted fields use their built-in defaults.",
         "properties": {
-          "cloud_first_desktop_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cloud First Desktop Enabled"
-          },
           "concise_walkthrough_enabled": {
             "agent_feature_flag": true,
             "anyOf": [
@@ -10199,36 +10185,6 @@
           "omitted"
         ],
         "title": "ThreadMessagesModel",
-        "type": "object"
-      },
-      "ThreadMoveRequest": {
-        "description": "Where to move a thread: onto the caller's machine through a bridge, or to the cloud.",
-        "properties": {
-          "sandbox_bridge_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sandbox Bridge Id"
-          },
-          "target": {
-            "anyOf": [
-              {
-                "const": "cloud",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target"
-          }
-        },
-        "title": "ThreadMoveRequest",
         "type": "object"
       },
       "ThreadPageModel": {
@@ -25965,66 +25921,6 @@
           }
         ],
         "summary": "Api Thread History",
-        "tags": [
-          "dashboard",
-          "threads"
-        ]
-      }
-    },
-    "/dashboard/api/threads/{thread_id}/move": {
-      "post": {
-        "operationId": "api_move_thread_dashboard_api_threads__thread_id__move_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "thread_id",
-            "required": true,
-            "schema": {
-              "title": "Thread Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ThreadMoveRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Move Thread Dashboard Api Threads  Thread Id  Move Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Move Thread",
         "tags": [
           "dashboard",
           "threads"

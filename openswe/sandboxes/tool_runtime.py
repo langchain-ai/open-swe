@@ -121,8 +121,6 @@ class ToolSurface:
     # Where the run's skills are in the thread's files, a later source's skill taking the
     # place of an earlier one's of the same name.
     skill_sources: tuple[str, ...] = ()
-    # Where large tool results and binary reads are offloaded.
-    artifacts_root: str = "/"
     # The checks on what the run's ``read_file`` calls return.
     file_checks: tuple[FileCheck, ...] = ()
     # Whether the graph's core tools it seldom needs belong in a runtime's code mode.

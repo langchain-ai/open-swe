@@ -65,7 +65,7 @@ from rt.middleware import (
 )
 from rt.model_calls import model_call_guards
 from rt.models import build_model
-from rt.remote_files import FILE_TOOLS, RemoteFiles, RunArtifacts
+from rt.remote_files import FILE_TOOLS, RemoteFiles
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from rt.run_tools import (
     BackendTools,
@@ -301,9 +301,7 @@ def _parts(graph: Graph) -> _Parts:
         middleware=middleware,
         worker_middleware=[*middleware, AsyncWorkerLaunchMiddleware(backend)],
         # A run without MDA's sandbox keeps the graph's own files where its file tools are.
-        sandbox=declared_sandbox(
-            RunArtifacts(backend, run_id, lambda: backend.run.catalog.files.artifacts_root)
-        ),
+        sandbox=declared_sandbox(remote),
     )
 
 

@@ -30,25 +30,6 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
     ipcRenderer.on("desktop:menu-command", listener);
     return () => ipcRenderer.removeListener("desktop:menu-command", listener);
   },
-  listProjects: () => ipcRenderer.invoke("desktop:projects"),
-  getProjectBranches: (cwd) =>
-    ipcRenderer.invoke("desktop:project-branches", cwd),
-  watchProjectHead: (cwd) =>
-    ipcRenderer.invoke("desktop:watch-project-head", cwd),
-  onProjectHeadChanged: (callback) => {
-    const listener = (_event, cwd) => callback(cwd);
-    ipcRenderer.on("desktop:project-head-changed", listener);
-    return () =>
-      ipcRenderer.removeListener("desktop:project-head-changed", listener);
-  },
-  setLocalBranch: (input) =>
-    ipcRenderer.invoke("desktop:set-local-branch", { ...input }),
-  checkoutProjectBranch: (input) =>
-    ipcRenderer.invoke("desktop:checkout-project-branch", { ...input }),
-  addProject: () => ipcRenderer.invoke("desktop:add-project"),
-  removeProject: (cwd) => ipcRenderer.invoke("desktop:remove-project", cwd),
-  linkProject: (input) =>
-    ipcRenderer.invoke("desktop:link-project", { ...input }),
   writeClipboard: (value) =>
     ipcRenderer.invoke("desktop:write-clipboard", value),
   copyPageLink: () => ipcRenderer.invoke("desktop:copy-page-link"),
@@ -66,8 +47,6 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   cancelConnectService: (provider) =>
     ipcRenderer.invoke("desktop:cancel-connect-service", provider),
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
-  resolveLocalProjectPath: (input) =>
-    ipcRenderer.invoke("desktop:resolve-local-project-path", { ...input }),
   ensureLocalAccessBridge: () =>
     ipcRenderer.invoke("desktop:ensure-local-access-bridge"),
   localAccessGrants: (threadId) =>
@@ -96,83 +75,8 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
         listener,
       );
   },
-  taskWorkspaces: true,
-  prepareLocalThread: (input) =>
-    ipcRenderer.invoke("desktop:prepare-local-thread", { ...input }),
-  takeOverThread: (input) =>
-    ipcRenderer.invoke("desktop:take-over-thread", { ...input }),
-  ensureLocalBridge: (threadId) =>
-    ipcRenderer.invoke("desktop:ensure-local-bridge", threadId),
-  openTaskFolder: (threadId) =>
-    ipcRenderer.invoke("desktop:open-task-folder", threadId),
-  getLocalThread: (threadId) =>
-    ipcRenderer.invoke("desktop:get-local-thread", threadId),
   setAppearance: (appearance) =>
     ipcRenderer.invoke("desktop:set-appearance", appearance),
-  listLocalThreads: () => ipcRenderer.invoke("desktop:list-local-threads"),
-  discardLocalThread: (threadId) =>
-    ipcRenderer.invoke("desktop:discard-local-thread", threadId),
-  getLocalDiff: (threadId) =>
-    ipcRenderer.invoke("desktop:get-local-diff", threadId),
-  getLocalPrDiff: (threadId) =>
-    ipcRenderer.invoke("desktop:get-local-pr-diff", threadId),
-  getLocalPr: (threadId) =>
-    ipcRenderer.invoke("desktop:get-local-pr", threadId),
-  getProjectDiff: (cwd) => ipcRenderer.invoke("desktop:get-project-diff", cwd),
-  readWorkspacePath: (input) =>
-    ipcRenderer.invoke("desktop:read-workspace-path", { ...input }),
-  listWorkspaceFiles: (localSessionId) =>
-    ipcRenderer.invoke("desktop:list-workspace-files", localSessionId),
-  previewWorkspaceFile: (input) =>
-    ipcRenderer.invoke("desktop:preview-workspace-file", { ...input }),
-  onLocalThreadsChanged: (callback) => {
-    const listener = () => callback();
-    ipcRenderer.on("desktop:local-threads-changed", listener);
-    return () =>
-      ipcRenderer.removeListener("desktop:local-threads-changed", listener);
-  },
-  onProjectsChanged: (callback) => {
-    const listener = (_event, projects) => callback(projects);
-    ipcRenderer.on("desktop:projects-changed", listener);
-    return () =>
-      ipcRenderer.removeListener("desktop:projects-changed", listener);
-  },
-  terminal: {
-    attach: (input) =>
-      ipcRenderer.invoke("desktop:terminal-attach", { ...input }),
-    open: (input) =>
-      ipcRenderer.invoke("desktop:terminal-attach", { ...input }),
-    write: (input) =>
-      ipcRenderer.invoke("desktop:terminal-write", { ...input }),
-    resize: (input) =>
-      ipcRenderer.invoke("desktop:terminal-resize", { ...input }),
-    clear: (input) =>
-      ipcRenderer.invoke("desktop:terminal-clear", { ...input }),
-    restart: (input) =>
-      ipcRenderer.invoke("desktop:terminal-restart", { ...input }),
-    detach: (input) =>
-      ipcRenderer.invoke("desktop:terminal-detach", { ...input }),
-    close: (input) =>
-      ipcRenderer.invoke("desktop:terminal-close", { ...input }),
-    list: (localSessionId) =>
-      ipcRenderer.invoke("desktop:terminal-list", localSessionId),
-    subscribeMetadata: (localSessionId) =>
-      ipcRenderer.invoke("desktop:terminal-metadata-subscribe", localSessionId),
-    detachMetadata: (localSessionId) =>
-      ipcRenderer.invoke("desktop:terminal-metadata-detach", localSessionId),
-    onEvent: (callback) => {
-      const listener = (_event, terminalEvent) => callback(terminalEvent);
-      ipcRenderer.on("desktop:terminal-event", listener);
-      return () =>
-        ipcRenderer.removeListener("desktop:terminal-event", listener);
-    },
-    onMetadata: (callback) => {
-      const listener = (_event, metadataEvent) => callback(metadataEvent);
-      ipcRenderer.on("desktop:terminal-metadata", listener);
-      return () =>
-        ipcRenderer.removeListener("desktop:terminal-metadata", listener);
-    },
-  },
 });
 
 ipcRenderer.on("desktop:fullscreen-change", (_event, fullscreen) => {

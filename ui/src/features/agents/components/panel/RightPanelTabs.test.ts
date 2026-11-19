@@ -47,7 +47,6 @@ it("emits adoption only for real panel gestures, not mounting or restoring tabs"
     surfaces: [],
     activeSurfaceId: null,
     pendingSurfaceIds: new Set<string>(),
-    terminalLabelsById: new Map<string, string>(),
     onActivate: vi.fn(),
     onCloseSurface: vi.fn(),
     onCloseOtherSurfaces: vi.fn(),

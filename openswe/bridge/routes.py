@@ -1,4 +1,4 @@
-"""The CLI's side of the bridge: open, heartbeat, long-poll, reply, close.
+"""The desktop's side of the bridge: open, heartbeat, long-poll, reply, close.
 
 Every route is scoped to the caller's ``Principal.sender_id`` (a person, an API
 key or a CI workflow) and answers 404 for a bridge the caller does not own, so
@@ -21,9 +21,10 @@ from openswe.bridge.constants import (
     DEFAULT_CLAIM_LIMIT,
     DEFAULT_POLL_WAIT_SECONDS,
     HEARTBEAT_INTERVAL_SECONDS,
+    LOCAL_ACCESS_CLIENT,
+    LOCAL_ACCESS_ROOT,
     MAX_CLAIM_LIMIT,
     MAX_POLL_WAIT_SECONDS,
-    BridgeClient,
 )
 from openswe.bridge.protocol import JsonObject
 from openswe.bridge.store import BridgeInUseError, BridgeStore, ClaimedRequest
@@ -33,16 +34,27 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["sandbox-bridge"])
 
-# A CLI runs a few commands at once; a list this long is not one it could hold.
+# A desktop runs a few actions at once; a list this long is not one it could hold.
 MAX_HELD_REQUESTS = 1024
+MAC_THREADS_RETIRED = (
+    "This Mac threads and the CLI's local sandbox are no longer supported. "
+    "Start a new cloud thread instead."
+)
 
 
 class BridgeOpenBody(BaseModel):
-    client: BridgeClient = "cli"
-    root_path: str
+    """A desktop opening its approved-actions bridge, the only kind there is."""
+
+    # Optional, so a client opening any other kind is told why it cannot.
+    client: str | None = None
+    root_path: str | None = None
     hostname: str
     label: str | None = None
     bridge_id: str | None = None
+
+    @property
+    def local_access(self) -> bool:
+        return self.client == LOCAL_ACCESS_CLIENT and self.root_path == LOCAL_ACCESS_ROOT
 
 
 class BridgeOpenResponse(BaseModel):
@@ -52,7 +64,7 @@ class BridgeOpenResponse(BaseModel):
 
 
 class BridgeClaimBody(BaseModel):
-    """One long poll: how long to wait, how many to take, and what the CLI is already running."""
+    """One long poll: how long to wait, how many to take, and what the desktop is already running."""
 
     wait: int = Field(DEFAULT_POLL_WAIT_SECONDS, ge=0, le=MAX_POLL_WAIT_SECONDS)
     limit: int = Field(DEFAULT_CLAIM_LIMIT, ge=1, le=MAX_CLAIM_LIMIT)
@@ -64,7 +76,7 @@ class BridgeRequestsResponse(BaseModel):
 
 
 class BridgeReplyBody(BaseModel):
-    """The CLI's answer: a result, or the reason it could not produce one."""
+    """The desktop's answer: a result, or the reason it could not produce one."""
 
     result: JsonObject | None = None
     error: str | None = None
@@ -92,17 +104,17 @@ async def api_open_bridge(
     body: BridgeOpenBody,
     principal: PrincipalDep,
 ) -> BridgeOpenResponse:
+    if not body.local_access:
+        raise HTTPException(410, MAC_THREADS_RETIRED)
     try:
         bridge = await BridgeStore.register(
             owner_id=principal.sender_id,
-            client=body.client,
             hostname=body.hostname,
-            root_path=body.root_path,
             label=body.label,
             bridge_id=body.bridge_id,
         )
     except BridgeInUseError as exc:
-        raise HTTPException(409, "sandbox bridge is in use by another CLI process") from exc
+        raise HTTPException(409, "sandbox bridge is in use by another process") from exc
     if bridge is None:
         raise HTTPException(404, "sandbox bridge not found")
     logger.info(
@@ -110,7 +122,6 @@ async def api_open_bridge(
         extra={
             "bridge_id": bridge.bridge_id,
             "bridge_owner": bridge.owner_id,
-            "bridge_client": bridge.client,
             "bridge_reopened": body.bridge_id is not None,
         },
     )

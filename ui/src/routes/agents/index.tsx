@@ -7,7 +7,6 @@ import { AgentsHome } from "@/features/agents/components/AgentsHome"
 interface AgentsIndexSearch {
   prompt?: string
   repo?: string
-  localRepo?: string
   noRepo?: boolean
   project?: string
 }
@@ -21,9 +20,6 @@ export const Route = createFileRoute("/agents/")({
     ...(typeof search.repo === "string" && search.repo.trim()
       ? { repo: search.repo.trim() }
       : {}),
-    ...(typeof search.localRepo === "string" && search.localRepo.trim()
-      ? { localRepo: search.localRepo.trim() }
-      : {}),
     ...(search.noRepo === true || search.noRepo === "true"
       ? { noRepo: true }
       : {}),
@@ -35,7 +31,7 @@ export const Route = createFileRoute("/agents/")({
 })
 
 function AgentsIndexPage() {
-  const { prompt, repo, localRepo, noRepo, project } = Route.useSearch()
+  const { prompt, repo, noRepo, project } = Route.useSearch()
   const navigate = Route.useNavigate()
   useEffect(() => {
     if (!prompt) return
@@ -46,11 +42,10 @@ function AgentsIndexPage() {
   }, [navigate, prompt])
   return (
     <AgentsHome
-      key={`${repo ?? ""}:${localRepo ?? ""}:${noRepo ?? ""}:${project ?? ""}`}
+      key={`${repo ?? ""}:${noRepo ?? ""}:${project ?? ""}`}
       initialPrompt={prompt}
       initialProject={project}
       initialRepo={repo}
-      initialLocalRepo={localRepo}
       initialNoRepo={noRepo}
     />
   )

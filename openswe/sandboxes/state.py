@@ -217,12 +217,9 @@ class SandboxBackendProxy(BaseSandbox):
                     logger.info(
                         "Reconnecting sandbox backend for thread %s from metadata", self._thread_id
                     )
-                    # deferred: the bridge backend imports this module
                     from openswe.sandboxes.connect import connect_sandbox
 
-                    self._startup_task = asyncio.create_task(
-                        connect_sandbox(sandbox_id, thread_id=self._thread_id)
-                    )
+                    self._startup_task = asyncio.create_task(connect_sandbox(sandbox_id))
                     self._startup_task.add_done_callback(self._startup_completed)
             startup_task = self._startup_task
             if startup_task is None:

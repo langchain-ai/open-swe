@@ -66,10 +66,7 @@ type ProductEvents = {
     failure_kind: FailureKind
   }
   agents_feature_opened: { feature: ProductFeature }
-  agents_thread_created: {
-    run_target: "local" | "cloud"
-    has_attachments: boolean
-  }
+  agents_thread_created: { has_attachments: boolean }
   agents_message_submitted: {
     mode: "new_turn" | "queue" | "steer"
     has_attachments: boolean
@@ -446,10 +443,8 @@ export class ProductAnalytics {
         ].includes(value)
       )
     }
-    if (name === "agents_thread_created") {
-      if (key === "run_target") return value === "local" || value === "cloud"
+    if (name === "agents_thread_created")
       return key === "has_attachments" && typeof value === "boolean"
-    }
     if (name === "agents_message_submitted") {
       if (key === "mode")
         return value === "new_turn" || value === "queue" || value === "steer"

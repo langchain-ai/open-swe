@@ -101,9 +101,6 @@ class SettingsUpdate(BaseModel):
     model_routing_split: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
-    cloud_first_desktop_enabled: bool | None = Field(
-        default=None, json_schema_extra={"agent_feature_flag": True}
-    )
     model_selection_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -353,7 +350,6 @@ def _default_settings() -> dict[str, Any]:
         "model_routing_enabled": True,
         "model_routing_split": False,
         "model_selection_enabled": False,
-        "cloud_first_desktop_enabled": False,
         "fable_enabled": False,
         "expedited_review_enabled": False,
         "human_review_auto_merge_enabled": True,
@@ -396,6 +392,8 @@ _STALE_FIELDS = (
     # Approval criteria moved to each repository's .open-swe/auto-approve-rules/ and its review style's mode.
     "approval_policy",
     "review_auto_approve",
+    # Every desktop thread runs in the cloud, with approved local actions.
+    "cloud_first_desktop_enabled",
 )
 
 

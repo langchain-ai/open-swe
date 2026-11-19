@@ -12,8 +12,6 @@ import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenuGroup,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@/components/Skeleton"
@@ -23,7 +21,6 @@ import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimpl
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
-import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 import {
   useQueries,
   useQueryClient,
@@ -31,7 +28,6 @@ import {
 } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
 import type { DesktopUpdateState } from "@/desktop"
 import type { SessionUser } from "@/lib/api"
 import { useProfile } from "@/lib/profile"
@@ -41,7 +37,6 @@ import type {
 } from "@/features/agents/lib/api"
 import { CreateProjectDialog } from "@/features/projects/components/CreateProjectDialog"
 import { ProjectFolderMenu } from "@/features/projects/components/ProjectFolderMenu"
-import { useLinkDesktopFolders } from "@/features/projects/lib/desktopFolders"
 import { type Project, useProjects } from "@/features/projects/lib/projects"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type {
@@ -102,8 +97,6 @@ import {
 import { useSidebarPullRequests } from "@/features/agents/lib/prChecks"
 import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useRunCompletionNotifier } from "@/features/agents/lib/useRunCompletionNotifier"
-import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
-import { useLocalThreads } from "@/features/agents/lib/desktopLocal"
 import {
   cloudSidebarThread,
   groupSidebarThreadsByRecency,
@@ -143,7 +136,6 @@ interface SidebarRowOptions {
 interface HydratedRepoGroup extends SidebarRepoGroup {
   repoFullName: string | null
   project?: Project
-  localRepoPath?: string
   updatedAt: number
   activeThread?: AgentThread
 }
@@ -159,22 +151,6 @@ const GROUP_HEADER_CLASS =
 /** Threads shown per repo before the group needs a "Show more". */
 const REPO_PREVIEW_COUNT = 5
 const NO_REPO_GROUP_KEY = "repo:no-repo"
-
-function cloudRepoAliases(
-  repos: ReadonlyArray<SidebarRepo>
-): Map<string, string> {
-  const keys = new Map<string, Array<string>>()
-  for (const repo of repos) {
-    const label = repo.name.trim().toLowerCase()
-    const key = sidebarRepoKey(repo.repoFullName)
-    if (label && key) keys.set(label, [...(keys.get(label) ?? []), key])
-  }
-  return new Map(
-    [...keys].flatMap(([label, values]) =>
-      values.length === 1 ? [[label, values[0] as string]] : []
-    )
-  )
-}
 
 export function AgentsSidebar({
   user,
@@ -297,39 +273,10 @@ export function AgentsSidebar({
   const pendingResolves = usePendingVariables<{ threadId: string }>(
     agentMutationKeys.resolve
   )
-  const {
-    projects: localRepos,
-    loaded: localReposLoaded,
-    addProject: addLocalRepo,
-    removeProject: removeLocalRepo,
-  } = useDesktopProjects()
-  const localThreadsQuery = useLocalThreads()
-  const repoCommands = useMemo(
-    () =>
-      isDesktop
-        ? [
-            {
-              id: "add-repository",
-              label: "Add repository",
-              aliases: ["open folder", "add folder", "repository", "repo"],
-              group: "Workspace",
-              menu: "file" as const,
-              menuLabel: "Add Repository…",
-              run: async () => {
-                await addLocalRepo()
-              },
-            },
-          ]
-        : [],
-    [addLocalRepo, isDesktop]
-  )
-  useRegisterAppCommands(repoCommands)
-
   const { projects, isPending: projectsPending } = useProjects({
     enabled: true,
   })
   const [creatingProject, setCreatingProject] = useState(false)
-  useLinkDesktopFolders(localRepos, localThreadsQuery.data, isDesktop)
   useEffect(() => {
     pendingThreadStarts.reconcile([
       ...(pinnedQuery.data ?? []),
@@ -428,7 +375,6 @@ export function AgentsSidebar({
     const key = sidebarRepoKey(repo.repoFullName)
     return key ? [{ repo, key }] : []
   })
-  const aliases = cloudRepoAliases(cloudRepos)
   const pinnedItems =
     pinnedThreadShortcuts(pinnedThreads).map(cloudSidebarThread)
   const threadItems = recentThreads.map(cloudSidebarThread)
@@ -451,25 +397,16 @@ export function AgentsSidebar({
   }
   const recentItems = hydrateRepoThreads(recentThreads)
   const recents = repoMode ? recentItems : sortSidebarThreads(recentItems)
-  const macFolderOf = new Map(
-    (localThreadsQuery.data ?? []).map((thread) => [thread.id, thread.cwd])
-  )
   const groupOf = new Map(
     recents.map((item) => {
       const projectId = projectIds.has(item.thread.projectId ?? "")
         ? item.thread.projectId
         : projectOfRepo.get(item.thread.repoFullName.toLowerCase())
-      const cwd = macFolderOf.get(item.id)
-      const folder = localRepos.find((repo) => repo.cwd === cwd)
       return [
         item.id,
         projectId
           ? `project:${projectId}`
-          : (item.repoKey ??
-            (folder &&
-              (aliases.get(folder.name.trim().toLowerCase()) ??
-                sidebarRepoKey(folder.cwd))) ??
-            NO_REPO_GROUP_KEY),
+          : (item.repoKey ?? NO_REPO_GROUP_KEY),
       ]
     })
   )
@@ -480,10 +417,6 @@ export function AgentsSidebar({
           label: project.name,
           repoFullName: project.repo_full_name,
           project,
-          // A folder on this Mac linked to the project starts its threads here.
-          localRepoPath: localRepos.find(
-            (folder) => folder.projectId === project.id
-          )?.cwd,
           updatedAt:
             projectActivity.get(project.id) ?? Date.parse(project.updated_at),
           activeThread:
@@ -507,28 +440,6 @@ export function AgentsSidebar({
                 : undefined,
             threads: recents.filter((item) => groupOf.get(item.id) === key),
           }
-        }),
-        // "This Mac" projects with no cloud repo of the same name yet still
-        // get a folder, so a thread can be started in them.
-        ...localRepos.flatMap((repo) => {
-          if (repo.projectId && projectIds.has(repo.projectId)) return []
-          const key =
-            aliases.get(repo.name.trim().toLowerCase()) ??
-            sidebarRepoKey(repo.cwd)
-          return key && !keyedCloudRepos.some((cloud) => cloud.key === key)
-            ? [
-                {
-                  key,
-                  label: repo.name,
-                  repoFullName: null,
-                  localRepoPath: repo.cwd,
-                  updatedAt: 0,
-                  threads: recents.filter(
-                    (item) => macFolderOf.get(item.id) === repo.cwd
-                  ),
-                },
-              ]
-            : []
         }),
       ].sort((left, right) => right.updatedAt - left.updatedAt)
     : []
@@ -577,34 +488,6 @@ export function AgentsSidebar({
 
   const sectionCollapsed = (key: string) =>
     prefs.collapsedSectionKeys.includes(key)
-  // Repositories and Recents share one menu: both control the same list.
-  const removeProjectItems = isDesktop && localRepos.length > 0 && (
-    <>
-      <DropdownMenuSeparator />
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger size="sm">
-          <TrashIcon size={14} weight="regular" />
-          Remove repository…
-        </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent className="w-56">
-          <DropdownMenuGroup>
-            {localRepos.map((repo) => (
-              <DropdownMenuItem
-                key={repo.cwd}
-                size="sm"
-                onSelect={() => void removeLocalRepo(repo.cwd)}
-                className="gap-space-2 text-error-secondary"
-              >
-                <TrashIcon size={14} weight="regular" />
-                <span className="min-w-0 truncate">{repo.name}</span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
-    </>
-  )
-
   const viewMenuItems = (
     <>
       <MenuChoiceGroup<OrganizeMode>
@@ -716,8 +599,7 @@ export function AgentsSidebar({
         group.project ||
         serverRepos.some(
           (repo) => sidebarRepoKey(repo.repoFullName) === group.key
-        ) ||
-        group.localRepoPath
+        )
       )}
       activeKey={activeKey}
       hidden={hidden}
@@ -737,9 +619,6 @@ export function AgentsSidebar({
       composeTo="/agents"
       onCompose={layout.closeOnMobile}
       onTogglePin={() => toggleRepoPin(group.key)}
-      initialLoading={
-        Boolean(group.localRepoPath) && isDesktop && localThreadsQuery.isPending
-      }
       renderRow={(item, options) =>
         renderRow(item, { ...options, indent: true })
       }
@@ -747,10 +626,7 @@ export function AgentsSidebar({
   )
 
   const foldersPending =
-    repoMode &&
-    (sidebarReposQuery.isPending ||
-      projectsPending ||
-      (isDesktop && !localReposLoaded))
+    repoMode && (sidebarReposQuery.isPending || projectsPending)
   const pinnedPending =
     pinnedQuery.isPending || (foldersPending && prefs.pinnedRepoKeys.length > 0)
   const cloudPending =
@@ -1021,7 +897,6 @@ export function AgentsSidebar({
                   menu={
                     <SidebarSectionMenu label="Projects options">
                       {viewMenuItems}
-                      {removeProjectItems}
                     </SidebarSectionMenu>
                   }
                   action={
@@ -1135,7 +1010,6 @@ function RepoGroup({
   composeTo,
   onCompose,
   onTogglePin,
-  initialLoading = false,
   renderRow,
 }: {
   group: HydratedRepoGroup
@@ -1159,7 +1033,6 @@ function RepoGroup({
   composeTo: "/agents"
   onCompose: () => void
   onTogglePin: () => void
-  initialLoading?: boolean
   renderRow: (
     item: SidebarThreadItem,
     options: SidebarRowOptions
@@ -1175,7 +1048,6 @@ function RepoGroup({
     owned,
     includeSlack,
     sort: "created",
-    // A This Mac folder has no repository to ask for: its threads are filed in.
     enabled:
       !hidden && !collapsed && Boolean(group.project || group.repoFullName),
   })
@@ -1221,9 +1093,7 @@ function RepoGroup({
     : active && !preview.includes(active)
       ? [...preview.slice(0, -1), active]
       : preview
-  const pending =
-    initialLoading ||
-    (Boolean(group.project || group.repoFullName) && repo.isPending)
+  const pending = Boolean(group.project || group.repoFullName) && repo.isPending
   const loading = pending || repo.isFetchingNextPage
   const hasMore = expanded
     ? repo.hasMore
@@ -1284,13 +1154,11 @@ function RepoGroup({
           <Link
             to={composeTo}
             search={
-              group.localRepoPath
-                ? { localRepo: group.localRepoPath }
-                : group.project
-                  ? { project: group.project.id }
-                  : group.repoFullName
-                    ? { repo: group.repoFullName }
-                    : { noRepo: true }
+              group.project
+                ? { project: group.project.id }
+                : group.repoFullName
+                  ? { repo: group.repoFullName }
+                  : { noRepo: true }
             }
             onClick={onCompose}
           />

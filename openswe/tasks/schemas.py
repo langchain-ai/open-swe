@@ -7,8 +7,6 @@ from uuid import UUID
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 from runtime_api.sandbox_setup import GitIdentity
 
-from openswe.bridge.constants import SANDBOX_ID_PREFIX
-from openswe.bridge.store import BridgeStore
 from openswe.invocation import resolve_invocation_id
 from openswe.threads.identity import ThreadIdentity
 from openswe.trace_metadata import RunOrigin
@@ -42,7 +40,6 @@ class ThreadMetadata(BaseModel):
     sandbox_id: str | None = None
     # "mda": Managed Deep Agents names, creates and replaces the sandbox; the backend binds to it.
     sandbox_owner: Literal["mda"] | None = None
-    sandbox_bridge_client: str | None = None
     sandbox_base_proxy_config: dict[str, JsonValue] | None = None
     visibility: Literal["public", "private"] = "public"
     admin_thread: bool = False
@@ -75,12 +72,6 @@ class ThreadMetadata(BaseModel):
                     if owner is not None:
                         values["owner_user_id"] = str(owner.id)
         return values
-
-    async def delegation_supported(self) -> bool:
-        """Whether workers could share this thread's sandbox: a machine's only while it serves it."""
-        if self.sandbox_id and self.sandbox_id.startswith(SANDBOX_ID_PREFIX):
-            return await BridgeStore.is_connected(self.sandbox_id)
-        return True
 
     def owner_subject(self, owner: User) -> str:
         if self.owner_login and self.owner_login.startswith("user:"):

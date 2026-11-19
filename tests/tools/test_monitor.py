@@ -245,6 +245,23 @@ async def test_sandbox_cannot_deliver_for_a_thread_it_does_not_serve(
         )
 
 
+async def test_a_this_mac_thread_has_no_monitors_to_poll(monkeypatch: pytest.MonkeyPatch) -> None:
+    thread = {"metadata": {"sandbox_id": "bridge:abc", "running_monitors": ["mon-1"]}}
+    client = SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value=thread)))
+    reset = AsyncMock()
+    connect = AsyncMock()
+    monkeypatch.setattr(delivery, "langgraph_client", lambda: client)
+    monkeypatch.setattr(delivery, "update_background_task_state", reset)
+    monkeypatch.setattr(delivery, "connect_sandbox", connect)
+
+    assert await delivery.poll_monitors("thread-1") is False
+
+    connect.assert_not_awaited()
+    reset.assert_awaited_once_with(
+        client, "thread-1", reset=True, key=delivery.RUNNING_MONITORS_KEY
+    )
+
+
 @pytest.mark.usefixtures("registry_db")
 async def test_spent_wake_budget_holds_monitor_output_on_every_delivery_path(
     monkeypatch: pytest.MonkeyPatch,

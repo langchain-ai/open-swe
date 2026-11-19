@@ -28,42 +28,12 @@ export function numberAt(
   return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
-export function booleanAt(
-  source: Record<string, unknown> | null,
-  key: string
-): boolean | null {
-  const value = source?.[key]
-  return typeof value === "boolean" ? value : null
-}
-
-export function arrayAt(
-  source: Record<string, unknown> | null,
-  key: string
-): unknown[] | null {
-  const value = source?.[key]
-  return Array.isArray(value) ? value : null
-}
-
 export function recordAt(
   source: Record<string, unknown> | null,
   key: string
 ): Record<string, unknown> | null {
   const value = source?.[key]
   return isRecord(value) ? value : null
-}
-
-export function stringArrayAt(
-  source: Record<string, unknown> | null,
-  key: string
-): string[] | null {
-  const value = arrayAt(source, key)
-  if (value === null) return null
-  const out: string[] = []
-  for (const entry of value) {
-    if (typeof entry !== "string") return null
-    out.push(entry)
-  }
-  return out
 }
 
 export function parseJson(text: string): unknown {

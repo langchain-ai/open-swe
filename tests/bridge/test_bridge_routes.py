@@ -1,4 +1,4 @@
-"""The wire contract the CLI is built against, called the way FastAPI calls it."""
+"""The wire contract the desktop is built against, called the way FastAPI calls it."""
 
 import asyncio
 
@@ -23,17 +23,33 @@ OWNER = Principal.of_login("test-user")
 INTRUDER = Principal.of_login("someone-else")
 
 
-async def _open() -> str:
-    opened = await api_open_bridge(
-        BridgeOpenBody(root_path="/Users/test/project", hostname="laptop.local"),
-        principal=OWNER,
+def _body(bridge_id: str | None = None) -> BridgeOpenBody:
+    return BridgeOpenBody(
+        client="desktop",
+        root_path="local-access://approved-actions",
+        hostname="laptop.local",
+        bridge_id=bridge_id,
     )
+
+
+async def _open() -> str:
+    opened = await api_open_bridge(_body(), principal=OWNER)
     return opened.bridge_id
 
 
-async def _enqueue(bridge_id: str, command: str = "true") -> str:
-    params: JsonObject = {"command": command, "timeout": None}
-    return await BridgeStore.enqueue(bridge_id, method="execute", params=params)
+async def _enqueue(bridge_id: str, path: str = "~/notes.txt") -> str:
+    params: JsonObject = {"operation": "read", "path": path}
+    return await BridgeStore.enqueue(bridge_id, method="local_action", params=params)
+
+
+async def test_only_a_desktops_local_access_bridge_opens(registry_db: None) -> None:
+    for body in (
+        BridgeOpenBody(root_path="/Users/test/project", hostname="laptop.local"),
+        BridgeOpenBody(client="desktop", root_path="/Users/test/project", hostname="laptop.local"),
+    ):
+        with pytest.raises(HTTPException) as refused:
+            await api_open_bridge(body, principal=OWNER)
+        assert refused.value.status_code == 410
 
 
 async def test_a_long_poll_returns_a_request_that_arrives_while_it_waits(
@@ -44,12 +60,12 @@ async def test_a_long_poll_returns_a_request_that_arrives_while_it_waits(
         api_claim_bridge_requests(bridge_id, BridgeClaimBody(wait=10, limit=8), principal=OWNER)
     )
     await asyncio.sleep(0.05)
-    request_id = await _enqueue(bridge_id, "echo hi")
+    request_id = await _enqueue(bridge_id, "~/hi.txt")
 
     answered = await asyncio.wait_for(poll, timeout=10)
 
     assert [request.request_id for request in answered.requests] == [request_id]
-    assert answered.requests[0].params == {"command": "echo hi", "timeout": None}
+    assert answered.requests[0].params == {"operation": "read", "path": "~/hi.txt"}
 
 
 async def test_a_long_poll_with_nothing_queued_returns_empty(registry_db: None) -> None:
@@ -127,23 +143,13 @@ async def test_closing_a_bridge_stops_its_heartbeat_being_accepted(registry_db: 
     assert closed.status_code == 204
     assert refused.value.status_code == 409
 
-    reopened = await api_open_bridge(
-        BridgeOpenBody(
-            root_path="/Users/test/project", hostname="laptop.local", bridge_id=bridge_id
-        ),
-        principal=OWNER,
-    )
+    reopened = await api_open_bridge(_body(bridge_id), principal=OWNER)
     assert reopened.bridge_id == bridge_id
     assert (await api_bridge_heartbeat(bridge_id, principal=OWNER)).status_code == 204
 
 
 async def test_reopening_a_bridge_nobody_owns_is_not_found(registry_db: None) -> None:
     with pytest.raises(HTTPException) as refused:
-        await api_open_bridge(
-            BridgeOpenBody(
-                root_path="/Users/test/project", hostname="laptop.local", bridge_id="nope"
-            ),
-            principal=OWNER,
-        )
+        await api_open_bridge(_body("nope"), principal=OWNER)
 
     assert refused.value.status_code == 404

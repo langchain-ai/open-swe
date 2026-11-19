@@ -15,7 +15,6 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
-import { localThreadKeys } from "./desktopLocal"
 import { pendingThreadStarts } from "./pendingThreadStarts"
 import type {
   InfiniteData,
@@ -26,7 +25,6 @@ import type {
 import type {
   ScheduleUpdateRequest,
   ThreadBrowser,
-  ThreadMoveDestination,
   ThreadsPage,
   ThreadsPageParams,
 } from "./api"
@@ -50,7 +48,6 @@ import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { optimisticUpdate } from "@/lib/optimistic"
-import { reportError } from "@/lib/errorReporting"
 import { useThreadListLoad } from "@/lib/perf/threadListLoad"
 
 export const agentThreadKeys = {
@@ -1600,23 +1597,6 @@ export function useDeleteAgentThread() {
       pendingThreadStarts.remove(threadId)
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
       invalidateAgentThreadLists(queryClient)
-      // A "This Mac" thread also leaves a worktree and a bridge on this machine.
-      const desktop = window.openSweDesktop
-      if (desktop)
-        void desktop
-          .discardLocalThread(threadId)
-          .then((discarded) => {
-            if (discarded)
-              void queryClient.invalidateQueries({
-                queryKey: localThreadKeys.all,
-              })
-          })
-          .catch((error: unknown) =>
-            reportError({
-              title: "Couldn't clean up the thread's local worktree",
-              error,
-            })
-          )
       const path = window.location.pathname
       if (path === `/agents/${threadId}`) {
         navigate({ to: "/agents" })
@@ -1645,37 +1625,6 @@ export function useShareThread() {
       storeAgentThread(queryClient, thread)
       invalidateAgentThreadLists(queryClient)
     },
-  })
-}
-
-/** Move a thread to the cloud, or onto a fresh checkout on this Mac, before its next message. */
-export function useMoveThread(
-  thread: Pick<AgentThread, "id" | "repoFullName">
-) {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (to: "cloud" | "local") => {
-      let destination: ThreadMoveDestination = { target: "cloud" }
-      if (to === "local") {
-        if (!window.openSweDesktop)
-          throw new Error("Open this thread in the Robin app to move it here")
-        destination = {
-          sandbox_bridge_id: await window.openSweDesktop.takeOverThread({
-            threadId: thread.id,
-            repo: thread.repoFullName,
-          }),
-        }
-      }
-      return agentsApi.moveThread(thread.id, destination)
-    },
-    meta: { errorTitle: "Couldn't move thread" },
-    onSuccess: (moved) => {
-      storeAgentThread(queryClient, moved)
-      invalidateAgentThreadLists(queryClient)
-    },
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: localThreadKeys.all }),
   })
 }
 

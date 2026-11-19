@@ -134,7 +134,6 @@ export interface AgentThread {
   source?: string
   threadCategory?: string
   ownerLogin?: string
-  sandboxBridgeClient?: string
   pr?: PullRequestSummary
   diffStats?: DiffStats
 }
@@ -191,7 +190,6 @@ export function decodeThread(value: unknown): AgentThread {
     source: stringAt(value, "source"),
     threadCategory: stringAt(value, "threadCategory"),
     ownerLogin: stringAt(value, "ownerLogin"),
-    sandboxBridgeClient: stringAt(value, "sandboxBridgeClient"),
     pr: decodePullRequest(value.pr),
     diffStats: decodeDiffStats(value.diffStats),
   }
@@ -255,10 +253,6 @@ export function workspaceKey(thread: AgentThread): string {
 export function workspaceName(thread: AgentThread): string {
   if (thread.repo) return thread.repo
   return thread.repoFullName || "No Repo"
-}
-
-export function isLocal(thread: AgentThread): boolean {
-  return thread.sandboxBridgeClient !== undefined
 }
 
 export const AGENT_SOURCES = [

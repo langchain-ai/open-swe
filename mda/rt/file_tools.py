@@ -1,8 +1,8 @@
 """The run's file and shell tools, with the checks around them.
 
 They run in the thread's sandbox, which MDA owns, or against the thread's files on the
-backend (``rt.remote_files``): where the sandbox is not MDA's, such as a thread bridged
-to a person's machine, and on the paths the backend serves. Reads of the run's
+backend (``rt.remote_files``): where the sandbox is not MDA's, and on the paths the
+backend serves. Reads of the run's
 skills are answered from the skills this runtime keeps (``rt.skills``).
 
 Around every call: a command that may push or open a pull request is first put to
@@ -107,13 +107,8 @@ class FileToolsMiddleware(AgentMiddleware):
     ) -> None:
         self._backend = backend
         self._remote_files = remote_files
-        # Each run's view of the backend's files as deepagents' own tools, with large
-        # results under the run's artifacts root, which a bridged thread has its own of.
-        self._remote_by_run = RunLocal(
-            lambda: remote_file_tools(
-                self._remote_files, self._backend.run.catalog.files.artifacts_root
-            )
-        )
+        # Each run's view of the backend's files as deepagents' own tools.
+        self._remote_by_run = RunLocal(lambda: remote_file_tools(self._remote_files))
         # The run's skills, which this runtime keeps itself (``rt.skills``).
         self._skills = dict(skills or {})
         # The sandbox's own tools, as the model is offered them; code mode runs them from here.
@@ -158,7 +153,7 @@ class FileToolsMiddleware(AgentMiddleware):
 
     def code_tools(self, names: Iterable[str]) -> list[StructuredTool]:
         """The file and shell tools among ``names``, for code mode, each call checked."""
-        templates = remote_file_tools(self._remote_files, "/")
+        templates = remote_file_tools(self._remote_files)
         return [
             self._code_tool(self._described_tool(templates[name]))
             for name in sorted({*names} & {*templates})

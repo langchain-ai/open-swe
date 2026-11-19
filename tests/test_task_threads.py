@@ -10,7 +10,6 @@ from pydantic import JsonValue
 from runtime_api.catalog import InboxSpec
 from sqlalchemy import func, select, update
 
-from openswe.bridge.store import BridgeStore
 from openswe.dashboard.settings import Settings
 from openswe.database import postgres
 from openswe.jobs import queue
@@ -19,14 +18,12 @@ from openswe.tasks import presentation, service, store
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.presentation import TaskEventMetadata
 from openswe.tasks.schemas import ThreadMetadata
-from openswe.threads import handlers
 from openswe.users import User
 from openswe.users.models import UserIdentity
 from openswe.utils.thread_participants import PARTICIPANT_IDENTITY_PREFIX, PARTICIPANT_LOGINS_KEY
 from openswe.webhooks import event_matches
 from openswe.webhooks.event_matches import EventMatch
 from openswe.webhooks.event_subscriptions import EventSubscription
-from tests.conftest import serve_threads_from
 
 MODEL = "openai:gpt-6-astra"
 COORDINATOR = str(uuid4())
@@ -299,23 +296,6 @@ def launch(monkeypatch: pytest.MonkeyPatch) -> Launch:
     return launch
 
 
-@pytest.mark.parametrize("connected", [True, False])
-async def test_cli_bridge_delegates_only_while_it_is_served(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch, connected: bool
-) -> None:
-    client.metadata[COORDINATOR].update(sandbox_id="bridge:cli", sandbox_bridge_client="cli")
-    monkeypatch.setattr(store.TaskMembership, "context_for_thread", AsyncMock(return_value=None))
-    monkeypatch.setattr(BridgeStore, "is_connected", AsyncMock(return_value=connected))
-    monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
-    actor = service.Actor(COORDINATOR, OWNER)
-
-    if connected:
-        assert (await service.Delegation.authorize(actor)).metadata.sandbox_id == "bridge:cli"
-    else:
-        with pytest.raises(ValueError, match="connected"):
-            await service.Delegation.authorize(actor)
-
-
 async def test_public_thread_does_not_allow_using_owners_credentials(client: MagicMock) -> None:
     with pytest.raises(PermissionError, match="thread owner"):
         await service.authorized_metadata(service.Actor(COORDINATOR, "other-user"))
@@ -480,37 +460,6 @@ async def test_task_wakeup_preserves_current_model_selection(
     else:
         assert "agent_model_id" not in config
         assert "agent_effort" not in config
-
-
-async def test_desktop_worker_cannot_be_shared(
-    client: MagicMock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    client.metadata[COORDINATOR].update(
-        visibility="private",
-        sandbox_id="bridge:desktop",
-        sandbox_kind="bridge",
-        sandbox_bridge_client="desktop",
-    )
-    current_task = task()
-    delegation = store.TaskDelegation(
-        worker_thread_id=str(uuid4()),
-        task_id=current_task.id,
-        coordinator_thread_id=COORDINATOR,
-        instructions="Fix login",
-        model=MODEL,
-        effort="low",
-    )
-    monkeypatch.setattr(handlers, "langgraph_client", lambda: client)
-    serve_threads_from(monkeypatch, client.threads.get)
-
-    await service.index_worker(
-        current_task, delegation, ThreadMetadata.model_validate(client.metadata[COORDINATOR])
-    )
-
-    with pytest.raises(HTTPException, match="owner's machine") as error:
-        await handlers.share_thread(delegation.worker_thread_id, OWNER)
-    assert error.value.status_code == 409
-    client.threads.update.assert_not_called()
 
 
 async def test_worker_cannot_spawn_siblings(
@@ -1062,7 +1011,7 @@ async def test_concurrent_registrations_of_one_launch_make_one_worker(
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_github(
+async def test_langsmith_task_workers_inherit_uuid_and_sandbox_without_github(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
 ) -> None:
     from openswe.dashboard.langsmith_login import LangSmithLogin
@@ -1077,11 +1026,8 @@ async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_gith
         owner_user_id=str(owner.id),
         visibility="private",
         repo_explicitly_none=True,
-        sandbox_id="bridge:local-task",
-        sandbox_kind="bridge",
-        sandbox_bridge_client="desktop",
+        sandbox_id="sandbox-local-task",
     )
-    monkeypatch.setattr(BridgeStore, "is_connected", AsyncMock(return_value=True))
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     actor = service.Actor(COORDINATOR, subject)
     worker = str((await launch(actor, "local-worker", "Research"))["worker_thread_id"])
@@ -1092,7 +1038,7 @@ async def test_langsmith_task_workers_inherit_uuid_and_local_bridge_without_gith
     assert config["repo_explicitly_none"] is True
     assert "github_login" not in config
     assert client.metadata[worker]["owner_user_id"] == str(owner.id)
-    assert client.metadata[worker]["sandbox_id"] == "bridge:local-task"
+    assert client.metadata[worker]["sandbox_id"] == "sandbox-local-task"
     await service.authorized_metadata(service.Actor(worker, subject))
     service.enforce_github_login_gate.assert_not_awaited()
     grant.side_effect = HTTPException(401, "LangSmith login expired")

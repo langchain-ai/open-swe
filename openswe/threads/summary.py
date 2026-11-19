@@ -10,7 +10,6 @@ from urllib.parse import urlencode
 from fastapi import HTTPException
 
 from openswe.agent_cost import RUN_COST_KEY_PREFIX
-from openswe.bridge.store import BridgeStore, SandboxBridgeBinding
 from openswe.dashboard.admin import is_admin
 from openswe.github.pull_requests import PullRequest
 from openswe.review.findings import (
@@ -170,27 +169,15 @@ def thread_is_readable(
 def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool:
     """Only the owner may prompt, approve, or open a shell into a private thread.
 
-    Nor may anyone else drive a thread that runs on its owner's machine, even one
-    shared before such threads were kept private. Historical Claude Code
-    sessions remain read-only.
+    Historical Claude Code sessions remain read-only.
     """
     if login and ThreadIdentity(login).user_id is not None:
-        return (
-            thread_is_readable(metadata, login)
-            and thread_source(metadata) != CLAUDE_CODE_SOURCE
-            and (
-                not SandboxBridgeBinding.reaches_a_machine(metadata)
-                or thread_is_owner(metadata, login)
-            )
-        )
+        return thread_is_readable(metadata, login) and thread_source(metadata) != CLAUDE_CODE_SOURCE
     source = thread_source(metadata)
     return (
         source in _SURFACED_SOURCES
         and source != CLAUDE_CODE_SOURCE
-        and (
-            not (thread_is_private(metadata) or SandboxBridgeBinding.reaches_a_machine(metadata))
-            or thread_is_owner(metadata, login)
-        )
+        and (not thread_is_private(metadata) or thread_is_owner(metadata, login))
     )
 
 
@@ -480,17 +467,6 @@ async def _apply_stored_diff_stats(pull_requests: list[dict[str, Any]]) -> None:
         pr["diffStats"] = stored.get((pr["repoFullName"].lower(), pr["number"]), pr["diffStats"])
 
 
-async def _mac_online(metadata: Mapping[str, Any], sandbox_id: str | None) -> bool:
-    """Whether a "This Mac" thread's Mac is serving its checkout, so it can run from anywhere."""
-    if metadata.get("sandbox_bridge_client") != "desktop":
-        return False
-    try:
-        return await BridgeStore.is_connected(sandbox_id)
-    except Exception:  # noqa: BLE001
-        logger.warning("Could not read the thread's sandbox bridge", exc_info=True)
-        return False
-
-
 def _run_costs(metadata: Mapping[str, Any]) -> dict[str, float]:
     return {
         key.removeprefix(RUN_COST_KEY_PREFIX): float(cost)
@@ -559,7 +535,6 @@ async def _thread_summary(
     *,
     latest_run_status: str | None = None,
     latest_run_id: str | None = None,
-    bridge_status: bool = True,
     viewer_login: str | None = None,
     read_states: Mapping[str, JsonObject] | None = None,
     owner_ids: Mapping[str, str] | None = None,
@@ -702,15 +677,6 @@ async def _thread_summary(
         "sourceUrl": thread_source_url(metadata),
         "sourceAppUrl": thread_source_app_url(metadata),
         "sandboxId": sandbox_id,
-        # Which app serves a bridged thread's machine, so a client can tell
-        # whether it is the one that can run the thread.
-        "sandboxBridgeClient": (
-            (metadata.get("sandbox_bridge_client") or "cli")
-            if metadata.get("sandbox_kind") == "bridge"
-            else None
-        ),
-        # Lists skip it: one bridge lookup per thread would cost a query each.
-        "sandboxBridgeOnline": await _mac_online(metadata, sandbox_id) if bridge_status else None,
         # What the thread's Browser panel offers: its browser to watch, or to open.
         "browser": None if browser is None else browser.state,
     }

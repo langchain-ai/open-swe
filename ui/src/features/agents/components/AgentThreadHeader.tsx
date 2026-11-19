@@ -1,6 +1,5 @@
 import { Input } from "@langchain/macaw-components/Input"
 import { Button } from "@langchain/macaw-components/Button"
-import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import { useRef, useState } from "react"
 import {
   ContextMenu,
@@ -17,9 +16,7 @@ import { Skeleton } from "@/components/Skeleton"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
-import { TerminalIcon } from "@phosphor-icons/react/dist/ssr/Terminal"
 
-import { useLocalThread } from "@/features/agents/lib/desktopLocal"
 import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
@@ -44,7 +41,6 @@ import {
 import { copyPageLink } from "@/features/reviews/lib/copyText"
 import type { ThreadVisibility } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { reportError } from "@/lib/errorReporting"
 import { cn } from "@/lib/utils"
 
 function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
@@ -87,14 +83,7 @@ function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
   )
 }
 
-const TARGET_ICONS = {
-  Cloud: null,
-  "This Mac": LaptopRegularIcon,
-  "Local CLI": TerminalIcon,
-}
-
 export function AgentThreadHeader({
-  target,
   panelCollapsed,
   thread,
   startingThread,
@@ -103,7 +92,6 @@ export function AgentThreadHeader({
   onVisibilityChange,
   loading = false,
 }: {
-  target: keyof typeof TARGET_ICONS
   panelCollapsed: boolean
   onRename?: (title: string) => Promise<unknown>
   thread?: AgentThread
@@ -121,9 +109,7 @@ export function AgentThreadHeader({
 }) {
   const shownThread = thread ?? startingThread
   const title = shownThread?.title
-  const worktreeThread = useLocalThread(thread?.id ?? "")
   const sidebarCollapsed = useSidebarCollapsed()
-  const TargetIcon = TARGET_ICONS[target]
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const pinnedThreads = useSidebarPinnedThreads({
@@ -137,11 +123,9 @@ export function AgentThreadHeader({
   const continuePrivately = useContinueThreadPrivately()
   const shareThread = useShareThread()
   const session = useSession()
-  // A thread on its owner's machine runs commands there, so it stays private.
   const canShare = Boolean(
     thread?.ownerLogin &&
-    thread.ownerLogin.toLowerCase() === session.data?.login.toLowerCase() &&
-    !thread.sandboxBridgeClient
+    thread.ownerLogin.toLowerCase() === session.data?.login.toLowerCase()
   )
   const [shareOpen, setShareOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -338,35 +322,6 @@ export function AgentThreadHeader({
           </div>
         )}
         <div className="ml-auto flex shrink-0 items-center gap-space-3">
-          {worktreeThread && window.openSweDesktop?.openTaskFolder && (
-            <IconButton
-              icon={FolderIcon}
-              label="Open task folder"
-              size="sm"
-              color="secondary"
-              variant="plain"
-              data-no-drag=""
-              onClick={() => {
-                void window.openSweDesktop
-                  ?.openTaskFolder?.(worktreeThread.id)
-                  .catch((error: unknown) =>
-                    reportError({
-                      title: "Couldn't open the task folder",
-                      error,
-                    })
-                  )
-              }}
-            />
-          )}
-          <span
-            role="img"
-            aria-label={`Runs on ${target}`}
-            title={target}
-            hidden={!TargetIcon}
-            className="text-icon-secondary"
-          >
-            {TargetIcon && <TargetIcon size={16} weight="regular" />}
-          </span>
           {visibilityMenu}
         </div>
       </div>
@@ -402,13 +357,6 @@ export function AgentThreadHeader({
         onOpenChange={setDeleteOpen}
         isDeleting={isDeleting}
         onConfirm={confirmDelete}
-        detail={
-          worktreeThread &&
-          !worktreeThread.managedTaskFolder &&
-          worktreeThread.ownedWorktrees.length
-            ? "This also deletes its worktree and uncommitted changes. Branch and commits are kept."
-            : undefined
-        }
       />
     </>
   )

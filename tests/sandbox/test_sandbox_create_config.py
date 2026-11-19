@@ -89,8 +89,6 @@ _WORKER = {"task_id": "00000000-0000-0000-0000-000000000001", "sandbox_host_thre
     ("metadata", "host", "owner"),
     [
         ({}, {}, "own"),
-        # Moved off a Mac: connecting to its new sandbox carries the checkout over from GitHub.
-        ({"sandbox_handoff_from": "bridge:mac"}, {}, "own"),
         ({"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}, {}, "own"),
         # Files a Slack message brought wait for preparing to write them in the sandbox.
         (
@@ -101,7 +99,6 @@ _WORKER = {"task_id": "00000000-0000-0000-0000-000000000001", "sandbox_host_thre
         ({"sandbox_id": "backend-sandbox"}, {}, None),
         # The sandbox the backend made is gone: this run starts in MDA's instead of failing.
         ({"sandbox_id": "gone-sandbox"}, {}, "own"),
-        ({"sandbox_id": "bridge:abc"}, {}, None),
         ({**_WORKER}, {"sandbox_id": "sandbox", "sandbox_owner": "mda"}, None),
         (
             {**_WORKER, "sandbox_id": "sandbox"},
@@ -159,10 +156,7 @@ async def test_mda_owns_new_threads_and_its_own_sandboxes(
         if owner == _HOST or metadata.get("sandbox_owner") == "mda"
         else None
     )
-    assert sandbox.prepare_uses_github is ("sandbox_handoff_from" in metadata)
-    assert sandbox.bind_after_prepare is (
-        owner == "own" and not {"sandbox_handoff_from", "slack_files_pending"} & set(metadata)
-    )
+    assert sandbox.bind_after_prepare is (owner == "own" and "slack_files_pending" not in metadata)
     # A review prepares in its sandbox, and the deployment can turn the late report off.
     review = await ManagedSandbox.for_thread("thread-1")
     monkeypatch.setenv("MDA_BIND_SANDBOX_AFTER_PREPARE", "false")
@@ -548,7 +542,6 @@ class TestLangSmithSandboxCredentials:
         monkeypatch.setattr(lifecycle, "configure_sandbox_proxy", configure)
         monkeypatch.setattr(lifecycle, "configure_git_identity", AsyncMock())
         monkeypatch.setattr(lifecycle, "connect_existing_sandbox", AsyncMock(return_value=backend))
-        monkeypatch.setattr(lifecycle, "complete_handoff", AsyncMock())
         monkeypatch.setattr(lifecycle, "set_sandbox_backend", lambda thread_id, backend: backend)
         monkeypatch.setattr(
             "openswe.execution_images.EXECUTION_IMAGES.maybe_start_update", AsyncMock()

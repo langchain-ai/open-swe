@@ -57,7 +57,6 @@ Do not store GitHub access tokens as deployment environment variables.
 
 Every thread's sandbox is a LangSmith sandbox that Managed Deep Agents creates when the thread's run starts, and replaces when the agent asks for a fresh one.
 The backend never creates a thread's sandbox: it connects to the one MDA opened, configures its GitHub proxy and git identity, and runs the backend's tools in it.
-A thread bridged to its owner's machine runs there instead.
 
 Sandbox provisioning, connection, proxy configuration, and global image captures use the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
 The configured base snapshot must exist in that LangSmith workspace.
@@ -516,7 +515,7 @@ Edit a section's file to customize it:
 
 | File | What it controls |
 |---|---|
-| `working-environment.md.jinja` | Sandbox paths, execution constraints, and repository setup steps (`working-environment-local.md.jinja` for bridged runs); sent per turn |
+| `working-environment.md.jinja` | Sandbox paths, execution constraints, and repository setup steps; sent per turn |
 | `source-context.md.jinja` | How to communicate on the surface the turn came from; sent per turn |
 | `repository-setup.md.jinja` | Repository freshness, read-only requests, and repository skills |
 | `task-execution.md` | Workflow steps (understand → implement → verify → submit) and PR review dispatch |

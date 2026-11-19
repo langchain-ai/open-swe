@@ -25,9 +25,8 @@ sandbox to boot, so it is made behind the run's preparation and first model call
 the run's first tool call waits for it, whichever tool it is, since the backend may run
 it in the sandbox: it is retried for as long as the host takes to suspend an idle
 sandbox, while the sandbox API takes no proxy config, and then a failure ends the run at
-that call, since the backend writes none of it. Where preparing may use GitHub in the
-sandbox (``SandboxSpec.prepare_uses_github``), the run writes it before it prepares
-instead. It writes it again every few minutes before a model or tool call, for the
+that call, since the backend writes none of it. It writes it again every few minutes
+before a model or tool call, for the
 commands the backend runs in the sandbox, and after a replacement, which keeps the
 config it was created with until then. A backend that refuses the call writes it itself.
 """
@@ -415,17 +414,10 @@ async def opened_sandbox(runtime: Runtime) -> OpenedSandbox:
     preparation; one that cannot boot is reported by the first call that needs it
     (``booted_sandbox``).
     Where MDA writes the proxy config, writing it waits for the sandbox to boot, so the first
-    write is left to the boot, unless preparing may use GitHub in the sandbox
-    (``SandboxSpec.prepare_uses_github``): then it is written here, and one MDA could not
-    write raises, which ends the run.
+    write is left to the boot.
     """
     opened = await _opening(getattr(runtime, "backend", None), wait=False)
-    if opened.sandbox_id is None or (proxy := _written_proxy(runtime)) is None:
-        return opened
-    spec = _run_of(runtime).planned.sandbox
-    if spec is None or spec.prepare_uses_github:
-        await proxy.write_first(runtime, opened.sandbox_id)
-    else:
+    if opened.sandbox_id is not None and (proxy := _written_proxy(runtime)) is not None:
         proxy.defer(opened.sandbox_id)
     return opened
 

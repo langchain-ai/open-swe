@@ -2051,7 +2051,7 @@ async def test_execute_searches_through_the_shell_where_grep_and_glob_are_exclud
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     backend = _run_backend(catalog=Catalog(excluded=excluded))
     remote = RemoteFiles(backend, lambda: "run-1")
-    tools = remote_file_tools(remote, "/")
+    tools = remote_file_tools(remote)
     original = tools["execute"].description
     assert "Instead use the grep, glob tools" in original
     files = FileToolsMiddleware(backend, 300, remote_files=remote)
@@ -2151,23 +2151,16 @@ class _ExecuteTransport:
 
 
 @pytest.mark.parametrize(
-    ("timeout", "exit_code", "output", "sent", "capped"),
-    [
-        (1500, 124, "building...\n[command timed out after 480s]", 480, True),
-        (1500, 124, "building...\ntimeout: sending signal TERM", 480, False),
-        (1500, 0, "building...", 480, False),
-        (300, 124, "building...\n[command timed out after 300s]", 300, False),
-        (None, 0, "building...", None, False),
-    ],
+    ("timeout", "sent"),
+    [(1500, 480), (300, 300), (None, None)],
 )
 async def test_a_command_through_the_backend_ends_before_its_reply_would_be_lost(
-    timeout: int | None, exit_code: int, output: str, sent: int | None, capped: bool
+    timeout: int | None, sent: int | None
 ) -> None:
-    """A command run on a bridged machine is held to what the backend's reply survives, and
-    one the limit stopped, rather than its own `timeout`, says how to run longer work."""
+    """A command the backend runs is held to what the backend's reply survives."""
     from rt.remote_files import MAX_COMMAND_SECONDS, RemoteFiles
 
-    transport = _ExecuteTransport(exit_code, output)
+    transport = _ExecuteTransport(124, "building...")
     remote = RemoteFiles(transport, lambda: "run-1")
 
     result = await remote.aexecute("make build", timeout=timeout)
@@ -2176,9 +2169,7 @@ async def test_a_command_through_the_backend_ends_before_its_reply_would_be_lost
     if sent is not None:
         assert sent <= MAX_COMMAND_SECONDS
         assert transport.timeouts[0] >= sent
-    assert result.exit_code == exit_code
-    assert ("background_execute" in result.output) is capped
-    assert result.output.startswith("building...")
+    assert (result.exit_code, result.output) == (124, "building...")
 
 
 async def test_a_read_file_the_backend_serves_gets_the_read_checks(

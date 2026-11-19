@@ -7,7 +7,6 @@ import {
 import {
   CaretDownIcon,
   CaretRightIcon,
-  LaptopRegularIcon,
   XIcon,
 } from "@langchain/macaw-components/icons"
 import {
@@ -32,7 +31,6 @@ import { Spinner } from "@langchain/macaw-components/Spinner"
 import { useZIndex } from "@langchain/macaw-components/utils/useZIndex"
 import zIndices from "@langchain/macaw-components/utils/zIndices"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
-import { CloudIcon } from "@phosphor-icons/react/dist/ssr/Cloud"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
@@ -69,7 +67,6 @@ import {
 } from "@/features/agents/lib/apiWarmup"
 import { earlyReads } from "@/lib/earlyReads"
 import { readPreference } from "@/lib/streamPreference"
-import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
 import {
   markReviewViewed,
   useDeleteAgentThread,
@@ -475,7 +472,6 @@ export function SidebarThreadRow({
   const queryClient = useQueryClient()
   const deleteThread = useDeleteAgentThread()
   const setViewed = useSetAgentThreadViewed()
-  const worktreeThread = useLocalThread(item.id)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   const renameThread = useRenameAgentThread()
@@ -885,13 +881,6 @@ export function SidebarThreadRow({
         onOpenChange={setDeleteOpen}
         isDeleting={isDeleting}
         onConfirm={onConfirmDelete}
-        detail={
-          worktreeThread &&
-          !worktreeThread.managedTaskFolder &&
-          worktreeThread.ownedWorktrees.length
-            ? "This also deletes its worktree and uncommitted changes. Branch and commits are kept."
-            : undefined
-        }
       />
     </>
   )
@@ -1113,9 +1102,6 @@ function ThreadHoverCard({
   item: SidebarThreadItem
   live?: PullRequestSnapshot
 }) {
-  const onAMac = runsOnAMac(item.thread)
-  const LocationIcon = onAMac ? LaptopRegularIcon : CloudIcon
-  const locationLabel = onAMac ? "This Mac" : "Cloud"
   const reference = parsePullRequestReference(item.pr?.url ?? "")
   const prContent = item.pr && (
     <>
@@ -1140,12 +1126,6 @@ function ThreadHoverCard({
             aria-label="Private thread"
           />
         )}
-        <LocationIcon
-          size={ICON_SIZE}
-          weight="regular"
-          className="mt-0.5 shrink-0 text-icon-secondary"
-          aria-label={locationLabel}
-        />
         <span className="mt-px shrink-0 text-xxs text-secondary">
           {compactAge(item.updatedAt)}
         </span>

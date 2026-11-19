@@ -1,4 +1,3 @@
-import { basename } from "node:path"
 import { parseArgs } from "node:util"
 import { randomUUID } from "node:crypto"
 
@@ -9,34 +8,26 @@ import {
   normalizeBackend,
   type TaskActivity,
 } from "./api.ts"
-import { Bridge } from "open-swe-bridge-client"
 import {
   forgetSession,
-  readBridgeMemory,
   readBackend,
   readConfig,
-  rememberThreadBridge,
   storeSession,
 } from "./config.ts"
 import { SessionCredential } from "./credentials.ts"
-import { isGitRepository, originRepo, repoFullName } from "./git.ts"
+import { originRepo, repoFullName } from "./git.ts"
 import { composePrompt, readPipedStdin } from "./input.ts"
 import { errorMessage, type JsonObject } from "./json.ts"
 import { login } from "./login.ts"
-import {
-  followTask,
-  RESULT_TOOL,
-  type CliResult,
-  type RunOutcome,
-} from "./follow.ts"
+import { followTask, type RunStatus } from "./follow.ts"
 
-const USAGE = `robin — run a cloud Robin agent against this directory
+const USAGE = `robin — start a cloud Robin agent and wait for it
 
 Usage:
   robin login [--backend <url>]      Sign in; --backend also repoints the desktop app
   robin logout                       Forget the session for the current backend
   robin auth status                  Show which credential is in use and check it
-  robin run [options] [prompt...]    Start an agent bridged to this directory
+  robin run [options] [prompt...]    Start a cloud thread and wait for it to finish
   robin --help | --version
 
 Run options:
@@ -44,32 +35,23 @@ Run options:
   --model <id>     Agent model id (requires --effort)
   --effort <name>  Reasoning effort for --model
 
+A new thread works on the GitHub repository this directory's origin names.
 Piped input is attached below the prompt, or is the prompt when none is given.
-Stdout carries only the result the agent reports. The exit code is the one it
-reports: 0 done or yes, 1 failed or no, 2 could not tell.
-
-The agent runs shell commands and reads and writes files in the current
-directory, on this machine, without a sandbox.
+Stdout carries only the thread's dashboard URL. The exit code is 0 when the
+agent's run completed, 1 when it failed or stopped to wait for an answer.
 `
 
 function out(text: string): void {
   process.stdout.write(`${text}\n`)
 }
 
-/** Stdout carries only the agent's result, so everything the CLI says goes here. */
+/** Stdout carries only the thread's URL, so everything else the CLI says goes here. */
 function note(text: string): void {
   process.stderr.write(`${text}\n`)
 }
 
 function fail(text: string): void {
   process.stderr.write(`robin: ${text}\n`)
-}
-
-function printResult(result: CliResult): void {
-  const { stdout } = result
-  process.stdout.write(
-    stdout === "" || stdout.endsWith("\n") ? stdout : `${stdout}\n`
-  )
 }
 
 const INSTRUCTIONS_PREVIEW_CHARS = 72
@@ -158,20 +140,18 @@ async function authStatusCommand(): Promise<number> {
 
 interface RunOptions {
   thread: string | undefined
-  visibility: string | undefined
   model: string | undefined
   effort: string | undefined
   prompt: string
 }
 
+const STATUS_EXIT: Record<RunStatus, number> = {
+  completed: 0,
+  failed: 1,
+  interrupted: 1,
+}
+
 async function runCommand(options: RunOptions): Promise<number> {
-  // Still accepted so scripts that asked for private threads keep working.
-  if (options.visibility !== undefined && options.visibility !== "private") {
-    fail(
-      "--visibility is always private: whoever can prompt a thread runs commands on this machine"
-    )
-    return 2
-  }
   const prompt = composePrompt(options.prompt, await readPipedStdin())
   if (!prompt) {
     fail("a prompt is required, as arguments or on stdin")
@@ -183,116 +163,23 @@ async function runCommand(options: RunOptions): Promise<number> {
     return 1
   }
   const { credential } = config
-  // Whoever can prompt a person's thread runs commands on this machine.
-  const threadType = credential.machine ? "system" : "private"
-  const root = process.cwd()
   const api = new ApiClient(config.backend, credential)
-
-  if (!(await isGitRepository(root))) {
-    fail(
-      `${root} is not a git checkout — the agent will have no repository context`
-    )
-  }
-  note(
-    `! The remote agent will run commands and edit files in ${root} on this machine, unsandboxed.`
-  )
-
-  let bridgeId: string | null = null
-  if (options.thread !== undefined) {
-    const bound = (await readBridgeMemory())[options.thread]
-    if (bound === undefined) {
-      fail(`thread ${options.thread} was not started by robin on this machine`)
-      return 1
-    }
-    if (bound.root !== root) {
-      fail(
-        `thread ${options.thread} serves ${bound.root}; run robin from there`
-      )
-      return 1
-    }
-    bridgeId = bound.bridgeId
-  }
-
-  let bridge: Bridge
-  try {
-    bridge = await Bridge.open(api.bridges(), {
-      client: "cli",
-      rootPath: root,
-      label: basename(root),
-      bridgeId,
-      credentialRejected: credential.rejected,
-      log: (message) => process.stderr.write(`robin: ${message}\n`),
-    })
-  } catch (cause) {
-    if (!(cause instanceof ApiError)) throw cause
-    if (cause.status === 401) fail(credential.rejected)
-    else if (cause.status === 404)
-      fail(`the bridge thread ${options.thread} was bound to no longer exists`)
-    else if (cause.status === 409)
-      fail(`another robin process is serving thread ${options.thread}`)
-    else throw cause
-    return 1
-  }
-  note(
-    `Bridge ${bridge.session.bridgeId}${bridge.reopened ? " (reopened)" : ""} serving ${root}`
-  )
 
   const creating = options.thread === undefined
   const threadId = options.thread ?? randomUUID()
-  await rememberThreadBridge(threadId, {
-    bridgeId: bridge.session.bridgeId,
-    root,
-  })
-  const threadUrl = api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`)
-  note(`Thread ${threadUrl}`)
-  const thread = api.coordinator(threadId)
-
-  let exitCode = 0
-  // 128 + SIGINT, as shells report an interrupted command, so `robin run … &&` stops.
-  const INTERRUPTED = 130
-  let closing = false
-  let interrupts = 0
-  let following = false
-
-  const shutdown = async (): Promise<void> => {
-    if (closing) return
-    closing = true
-    if (following) {
-      try {
-        await thread.stop()
-      } catch (cause) {
-        fail(`could not cancel the run and its workers: ${errorMessage(cause)}`)
-      }
-    }
-    await bridge.close()
-    process.exit(exitCode)
-  }
-
-  process.on("SIGINT", () => {
-    interrupts += 1
-    if (interrupts > 1) process.exit(INTERRUPTED)
-    exitCode = INTERRUPTED
-    note(
-      "\nStopping the run and its workers — press Ctrl-C again to exit immediately."
-    )
-    void shutdown()
-  })
-
-  bridge.start((error) => {
-    fail(errorMessage(error))
-    exitCode = 1
-    void shutdown()
-  })
-
-  const repo = await originRepo(root)
   // Every machine run names its thread type, a resumed one included.
-  const configurable: JsonObject = { thread_type: threadType }
-  // The bridge, and the repo it belongs to, are stamped on the thread when it
-  // is created; the server rejects them on any later run.
+  const configurable: JsonObject = {
+    thread_type: credential.machine ? "system" : "private",
+  }
+  // The repository is stamped on the thread when it is created; the server
+  // rejects it on any later run.
   if (creating) {
-    configurable["sandbox_bridge_id"] = bridge.session.bridgeId
+    const repo = await originRepo(process.cwd())
     if (repo !== null) configurable["repo"] = repoFullName(repo)
-    else configurable["repo_explicitly_none"] = true
+    else {
+      configurable["repo_explicitly_none"] = true
+      note("No GitHub origin here; the thread starts without a repository.")
+    }
   }
   if (options.model !== undefined) {
     configurable["agent_model_id"] = options.model
@@ -300,13 +187,34 @@ async function runCommand(options: RunOptions): Promise<number> {
       configurable["agent_effort"] = options.effort
   }
 
-  let outcome: RunOutcome | null = null
+  const threadUrl = api.dashboardUrl(`/agents/${encodeURIComponent(threadId)}`)
+  const thread = api.coordinator(threadId)
+
+  // 128 + SIGINT, as shells report an interrupted command, so `robin run … &&` stops.
+  const INTERRUPTED = 130
+  let interrupts = 0
+  let following = false
+
+  process.on("SIGINT", () => {
+    interrupts += 1
+    if (interrupts > 1 || !following) process.exit(INTERRUPTED)
+    note(
+      "\nStopping the run and its workers — press Ctrl-C again to exit immediately."
+    )
+    void thread
+      .stop()
+      .catch((cause: unknown) =>
+        fail(`could not cancel the run and its workers: ${errorMessage(cause)}`)
+      )
+      .finally(() => process.exit(INTERRUPTED))
+  })
+
+  let status: RunStatus
   try {
     following = true
-    // Minted here, so the answer is read from the messages after this one.
-    const promptId = randomUUID()
-    const runId = await api.startRun(threadId, configurable, prompt, promptId)
-    outcome = await followTask(thread, runId, promptId, {
+    const runId = await api.startRun(threadId, configurable, prompt)
+    out(threadUrl)
+    status = await followTask(thread, runId, {
       onRetry: (attempt, reason) =>
         note(
           `Lost the connection to the backend (${reason}); retrying, attempt ${attempt}`
@@ -319,37 +227,19 @@ async function runCommand(options: RunOptions): Promise<number> {
         ? credential.rejected
         : errorMessage(cause)
     )
-    exitCode = 1
+    return 1
   } finally {
     following = false
   }
 
-  if (interrupts > 0) {
-    // The run ended because Ctrl-C cancelled it, not on its own.
-    exitCode = INTERRUPTED
-  } else if (outcome?.status === "completed" && outcome.result) {
-    printResult(outcome.result)
-    exitCode = outcome.result.exitCode
-  } else if (outcome !== null) {
-    fail(
-      outcome.status === "completed"
-        ? `the agent finished without calling ${RESULT_TOOL}`
-        : `run ${outcome.status}; see ${threadUrl}`
-    )
-    exitCode = 1
-  }
-
-  if (!closing) {
-    closing = true
-    await bridge.close()
-  }
-  return exitCode
+  if (interrupts > 0) return INTERRUPTED
+  if (status !== "completed") fail(`run ${status}; see ${threadUrl}`)
+  return STATUS_EXIT[status]
 }
 
 const CLI_OPTIONS = {
   backend: { type: "string" },
   thread: { type: "string" },
-  visibility: { type: "string" },
   model: { type: "string" },
   effort: { type: "string" },
   help: { type: "boolean", short: "h" },
@@ -402,7 +292,6 @@ export async function main(argv: readonly string[]): Promise<number> {
     case "run":
       return await runCommand({
         thread: values.thread,
-        visibility: values.visibility,
         model: values.model,
         effort: values.effort,
         prompt: positionals.slice(1).join(" "),

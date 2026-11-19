@@ -44,20 +44,6 @@ export function recordAt(
   return isRecord(value) ? value : null
 }
 
-export function stringArrayAt(
-  source: Record<string, unknown> | null,
-  key: string
-): string[] | null {
-  const value = arrayAt(source, key)
-  if (value === null) return null
-  const out: string[] = []
-  for (const entry of value) {
-    if (typeof entry !== "string") return null
-    out.push(entry)
-  }
-  return out
-}
-
 export function errorCode(cause: unknown): string | null {
   return isRecord(cause) && typeof cause["code"] === "string"
     ? cause["code"]

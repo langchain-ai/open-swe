@@ -93,7 +93,7 @@ function open(relativePath: string, onOpenFile = vi.fn()) {
     <QueryClientProvider client={client}>
       <TooltipProvider>
         <FilesPanel
-          target={{ kind: "cloud", threadId: "t" }}
+          target={{ threadId: "t" }}
           relativePath={path}
           revealRequestId={revealRequestId}
           onOpenFile={onOpenFile}

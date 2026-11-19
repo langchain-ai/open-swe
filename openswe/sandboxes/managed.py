@@ -15,8 +15,6 @@ from collections.abc import Sequence
 from pydantic import BaseModel
 from runtime_api.connections import ConnectionRef
 
-from openswe.bridge.constants import HANDOFF_FROM_KEY
-from openswe.bridge.store import Bridge
 from openswe.config import ENV
 from openswe.github.app import PermissionMap
 from openswe.sandboxes.lifecycle import (
@@ -41,9 +39,6 @@ class ManagedSandbox(BaseModel):
     # The connection MDA fills the sandbox's GitHub proxy from, as it writes all of the sandbox's
     # proxy config; None where the backend writes it.
     github_proxy: ConnectionRef | None = None
-    # Whether preparing a turn may use GitHub in the sandbox: connecting to it carries over
-    # the checkout of a thread that moved, which fetches from GitHub.
-    prepare_uses_github: bool = True
     # Whether the run may prepare before the sandbox is open and report it afterwards
     # (``bind_sandbox``): preparing it reaches no sandbox, and the deployment allows it
     # (``MDA_BIND_SANDBOX_AFTER_PREPARE``).
@@ -64,19 +59,16 @@ class ManagedSandbox(BaseModel):
         New threads and MDA's own get MDA's sandbox, created from the replacement
         ``recreate_sandbox`` asked for if any. A thread the backend gave a sandbox before
         MDA owned them keeps it until it is gone, when this run starts in MDA's
-        instead; bridged threads run on the user's machine. A task worker shares its
+        instead. A task worker shares its
         coordinator's MDA sandbox once the backend has attached it there, which checks that
         it may. ``github_repositories`` and ``github_permissions`` narrow the run's
         GitHub token beyond its thread's own scope, as a review's do.
         ``prepare_reaches_sandbox`` says preparing a turn of the run's kind works in the
         sandbox, as a review's does; the thread says so too where files a Slack message
-        brought wait to be written there, or the checkout of a thread that moved to be
-        carried over, and a task worker's attaches to its coordinator's.
+        brought wait to be written there, and a task worker's attaches to its coordinator's.
         """
         raw = await get_sandbox_metadata(thread_id)
         metadata = ThreadMetadata.model_validate(raw)
-        if metadata.sandbox_id is not None and Bridge.bridge_id_of(metadata.sandbox_id):
-            return None
         # The metadata of the thread whose sandbox this is: a worker's coordinator's.
         sandbox_metadata = raw
         owner: str | None = None
@@ -95,7 +87,6 @@ class ManagedSandbox(BaseModel):
         config = await SandboxCreateConfig.for_thread(
             sandbox_metadata, thread_id=owner or thread_id
         )
-        carries_checkout = sandbox_metadata.get(HANDOFF_FROM_KEY) is not None
         return cls(
             create=await config.recreation_options()
             if isinstance(sandbox_metadata.get("sandbox_id"), str)
@@ -110,12 +101,8 @@ class ManagedSandbox(BaseModel):
                 if allow_github
                 else None
             ),
-            prepare_uses_github=carries_checkout,
             bind_after_prepare=not (
-                prepare_reaches_sandbox
-                or owner is not None
-                or carries_checkout
-                or slack_files_pending(raw)
+                prepare_reaches_sandbox or owner is not None or slack_files_pending(raw)
             )
             and ENV.MDA_BIND_SANDBOX_AFTER_PREPARE.get_bool(default=True),
         )

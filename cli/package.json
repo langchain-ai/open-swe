@@ -2,7 +2,7 @@
   "name": "open-swe-cli",
   "version": "0.1.0",
   "private": true,
-  "description": "Robin command-line client: runs a cloud agent against a local checkout",
+  "description": "Robin command-line client: starts a cloud thread and waits for it",
   "type": "module",
   "scripts": {
     "build": "bun run compile --outfile dist/robin && cp dist/robin dist/oswe",

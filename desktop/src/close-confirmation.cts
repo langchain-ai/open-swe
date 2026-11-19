@@ -23,7 +23,7 @@ export class CloseConfirmation {
           action === "quit" ? `Quit ${this.appName}?` : "Close this window?",
         detail:
           action === "quit"
-            ? "Quitting disconnects any running This Mac threads."
+            ? "Quitting stops Robin from asking to act on this Mac."
             : "You can reopen the window from the Dock.",
         buttons: ["Cancel", action === "quit" ? "Quit" : "Close Window"],
         defaultId: 0,

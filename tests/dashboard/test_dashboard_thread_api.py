@@ -19,7 +19,6 @@ from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.agent_api.connections import SENDER_USER_KEY
-from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, oauth, profiles
 from openswe.dashboard.settings import (
     Settings,
@@ -331,12 +330,10 @@ async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.parametrize("langsmith", [False, True])
-@pytest.mark.parametrize("local", [False, True])
 async def test_desktop_thread_keeps_authenticated_identity_on_resume(
     monkeypatch: pytest.MonkeyPatch,
     registry_db: None,
     langsmith: bool,
-    local: bool,
     langsmith_users,
 ) -> None:
     monkeypatch.setattr(thread_runs, "_requested_visibility", AsyncMock(return_value="public"))
@@ -346,23 +343,11 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
     subject = f"user:{uuid7()}" if langsmith else "octocat"
     if langsmith:
         langsmith_users.add(subject, user_id=UUID(subject.removeprefix("user:")))
-    bridge = await BridgeStore.register(
-        owner_id=subject if langsmith else "github:octocat",
-        hostname="laptop.local",
-        root_path="/Users/test/tasks",
-        label=None,
-        bridge_id=None,
-    )
-    assert bridge is not None
     command = {
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "Research this topic"}]},
-            "config": {
-                "configurable": {
-                    **({"sandbox_bridge_id": bridge.bridge_id} if local else {}),
-                }
-            },
+            "config": {"configurable": {}},
         },
     }
     first = await thread_runs._enrich_run_start_command(
@@ -383,11 +368,8 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
     assert metadata["owner_login"] == subject
     if langsmith:
         assert metadata["owner_user_id"] == subject.removeprefix("user:")
-    assert metadata["visibility"] == ("private" if local or langsmith else "public")
-    if local:
-        assert metadata["sandbox_id"] == bridge.sandbox_id
-    else:
-        assert metadata.get("sandbox_id") is None
+    assert metadata["visibility"] == ("private" if langsmith else "public")
+    assert metadata.get("sandbox_id") is None
     followup = {
         "method": "run.start",
         "params": {
@@ -442,38 +424,30 @@ async def test_enrich_run_start_command_keeps_explicit_repository(monkeypatch, r
     assert created_metadata["repo_name"] == "oss"
 
 
-async def test_a_thread_on_the_creators_machine_is_created_private(
-    monkeypatch, registry_db
+@pytest.mark.parametrize(
+    "configurable", [{"sandbox_bridge_id": "bridge-1"}, {"sandbox_target": "cloud"}]
+)
+async def test_an_old_desktop_asking_for_this_mac_is_told_it_is_gone(
+    monkeypatch, registry_db, configurable: dict[str, str]
 ) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
-    bridge = await BridgeStore.register(
-        owner_id="github:octocat",
-        hostname="laptop.local",
-        root_path="/Users/octocat/app",
-        label=None,
-        bridge_id=None,
-    )
-    assert bridge is not None
     command = {
         "method": "run.start",
         "params": {
             "input": {"messages": [{"type": "human", "content": "Fix the flaky test"}]},
-            "config": {
-                "configurable": {"thread_type": "workspace", "sandbox_bridge_id": bridge.bridge_id}
-            },
+            "config": {"configurable": {"thread_type": "workspace", **configurable}},
         },
     }
 
-    await thread_runs._enrich_run_start_command(
-        "new-tid", "octocat", command, metadata={}, creating=True
-    )
+    with pytest.raises(HTTPException) as refused:
+        await thread_runs._enrich_run_start_command(
+            "new-tid", "octocat", command, metadata={}, creating=True
+        )
 
-    created_metadata = created["metadata"]
-    assert isinstance(created_metadata, dict)
-    assert created_metadata["sandbox_id"] == bridge.sandbox_id
-    assert created_metadata["visibility"] == "private"
+    assert refused.value.status_code == 410
+    assert "metadata" not in created
 
 
 async def test_enrich_run_start_command_resolves_global_default_model(

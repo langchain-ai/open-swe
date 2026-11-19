@@ -7,7 +7,6 @@ import pytest
 from runtime_api.loop import FIRST_OUTPUT_AT_KEY, FIRST_TEXT_AT_KEY
 
 from openswe.dashboard import ttft
-from openswe.dashboard.ttft import DashboardSandbox
 from openswe.slack import run_timing
 from openswe.slack.run_timing import SlackRunTimeline
 
@@ -156,7 +155,7 @@ async def test_run_completion_times_the_slack_message_it_started(
                 "open_swe_slack_thread_first_generation": 3.0,
                 "open_swe_slack_thread_first_reply": 5.0,
             },
-            {"source": "slack", "sandbox": DashboardSandbox.CLOUD.value},
+            {"source": "slack"},
         )
     ]
     (timing,) = [r for r in caplog.records if r.getMessage() == "Slack run timing"]
@@ -295,11 +294,9 @@ async def test_slack_latencies_go_to_their_own_histograms(monkeypatch: pytest.Mo
     timeline = SlackRunTimeline(POSTED_MS, run_id="run-1")
     timeline.marks = {"first_reply": POSTED_MS + 2_500}
 
-    timeline.record(thread_id="thread-1", sandbox=DashboardSandbox.BRIDGE)
+    timeline.record(thread_id="thread-1")
 
-    assert recorded == [
-        ("lg_api_open_swe_slack_thread_first_reply", 2.5, {"source": "slack", "sandbox": "bridge"})
-    ]
+    assert recorded == [("lg_api_open_swe_slack_thread_first_reply", 2.5, {"source": "slack"})]
 
 
 def test_dashboard_marks_keep_the_earliest_across_reads() -> None:
@@ -428,7 +425,6 @@ async def test_run_completion_adds_the_runs_stages_to_the_messages_trace_and_clo
             "thread_id": "thread-1",
             "invocation_id": "inv-1",
             "agent_run_id": "run-1",
-            "sandbox_kind": "cloud",
         }
         for span in client.runs
     )

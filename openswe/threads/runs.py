@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 
 from fastapi import HTTPException
 from langchain_core.messages.content import ImageContentBlock, create_image_block
@@ -18,7 +18,6 @@ from runtime_api.provenance import Provenance
 
 from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.bridge.local_access_policy import LocalAccess
-from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
 from openswe.config import ENV
 from openswe.dashboard.options import (
     DEPRECATED_MODEL_IDS,
@@ -78,10 +77,9 @@ from openswe.threads.access import (
 )
 from openswe.threads.creation import create_thread
 from openswe.threads.identity import ThreadIdentity
-from openswe.threads.moves import SANDBOX_HANDOFF_SYSTEM, SANDBOX_MOVED_KEY, SandboxMove
 from openswe.threads.principals import STARTED_BY_ID, STARTED_BY_NAME, Principal, ThreadType
 from openswe.threads.start_request import SentRun
-from openswe.threads.store import THREADS
+from openswe.threads.store import MAC_THREAD, THREADS
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
     TRANSCRIPT_VERSION,
@@ -152,6 +150,8 @@ _PULL_REQUEST_THREAD_SYSTEM: SystemIdentity = {
     "display_name": "Pull request thread",
     "platform": "open-swe",
 }
+# Keys asking to run a thread on its owner's Mac, or to move it to or from one: refused.
+_MAC_THREAD_KEYS: Final = ("sandbox_bridge_id", "sandbox_target")
 
 
 class _LinkedPullRequest(BaseModel):
@@ -819,28 +819,6 @@ def _transcript_attachments(
     return metadata, tuple(pending)
 
 
-async def _resolve_sandbox_bridge(requested: object, *, owner_id: str) -> Bridge | None:
-    """The live bridge a thread asked to run on, validated before anything is stamped."""
-    if requested is None:
-        return None
-    if not isinstance(requested, str) or not requested.strip():
-        raise HTTPException(422, "sandbox_bridge_id must be a non-empty string")
-    return await BridgeStore.require_open(requested.strip(), owner_id=owner_id)
-
-
-async def _bind_thread_to_bridge(
-    thread_id: str, bridge: Bridge, metadata: dict[str, Any]
-) -> dict[str, Any]:
-    await LocalAccess.allow_binding(bridge, metadata)
-    binding = SandboxBridgeBinding.of(bridge).dump()
-    await THREADS.update(thread_id, binding)
-    logger.info(
-        "Bound a thread to a sandbox bridge",
-        extra={"bridge_id": bridge.bridge_id, "bridge_thread": thread_id},
-    )
-    return {**metadata, **binding}
-
-
 def requested_thread_type(configurable: Mapping[str, Any]) -> ThreadType | None:
     """The kind of thread a creating command asks for, if it names one."""
     requested = configurable.get("thread_type")
@@ -944,18 +922,6 @@ async def _attributed_run_messages(
     notices: list[tuple[SystemIdentity, str]] = []
     if metadata.get("source") == "slack" and relayed_from is None:
         notices.append((_DASHBOARD_HANDOFF_SYSTEM, DASHBOARD_HANDOFF_BODY))
-    moved = metadata.get(SANDBOX_MOVED_KEY)
-    if isinstance(moved, Mapping):
-        notices.append(
-            (
-                SANDBOX_HANDOFF_SYSTEM,
-                prompt(
-                    "runs/sandbox-handoff",
-                    to_cloud=moved.get("to_cloud") is True,
-                    carried=moved.get("carried") is True,
-                ),
-            )
-        )
     pr_url = _LinkedPullRequest.model_validate(metadata).pr_url
     if pr_url and history.read and not history.message_ids:
         notices.append(
@@ -1072,29 +1038,8 @@ async def _enrich_run_start_command(
             else:
                 model_selection = "auto" if creating else metadata.get("model_selection")
         offloading = offload_requested(params)
-        sandbox_bridge = await _resolve_sandbox_bridge(
-            client_configurable.get("sandbox_bridge_id"),
-            owner_id=Principal.of_login(login, email).sender_id,
-        )
-        move = (
-            None
-            if creating
-            else await SandboxMove.requested(
-                thread_id,
-                metadata,
-                login=login,
-                bridge=sandbox_bridge,
-                target=client_configurable.get("sandbox_target"),
-            )
-        )
-        if move is not None:
-            # A client that still moves a thread with its next message gets the same
-            # move, finished before the run starts.
-            try:
-                await move.carry_out()
-            except Exception as exc:
-                raise HTTPException(502, f"could not move this thread: {exc}") from exc
-            metadata = {**metadata, **move.update}
+        if any(client_configurable.get(key) is not None for key in _MAC_THREAD_KEYS):
+            raise HTTPException(410, MAC_THREAD)
         content = _command_message_content(params)
         replies = _command_message_replies(params)
         relayed_from = _relayed_from(params)
@@ -1142,9 +1087,6 @@ async def _enrich_run_start_command(
             # configurable; it never reaches the run config (which is rebuilt from
             # the stamped metadata below).
             visibility = await _requested_visibility(client_configurable, login=login)
-            if sandbox_bridge is not None:
-                # Whoever can prompt a thread runs commands on its machine.
-                visibility = "private"
             identity = ThreadIdentity(login)
             if identity.user_id is not None:
                 visibility = "private"
@@ -1160,9 +1102,6 @@ async def _enrich_run_start_command(
                 )
             except ProjectError as exc:
                 raise HTTPException(exc.status_code, str(exc)) from exc
-            if sandbox_bridge is not None:
-                # Refuse a This Mac thread before its record exists.
-                await LocalAccess.allow_binding(sandbox_bridge, {})
             thread = await create_dashboard_thread_record(
                 thread_id,
                 login=login,
@@ -1181,8 +1120,6 @@ async def _enrich_run_start_command(
                 profile=await profile_read or {},
             )
             metadata = thread_metadata(thread)
-            if sandbox_bridge is not None:
-                metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
             run_model, run_effort = normalize_model_choice(
                 metadata.get("resolved_model"), metadata.get("resolved_effort")
             )
@@ -1259,8 +1196,6 @@ async def _enrich_run_start_command(
         "model_selection": model_selection,
         **await participant_metadata(metadata, login=login, email=email),
         "injected_dynamic_context_hashes": sorted(injected),
-        # The agent is told about a move once, with the message after it.
-        **({SANDBOX_MOVED_KEY: None} if metadata.get(SANDBOX_MOVED_KEY) else {}),
     }
     if command_images and run_model and run_effort:
         overrides["agent_model_id"] = run_model
@@ -1959,15 +1894,10 @@ async def _enrich_system_run_start_command(
     if _dashboard_images_from_content(content) or DashboardImageBody.files_in(content):
         raise HTTPException(422, "machine principals cannot attach images or files")
 
-    if not creating and client_configurable.get("sandbox_bridge_id") is not None:
-        raise HTTPException(409, "sandbox_bridge_id is only accepted when creating a thread")
-    sandbox_bridge = await _resolve_sandbox_bridge(
-        client_configurable.get("sandbox_bridge_id"), owner_id=principal.sender_id
-    )
+    if any(client_configurable.get(key) is not None for key in _MAC_THREAD_KEYS):
+        raise HTTPException(410, MAC_THREAD)
     repo_config = await _system_repo_config(client_configurable, principal)
     if creating:
-        if sandbox_bridge is not None:
-            await LocalAccess.allow_binding(sandbox_bridge, {})
         title = client_configurable.get("title")
         metadata = thread_metadata(
             await _create_system_thread_record(
@@ -1978,8 +1908,6 @@ async def _enrich_system_run_start_command(
                 repo_config=repo_config,
             )
         )
-        if sandbox_bridge is not None:
-            metadata = await _bind_thread_to_bridge(thread_id, sandbox_bridge, metadata)
     else:
         await principal.assert_can_post(metadata)
 

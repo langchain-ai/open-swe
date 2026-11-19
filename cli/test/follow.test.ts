@@ -2,24 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import { ApiClient, ApiError, type CoordinatorThread } from "../src/api.ts"
 import { CredentialError, SessionCredential } from "../src/credentials.ts"
-import { followTask, parseCliResult } from "../src/follow.ts"
-
-describe("parseCliResult", () => {
-  test("reads stdout and the exit code", () => {
-    expect(parseCliResult({ stdout: "ok\n", exit_code: 3 })).toEqual({
-      stdout: "ok\n",
-      exitCode: 3,
-      unchanged: false,
-    })
-  })
-
-  test("rejects an exit code a process cannot return", () => {
-    expect(parseCliResult({ stdout: "", exit_code: 256 })).toBeNull()
-    expect(parseCliResult({ stdout: "", exit_code: -1 })).toBeNull()
-    expect(parseCliResult({ stdout: "", exit_code: 1.5 })).toBeNull()
-    expect(parseCliResult({ exit_code: 0 })).toBeNull()
-  })
-})
+import { followTask } from "../src/follow.ts"
 
 /** A thread whose activity reads all fail with `cause`; everything else is never reached. */
 function failingThread(cause: () => Error): {
@@ -36,7 +19,7 @@ function failingThread(cause: () => Error): {
         reads += 1
         throw cause()
       },
-      state: unreachable,
+      waiting: unreachable,
       runStatus: unreachable,
       stop: async () => undefined,
     },
@@ -51,7 +34,7 @@ describe("followTask through backend failures", () => {
     )
     const waits: number[] = []
 
-    const following = followTask(thread, "run-1", "prompt-1", {
+    const following = followTask(thread, "run-1", {
       sleep: async (ms) => {
         waits.push(ms)
       },
@@ -76,19 +59,15 @@ describe("followTask through backend failures", () => {
           if (failure !== undefined) throw failure
           return { runs: [], settled: true, workers: [] }
         },
-        state: async () => ({
-          messages: [{ id: "prompt-1", type: "human" }],
-          waiting: false,
-        }),
+        waiting: async () => false,
         runStatus: async () => "success",
         stop: async () => undefined,
       },
       "run-1",
-      "prompt-1",
       { sleep: async () => undefined }
     )
 
-    expect(outcome).toEqual({ status: "completed", result: null })
+    expect(outcome).toBe("completed")
     expect(reads).toBe(3)
   })
 
@@ -105,7 +84,7 @@ describe("followTask through backend failures", () => {
   ])("does not retry %s", async (_, cause) => {
     const { thread, reads } = failingThread(cause)
 
-    const following = followTask(thread, "run-1", "prompt-1", {
+    const following = followTask(thread, "run-1", {
       sleep: async () => undefined,
     })
 

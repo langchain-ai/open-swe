@@ -593,9 +593,8 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
         assert saved.delivered_at is not None
 
 
-@pytest.mark.parametrize("enabled", [False, True])
 async def test_task_context_is_checkpointed_once_without_changing_request_prefix(
-    monkeypatch: pytest.MonkeyPatch, enabled: bool
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from openswe.middleware import task_coordination
 
@@ -610,7 +609,7 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
     )
     lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(store.TaskMembership, "context_for_thread", lookup)
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, None)
     state: AgentState = {"messages": [HumanMessage(content="Repair login", id="request")]}
 
     # The role and the task's context arrive as messages, so the system prompt stays the same.
@@ -646,7 +645,7 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
         ],
     )
     assert await middleware.abefore_model(state, Runtime()) is None
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, enabled, None)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, None)
     assert await middleware.abefore_model(state, Runtime()) is None
 
 
@@ -661,7 +660,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
         store.TaskMembership(thread_id=_COORDINATOR, task_id=task.id, role="coordinator"),
     )
     state: SummarizationState = {"messages": [HumanMessage(content="Repair login")]}
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
+    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, context)
     initial = await middleware.abefore_model(state, Runtime())
     assert initial is not None
     state["messages"] = add_messages(state["messages"], initial["messages"])
@@ -694,7 +693,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
         assert visible[:-2] == visible_before
         assert [message.content for message in visible[-2:]] == [m.content for m in told]
         assert {message.id for message in visible[-2:]}.isdisjoint(m.id for m in told)
-        middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, False, context)
+        middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, context)
         assert await middleware.abefore_model(state, Runtime()) is None
 
 

@@ -159,7 +159,7 @@ class ThreadBackgroundWork:
         ):
             return None
         try:
-            return await connect_sandbox(sandbox_id, thread_id=self._thread_id)
+            return await connect_sandbox(sandbox_id)
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "Could not connect to sandbox for background work", extra={"sandbox": sandbox_id}

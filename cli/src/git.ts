@@ -20,10 +20,6 @@ async function git(
   return code === 0 ? output.trim() : null
 }
 
-export async function isGitRepository(cwd: string): Promise<boolean> {
-  return (await git(cwd, ["rev-parse", "--git-dir"])) !== null
-}
-
 export async function originRepo(cwd: string): Promise<GitHubRepo | null> {
   const remote = await git(cwd, ["remote", "get-url", "origin"])
   return remote === null ? null : parseGitHubRemote(remote)

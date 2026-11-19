@@ -23,7 +23,6 @@ export {
   OUTPUT_KEEP_BYTES,
   OUTPUT_LIMIT_BYTES,
   OutputWindow,
-  type DispatchOutcome,
   type ExecuteResult,
 } from "./executor"
 export {

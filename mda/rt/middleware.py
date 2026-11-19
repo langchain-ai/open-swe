@@ -112,7 +112,7 @@ from rt.model_calls import call_with_fallback
 from rt.models import build_model
 from rt.offload import OFFLOADING_KEY, RequestedOffload
 from rt.outbox import OUTBOX_KEY, carry
-from rt.remote_files import RemoteFiles, RunArtifacts
+from rt.remote_files import RemoteFiles
 from rt.sandbox_binding import SandboxBinding
 from rt.sandbox_setup import sandbox_setup
 from rt.tools import STATE_KEY, run_id, tool_report
@@ -399,17 +399,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @property
     def _binds_later(self) -> bool:
-        """Whether the run prepares while its sandbox is opened, and reports it afterwards.
-
-        Never where preparing may use GitHub in the sandbox, which needs it open first.
-        """
+        """Whether the run prepares while its sandbox is opened, and reports it afterwards."""
         spec = self._backend.run.planned.sandbox
-        return (
-            self._open_sandbox is not None
-            and spec is not None
-            and spec.bind_after_prepare
-            and not spec.prepare_uses_github
-        )
+        return self._open_sandbox is not None and spec is not None and spec.bind_after_prepare
 
     async def _before_agent(
         self, state: RunState, runtime: Runtime
@@ -554,14 +546,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     async def _offload(self, state: RunState, runtime: Runtime) -> dict[str, object]:
         """Summarize the conversation now, as the run was asked to, and end the run."""
-        # Where MDA's own summarization keeps the history: the sandbox, or else the run's
-        # artifacts root on the backend, never the root of a person's machine.
+        # Where MDA's own summarization keeps the history: the sandbox, or else the backend.
         files = (
             getattr(runtime, "backend", None)
             if self._in_sandbox
-            else RunArtifacts(
-                self._backend, run_id, lambda: self._backend.run.catalog.files.artifacts_root
-            )
+            else RemoteFiles(self._backend, run_id)
         )
         if not isinstance(files, BackendProtocol):
             raise BackendCallError("The run has no files to offload the conversation to")

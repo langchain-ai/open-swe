@@ -28,7 +28,6 @@ from langgraph_sdk import get_client
 from runtime_api import sandbox_setup
 from runtime_api.catalog import (
     SEARCH_TOOLS,
-    CliResultRules,
     InboxSpec,
     LoopRules,
     ReplyRules,
@@ -61,17 +60,12 @@ from runtime_api.models import DEFAULT_LLM_MAX_TOKENS, make_model, provider_mode
 
 from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings
 from openswe.analytics.usage import record_agent_invocation_usage
-from openswe.bridge.cli_result import cli_result
-from openswe.bridge.constants import LOCAL_ARTIFACTS_DIR, BridgeClient
 from openswe.bridge.local_access import (
     local_execute,
     local_import_file,
     local_read_file,
     local_write_file,
 )
-from openswe.bridge.store import Bridge
-from openswe.bridge.worktree_branch import schedule_worktree_branch_rename
-from openswe.bridge.worktree_handoff import worktree_handoff
 from openswe.client_tools import CLIENT_OWNED_SERVER_TOOLS
 from openswe.credential_scope import private_credential_login
 from openswe.dashboard.agent_overrides import (
@@ -108,7 +102,6 @@ from openswe.middleware import (
 from openswe.middleware.model_selection import ModelSelectionState, RoutingMode, SelectedRoute
 from openswe.middleware.plugin_chat import PluginChatTools
 from openswe.middleware.prepare_run import PrepareRunState
-from openswe.middleware.require_cli_result import cli_result_nudge
 from openswe.middleware.require_user_reply import (
     CARD_TOOLS,
     REPLY_GUARD,
@@ -154,6 +147,7 @@ from openswe.sandboxes.state import (
     get_or_create_sandbox_backend_proxy,
     get_sandbox_metadata,
 )
+from openswe.sandboxes.this_mac import MOVED_OFF_MAC_KEY
 from openswe.sandboxes.tool_runtime import (
     FILESYSTEM_TOOL_NAMES,
     ModelChoice,
@@ -785,8 +779,6 @@ AGENT_TOOLS: Final = (
     note_on_diff,
     add_review_comment,
     *ADMIN_TOOLS,
-    cli_result,
-    worktree_handoff,
     local_read_file,
     local_write_file,
     local_execute,
@@ -903,14 +895,10 @@ class ThreadFiles:
     keeps so they can be read without the sandbox.
     """
 
-    def __init__(
-        self, thread_id: str, cfg: RunConfig, *, skills: RunSkillStores, bridged: bool
-    ) -> None:
-        # A bridged machine's run keeps its artifacts apart from the person's own files.
-        self.artifacts_root = f"{LOCAL_ARTIFACTS_DIR}/{thread_id}/" if bridged else "/"
+    def __init__(self, thread_id: str, cfg: RunConfig, *, skills: RunSkillStores) -> None:
         self.routes: dict[str, BackendProtocol] = {
             **skills.routes,
-            f"{self.artifacts_root}blobs/": StoreBackend(
+            "/blobs/": StoreBackend(
                 store=ThreadBlobs(thread_id),
                 namespace=lambda _runtime: blob_namespace(thread_id),
             ),
@@ -918,9 +906,7 @@ class ThreadFiles:
         cached = get_cached_sandbox_backend(
             thread_id, reconnect=partial(_reconnect_agent_sandbox, thread_id)
         )
-        self.backend = CompositeBackend(
-            default=cached, routes=self.routes, artifacts_root=self.artifacts_root
-        )
+        self.backend = CompositeBackend(default=cached, routes=self.routes)
 
     @classmethod
     async def for_run(cls, config: RunnableConfig) -> Self:
@@ -928,33 +914,7 @@ class ThreadFiles:
         cfg = RunConfig.from_config(config)
         if cfg.thread_id is None:
             raise ValueError("An agent run needs a thread")
-        return cls(
-            cfg.thread_id,
-            cfg,
-            skills=await RunSkillStores.for_run(config),
-            bridged=await _bridge_client(cfg.thread_id) is not None,
-        )
-
-
-async def _bridge_client(thread_id: str | None) -> BridgeClient | None:
-    """The app serving this thread's bridge to the user's machine, if it has one."""
-    if not thread_id:
-        return None
-    try:
-        thread = await read_thread(thread_id)
-    except Exception:
-        logger.warning(
-            "Could not read the thread's sandbox; treating it as hosted",
-            extra={"agent_thread_id": thread_id},
-            exc_info=True,
-        )
-        return None
-    metadata = thread_metadata(thread)
-    sandbox_id = metadata.get("sandbox_id")
-    if not isinstance(sandbox_id, str) or Bridge.bridge_id_of(sandbox_id) is None:
-        return None
-    # Bound before bridges recorded their client, which only the CLI served then.
-    return "desktop" if metadata.get("sandbox_bridge_client") == "desktop" else "cli"
+        return cls(cfg.thread_id, cfg, skills=await RunSkillStores.for_run(config))
 
 
 async def _mcp_tools_for(credential_login: str | None) -> MCPTools:
@@ -984,7 +944,6 @@ _NOT_FROM_CODE = frozenset({"task"}) | frozenset(
     {
         "slack_reply",
         "slack_no_reply_needed",
-        "cli_result",
         "add_managed_tools_server",
         "connect_managed_tools",
         "switch_to_performance_model",
@@ -1044,7 +1003,6 @@ _RUNTIME_TOOLS = frozenset(
         "fetch_url",
         "http_request",
         "slack_no_reply_needed",
-        "cli_result",
         "record_human_input",
         "note_on_diff",
         "propose_review_comment",
@@ -1100,14 +1058,6 @@ async def _cached_profile(profile_login: str | None):
     return await ttl_cache.cached(
         PROFILES.cache_key(profile_login), 30, lambda: load_profile(profile_login)
     )
-
-
-def _sandbox_file_downloads_enabled(*, bridged: bool) -> bool:
-    """Return whether signed sandbox file downloads are available for this run.
-
-    They are served by the LangSmith sandbox itself, which a bridged thread does not have.
-    """
-    return not bridged
 
 
 def _initial_reply_surface(cfg: RunConfig) -> ReplySurface:
@@ -1171,7 +1121,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._thread_id = cfg.thread_id
         self._sandbox_id = sandbox_id
         self._sandbox_pending = sandbox_pending
-        self._bridge_client = turn.bridge_client
         self._saved_requested_model = turn.saved_requested_model
         self._requested_models = (
             available_requested_models(fable_enabled=turn.fable_enabled)
@@ -1505,7 +1454,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             self._sandbox_id is not None and not slack_files_pending(bound)
         ):
             triggering_user_identity = await triggering_user_identity_task
-            work_dir, bridged = sandbox_setup.WORK_DIR, False
+            work_dir = sandbox_setup.WORK_DIR
         else:
             triggering_user_identity, sandbox_backend = await self._attach_sandbox(
                 triggering_user_identity_task, bound
@@ -1518,14 +1467,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 await upload_files(self._thread_id, bound, sandbox_backend)
             async with aphase(self._thread_id, "prepare.work_dir"):
                 work_dir = await resolve_sandbox_work_dir(sandbox_backend)
-            bridged = Bridge.bridge_id_of(sandbox_backend.id) is not None
-            if bridged and self._bridge_client == "desktop":
-                schedule_worktree_branch_rename(
-                    thread_id=self._thread_id,
-                    backend=sandbox_backend,
-                    messages=state.get("messages") or [],
-                    model=self._title_model,
-                )
         del github_token
         if stale_execution := take_stale_boot(self._thread_id):
             await StaleExecutionReporter.report(self._thread_id, stale_execution)
@@ -1578,7 +1519,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         defaults = await defaults_task
         turn = TurnContext(
             working_dir=work_dir,
-            working_folder=cfg.repo_explicitly_none is True,
             source="background_task" if cfg.background_task_completion else self._source,
             slack_context=cfg.slack_context,
             automation_slack_reply=cfg.source == "schedule"
@@ -1590,10 +1530,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             or defaults.get("slack_follow_up_suggestions") is True,
             implementation_walkthrough_enabled=defaults.get("implementation_walkthrough_enabled")
             is True,
-            sandbox_file_downloads=_sandbox_file_downloads_enabled(bridged=bridged),
-            local_checkout=bridged,
-            local_access=bool(cfg.local_access_bridge_id) and not bridged,
-            local_checkout_client=self._bridge_client or "cli",
+            local_access=bool(cfg.local_access_bridge_id),
+            moved_off_mac=bound.get(MOVED_OFF_MAC_KEY) is True,
             tool_catalog_note=self._tool_catalog_note,
             recent_threads=await recent_threads,
         )
@@ -1807,13 +1745,11 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         profile_login,
         (credential_login, _),
         task_coordination,
-        bridge_client,
         (thread_settings, settings_changed),
     ) = await asyncio.gather(
         resolve_github_login(as_json_object(config)),
         credential_scope,
         TaskCoordinationMiddleware.for_thread(thread_id),
-        _timed(thread_id, "factory.bridged_thread", _bridge_client(thread_id)),
         _timed(thread_id, "factory.thread_settings", _thread_settings(thread_id)),
     )
 
@@ -2042,8 +1978,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     configurable["resolved_agent_model_id"] = model_id
     configurable["resolved_agent_effort"] = profile_effort
 
-    cli_result_required = bridge_client == "cli"
-    sandbox_file_downloads = _sandbox_file_downloads_enabled(bridged=bridge_client is not None)
     mcp_tools = await mcp_tools_task
     if cfg.source == "incidents_agent":
         # Status-page updates publish to customers; a kickoff run only researches.
@@ -2068,8 +2002,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     )
     withheld = [
         *(() if recovery_thread else MERGE_QUEUE_RECOVERY_TOOLS),
-        *(() if task_coordination else (task_status, message_task_thread, control_worker)),
-        *((start_thread,) if task_coordination and task_coordination.is_worker else ()),
+        *((start_thread,) if task_coordination.is_worker else ()),
         *(
             ()
             if credential_login and managed_tools_configured()
@@ -2077,19 +2010,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         ),
         *(
             ()
-            if sandbox_file_downloads
-            else (output_iframe, create_sandbox_file_download_url, expose_port)
-        ),
-        *(() if cli_result_required else (cli_result,)),
-        *(() if bridge_client == "desktop" else (worktree_handoff,)),
-        *(
-            ()
             if cfg.local_access_bridge_id
-            and not bridge_client
-            and (
-                settings.get("cloud_first_desktop_enabled") is True
-                or sender_preferences.experimental_cloud_first_desktop
-            )
             else (local_read_file, local_write_file, local_execute, local_import_file)
         ),
         *(() if _writes_database_rows() else (execute_database_sql, write_database_rows)),
@@ -2156,7 +2077,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     skill_stores = RunSkillStores(credential_login)
-    files = ThreadFiles(thread_id, cfg, skills=skill_stores, bridged=bridge_client is not None)
+    files = ThreadFiles(thread_id, cfg, skills=skill_stores)
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
         if (adaptive_model_routing or source == "slack")
@@ -2209,10 +2130,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         offers_requested_models=requested_models is not None,
         fable_enabled=fable_enabled,
         saved_requested_model=thread_settings.get("requested_model"),
-        bridge_client=bridge_client,
-        coordinator_thread_id=task_coordination.coordinator_thread_id
-        if task_coordination
-        else None,
+        coordinator_thread_id=task_coordination.coordinator_thread_id,
         tool_discovery_failures=list(mcp_tools.failures) if isinstance(mcp_tools, MCPTools) else [],
         connectable_managed_services=(
             list(mcp_tools.connectable) if isinstance(mcp_tools, MCPTools) else []
@@ -2232,10 +2150,9 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(page_tools.tools if page_tools else []),
     ]
     surface.model_call_limit = MODEL_CALL_RECURSION_LIMIT
-    surface.delegates = task_coordination is not None and task_coordination.can_delegate
+    surface.delegates = task_coordination.can_delegate
     reply_tool = _registered_tool_name(slack_reply)
     no_reply_tool = _registered_tool_name(slack_no_reply_needed)
-    cli_result_tool = _registered_tool_name(cli_result)
     surface.loop = LoopRules(
         hidden_tools=sorted(excluded_tools),
         routing=RoutingRules(
@@ -2256,11 +2173,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             nudges=reply_nudge(reply_tool, no_reply_tool),
             nudge_sender=REPLY_GUARD["id"],
         ),
-        cli_result=CliResultRules(tool=cli_result_tool, nudges=cli_result_nudge(cli_result_tool))
-        if cli_result_required
-        else None,
-        task_context=task_coordination.task_context() if task_coordination else None,
-        task_coordination=task_coordination is not None,
+        task_context=task_coordination.task_context(),
+        task_coordination=True,
         client_tools=client_tools is not None,
         client_prompt="\n\n".join(
             part
@@ -2279,7 +2193,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         model_id=model_id,
         image_fallback=vision_model is not None,
     )
-    surface.artifacts_root = files.artifacts_root
     surface.file_checks = ("image_reads", "agents_md")
     surface.models = SurfaceModels(
         main=ModelChoice(model_id, dict(model_kwargs)),

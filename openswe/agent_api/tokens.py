@@ -24,7 +24,6 @@ from pydantic import (
     ValidationError,
 )
 
-from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
 
 _ISSUER: Final = "open-swe"
@@ -74,8 +73,6 @@ class AgentTurnSettings(BaseModel):
     offers_requested_models: bool = False
     fable_enabled: bool = False
     saved_requested_model: str | None = None
-    # The client of a thread bridged to a person's machine.
-    bridge_client: BridgeClient | None = None
     # Why managed tool discovery failed while planning, which the prompt says.
     tool_discovery_failures: list[str] = []
     # Managed tools services a private thread's owner has yet to connect, which the prompt names.

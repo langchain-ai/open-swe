@@ -293,7 +293,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "personal_kitchen_channel_id": "",
                 "experimental_classify": False,
                 "experimental_force_code_mode": False,
-                "experimental_cloud_first_desktop": True,
             },
             "preferences": {
                 "default_visibility": "private",

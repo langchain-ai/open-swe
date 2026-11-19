@@ -255,13 +255,8 @@ class LocalAccessBridge {
       bridgeId: null,
       credentialRejected: "Sign in again to offer local access.",
       log: this.options.log,
-      handlers: {
-        local_action: (params) => this.enqueue(params),
-        execute: () => this.refuse(),
-        upload_files: () => this.refuse(),
-        download_files: () => this.refuse(),
-        worktree_handoff: () => this.refuse(),
-      },
+      // Any other method is refused: this bridge runs only individually approved actions.
+      handlers: { local_action: (params) => this.enqueue(params) },
     });
     if (this.closed) {
       await bridge.close();
@@ -275,10 +270,6 @@ class LocalAccessBridge {
       for (const executor of this.executors) executor.stopAll();
     });
     return bridge.session.bridgeId;
-  }
-
-  private async refuse(): Promise<JsonObject> {
-    throw new Error("Only individually approved local actions are supported");
   }
 
   private async enqueue(params: Record<string, unknown>): Promise<JsonObject> {

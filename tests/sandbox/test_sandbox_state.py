@@ -42,7 +42,7 @@ async def test_sandbox_proxy_reconnects_from_metadata_once(monkeypatch: pytest.M
         assert requested_thread_id == thread_id
         return "sandbox-1"
 
-    async def connect_sandbox(sandbox_id: str, *, thread_id: str | None = None):
+    async def connect_sandbox(sandbox_id: str):
         created.append(sandbox_id)
         await asyncio.sleep(0)
         return _FakeSandboxBackend()

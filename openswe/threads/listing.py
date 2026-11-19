@@ -473,7 +473,6 @@ async def _summarize_thread(
         thread,
         latest_run_status=latest_run_status,
         latest_run_id=latest_run_id,
-        bridge_status=False,
         viewer_login=viewer_login,
         read_states=read_states,
         owner_ids=owner_ids,

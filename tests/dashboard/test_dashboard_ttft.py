@@ -81,8 +81,8 @@ class _Recorded:
     def __init__(
         self, monkeypatch: pytest.MonkeyPatch, *, started_run_id: str | None = "run-1"
     ) -> None:
-        self.histograms: list[tuple[dict[str, float], ttft.DashboardSandbox]] = []
-        thread: dict[str, object] = {"sandbox_id": "bridge:mac-1"}
+        self.histograms: list[dict[str, float]] = []
+        thread: dict[str, object] = {"sandbox_id": "sbx-1"}
         self.thread = thread
         if started_run_id is not None:
             # An older send's run, this send's, and a newer send's that started before
@@ -93,12 +93,8 @@ class _Recorded:
                 str(SENT_AT + 60_000): "run-newer",
             }
 
-        def record(
-            timeline: ttft.DashboardRunTimeline,
-            seconds: dict[str, float],
-            sandbox: ttft.DashboardSandbox,
-        ) -> None:
-            self.histograms.append((dict(seconds), sandbox))
+        def record(timeline: ttft.DashboardRunTimeline, seconds: dict[str, float]) -> None:
+            self.histograms.append(dict(seconds))
 
         async def metadata(*_: object) -> dict[str, object]:
             return thread
@@ -257,13 +253,10 @@ async def test_run_completion_times_the_send_from_its_replies_and_closes_its_tra
     with caplog.at_level(logging.INFO, logger=ttft.__name__):
         await ttft.DashboardRunTimeline.settle(run, failed=False)
 
-    assert recorded.histograms == [
-        ({"first_generation": 9.0, "ttft": 30.0}, ttft.DashboardSandbox.BRIDGE)
-    ]
+    assert recorded.histograms == [{"first_generation": 9.0, "ttft": 30.0}]
     (timing,) = [r for r in caplog.records if r.getMessage() == "Dashboard run timing"]
     assert (timing.first_generation_ms, timing.ttft_ms) == (9_000, 30_000)  # type: ignore[attr-defined]
     assert timing.dashboard_client == "web"  # type: ignore[attr-defined]
-    assert timing.dashboard_sandbox == "bridge"  # type: ignore[attr-defined]
 
     trace_id = "0194a9b2-0000-7000-8000-000000000001"
     # ``commands`` is the request's own span, traced as it ran.
@@ -279,14 +272,13 @@ async def test_run_completion_times_the_send_from_its_replies_and_closes_its_tra
         str(span["dotted_order"]).startswith(f"20251231T235959700000Z{trace_id}.")
         for span in langsmith.runs
     )
-    # Each stage charts by client and sandbox on its own, without its root.
+    # Each stage charts by client on its own, without its root.
     assert all(
         span["extra"]["metadata"]  # type: ignore[index]
         == {
             "thread_id": "thread-1",
             "dashboard_client": "web",
             "agent_run_id": "run-1",
-            "sandbox_kind": "bridge",
         }
         for span in langsmith.runs
     )
@@ -380,21 +372,6 @@ def test_client_send_time_is_believed_only_near_the_backend_clock(
     assert ttft.DashboardRunTimeline.client_submitted_at(header, 1_000_000) == expected
 
 
-@pytest.mark.parametrize(
-    ("metadata", "expected"),
-    [
-        ({"sandbox_id": "bridge:mac-1", "sandbox_kind": "bridge"}, ttft.DashboardSandbox.BRIDGE),
-        # Moved to the cloud, with the checkout still to carry from the Mac it left.
-        ({"sandbox_id": None, "sandbox_handoff_from": "bridge:mac-1"}, ttft.DashboardSandbox.CLOUD),
-        ({"sandbox_id": "sbx-1"}, ttft.DashboardSandbox.CLOUD),
-    ],
-)
-def test_sandbox_label_follows_where_runs_work_now(
-    metadata: dict[str, object], expected: ttft.DashboardSandbox
-) -> None:
-    assert ttft.DashboardSandbox.of_thread(metadata) == expected
-
-
 class _Reporter:
     def __init__(self) -> None:
         self.latencies: list[tuple[str, float, dict[str, str]]] = []
@@ -403,7 +380,7 @@ class _Reporter:
         self.latencies.append((metric.name, seconds, attributes))  # type: ignore[attr-defined]
 
 
-async def test_each_mark_goes_to_its_histogram_labelled_by_client_and_sandbox(
+async def test_each_mark_goes_to_its_histogram_labelled_by_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from langgraph_api import metrics_otlp
@@ -415,9 +392,9 @@ async def test_each_mark_goes_to_its_histogram_labelled_by_client_and_sandbox(
     )
     timeline.read([_reply("Hi", output_at=SENT_AT + 1_500, text_at=SENT_AT + 2_000)])
 
-    timeline.report(thread_id="thread-1", sandbox=ttft.DashboardSandbox.BRIDGE)
+    timeline.report(thread_id="thread-1")
 
-    labels = {"source": "dashboard", "client": "desktop", "sandbox": "bridge"}
+    labels = {"source": "dashboard", "client": "desktop"}
     assert sorted(reporter.latencies) == [
         ("lg_api_open_swe_dashboard_thread_first_generation", 1.5, labels),
         ("lg_api_open_swe_dashboard_thread_ttft", 2.0, labels),

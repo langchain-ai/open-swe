@@ -757,6 +757,27 @@ async def test_monitor_deletes_crons_for_missing_thread(monkeypatch: pytest.Monk
     delete_crons.assert_awaited_once_with("thread-1")
 
 
+async def test_monitor_stops_polling_a_this_mac_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+    metadata = {"sandbox_id": "bridge:abc", "running_background_tasks": ["cmd-1"]}
+    client = AsyncMock()
+    client.threads.get.return_value = {"metadata": metadata}
+    reset = AsyncMock(return_value={})
+    connect = AsyncMock()
+    delete_crons = AsyncMock()
+    monkeypatch.setattr(background_tasks, "_client", lambda: client)
+    serve_runs_from(monkeypatch, client)
+    monkeypatch.setattr(background_tasks, "update_background_task_state", reset)
+    monkeypatch.setattr(background_tasks, "refresh_slack_background_status", AsyncMock())
+    monkeypatch.setattr(background_tasks, "connect_sandbox", connect)
+    monkeypatch.setattr(background_tasks, "_stop_polling", delete_crons)
+
+    assert await monitor_background_tasks("thread-1") == {"status": "missing_sandbox"}
+
+    connect.assert_not_awaited()
+    reset.assert_awaited_once_with(client, "thread-1", reset=True)
+    delete_crons.assert_awaited_once_with("thread-1")
+
+
 @pytest.mark.parametrize(
     ("launch_fails", "status_after_launch"),
     [(False, "running"), (False, "completed"), (True, "running")],
@@ -856,8 +877,8 @@ async def test_background_tools_reconnect_on_a_replica_without_a_binding(
         AsyncMock(return_value={"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}),
     )
 
-    async def connect(sandbox_id: str, *, thread_id: str | None = None) -> LocalShellBackend:
-        assert (sandbox_id, thread_id) == ("mda-sandbox", "thread-mda")
+    async def connect(sandbox_id: str) -> LocalShellBackend:
+        assert sandbox_id == "mda-sandbox"
         return backend
 
     monkeypatch.setattr("openswe.sandboxes.connect.connect_sandbox", connect)

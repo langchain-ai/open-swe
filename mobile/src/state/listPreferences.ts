@@ -26,7 +26,6 @@ export interface ListPreferences {
   sources: string[]
   showChanges: boolean
   showBranchStatus: boolean
-  showRuntime: boolean
   showLastUpdated: boolean
 }
 
@@ -38,7 +37,6 @@ export const DEFAULT_PREFERENCES: ListPreferences = {
   sources: [],
   showChanges: true,
   showBranchStatus: true,
-  showRuntime: true,
   showLastUpdated: false,
 }
 

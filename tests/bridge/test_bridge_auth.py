@@ -1,4 +1,4 @@
-"""How the CLI authenticates: the dashboard's own cookie, from its own origin."""
+"""How the desktop's bridge authenticates: the dashboard's own cookie, from its own origin."""
 
 import pytest
 from fastapi import HTTPException

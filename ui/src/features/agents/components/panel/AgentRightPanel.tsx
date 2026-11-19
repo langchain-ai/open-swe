@@ -23,7 +23,6 @@ import {
   selectThreadRightPanelState,
   useRightPanelStore,
 } from "@/features/agents/lib/rightPanelStore"
-import { terminalTabTitle } from "@/features/agents/lib/terminalTabTitle"
 import { workspaceTargetKey } from "@/features/agents/lib/workspaceFiles"
 import { useRegisterAppCommands } from "@/lib/appCommands"
 import { cn } from "@/lib/utils"
@@ -34,7 +33,6 @@ export interface AgentRightPanelProps {
   threadRef: PanelThreadRef
   terminals: TerminalGroupsController
   terminalTarget: TerminalTarget
-  cwd: string
   terminalAvailable: boolean
   diffAvailable: boolean
   /** Rendered for the Changes surface; `fullScreen` drives layout-only extras. */
@@ -50,7 +48,6 @@ export interface AgentRightPanelProps {
   renderArtifact?: () => ReactNode
   collapsed: boolean
   onCollapsedChange: (next: boolean) => void
-  onTerminalOpenFile?: (path: string) => void
   onTerminalAddToChat?: (text: string) => void
   /** Offers Reply on text selected in an open file. */
   onReply?: (reply: PassageReply) => void
@@ -75,7 +72,7 @@ function useIsNarrowLayout(): boolean {
 }
 
 /**
- * The right-hand column shared by cloud threads and local desktop sessions.
+ * The right-hand column of a thread, and of the new-thread screen.
  * Surfaces (changes, terminals) live in the right-panel store so
  * a thread's tabs survive navigation; this component owns only the layout
  * controls and the mapping from a surface to the component that renders it.
@@ -85,7 +82,6 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
     threadRef,
     terminals,
     terminalTarget,
-    cwd,
     terminalAvailable,
     diffAvailable,
     collapsed,
@@ -148,14 +144,6 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       terminalGroupIds ? terminalGroupIds.split(",") : []
     )
   }, [reconcileTerminalSurfaces, terminalGroupIds, threadRef])
-
-  const terminalLabelsById = useMemo(() => {
-    const labels = new Map<string, string>()
-    for (const group of terminals.state.terminalGroups) {
-      labels.set(group.id, terminalTabTitle(terminals, group.id))
-    }
-    return labels
-  }, [terminals])
 
   const handleAddTerminal = useCallback(() => {
     openTerminalSurface(threadRef, terminals.addGroup())
@@ -385,12 +373,8 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
           >
             <TerminalPanel
               target={terminalTarget}
-              cwd={cwd}
               groupId={surface.resourceId}
               terminals={terminals}
-              {...(props.onTerminalOpenFile
-                ? { onOpenFile: props.onTerminalOpenFile }
-                : {})}
               {...(props.onTerminalAddToChat
                 ? { onAddToChat: props.onTerminalAddToChat }
                 : {})}
@@ -407,7 +391,6 @@ export function AgentRightPanel(props: AgentRightPanelProps) {
       surfaces={surfaces}
       activeSurfaceId={activeSurfaceId}
       pendingSurfaceIds={EMPTY_PENDING_SURFACE_IDS}
-      terminalLabelsById={terminalLabelsById}
       onActivate={handleActivate}
       onCloseSurface={handleCloseSurface}
       onCloseOtherSurfaces={(surface) =>

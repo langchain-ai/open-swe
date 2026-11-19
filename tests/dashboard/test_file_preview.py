@@ -77,7 +77,7 @@ def state(monkeypatch, workspace: Path, langsmith_users: LangSmithUsers) -> Acce
         if login in current.denied:
             raise HTTPException(404, "thread not found")
 
-    async def connect(sandbox_id: str, *, thread_id: str) -> LocalSandbox:
+    async def connect(sandbox_id: str) -> LocalSandbox:
         return LocalSandbox()
 
     async def work_dir(sandbox: object) -> str:
@@ -206,28 +206,9 @@ def test_link_is_bound_to_its_thread_and_is_not_a_session(client: TestClient) ->
     assert _link(client, "site/index.html") != _link(client, "site/index.html")
 
 
-def _ts_strings(source: str, start: str, end: str) -> list[str]:
-    block = source[source.index(start) : source.index(end, source.index(start))]
-    return re.findall(r'"([^"]*)"', block)
-
-
-def test_desktop_and_dashboard_serve_files_as_the_backend_does() -> None:
-    """The desktop and the dashboard keep their own copies of these rules; a drift breaks or opens a viewer."""
+def test_the_dashboard_serves_files_as_the_backend_does() -> None:
+    """The dashboard keeps its own copy of which kinds load straight from a link."""
     app = Path(__file__).resolve().parents[2]
-    desktop = (app / "desktop" / "src" / "preview-files.cts").read_text()
-    types = _ts_strings(desktop, "const INLINE_TYPES", "};")
-    assert dict(zip(types[::2], types[1::2], strict=True)) == file_preview._INLINE_TYPES
-    assert "; ".join(_ts_strings(desktop, "const HTML_CSP", "].join")) == file_preview._HTML_CSP
-    assert set(_ts_strings(desktop, "const FOLDER_EXTENSIONS", ";")) == set(
-        file_preview._FOLDER_EXTENSIONS
-    )
-    assert set(_ts_strings(desktop, "const FOLDER_ASSETS", ";")) == file_preview._FOLDER_ASSETS
-    headers = _ts_strings(desktop, "const ALWAYS", "};")
-    assert dict(zip(headers[::2], headers[1::2], strict=True)) == file_preview._ALWAYS
-    for constant in ("SVG_CSP", "DEFAULT_CSP"):
-        line = next(row for row in desktop.splitlines() if row.startswith(f"const {constant} ="))
-        assert re.findall(r'"([^"]*)"', line) == [getattr(file_preview, f"_{constant}")]
-
     # A kind the panel loads straight from its link must be served inline, not as a download.
     ui = (app / "ui" / "src" / "features" / "agents" / "lib" / "filePreview.ts").read_text()
     block = ui[ui.index("const KINDS") : ui.index("}", ui.index("const KINDS"))]

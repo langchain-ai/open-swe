@@ -410,8 +410,6 @@ def _worker_metadata(
             "base_branch",
             "branch_prefix",
             "sandbox_id",
-            "sandbox_kind",
-            "sandbox_bridge_client",
             SANDBOX_PROXY_CONFIG_METADATA_KEY,
             GITHUB_TOKEN_REPOSITORIES_KEY,
             PARTICIPANT_LOGINS_KEY,
@@ -503,8 +501,6 @@ class Delegation:
         context = await store.TaskMembership.context_for_thread(actor.thread_id)
         if context is not None:
             context = await authorized_context(actor, coordinator=True)
-        if not await metadata.delegation_supported():
-            raise ValueError("Delegation needs the machine serving this thread to be connected")
         if metadata.sandbox_host_thread_id:
             raise PermissionError(
                 "Sandbox guests must ask their coordinator for additional workers"

@@ -36,7 +36,6 @@ from pydantic import JsonValue, TypeAdapter
 from runtime_api.catalog import (
     CLIENT_CALL_PENDING,
     JOINED_TASK_CONTEXT,
-    CliResultRules,
     LoopRules,
     Nudging,
     ReplyRules,
@@ -306,13 +305,11 @@ class RunLoop:
         update: dict[str, JsonValue] = {JOINED_TASK_CONTEXT: None}
         if self.rules.reply is not None:
             update.update(reply_surface=self.rules.reply.surface, reply_nudges=0)
-        if self.rules.cli_result is not None:
-            update["cli_result_nudges"] = 0
         return update
 
     @property
     def looks_at_answers(self) -> bool:
-        return self.rules.reply is not None or self.rules.cli_result is not None
+        return self.rules.reply is not None
 
     def ask(self, state: Mapping[str, object]) -> Asked | None:
         """Start what the backend is asked before a model call whose answer the inbox does
@@ -619,7 +616,7 @@ class RunLoop:
         return {reply.nudge_sender} if reply is not None and reply.nudge_sender else set()
 
     async def after_model(self, state: Mapping[str, object]) -> PhaseResult:
-        """Ask again for the CLI result, then the reply an answer owes."""
+        """Ask again for the reply an answer owes."""
         messages = state.get("messages")
         last = messages[-1] if isinstance(messages, list) and messages else None
         if not isinstance(last, AIMessage) or last.tool_calls:
@@ -631,11 +628,7 @@ class RunLoop:
             # written for it is the run's answer.
             if self.rules.reply is not None and held.get("reply_surface") == "slack":
                 await self._reply_on_behalf(state, content_text(last.content))
-            return PhaseResult(update={"reply_nudges": 0, "cli_result_nudges": 0})
-        if self.rules.cli_result is not None:
-            asked = self._cli_result(self.rules.cli_result, state, held, update)
-            if asked is not None:
-                return asked
+            return PhaseResult(update={"reply_nudges": 0})
         if self.rules.reply is not None:
             return await self._reply(self.rules.reply, state, held, update)
         return PhaseResult(update=update)
@@ -655,37 +648,6 @@ class RunLoop:
             )
         ]
         return _json_dicts.validate_python(messages_to_dict(added))
-
-    def _cli_result(
-        self,
-        rules: CliResultRules,
-        state: Mapping[str, object],
-        held: Mapping[str, object],
-        update: dict[str, JsonValue],
-    ) -> PhaseResult | None:
-        turn = _Turn(_messages(state), self._guards)
-        call_ids = {
-            str(tool_call.get("id"))
-            for tool_call in turn.calls()
-            if tool_call.get("name") == rules.tool
-        }
-        if turn.succeeded(call_ids):
-            update["cli_result_nudges"] = 0
-            return None
-        nudges = held.get("cli_result_nudges")
-        asked = nudges if isinstance(nudges, int) else 0
-        if asked >= rules.max_nudges:
-            logger.warning(
-                "Run ended without a CLI result after every nudge",
-                extra={"result_tool": rules.tool, "result_attempts": asked},
-            )
-            update["cli_result_nudges"] = 0
-            return None
-        return PhaseResult(
-            update={**update, "cli_result_nudges": asked + 1},
-            messages=self._nudge(rules, state),
-            jump_to="model",
-        )
 
     async def _reply(
         self,
