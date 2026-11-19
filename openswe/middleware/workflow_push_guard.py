@@ -18,6 +18,7 @@ from langgraph.types import Command
 
 from openswe.middleware.pr_creation_guard import executable_name, shell_commands, shell_tokens
 from openswe.middleware.trace import OpenSWEMiddleware
+from openswe.prompts import prompt
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import SANDBOX_BACKENDS, get_sandbox_backend
 from openswe.slack.client import (
@@ -697,18 +698,13 @@ async def _workflow_change_for_push(
 def _blocked_message(
     change: WorkflowPushChange,
     *,
-    approval_url: str | None = None,
     already_rejected: bool = False,
 ) -> ToolMessage:
     status = "rejected" if already_rejected else "approval_required"
     content = {
         "status": "error",
         "error_type": "WorkflowPushApprovalRequired",
-        "error": (
-            "This git push includes GitHub workflow file changes and requires human "
-            "approval before Robin can push it. Retry the same standalone git push "
-            "after the thread owner approves the workflow diff in Slack or the web UI."
-        ),
+        "error": prompt("tools/workflow-push-blocked"),
         "workflow_approval_status": status,
         "fingerprint": change.fingerprint,
         "files": change.files,
@@ -718,7 +714,6 @@ def _blocked_message(
         "head_sha": change.head_sha,
         "diff_stats": change.diff_stats,
         "diff_preview_truncated": change.diff_preview_truncated,
-        "approval_url": approval_url,
     }
     return ToolMessage(content=json.dumps(content), tool_call_id="", status="error")
 
@@ -821,7 +816,6 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
         change: WorkflowPushChange,
     ) -> ToolMessage | Command:
-        thread_id = _thread_id(request)
         state = await _approval_state(request, change)
         if state == "approved":
             safe_request = _override_execute_command(request, change.fixed_command)
@@ -829,7 +823,6 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         return _tool_message_for_request(
             _blocked_message(
                 change,
-                approval_url=_approval_url(thread_id, change.fingerprint),
                 already_rejected=state == "rejected",
             ),
             request,

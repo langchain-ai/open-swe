@@ -501,11 +501,13 @@ async def test_unapproved_workflow_push_blocks_and_posts_slack(
     assert payload["workflow_approval_status"] == "approval_required"
     assert payload["files"] == [".github/workflows/ci.yml"]
     assert payload["diff_stats"] == {"files": 1, "additions": 1, "deletions": 1}
-    assert payload["approval_url"].endswith("?workflowApproval=" + payload["fingerprint"])
+    assert "approval_url" not in payload
     assert pending_kwargs["diff_preview"]
     assert pending_kwargs["diff_preview_truncated"] is False
     assert pending_kwargs["inherited_from"] is None
-    assert pending_kwargs["approval_url"] == payload["approval_url"]
+    approval_url = pending_kwargs["approval_url"]
+    assert approval_url.endswith("?workflowApproval=" + payload["fingerprint"])
+    assert approval_url in posted["message"]
     assert posted["channel_id"] == "C123"
     assert "Open in Robin" in posted["message"]
     assert "Why confirmation is required" in posted["message"]
