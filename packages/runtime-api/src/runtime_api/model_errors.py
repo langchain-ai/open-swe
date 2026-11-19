@@ -17,8 +17,9 @@ _MAX_BODY_CHARS: Final = 2000
 LAST_MODEL_ERROR_KEY: Final = "last_model_error"
 
 # The ``response_metadata`` key marking an answer the runtime wrote for a model call it
-# could not make (``outage`` or ``model_access``). It is final: the loop posts it as it
-# is instead of asking the model again for a reply it cannot give.
+# could not make (``outage`` or ``model_access``) or the provider refused (``refusal``).
+# It is final: the loop posts it as it is instead of asking the model again for a reply
+# it cannot give.
 MODEL_FAILURE_REPLY_KEY: Final = "open_swe_model_failure"
 
 # Exception class names, the only failure signal the run-completion webhook gets:
@@ -33,6 +34,8 @@ _ERROR_TYPE_CODES: Final = {
     "InternalServerError": "provider_unavailable",
     "APITimeoutError": "provider_timeout",
     "ModelCallTimeoutError": "provider_timeout",
+    "ModelRefusalError": "model_refused",
+    "OpenAIRefusalError": "model_refused",
     "GraphRecursionError": "step_limit",
     "RecursionError": "step_limit",
     "SandboxConnectionError": "sandbox_unreachable",
