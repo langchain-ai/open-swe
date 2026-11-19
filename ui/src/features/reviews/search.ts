@@ -54,9 +54,9 @@ export function validateReviewQueueSearch(
 }
 
 export function parsePullRequestSelection(
-  value: string | undefined
+  value: unknown
 ): { owner: string; repo: string; number: number } | null {
-  if (!value || !prSelectionPattern.test(value)) return null
+  if (typeof value !== "string" || !prSelectionPattern.test(value)) return null
   const [fullName, rawNumber] = value.split("#")
   const [owner, repo] = fullName!.split("/")
   const number = Number(rawNumber)

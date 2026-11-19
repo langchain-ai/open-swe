@@ -2,6 +2,7 @@ import {
   STREAM_PREFERENCE_DEFAULT,
   STREAM_PREFERENCE_STORAGE_KEY,
 } from "@/lib/streamPreference"
+import { parsePullRequestSelection } from "@/features/reviews/search"
 import { agentsLangGraphApiUrl } from "./api"
 import { SIDEBAR_PREFS_STORAGE_KEY } from "./sidebarPrefs"
 import { SIDEBAR_PAGE_SIZE } from "./queries"
@@ -9,6 +10,7 @@ import { SIDEBAR_PAGE_SIZE } from "./queries"
 const THREAD_PATH_RE =
   /^\/agents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
 const AGENTS_HOME_RE = /^\/agents\/?$/
+const REVIEWS_PATH_RE = /^\/agents\/reviews\/?$/
 
 /**
  * Serialized into the document with `toString()`, so it may not reference
@@ -29,11 +31,13 @@ function warmApiRequests(
   prefsKey: string,
   streamPreferenceKey: string,
   streamPreferenceDefault: boolean,
-  pageSize: number
+  pageSize: number,
+  reviewReads: Array<string>
 ) {
   if (document.readyState !== "loading") return
 
   const targets: Array<{ url: string; dashboard: boolean }> = []
+  for (const url of reviewReads) targets.push({ url, dashboard: true })
   if (thread) {
     let prefersStream = streamPreferenceDefault
     try {
@@ -251,12 +255,25 @@ function sidebarPageEndpoint(): string {
  * Inline head script that starts the requests a route needs while the HTML is
  * still parsing and hands each in-flight response to the app's own later call.
  * Nothing can be requested until the bundle boots, which is most of the delay
- * before either the transcript or the sidebar can paint.
+ * before a transcript, the sidebar or an open pull request can paint.
+ * `selectedPullRequest` is the reviews page's `pr` search parameter as the
+ * router parsed it, before any route validated it.
  */
-export function apiWarmupScript(pathname: string): string | null {
+export function apiWarmupScript(
+  pathname: string,
+  selectedPullRequest?: unknown
+): string | null {
   const threadId = THREAD_PATH_RE.exec(pathname)?.[1]
   const isAgentsHome = AGENTS_HOME_RE.test(pathname)
-  if (!threadId && !isAgentsHome) return null
+  const review = REVIEWS_PATH_RE.test(pathname)
+    ? parsePullRequestSelection(selectedPullRequest)
+    : null
+  if (!threadId && !isAgentsHome && !review) return null
+  // The open pull request's detail and diff, and its chat, whose thread the
+  // chat panel waits for before it reads anything else.
+  const reviewPath =
+    review &&
+    `${agentsLangGraphApiUrl}/reviews/${encodeURIComponent(review.owner)}/${encodeURIComponent(review.repo)}/${review.number}`
 
   const args = [
     JSON.stringify(
@@ -274,6 +291,9 @@ export function apiWarmupScript(pathname: string): string | null {
     JSON.stringify(STREAM_PREFERENCE_STORAGE_KEY),
     JSON.stringify(STREAM_PREFERENCE_DEFAULT),
     JSON.stringify(SIDEBAR_PAGE_SIZE),
+    JSON.stringify(
+      reviewPath ? [reviewPath, `${reviewPath}/diff`, `${reviewPath}/chat`] : []
+    ),
   ].join(",")
   return `(${warmApiRequests.toString()})(${args});`
 }

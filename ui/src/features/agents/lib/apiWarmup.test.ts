@@ -5,6 +5,7 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react"
 import { createElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { api } from "@/lib/api"
 import { clearPerfSpans, getPerfSpans } from "@/lib/perf/trace"
 import {
   STREAM_PREFERENCE_STORAGE_KEY,
@@ -164,12 +165,38 @@ afterEach(() => {
 })
 
 describe("apiWarmupScript", () => {
-  it("only matches the routes that render a sidebar or transcript", () => {
+  it("only matches the routes whose first reads it warms", () => {
     expect(apiWarmupScript("/")).toBeNull()
     expect(apiWarmupScript("/login")).toBeNull()
     expect(apiWarmupScript(`/agents/${THREAD_ID}/plan`)).toBeNull()
     expect(apiWarmupScript("/agents")).toContain("/threads/page")
     expect(apiWarmupScript(`/agents/${THREAD_ID}`)).toContain(STATE_PATH)
+    expect(apiWarmupScript("/agents/reviews")).toBeNull()
+    expect(apiWarmupScript("/agents/reviews", "acme/web app#12")).toBeNull()
+    expect(apiWarmupScript("/agents/reviews", ["acme/web.app#12"])).toBeNull()
+  })
+
+  it("warms the open pull request's first reads as the page requests them, and hands each to that request", async () => {
+    const reads = [
+      () => api.getReview("acme", "web.app", 12),
+      () => api.getReviewDiff("acme", "web.app", 12),
+      () => api.getReviewChat("acme", "web.app", 12),
+    ]
+    const own = stubFetch()
+    for (const read of reads) await read()
+
+    setReadyState("loading")
+    const network = stubFetch()
+    run(apiWarmupScript("/agents/reviews", "acme/web.app#012")!)
+    const reviewCalls = () =>
+      network.mock.calls.filter(
+        ([input]) => !requestUrl(input).includes(SIDEBAR_PATH)
+      )
+    const warmed = reviewCalls().map(asSent)
+    for (const read of reads) await read()
+
+    expect(warmed).toEqual(own.mock.calls.map(asSent))
+    expect(reviewCalls()).toHaveLength(reads.length)
   })
 
   it("warms only the sidebar on the agents home", () => {

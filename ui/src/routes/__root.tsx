@@ -100,7 +100,10 @@ function AppProviders({ children }: { children: React.ReactNode }) {
 function RootDocument({ children }: { children: React.ReactNode }) {
   const { queryClient } = useRouter().options.context
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const warmupScript = apiWarmupScript(pathname)
+  const selectedPullRequest = useRouterState({
+    select: (s) => s.location.search.pr,
+  })
+  const warmupScript = apiWarmupScript(pathname, selectedPullRequest)
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
