@@ -214,6 +214,11 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
     again under the same ``webhook-id`` gets the run built again, but no decline it
     answered already.
     """
+    async with service.SlackAuthorization.shared():
+        return await _start_slack_turn(call, turn)
+
+
+async def _start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurnStarted:
     webhook_id = call.request.headers.get("webhook-id", "")
     fields = {
         "agent_thread_id": str(turn.thread_id),

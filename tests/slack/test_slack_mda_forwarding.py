@@ -1,6 +1,7 @@
 """``/webhooks/slack`` leaves MDA's conversations to MDA's Slack channel, and only those;
 the channel API answers what MDA's Slack channel asks about them."""
 
+import asyncio
 import json
 import uuid
 from collections.abc import Awaitable, Callable
@@ -36,6 +37,8 @@ from openswe.slack.channels import SlackChannel
 from openswe.slack.dm import CONCIERGE_TS
 from openswe.slack.payloads import SlackChannelContext
 from openswe.slack.request import SlackRequest
+from openswe.threads.identity import ThreadIdentity
+from openswe.users import User
 from openswe.webhooks import common as webhook_common
 from tests.mda_helpers import mda_starts, stub_mda_runtime
 from tests.support.slack_api import SlackAPI
@@ -44,6 +47,9 @@ pytestmark = pytest.mark.usefixtures("registry_db")
 
 
 _MDA_THREAD = str(uuid.uuid4())
+# The real sender checks, which the autouse fixture stubs.
+_ACCOUNT_LINK_NEEDED = slack_service.account_link_needed
+_SLACK_LOGIN = slack_service.slack_login
 _DM_THREAD = str(uuid.uuid4())
 _SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
 # The real lookups, which the fixture below stands in for in the webhook's tests.
@@ -778,6 +784,67 @@ async def test_a_turn_gets_its_prompts_facts_and_a_signed_run_for_mdas_prompt(
     cast(AsyncMock, mda_forwarding.claim_conversation).assert_not_awaited()
     assert request.channel_context.name == "engineering"
     assert slack_api.calls == []
+
+
+async def test_a_turn_checks_its_senders_sign_in_once(
+    monkeypatch: pytest.MonkeyPatch, slack_api: SlackAPI
+) -> None:
+    """The account gate, the thread's owner and the run's build share one sign-in check."""
+    monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", _CHANNEL_CONTEXT)
+    await SlackChannel.save_all({"id": "C1", "name": "engineering"})
+    monkeypatch.setattr(slack_service, "account_link_needed", _ACCOUNT_LINK_NEEDED)
+    monkeypatch.setattr(slack_service, "slack_login", _SLACK_LOGIN)
+    check = AsyncMock(
+        return_value=slack_service.SlackAuthorization("U1", User(), ThreadIdentity("ada"))
+    )
+    monkeypatch.setattr(slack_service.SlackAuthorization, "_resolve", check)
+    prepare = _prepared(monkeypatch, prompt=_PROMPT)
+    prepared = prepare.return_value
+
+    async def build(*_args: object, **_kwargs: object) -> object:
+        await slack_service.SlackAuthorization.resolve("U1")
+        return prepared
+
+    prepare.side_effect = build
+
+    start = await _start(_start_app(monkeypatch))
+
+    assert start["run"] is not None
+    check.assert_awaited_once_with("U1")
+
+
+async def test_a_sign_in_check_is_shared_only_inside_its_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    check = AsyncMock(
+        side_effect=lambda user_id: slack_service.SlackAuthorization(user_id, None, None)
+    )
+    monkeypatch.setattr(slack_service.SlackAuthorization, "_resolve", check)
+
+    async with slack_service.SlackAuthorization.shared():
+        async with slack_service.SlackAuthorization.shared():
+            await slack_service.SlackAuthorization.resolve("U1")
+        await asyncio.gather(
+            slack_service.SlackAuthorization.resolve("U1"),
+            slack_service.SlackAuthorization.resolve("U2"),
+        )
+    await slack_service.SlackAuthorization.resolve("U1")
+
+    assert [call.args for call in check.await_args_list] == [("U1",), ("U2",), ("U1",)]
+
+
+async def test_a_failed_sign_in_check_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    authorization = slack_service.SlackAuthorization("U1", None, None)
+    check = AsyncMock(side_effect=[HTTPException(503), authorization])
+    monkeypatch.setattr(slack_service.SlackAuthorization, "_resolve", check)
+
+    async with slack_service.SlackAuthorization.shared():
+        with pytest.raises(HTTPException):
+            await slack_service.SlackAuthorization.resolve("U1")
+        assert await slack_service.SlackAuthorization.resolve("U1") is authorization
+
+    assert check.await_count == 2
 
 
 async def test_the_attribution_the_runs_hooks_read_rides_in_its_token(

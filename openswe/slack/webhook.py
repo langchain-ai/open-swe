@@ -5,7 +5,9 @@ object (``common.X``) so tests that monkeypatch them keep working.
 """
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, Mapping
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -618,6 +620,11 @@ class AccountLinkNeeded:
         )
 
 
+_SHARED_AUTHORIZATIONS: ContextVar[dict[str, asyncio.Future[SlackAuthorization]] | None] = (
+    ContextVar("shared_slack_authorizations", default=None)
+)
+
+
 @dataclass(frozen=True)
 class SlackAuthorization:
     """A Slack identity's validated sign-in and optional GitHub capability."""
@@ -630,6 +637,42 @@ class SlackAuthorization:
 
     @classmethod
     async def resolve(cls, slack_user_id: str) -> SlackAuthorization:
+        """The sender's sign-in, checked once per sender within ``shared``."""
+        resolved = _SHARED_AUTHORIZATIONS.get()
+        if resolved is None:
+            return await cls._resolve(slack_user_id)
+        resolving = resolved.get(slack_user_id)
+        if resolving is None:
+            resolving = resolved[slack_user_id] = asyncio.ensure_future(cls._resolve(slack_user_id))
+        try:
+            return await asyncio.shield(resolving)
+        except Exception:
+            # A failed check is not shared: the next caller checks again.
+            if resolved.get(slack_user_id) is resolving:
+                del resolved[slack_user_id]
+            raise
+
+    @staticmethod
+    @asynccontextmanager
+    async def shared() -> AsyncGenerator[None]:
+        """Within the block, each Slack sender's sign-in is checked once.
+
+        Starting a Slack turn checks its sender at the account gate, again for the
+        thread's owner and again while building the run; each check reads the person,
+        their LangSmith credential and their GitHub record. A block inside another
+        shares the outer one's checks.
+        """
+        if _SHARED_AUTHORIZATIONS.get() is not None:
+            yield
+            return
+        token = _SHARED_AUTHORIZATIONS.set({})
+        try:
+            yield
+        finally:
+            _SHARED_AUTHORIZATIONS.reset(token)
+
+    @classmethod
+    async def _resolve(cls, slack_user_id: str) -> SlackAuthorization:
         user = await User.for_identity("slack", slack_user_id) if slack_user_id else None
         if user is None:
             return cls(slack_user_id, None, None, "unlinked")
