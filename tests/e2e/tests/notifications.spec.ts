@@ -274,7 +274,7 @@ for (const review of [false, true]) {
       await page.goto(`/agents/reviews/fakeorg/demo/${pr.number}`, {
         waitUntil: "domcontentloaded",
       });
-      await page.getByRole("tab", { name: "Chat", exact: true }).click();
+      await page.getByRole("button", { name: "Chat", exact: true }).click();
     } else {
       await page.goto("/agents", { waitUntil: "domcontentloaded" });
     }

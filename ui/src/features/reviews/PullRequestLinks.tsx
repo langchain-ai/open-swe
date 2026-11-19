@@ -4,7 +4,7 @@ import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { useMutation } from "@tanstack/react-query"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -23,7 +23,6 @@ export function PullRequestLinks({
   title: string
   onReviewPage?: boolean
 }) {
-  const [owner, name] = repo.split("/")
   const navigate = useNavigate()
   const [messageOpen, setMessageOpen] = useState(false)
   const [message, setMessage] = useState("")
@@ -120,23 +119,6 @@ export function PullRequestLinks({
         </Dialog>
         {!onReviewPage && (
           <>
-            <Button
-              size="xs"
-              color="secondary"
-              variant="plain"
-              as={
-                <Link
-                  to="/agents/reviews/$owner/$repo/$number"
-                  params={{
-                    owner: owner!,
-                    repo: name!,
-                    number: String(number),
-                  }}
-                />
-              }
-            >
-              Reviewer
-            </Button>
             <IconButton
               asChild
               icon={GithubLogoIcon}

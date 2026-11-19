@@ -1,6 +1,6 @@
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CircularProgress } from "@langchain/macaw-components/CircularProgress"
-import { ArrowLeftIcon, ArrowUpIcon } from "@langchain/macaw-components/icons"
+import { ArrowUpIcon } from "@langchain/macaw-components/icons"
 import { Badge, type BadgeProps } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -22,7 +22,6 @@ import { KeyboardIcon } from "@phosphor-icons/react/dist/ssr/Keyboard"
 import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
 import { TreeStructureIcon } from "@phosphor-icons/react/dist/ssr/TreeStructure"
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
 import type { ReviewDetail } from "@/lib/api"
@@ -30,12 +29,17 @@ import { cn, INHERITED_LINK } from "@/lib/utils"
 import { reportError } from "@/lib/errorReporting"
 import { useAppCommandControls } from "@/lib/appCommands"
 import { StatusPill } from "@/features/reviews/components/StatusPill"
+import { ClosePullRequest } from "@/features/reviews/components/ClosePullRequest"
 import { ReviewButton } from "@/features/reviews/components/ReviewButton"
 import { copyPageLink, copyText } from "@/features/reviews/lib/copyText"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { statusLabels } from "@/features/reviews/lib/status"
 import { ProfileLink } from "./notes/Byline"
-import { reviewQueries, type PullRequestRef } from "./queries"
+import {
+  reviewQueries,
+  useRefreshPullRequest,
+  type PullRequestRef,
+} from "./queries"
 import { isLive } from "./pullRequestStanding"
 import { PullRequestTitle } from "./PullRequestTitle"
 import { RelativeTimestamp } from "./RelativeTimestamp"
@@ -71,6 +75,7 @@ export function Header({
   leftInset: string
   compactRail: boolean
 }) {
+  const refresh = useRefreshPullRequest(pr)
   const detailQuery = useQuery(reviewQueries.detail(pr))
   const detail = detailQuery.data
   const diff = useQuery(reviewQueries.diff(pr)).data
@@ -108,21 +113,10 @@ export function Header({
       data-desktop-drag-region=""
       className={cn(
         // Top-aligned at 8px so the first row lines up with the app's floating sidebar button.
-        "flex shrink-0 items-start gap-space-3 border-b border-default bg-surface-level-1 pt-space-2 pr-space-3 pb-space-2",
+        "flex shrink-0 flex-wrap items-start gap-space-3 border-b border-default bg-surface-level-1 pt-space-2 pr-space-3 pb-space-2",
         leftInset
       )}
     >
-      <IconButton
-        asChild
-        icon={ArrowLeftIcon}
-        label="Back to reviews"
-        size="md"
-        color="secondary"
-        variant="plain"
-        className="max-sm:hidden"
-      >
-        <Link to="/agents/reviews" search={{}} />
-      </IconButton>
       <div className="min-w-0 flex-1">
         <div className="flex min-h-7 min-w-0 items-center gap-space-2">
           {/* An open PR shows where it stands, in the PR list's own pills; GitHub's lifecycle only once it's settled. */}
@@ -300,7 +294,7 @@ export function Header({
           <Skeleton className="mt-space-1 h-3.5 w-80 max-w-full max-sm:hidden" />
         )}
       </div>
-      <div className="flex h-7 shrink-0 items-center gap-space-3">
+      <div className="flex min-h-7 max-w-full shrink-0 flex-wrap items-center gap-space-3">
         {carrying && current?.status && (
           <div className="max-lg:hidden">
             <NextStepAction
@@ -370,6 +364,9 @@ export function Header({
             nextLabel={queue ? (queue.next ? "Next" : "Finish") : undefined}
             onNext={queue?.advance}
           />
+        )}
+        {live && status && (
+          <ClosePullRequest pr={status} onClosed={refresh.merged} />
         )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

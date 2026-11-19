@@ -15,8 +15,7 @@ import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 import { SidebarGroupHeading } from "@/features/agents/components/SidebarGroupHeading"
 
-const SECTION_CONTROL =
-  "text-tertiary opacity-0 transition-opacity group-hover/section:opacity-100 hover:text-primary focus-visible:opacity-100"
+const SECTION_CONTROL = "text-tertiary hover:text-primary"
 
 /**
  * The Pinned / Repositories / Recents header. The caret only shows on hover while
@@ -91,7 +90,7 @@ export function SidebarSectionMenu({
           size="xs"
           color="secondary"
           variant="plain"
-          className={cn(SECTION_CONTROL, "data-[state=open]:opacity-100")}
+          className={SECTION_CONTROL}
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">

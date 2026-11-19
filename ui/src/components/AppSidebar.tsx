@@ -1,3 +1,4 @@
+import { Button } from "@langchain/macaw-components/Button"
 import {
   ArrowLeftIcon,
   ArticleRegularIcon,
@@ -33,7 +34,7 @@ import {
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import { cn } from "@/lib/utils"
-import { getLastAppLocation, useHrefLinkOptions } from "@/lib/appLocation"
+import { useContextReturn } from "@/lib/contextNavigation"
 
 interface NavItem {
   to: string
@@ -167,7 +168,7 @@ function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
 
 export function AppSidebar({ user }: { user: SessionUser }) {
   const layout = useSidebarLayout()
-  const hrefLinkOptions = useHrefLinkOptions()
+  const settings = useContextReturn("settings")
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
@@ -175,6 +176,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
   return (
     <SidebarFrame
       {...layout}
+      historyControls={false}
       className="border-r border-default bg-surface-level-2 text-primary"
     >
       <div
@@ -183,14 +185,20 @@ export function AppSidebar({ user }: { user: SessionUser }) {
           isDesktop ? "pt-13" : "pt-space-4"
         )}
       >
-        <Link
-          {...hrefLinkOptions(getLastAppLocation())}
-          className={cn(LINK_CLASS, "-mx-space-2 font-medium")}
-          onClick={layout.closeOnMobile}
+        <Button
+          size="sm"
+          color="secondary"
+          variant="plain"
+          leftDecorator={ArrowLeftIcon}
+          aria-label="Back to app"
+          className="-mx-space-2 border-0"
+          onClick={() => {
+            layout.closeOnMobile()
+            settings.returnToOrigin()
+          }}
         >
-          <ArrowLeftIcon size={16} weight="regular" />
-          <span>Back to app</span>
-        </Link>
+          Back to app
+        </Button>
         <SidebarCollapseButton onToggle={layout.toggle} />
       </div>
 

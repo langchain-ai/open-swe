@@ -31,8 +31,12 @@ function statusBadge(review: ReviewSummary) {
 export function ReviewedPullRequests({
   page,
   onPageChange,
+  selected,
+  onSelect,
 }: {
   page: number
+  selected?: string
+  onSelect: (pr: string) => void
   onPageChange: (page: number) => void
 }) {
   const queryClient = useQueryClient()
@@ -103,7 +107,12 @@ export function ReviewedPullRequests({
           {items.map((review) => (
             <div
               key={review.thread_id}
-              className="flex items-center justify-between gap-space-4 px-space-4 py-space-3 transition-colors hover:bg-surface-level-2-hover"
+              className={cn(
+                "flex flex-wrap items-center justify-between gap-space-3 px-space-4 py-space-3 transition-colors hover:bg-surface-level-2-hover",
+                selected ===
+                  `${review.owner}/${review.repo}#${review.number}` &&
+                  "bg-surface-level-2"
+              )}
             >
               <div className="flex min-w-0 items-center gap-space-3">
                 <GitPullRequestIcon
@@ -111,9 +120,20 @@ export function ReviewedPullRequests({
                   className="size-4 shrink-0 text-icon-secondary"
                 />
                 <div className="min-w-0">
-                  <div className="truncate text-xs font-medium text-primary">
+                  <button
+                    className="block w-full cursor-pointer truncate text-left text-xs font-medium text-primary hover:underline"
+                    aria-pressed={
+                      selected ===
+                      `${review.owner}/${review.repo}#${review.number}`
+                    }
+                    onClick={() =>
+                      onSelect(
+                        `${review.owner}/${review.repo}#${review.number}`
+                      )
+                    }
+                  >
                     {review.title}
-                  </div>
+                  </button>
                   <PullRequestLinks
                     repo={`${review.owner}/${review.repo}`}
                     number={review.number}

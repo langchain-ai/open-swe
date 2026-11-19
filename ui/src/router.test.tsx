@@ -34,7 +34,16 @@ vi.mock("@tanstack/react-router-ssr-query", () => ({
 }))
 vi.mock("./lib/perf/threadLoad", () => ({ onRouterNavigation: () => {} }))
 
-afterEach(() => cleanup())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  cleanup()
+})
+
+it("initializes on the server before route stores exist", () => {
+  vi.stubGlobal("window", undefined)
+  vi.stubGlobal("document", undefined)
+  expect(() => getRouter()).not.toThrow()
+})
 
 it("does not overwrite a thread's own initial position with another thread's offset", async () => {
   const router = getRouter()

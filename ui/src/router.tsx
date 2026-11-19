@@ -1,6 +1,7 @@
 import { createRouter as createTanStackRouter } from "@tanstack/react-router"
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query"
 
+import { ContextNavigation } from "./lib/contextNavigation"
 import { onRouterNavigation } from "./lib/perf/threadLoad"
 import { makeQueryClient } from "./lib/query"
 import { routeTree } from "./routeTree.gen"
@@ -24,6 +25,7 @@ export function getRouter() {
     defaultPreloadStaleTime: 0,
   })
 
+  ContextNavigation.for(router)
   setupRouterSsrQueryIntegration({ router, queryClient })
 
   // The thread-load clock starts at the navigation, not at the route mount.
@@ -37,5 +39,9 @@ export function getRouter() {
 declare module "@tanstack/react-router" {
   interface Register {
     router: ReturnType<typeof getRouter>
+  }
+  interface StaticDataRouteOption {
+    /** Show the desktop Back/Forward buttons beside the sidebar toggle. */
+    historyControls?: boolean
   }
 }

@@ -11,7 +11,7 @@ export const reviewStatuses = [
   "Changes Requested",
 ] as const
 export type ReviewStatus = (typeof reviewStatuses)[number]
-export interface ReviewsSearch {
+export interface ReviewsSearch extends ReviewQueueSearch {
   tab?: "mine" | "to-review" | "all"
   github?: boolean
   repo?: string[]
@@ -46,7 +46,7 @@ export function validateReviewQueueSearch(
     ...new Set(
       (Array.isArray(search.queue) ? search.queue : []).filter(
         (value): value is string =>
-          typeof value === "string" && prSelectionPattern.test(value)
+          typeof value === "string" && parsePullRequestSelection(value) !== null
       )
     ),
   ].slice(0, REVIEW_QUEUE_LIMIT)
@@ -59,7 +59,9 @@ export function parsePullRequestSelection(
   if (!value || !prSelectionPattern.test(value)) return null
   const [fullName, rawNumber] = value.split("#")
   const [owner, repo] = fullName!.split("/")
-  return { owner: owner!, repo: repo!, number: Number(rawNumber) }
+  const number = Number(rawNumber)
+  if (!Number.isSafeInteger(number) || number <= 0) return null
+  return { owner: owner!, repo: repo!, number }
 }
 
 const pullRequestUrlPattern =
@@ -103,6 +105,7 @@ export function validateReviewsSearch(
     )
     .slice(0, 100)
   return {
+    ...validateReviewQueueSearch(search),
     tab:
       search.tab === "mine" ||
       search.tab === "all" ||
@@ -123,7 +126,7 @@ export function validateReviewsSearch(
         : undefined,
     page: Number.isInteger(page) && page > 0 && page <= 50 ? page : undefined,
     pr:
-      typeof search.pr === "string" && prSelectionPattern.test(search.pr)
+      typeof search.pr === "string" && parsePullRequestSelection(search.pr)
         ? search.pr
         : undefined,
     files: expandedFiles.length ? expandedFiles : undefined,

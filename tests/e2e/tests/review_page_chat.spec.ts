@@ -110,7 +110,10 @@ function diffColumn(page: Page): Locator {
 }
 
 async function openChatTab(page: Page) {
-  await page.getByRole("tab", { name: "Chat", exact: true }).click();
+  const tab = page.getByRole("tab", { name: "Chat", exact: true });
+  if (!(await tab.isVisible()))
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await tab.click();
   await expect(page.getByTestId("composer-editor")).toBeVisible();
 }
 
@@ -121,6 +124,7 @@ async function sendChat(page: Page, text: string) {
 let pr: SeededPullRequest;
 
 test.describe("review page", () => {
+  test.use({ viewport: { width: 1600, height: 1000 } });
   test.beforeEach(async ({ page }) => {
     await page.request.post("/control/reset");
     await loginAs(page, SAME_USER);
@@ -185,7 +189,9 @@ test.describe("review page", () => {
   test("opens a review from a pasted or typed pull request link", async ({
     page,
   }) => {
-    const target = new RegExp(`/agents/reviews/${OWNER}/${REPO}/${pr.number}$`);
+    const target = (url: URL) =>
+      url.pathname === "/agents/reviews" &&
+      url.searchParams.get("pr") === `${OWNER}/${REPO}#${pr.number}`;
     const link = `https://github.com/${OWNER}/${REPO}/pull/${pr.number}/files?w=1`;
 
     const input = page.getByLabel("Open a pull request review");
@@ -221,7 +227,7 @@ test.describe("review page", () => {
   }) => {
     await openReview(page, pr);
     const title = page
-      .locator("h1")
+      .locator("h2")
       .filter({ hasText: "Add constant modules" });
     const menu = title.getByRole("link", { name: /Add constant modules/ });
     await expect(menu).toContainText("Add constant modules");
@@ -293,9 +299,9 @@ test.describe("review page", () => {
     await expect(input).toBeVisible();
     await input.press("Enter");
     await expect(input).toBeHidden();
-    await expect(page.getByRole("heading", { level: 1 })).toContainText(
-      "Rename constant modules",
-    );
+    await expect(
+      page.getByRole("heading", { level: 2, name: /Rename constant modules/ }),
+    ).toBeVisible();
     await page.reload();
     await edit.click();
     await expect(input).toHaveValue("Rename constant modules");
@@ -319,9 +325,9 @@ test.describe("review page", () => {
     await save.click();
     await expect(input).toBeHidden();
     await page.reload();
-    await expect(page.getByRole("heading", { level: 1 })).toContainText(
-      "Retry this title",
-    );
+    await expect(
+      page.getByRole("heading", { level: 2, name: /Retry this title/ }),
+    ).toBeVisible();
   });
 
   test("edits descriptions, cancels drafts, and keeps failed saves retryable", async ({
@@ -826,6 +832,7 @@ test.describe("review page", () => {
     page,
   }) => {
     await openReview(page, pr);
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
     await page.getByRole("tab", { name: /Discussion/ }).click();
     const conversation = page.getByRole("region", { name: "Conversation" });
     await expect(conversation).toBeVisible();
@@ -834,6 +841,18 @@ test.describe("review page", () => {
     await conversation
       .getByRole("textbox", { name: "Comment on this pull request" })
       .fill(comment);
+    await page
+      .getByRole("complementary", { name: "Chat and discussion" })
+      .getByRole("button", { name: "Close", exact: true })
+      .click();
+    await expect(conversation).toBeHidden();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("tab", { name: /Discussion/ }).click();
+    await expect(
+      conversation.getByRole("textbox", {
+        name: "Comment on this pull request",
+      }),
+    ).toHaveValue(comment);
     await conversation
       .getByRole("button", { name: "Comment", exact: true })
       .click();

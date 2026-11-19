@@ -1,5 +1,12 @@
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useElementScrollRestoration } from "@tanstack/react-router"
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 
 import type { OpenPullRequest } from "@/lib/api"
 import { pullRequestKey } from "../lib/status"
@@ -31,6 +38,7 @@ export function PullRequestList({
   onEndReached: () => void
   footer?: ReactNode
 }) {
+  const scrollEntry = useElementScrollRestoration({ id: "pull-request-list" })
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState(0)
   useEffect(() => {
@@ -46,11 +54,19 @@ export function PullRequestList({
   // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer({
     count: rows.length,
+    initialOffset: scrollEntry?.scrollY,
     getScrollElement: () => scroller,
     estimateSize: () => (compact ? estimatedRowHeight : estimatedCardHeight),
     overscan: 4,
     getItemKey: (index) => pullRequestKey(rows[index]!),
   })
+  const measurable = viewport > 0
+  useLayoutEffect(() => {
+    if (!measurable || !scroller) return
+    virtualizer.measure()
+    for (const row of scroller.querySelectorAll("[data-index]"))
+      virtualizer.measureElement(row)
+  }, [measurable, compact, scroller, virtualizer])
   const virtualRows = virtualizer.getVirtualItems()
   const lastRendered = virtualRows.at(-1)?.index ?? -1
   const reachedEnd = useRef(onEndReached)
@@ -63,7 +79,11 @@ export function PullRequestList({
   }, [lastRendered, rows.length, available])
 
   return (
-    <div ref={setScroller} className="min-h-0 flex-1 overflow-y-auto">
+    <div
+      ref={setScroller}
+      data-scroll-restoration-id="pull-request-list"
+      className="min-h-0 flex-1 overflow-y-auto"
+    >
       {viewport > 0 ? (
         <ul className="relative" style={{ height: virtualizer.getTotalSize() }}>
           {virtualRows.map((row) => (

@@ -10,6 +10,7 @@ import { ThreadCacheProvider } from "@langchain/react"
 
 import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { PluginTabs } from "@/features/plugins/components/PluginTabs"
+import { parsePullRequestSelection } from "@/features/reviews/search"
 import { reviewChatQuery } from "@/features/agents/lib/queries"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { RequireLogin } from "@/lib/auth-redirect"
@@ -29,21 +30,18 @@ function AgentsLayout() {
     shouldThrow: false,
   })
   const reviewMatch = useMatch({
-    from: "/agents/reviews/$owner/$repo/$number",
+    from: "/agents/reviews/",
     shouldThrow: false,
   })
+  const selectedReview = parsePullRequestSelection(reviewMatch?.search.pr)
   const activeThreadId = threadMatch?.params.threadId
   // A review page's sidebar row is the user's review chat thread. The page
   // loads it; the layout only reads it, so off a review page it asks for nothing.
   const reviewChat = useQuery({
-    ...reviewChatQuery({
-      owner: reviewMatch?.params.owner ?? "",
-      repo: reviewMatch?.params.repo ?? "",
-      number: Number(reviewMatch?.params.number),
-    }),
+    ...reviewChatQuery(selectedReview ?? { owner: "", repo: "", number: 0 }),
     enabled: false,
   })
-  const activeReviewThreadId = reviewMatch
+  const activeReviewThreadId = selectedReview
     ? reviewChat.data?.thread_id
     : undefined
   const location = useRouterState({

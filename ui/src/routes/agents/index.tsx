@@ -13,6 +13,7 @@ interface AgentsIndexSearch {
 }
 
 export const Route = createFileRoute("/agents/")({
+  staticData: { historyControls: true },
   validateSearch: (search: Record<string, unknown>): AgentsIndexSearch => ({
     ...(typeof search.prompt === "string" && search.prompt.trim()
       ? { prompt: search.prompt }

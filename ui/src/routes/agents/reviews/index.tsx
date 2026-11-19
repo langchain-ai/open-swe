@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { OpenPullRequests } from "@/features/reviews/OpenPullRequests"
 import { ReviewedPullRequests } from "@/features/reviews/ReviewedPullRequests"
 import { OpenPullRequestInput } from "@/features/reviews/OpenPullRequestInput"
+import { PullRequestWorkspace } from "@/features/reviews/PullRequestWorkspace"
 import { ReviewBookmarklet } from "@/features/reviews/ReviewBookmarklet"
 import {
   parsePullRequestSelection,
@@ -20,7 +21,7 @@ import {
 export const Route = createFileRoute("/agents/reviews/")({
   validateSearch: validateReviewsSearch,
   ssr: false,
-  beforeLoad: ({ search }) => {
+  beforeLoad: ({ search, location }) => {
     const stored = readStoredRepos()
     const storedTab = validateReviewsSearch({
       tab: window.localStorage.getItem(TAB_STORAGE_KEY),
@@ -33,6 +34,7 @@ export const Route = createFileRoute("/agents/reviews/")({
       throw redirect({
         to: "/agents/reviews",
         search: { ...search, ...changes },
+        hash: location.hash,
         replace: true,
       })
   },
@@ -72,10 +74,11 @@ function ReviewsPage() {
   const filters = Route.useSearch()
   const navigate = Route.useNavigate()
   const tab = filters.tab ?? "mine"
-  const clearTrafficLights =
-    useSidebarCollapsed() &&
-    typeof window !== "undefined" &&
-    Boolean(window.openSweDesktop)
+  const sidebarCollapsed = useSidebarCollapsed()
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const clearTrafficLights = sidebarCollapsed && isDesktop
+  const clearSidebarToggle = sidebarCollapsed && !isDesktop
   const changeFilters = (changes: Partial<ReviewsSearch>, replace = false) => {
     if ("repo" in changes) storeRepos(changes.repo)
     void navigate({
@@ -95,11 +98,16 @@ function ReviewsPage() {
   useEffect(() => {
     if (filters.tab) window.localStorage.setItem(TAB_STORAGE_KEY, filters.tab)
   }, [filters.tab])
-  const selection = tab !== "all" ? parsePullRequestSelection(filters.pr) : null
+  const selection = parsePullRequestSelection(filters.pr)
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="flex min-h-0 w-full flex-1 flex-col px-space-5 py-space-5">
+      <div
+        className={cn(
+          "flex min-h-0 w-full flex-1 flex-col",
+          !selection && "px-space-5 py-space-5"
+        )}
+      >
         <div
           className={cn(
             "mx-auto flex min-h-0 w-full flex-1 flex-col",
@@ -108,10 +116,13 @@ function ReviewsPage() {
         >
           <div
             className={cn(
-              "flex items-center gap-space-3",
-              clearTrafficLights && "relative -top-4",
+              "flex flex-wrap items-center gap-space-3",
+              selection && "border-b border-muted px-space-3 py-space-2",
+              clearTrafficLights && !selection && "relative -top-4",
               clearTrafficLights &&
-                (selection ? "pl-44" : "pl-[clamp(0px,772px-50vw,176px)]")
+                (selection ? "pl-44" : "pl-[clamp(0px,772px-50vw,176px)]"),
+              clearSidebarToggle &&
+                (selection ? "pl-11" : "pl-[clamp(0px,620px-50vw,24px)]")
             )}
           >
             <Text as="h1" variant="h3" weight="medium" color="primary">
@@ -129,6 +140,7 @@ function ReviewsPage() {
                       tab: value,
                       page: undefined,
                       pr: undefined,
+                      queue: undefined,
                     })
                   }}
                 >
@@ -137,20 +149,38 @@ function ReviewsPage() {
               ))}
             </div>
             <OpenPullRequestInput />
-            <ReviewBookmarklet />
-            <span className="hidden text-xs text-secondary lg:inline">
-              Drag to your bookmarks bar
-            </span>
+            {!selection && (
+              <>
+                <ReviewBookmarklet />
+                <span className="hidden text-xs text-secondary lg:inline">
+                  Drag to your bookmarks bar
+                </span>
+              </>
+            )}
           </div>
 
           {session.data &&
             (tab === "all" ? (
-              <ReviewedPullRequests
-                page={filters.page ?? 0}
-                onPageChange={(page) =>
-                  changeFilters({ page: page || undefined })
+              <PullRequestWorkspace
+                pr={selection}
+                onClose={() =>
+                  changeFilters({ pr: undefined, queue: undefined })
                 }
-              />
+              >
+                {(onSelect) => (
+                  <ReviewedPullRequests
+                    page={filters.page ?? 0}
+                    selected={filters.pr}
+                    onSelect={(pr) => {
+                      changeFilters({ pr, queue: undefined })
+                      onSelect()
+                    }}
+                    onPageChange={(page) =>
+                      changeFilters({ page: page || undefined })
+                    }
+                  />
+                )}
+              </PullRequestWorkspace>
             ) : (
               <OpenPullRequests
                 key={`${tab}-${Boolean(filters.github)}`}

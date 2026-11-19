@@ -27,6 +27,10 @@ it("restores a shared view and bounds malformed URL state", () => {
     direction: "desc",
     page: 2,
   })
+  expect(validateReviewsSearch({ pr: "acme/app#0" }).pr).toBeUndefined()
+  expect(
+    validateReviewsSearch({ pr: "acme/app#9007199254740992" }).pr
+  ).toBeUndefined()
   expect(
     validateReviewsSearch({
       tab: "bad",

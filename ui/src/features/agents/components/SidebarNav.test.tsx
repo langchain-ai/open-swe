@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { act, cleanup, render, screen } from "@testing-library/react"
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
@@ -21,7 +21,9 @@ beforeEach(() => {
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, ref }: React.ComponentProps<"a">) => (
-    <a ref={ref}>{children}</a>
+    <a ref={ref} href="/agents">
+      {children}
+    </a>
   ),
   useRouterState: ({ select }: { select: (state: unknown) => unknown }) =>
     select({ location }),
@@ -34,38 +36,24 @@ afterEach(() => {
   location.pathname = "/agents"
 })
 
-it("temporarily shows an active hidden item", () => {
+it("always shows core navigation regardless of saved visibility preferences", () => {
   const client = new QueryClient()
   client.setQueryData(["session"], null)
   const savedPrefs = window.localStorage.getItem(
     "open-swe.agents.sidebar-prefs"
   )
-  const view = (
+  render(
     <QueryClientProvider client={client}>
       <SidebarNav onNavigate={() => {}} />
     </QueryClientProvider>
   )
-  const { rerender } = render(view)
-  expect(screen.queryByText("Skills")).toBeNull()
-
-  location.pathname = "/agents/skills/new"
-  rerender(
-    <QueryClientProvider client={client}>
-      <SidebarNav onNavigate={() => {}} />
-    </QueryClientProvider>
-  )
-  expect(screen.getByText("Skills")).toBeTruthy()
+  for (const name of ["Skills", "Automations", "Pull Requests"]) {
+    expect(screen.getByRole("link", { name })).toBeTruthy()
+  }
+  expect(screen.queryByRole("button", { name: "More" })).toBeNull()
   expect(window.localStorage.getItem("open-swe.agents.sidebar-prefs")).toBe(
     savedPrefs
   )
-
-  location.pathname = "/agents"
-  rerender(
-    <QueryClientProvider client={client}>
-      <SidebarNav onNavigate={() => {}} />
-    </QueryClientProvider>
-  )
-  expect(screen.queryByText("Skills")).toBeNull()
 })
 
 it("shows navigation when signed out rather than waiting for disabled apps", () => {
@@ -76,7 +64,7 @@ it("shows navigation when signed out rather than waiting for disabled apps", () 
       <SidebarNav onNavigate={() => {}} />
     </QueryClientProvider>
   )
-  expect(screen.getByRole("button", { name: "More" })).toBeTruthy()
+  expect(screen.getByRole("link", { name: "Skills" })).toBeTruthy()
   expect(screen.queryByRole("status", { name: "Loading apps" })).toBeNull()
 })
 
@@ -97,6 +85,9 @@ it("shows loading feedback when a session enables the apps request", async () =>
     await screen.findByRole("status", { name: "Loading apps" })
   ).toBeTruthy()
   await act(() => release([]))
-  expect(await screen.findByRole("button", { name: "More" })).toBeTruthy()
+  expect(screen.getByRole("link", { name: "Skills" })).toBeTruthy()
+  await waitFor(() =>
+    expect(screen.queryByRole("status", { name: "Loading apps" })).toBeNull()
+  )
   vi.restoreAllMocks()
 })

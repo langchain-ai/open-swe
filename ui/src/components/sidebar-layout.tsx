@@ -8,10 +8,10 @@ import {
   useSyncExternalStore,
 } from "react"
 import { createPortal } from "react-dom"
-import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Kbd } from "@langchain/macaw-components/Kbd"
 import { ArrowLeftIcon } from "@phosphor-icons/react/dist/ssr/ArrowLeft"
 import { ArrowRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowRight"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/ssr/SidebarSimple"
 
 import { shortcutPlatform, useShortcutLabel } from "@/lib/hotkeys"
@@ -157,6 +157,7 @@ interface SidebarFrameProps {
   collapsed: boolean
   toggle: () => void
   className?: string
+  historyControls?: boolean
   children: React.ReactNode
 }
 
@@ -166,6 +167,7 @@ export function SidebarFrame({
   collapsed,
   toggle,
   className,
+  historyControls = true,
   children,
 }: SidebarFrameProps) {
   const isDesktop =
@@ -180,7 +182,11 @@ export function SidebarFrame({
   const windowControls =
     controlsHost &&
     createPortal(
-      <WindowControls collapsed={collapsed} toggle={toggle} />,
+      <WindowControls
+        collapsed={collapsed}
+        toggle={toggle}
+        historyControls={historyControls}
+      />,
       controlsHost
     )
 
@@ -225,19 +231,15 @@ type KeyboardWithLayout = {
   getLayoutMap: () => Promise<ReadonlyMap<string, string>>
 }
 
-/**
- * The desktop title bar's buttons beside the traffic lights: the sidebar
- * toggle, then back and forward, which the app needs without browser chrome.
- * One no-drag cluster in the root layout's controls host, so no draggable
- * header can come after it and swallow its clicks. ⌘[ and ⌘] stay the
- * browser's on the web.
- */
+/** The desktop sidebar toggle and optional history controls. */
 function WindowControls({
   collapsed,
   toggle,
+  historyControls,
 }: {
   collapsed: boolean
   toggle: () => void
+  historyControls: boolean
 }) {
   const subscribe = (onChange: () => void) => {
     window.navigation?.addEventListener("currententrychange", onChange)
@@ -299,40 +301,44 @@ function WindowControls({
         onClick={toggle}
         className="size-7"
       />
-      <IconButton
-        icon={ArrowLeftIcon}
-        label="Back"
-        tooltipProps={{
-          title: (
-            <span className="flex items-center gap-space-2">
-              Back <Kbd>{backShortcut}</Kbd>
-            </span>
-          ),
-        }}
-        color="secondary"
-        variant="plain"
-        size="sm"
-        disabled={!canGoBack}
-        onClick={() => window.history.back()}
-        className="size-7 disabled:bg-transparent"
-      />
-      <IconButton
-        icon={ArrowRightIcon}
-        label="Forward"
-        tooltipProps={{
-          title: (
-            <span className="flex items-center gap-space-2">
-              Forward <Kbd>{forwardShortcut}</Kbd>
-            </span>
-          ),
-        }}
-        color="secondary"
-        variant="plain"
-        size="sm"
-        disabled={!canGoForward}
-        onClick={() => window.history.forward()}
-        className="size-7 disabled:bg-transparent"
-      />
+      {historyControls && (
+        <>
+          <IconButton
+            icon={ArrowLeftIcon}
+            label="Back"
+            tooltipProps={{
+              title: (
+                <span className="flex items-center gap-space-2">
+                  Back <Kbd>{backShortcut}</Kbd>
+                </span>
+              ),
+            }}
+            color="secondary"
+            variant="plain"
+            size="sm"
+            disabled={!canGoBack}
+            onClick={() => window.history.back()}
+            className="size-7 disabled:bg-transparent"
+          />
+          <IconButton
+            icon={ArrowRightIcon}
+            label="Forward"
+            tooltipProps={{
+              title: (
+                <span className="flex items-center gap-space-2">
+                  Forward <Kbd>{forwardShortcut}</Kbd>
+                </span>
+              ),
+            }}
+            color="secondary"
+            variant="plain"
+            size="sm"
+            disabled={!canGoForward}
+            onClick={() => window.history.forward()}
+            className="size-7 disabled:bg-transparent"
+          />
+        </>
+      )}
     </div>
   )
 }

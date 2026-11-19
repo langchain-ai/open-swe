@@ -8,7 +8,7 @@ import {
   PushPinRegularIcon,
   StackRegularIcon,
 } from "@langchain/macaw-components/icons"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   DropdownMenuGroup,
@@ -210,6 +210,10 @@ export function AgentsSidebar({
   )
   const pinnedSectionRef = useRef<HTMLElement>(null)
   const navigate = useNavigate()
+  const historyControls = useRouterState({
+    select: ({ matches }) =>
+      matches.some(({ staticData }) => staticData.historyControls),
+  })
   const profile = useProfile()
   const scrollViewport = useRef<HTMLDivElement>(null)
   const { openPalette } = useAppCommandControls()
@@ -881,6 +885,7 @@ export function AgentsSidebar({
   return (
     <SidebarFrame
       {...layout}
+      historyControls={historyControls}
       className="border-r border-muted bg-surface-level-2"
     >
       {creatingProject && (

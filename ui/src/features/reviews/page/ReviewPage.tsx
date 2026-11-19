@@ -1,31 +1,26 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { useContextReturn } from "@/lib/contextNavigation"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 
-import { useIsHydrated } from "@/lib/hydration"
 import { useMediaQuery } from "@/lib/useIsMobile"
-import { useResizableWidth } from "@/lib/useResizableWidth"
-import { RightPanelResizeHandle } from "@/features/agents/components/panel/RightPanelResizeHandle"
+import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { pageTitle } from "@/lib/pageTitle"
 import { SideSheet } from "@/components/SideSheet"
-import { useSidebarControls } from "@/components/sidebar-layout"
-import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
 import { markReviewViewed } from "@/features/agents/lib/queries"
 import { ChatDraftsProvider } from "@/features/reviews/lib/chatDrafts"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
-import { reviewOpenedFromSidebar } from "@/features/reviews/lib/reviewEntry"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
 import { Changes } from "./Changes"
 import { Header } from "./Header"
 import { Navigator, NavigatorToggle } from "./Navigator"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { Rail } from "./Rail"
-import { NAVIGATOR_INLINE_QUERY, useReviewPage } from "./store"
+import { useReviewPage } from "./store"
 import { useReviewPageTools } from "./useReviewPageTools"
 
-/** The pull request page: files on the left, the PR and its code in the middle, the agent on the right. */
+/** The selected PR, with files and chat available on demand. */
 export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
@@ -34,19 +29,13 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const chatThreadId = useReviewChat(pr).data?.thread_id
   const open = useReviewPage((state) => state.open)
   const leave = useReviewPage((state) => state.leave)
-  const navigatorOpen = useReviewPage((state) => state.navigatorOpen)
   const navigatorOverlay = useReviewPage((state) => state.navigatorOverlay)
   const setNavigatorOverlay = useReviewPage(
     (state) => state.setNavigatorOverlay
   )
   const railOpen = useReviewPage((state) => state.railOpen)
   const setRailOpen = useReviewPage((state) => state.setRailOpen)
-  // The server and the first client render assume a desktop window, so hydration matches.
-  const hydrated = useIsHydrated()
-  const wideQuery = useMediaQuery("(min-width: 1100px)")
-  const navigatorQuery = useMediaQuery(NAVIGATOR_INLINE_QUERY)
-  const wide = !hydrated || wideQuery
-  const roomForNavigator = !hydrated || navigatorQuery
+  const wide = useMediaQuery("(min-width: 1360px)")
   const headSha = detail.data?.head_sha ?? null
 
   useLayoutEffect(() => open(pr, headSha), [open, pr, headSha])
@@ -85,30 +74,12 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
       markReviewViewed(queryClient, pr, chatThreadId)
   }, [queryClient, pr, chatThreadId, detailLoaded, walkthroughSha])
 
-  useCollapseAppSidebar(pr)
   useReviewPageTools(pr)
-  const sidebar = useSidebarControls()
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const leftInset = sidebar?.collapsed
-    ? isDesktop
-      ? "pl-48"
-      : "pl-space-8"
-    : "pl-space-3"
-
-  const navigatorInline = navigatorOpen && roomForNavigator
-  const navigatorSize = useResizableWidth({
-    storageKey: "open-swe.review-navigator.width",
-    defaultWidth: 248,
-    minWidth: 200,
-    maxWidth: 480,
-    edge: "right",
-  })
 
   return (
     <ChatDraftsProvider>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary">
-        <Header pr={pr} leftInset={leftInset} compactRail={!wide} />
+        <Header pr={pr} leftInset="pl-space-3" compactRail />
         {errorMessage !== null ? (
           <PullRequestUnavailable
             pr={pr}
@@ -121,39 +92,27 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
           />
         ) : (
           <div className="flex min-h-0 flex-1">
-            {navigatorInline && (
-              <div
-                className="relative shrink-0 border-r border-default bg-surface-level-1"
-                style={{ width: navigatorSize.width }}
-              >
-                <Navigator pr={pr} />
-                <RightPanelResizeHandle
-                  handlers={navigatorSize.handlers}
-                  className="right-0 left-auto translate-x-1/2 touch-none"
-                />
-              </div>
-            )}
             <section
               aria-label="Changes"
-              className="flex min-w-0 flex-1 flex-col"
+              className="flex min-h-0 min-w-0 flex-1 flex-col"
             >
-              {!navigatorInline && (
-                <div className="flex h-11 shrink-0 items-center px-space-3">
-                  <NavigatorToggle shown={false} />
-                </div>
-              )}
+              <div className="flex h-11 shrink-0 items-center px-space-3">
+                <NavigatorToggle shown={false} />
+              </div>
               <div className="min-h-0 flex-1">
                 <Changes pr={pr} />
               </div>
             </section>
             {wide && (
-              <RightPanelShell
-                mode="inline"
-                widthStorageKey="open-swe.review-panel.width"
-                defaultWidth={420}
-              >
-                <Rail pr={pr} />
-              </RightPanelShell>
+              <div className={railOpen ? "contents" : "hidden"}>
+                <RightPanelShell
+                  mode="inline"
+                  widthStorageKey="open-swe.review-panel.width"
+                  defaultWidth={420}
+                >
+                  <Rail pr={pr} onClose={() => setRailOpen(false)} />
+                </RightPanelShell>
+              </div>
             )}
           </div>
         )}
@@ -168,26 +127,24 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
             <Rail pr={pr} onClose={() => setRailOpen(false)} />
           </SideSheet>
         )}
-        {!roomForNavigator && (
-          <SideSheet
-            side="left"
-            title="Files"
-            open={navigatorOverlay}
-            onClose={() => {
-              setNavigatorOverlay(false)
-              requestAnimationFrame(() =>
-                document
-                  .querySelector<HTMLElement>(
-                    '[data-navigator-toggle][aria-pressed="false"]'
-                  )
-                  ?.focus()
-              )
-            }}
-            className="w-[min(88vw,300px)] pt-space-7"
-          >
-            <Navigator pr={pr} />
-          </SideSheet>
-        )}
+        <SideSheet
+          side="left"
+          title="Files"
+          open={navigatorOverlay}
+          onClose={() => {
+            setNavigatorOverlay(false)
+            requestAnimationFrame(() =>
+              document
+                .querySelector<HTMLElement>(
+                  '[data-navigator-toggle][aria-pressed="false"]'
+                )
+                ?.focus()
+            )
+          }}
+          className="w-[min(88vw,300px)] pt-space-7"
+        >
+          <Navigator pr={pr} />
+        </SideSheet>
       </div>
     </ChatDraftsProvider>
   )
@@ -204,6 +161,7 @@ function PullRequestUnavailable({
   refreshing: boolean
   onRefresh: () => void
 }) {
+  const returnNavigation = useContextReturn("review")
   return (
     <div
       role="alert"
@@ -230,9 +188,9 @@ function PullRequestUnavailable({
           size="sm"
           color="secondary"
           variant="outlined"
-          as={<Link to="/agents/reviews" />}
+          onClick={returnNavigation.returnToOrigin}
         >
-          Back to reviews
+          {returnNavigation.label}
         </Button>
         <Button
           size="sm"
@@ -251,30 +209,4 @@ function PullRequestUnavailable({
       </div>
     </div>
   )
-}
-
-// Review pages currently holding the app's nav collapsed. Moving from one review
-// page straight to another hands the collapse over instead of reopening the nav.
-let pagesHoldingSidebar = 0
-
-/** Collapse the app's nav for room, unless the person came from it; restore it on the way out. */
-function useCollapseAppSidebar(pr: PullRequestRef) {
-  const sidebar = useSidebarControls()
-  const sidebarRef = useRef(sidebar)
-  const fromSidebar = useRef(reviewOpenedFromSidebar(pr))
-  useEffect(() => {
-    sidebarRef.current = sidebar
-  }, [sidebar])
-  useLayoutEffect(() => {
-    const controls = sidebarRef.current
-    if (!controls || fromSidebar.current) return
-    if (controls.collapsed && pagesHoldingSidebar === 0) return
-    pagesHoldingSidebar += 1
-    controls.setCollapsedForPage(true)
-    return () =>
-      queueMicrotask(() => {
-        pagesHoldingSidebar -= 1
-        if (pagesHoldingSidebar === 0) controls.setCollapsedForPage(false)
-      })
-  }, [])
 }

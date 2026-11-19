@@ -5,7 +5,7 @@ import { toPierreSide } from "@/features/reviews/lib/lineRange"
 import { buildEntries, matchesFileFilter, type DiffEntry } from "./diffEntries"
 import { findingTarget, isAnchored } from "./findings"
 import { reviewQueries, type PullRequestRef } from "./queries"
-import { NAVIGATOR_INLINE_QUERY, isRead, useReviewPage } from "./store"
+import { isRead, useReviewPage } from "./store"
 
 const SIDE = {
   type: "string",
@@ -294,7 +294,7 @@ export function useReviewPageTools(pr: PullRequestRef) {
         },
         file_list: {
           type: "boolean",
-          description: "Whether the list of files sits beside the diff.",
+          description: "Whether the file navigator is open.",
         },
       },
     } as const,
@@ -302,10 +302,7 @@ export function useReviewPageTools(pr: PullRequestRef) {
       const state = useReviewPage.getState()
       if (order) state.setOrder(order)
       if (diff_style) state.setDiffStyle(diff_style)
-      // Where there is no room beside the diff, the file list opens over the page.
-      const inline = window.matchMedia(NAVIGATOR_INLINE_QUERY).matches
-      const fileListShown = (current: typeof state) =>
-        inline ? current.navigatorOpen : current.navigatorOverlay
+      const fileListShown = (current: typeof state) => current.navigatorOverlay
       if (file_list !== undefined && file_list !== fileListShown(state))
         state.toggleNavigator()
       const now = useReviewPage.getState()

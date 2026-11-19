@@ -45,8 +45,6 @@ export type PageEvent = "showFindings" | "showOpenConversations"
 
 /** The viewer's settings; they carry across pull requests, and some across reloads. */
 interface Preferences {
-  /** Whether the file list sits beside the diff, where there is room for it. */
-  navigatorOpen: boolean
   /** Whether the file list shows the walkthrough or the tree behind tabs, or both stacked. */
   navigatorLayout: NavigatorLayout
   order: DiffOrder
@@ -185,10 +183,7 @@ interface ReviewPageActions {
 
 const ORDER_KEY = "open-swe.review.view"
 const DIFF_STYLE_KEY = "open-swe.review.diffStyle"
-const NAVIGATOR_KEY = "open-swe.review.navigator"
 const NAVIGATOR_LAYOUT_KEY = "open-swe.review.navigatorLayout"
-/** Wide enough for the file list, the diff and the chat side by side. */
-export const NAVIGATOR_INLINE_QUERY = "(min-width: 1360px)"
 
 function viewedKey(pr: PullRequestRef, headSha: string | null): string {
   return `open-swe.review.viewed.${pr.owner}/${pr.repo}/${pr.number}.${headSha ?? ""}`
@@ -266,7 +261,6 @@ export function isPassed(
 
 function storedPreferences(): Preferences {
   return {
-    navigatorOpen: readPreference(NAVIGATOR_KEY) !== "closed",
     navigatorLayout:
       readPreference(NAVIGATOR_LAYOUT_KEY) === "stacked" ? "stacked" : "tabs",
     // A walkthrough, when one exists, is the default reading order.
@@ -385,7 +379,6 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     set({ events: new Set(get().events).add(event) })
 
   return {
-    navigatorOpen: true,
     navigatorLayout: "tabs",
     order: "files",
     diffStyle: "unified",
@@ -410,15 +403,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     leave: () => set(freshVisit()),
     setRailTab: (railTab) => set({ railTab, railOpen: true }),
     setRailOpen: (railOpen) => set({ railOpen }),
-    toggleNavigator: () => {
-      if (!window.matchMedia(NAVIGATOR_INLINE_QUERY).matches) {
-        set({ navigatorOverlay: !get().navigatorOverlay })
-        return
-      }
-      const navigatorOpen = !get().navigatorOpen
-      writePreference(NAVIGATOR_KEY, navigatorOpen ? "open" : "closed")
-      set({ navigatorOpen })
-    },
+    toggleNavigator: () => set({ navigatorOverlay: !get().navigatorOverlay }),
     setNavigatorOverlay: (navigatorOverlay) => set({ navigatorOverlay }),
     toggleNavigatorLayout: () => {
       const navigatorLayout =

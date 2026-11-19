@@ -9,16 +9,12 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { toast } from "sonner"
 
-import { useSession } from "@/lib/session"
-import { useOpenPullRequests } from "@/features/reviews/lib/useOpenPullRequests"
-import { pullRequestStatusQuery } from "@/features/reviews/lib/cache"
-import type { OpenPullRequest } from "@/lib/api"
-import { awaitsViewer } from "@/features/reviews/lib/reviewers"
+import { useContextReturn } from "@/lib/contextNavigation"
 import { pullRequestKey } from "@/features/reviews/lib/status"
 import { parsePullRequestSelection } from "@/features/reviews/search"
 import { warmReviewPage, type PullRequestRef } from "./queries"
 
-const REVIEW_ROUTE = "/agents/reviews/$owner/$repo/$number"
+const REVIEW_ROUTE = "/agents/reviews/"
 
 export interface ReviewQueue {
   position: number
@@ -34,68 +30,19 @@ export interface ReviewQueue {
 /** Where this page sits in the reviews the person is working through one by one, if they are. */
 export function useReviewQueue(pr: PullRequestRef): ReviewQueue | null {
   const queryClient = useQueryClient()
-  const navigate = useNavigate()
+  const navigate = useNavigate({ from: REVIEW_ROUTE })
+  const returnNavigation = useContextReturn("review")
   const explicit = useSearch({
     from: REVIEW_ROUTE,
     shouldThrow: false,
     select: (search) => search.queue,
   })
-  const login = useSession().data?.login ?? ""
-  const pending = useOpenPullRequests(
-    login,
-    [],
-    "updatedAt",
-    "desc",
-    "review-assigned"
-  )
-  const { hasNextPage, isFetching, fetchNextPage } = pending
-  useEffect(() => {
-    if (hasNextPage && !isFetching) void fetchNextPage()
-  }, [hasNextPage, isFetching, fetchNextPage])
-  const rows = pending.data?.pages.flatMap((page) => page.pullRequests) ?? []
   const current = pullRequestKey({
     repo: `${pr.owner}/${pr.repo}`,
     number: pr.number,
   }).toLowerCase()
   const same = (key: string) => key.toLowerCase() === current
-  const loaded =
-    pending.isSuccess &&
-    !pending.hasNextPage &&
-    !pending.data.pages.some((page) => page.incomplete)
-  const remaining = loaded
-    ? rows
-        .filter((row) => {
-          const live = queryClient.getQueryData<OpenPullRequest | null>(
-            pullRequestStatusQuery(login, row).queryKey
-          )
-          return awaitsViewer(
-            { ...row, ...live, assignment: row.assignment },
-            login
-          )
-        })
-        .map(pullRequestKey)
-    : undefined
-  const ordered = !remaining
-    ? (explicit ?? [])
-    : explicit
-      ? [
-          ...explicit.filter(
-            (key) =>
-              same(key) ||
-              remaining.some((left) => left.toLowerCase() === key.toLowerCase())
-          ),
-          ...remaining.filter(
-            (key) =>
-              !explicit.some(
-                (entry) => entry.toLowerCase() === key.toLowerCase()
-              )
-          ),
-        ]
-      : remaining.some((key) => !same(key))
-        ? [current, ...remaining.filter((key) => !same(key))]
-        : []
-  const queue =
-    ordered.length && !ordered.some(same) ? [current, ...ordered] : ordered
+  const queue = explicit ?? []
   const index = queue.findIndex(same)
   const nextKey = queue[index + 1]
   const previous = parsePullRequestSelection(queue[index - 1])
@@ -107,15 +54,23 @@ export function useReviewQueue(pr: PullRequestRef): ReviewQueue | null {
   if (index < 0) return null
   const open = (target: PullRequestRef) =>
     void navigate({
-      to: REVIEW_ROUTE,
-      params: {
-        owner: target.owner,
-        repo: target.repo,
-        number: String(target.number),
-      },
-      search: { queue },
+      to: "/agents/reviews",
+      state: returnNavigation.state,
+      search: (filters) => ({
+        ...filters,
+        files: undefined,
+        at: undefined,
+        pr: `${target.owner}/${target.repo}#${target.number}`,
+        queue,
+      }),
     })
-  const exit = () => void navigate({ to: "/agents/reviews", search: {} })
+  const exit = () => {
+    if (returnNavigation.back) return returnNavigation.returnToOrigin()
+    void navigate({
+      to: "/agents/reviews",
+      search: (filters) => ({ ...filters, pr: undefined, queue: undefined }),
+    })
+  }
   return {
     position: index + 1,
     total: queue.length,

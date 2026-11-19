@@ -11,7 +11,7 @@ export function ClosePullRequest({
   onClosed,
 }: {
   pr: OpenPullRequest
-  apply: () => () => void
+  apply?: () => () => void
   onClosed?: () => void
 }) {
   const close = usePullRequestAction({

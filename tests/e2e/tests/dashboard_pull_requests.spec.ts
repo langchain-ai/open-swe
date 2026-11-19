@@ -67,7 +67,9 @@ test.describe("thread pull requests", () => {
 
     await companionLink.click();
     await expect(page).toHaveURL(
-      /\/agents\/reviews\/anotherorg\/companion\/2$/,
+      (url) =>
+        url.pathname === "/agents/reviews" &&
+        url.searchParams.get("pr") === "anotherorg/companion#2",
     );
     await expect(
       page.getByRole("heading", { name: /Add companion integration/ }),
@@ -125,7 +127,7 @@ test.describe("thread pull requests", () => {
       await link.click({ modifiers: ["ControlOrMeta"] });
       const reviewPage = await newTab;
       await expect(reviewPage).toHaveURL(
-        /\/agents\/reviews\/fakeorg\/demo\/1$/,
+        /\/agents\/reviews\?pr=fakeorg%2Fdemo%231(&|$)/,
       );
       await expect(page).toHaveURL(threadUrl);
       await reviewPage.close();
@@ -139,7 +141,11 @@ test.describe("thread pull requests", () => {
         name: "Review fakeorg/demo pull request #1 in Robin",
       })
       .click();
-    await expect(page).toHaveURL(/\/agents\/reviews\/fakeorg\/demo\/1$/);
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/agents/reviews" &&
+        url.searchParams.get("pr") === "fakeorg/demo#1",
+    );
   });
 
   test("shows live pull request health and submits actionable fixes", async ({

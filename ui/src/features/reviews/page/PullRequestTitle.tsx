@@ -91,11 +91,11 @@ export function PullRequestTitle({ pr }: { pr: PullRequestRef }) {
 
   return (
     <>
-      <h1 className="flex min-w-0 items-center">
+      <h2 className="flex min-w-0 items-center">
         <RecentReviewPagesMenu pr={pr}>
           {detail?.pr.title ?? `${pr.owner}/${pr.repo}`}
         </RecentReviewPagesMenu>
-      </h1>
+      </h2>
       <Button
         type="button"
         color="secondary"

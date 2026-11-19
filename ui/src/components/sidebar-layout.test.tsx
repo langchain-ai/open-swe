@@ -8,7 +8,7 @@ import {
   renderHook,
   screen,
 } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { SidebarFrame, useSidebarLayout } from "./sidebar-layout"
 
@@ -90,13 +90,19 @@ describe("desktop title-bar controls", () => {
   afterEach(() => {
     cleanup()
     Reflect.deleteProperty(window, "openSweDesktop")
+    vi.restoreAllMocks()
   })
 
   // Electron applies app regions in DOM order; anywhere but the root layout's
   // last-child host, a draggable header can follow and swallow their clicks.
-  it.each([false, true])(
-    "render in the controls host as one no-drag cluster (collapsed: %s)",
-    async (collapsed) => {
+  it.each([
+    [false, true],
+    [true, true],
+    [false, false],
+    [true, false],
+  ])(
+    "render in the controls host (collapsed: %s, history: %s)",
+    async (collapsed, historyControls) => {
       Object.defineProperty(window, "openSweDesktop", {
         configurable: true,
         value: {},
@@ -107,6 +113,7 @@ describe("desktop title-bar controls", () => {
             width={260}
             setWidth={() => {}}
             collapsed={collapsed}
+            historyControls={historyControls}
             toggle={() => {}}
           >
             <div data-desktop-drag-region="" />
@@ -118,15 +125,32 @@ describe("desktop title-bar controls", () => {
       const toggle = await screen.findByRole("button", {
         name: collapsed ? "Expand sidebar" : "Collapse sidebar",
       })
-      for (const button of [
-        toggle,
-        screen.getByRole("button", { name: "Back" }),
-        screen.getByRole("button", { name: "Forward" }),
-      ]) {
-        expect(
-          button.closest("[data-desktop-window-controls] > [data-no-drag]")
-        ).not.toBeNull()
+      expect(
+        toggle.closest("[data-desktop-window-controls] > [data-no-drag]")
+      ).not.toBeNull()
+      for (const name of ["Back", "Forward"]) {
+        const button = screen.queryByRole("button", { name })
+        expect(button?.closest("[data-no-drag]") ?? null).toBe(
+          historyControls ? toggle.closest("[data-no-drag]") : null
+        )
       }
+
+      const back = vi.spyOn(window.history, "back").mockImplementation(() => {})
+      const forward = vi
+        .spyOn(window.history, "forward")
+        .mockImplementation(() => {})
+      await act(async () => {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "[", ctrlKey: true })
+        )
+      })
+      expect(back).toHaveBeenCalledOnce()
+      await act(async () => {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "]", ctrlKey: true })
+        )
+      })
+      expect(forward).toHaveBeenCalledOnce()
     }
   )
 })

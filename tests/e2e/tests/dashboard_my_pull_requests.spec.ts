@@ -115,7 +115,9 @@ test.describe("my pull requests", () => {
     await expect(result).toBeVisible();
     await result.click();
     await expect(page).toHaveURL(
-      new RegExp(`/agents/reviews/fakeorg/demo/${own.number}`),
+      (url) =>
+        url.pathname === "/agents/reviews" &&
+        url.searchParams.get("pr") === `fakeorg/demo#${own.number}`,
     );
   });
 
@@ -157,49 +159,127 @@ test.describe("my pull requests", () => {
     await expect(page.getByText("Someone else's change")).toHaveCount(0);
   });
 
-  test("returns to Mine from a PR with an automatic review queue", async ({
+  test("keeps the PR list and full review workspace together, including old links", async ({
     page,
   }) => {
     const mine = await seedOpenPullRequest(page, {
       repo: DEMO,
       title: "My authored change",
-      draft: true,
+      head: "my-authored-change",
+      body: "The complete review workspace stays beside the list.",
+      files: { "change.py": "VALUE = 1\n" },
       ...approved,
     });
-    const assigned = await seedOpenPullRequest(page, {
+    const other = await seedOpenPullRequest(page, {
       repo: DEMO,
-      title: "Assigned to Alice",
-      author: "bob",
+      title: "Another authored change",
+      head: "another-authored-change",
+      files: { "another.py": "VALUE = 3\n" },
       ...approved,
     });
-    await page.request.post(
-      `/fake-gh/repos/${assigned.repo}/pulls/${assigned.number}/requested_reviewers`,
-      { data: { reviewers: [SAME_USER.login] } },
-    );
+    const theirs = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Someone else's change",
+      head: "someone-elses-change",
+      author: "bob",
+      files: { "other.py": "VALUE = 2\n" },
+      ...approved,
+    });
     await openMine(page);
+    await page
+      .getByRole("textbox", { name: "Search pull requests" })
+      .fill("authored");
     await card(page, mine)
       .getByText("My authored change", { exact: true })
       .click();
-    await page.getByRole("link", { name: "Reviewer", exact: true }).click();
+    const workspace = page.getByRole("region", {
+      name: "Selected pull request",
+    });
     await expect(
-      page.getByRole("group", { name: "Review queue" }),
+      workspace.getByRole("heading", { name: "Changes", exact: true }),
     ).toBeVisible();
+    await expect(workspace).toContainText(
+      "The complete review workspace stays beside the list.",
+    );
+    await expect(
+      page.getByRole("link", { name: "Reviewer", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("group", { name: "Review queue" })).toHaveCount(
+      0,
+    );
+    await page.getByRole("button", { name: "Show files", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Files" })).toContainText(
+      "change.py",
+    );
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await expect(page.getByRole("tab", { name: /^Discussion/ })).toBeVisible();
+    await page.keyboard.press("Escape");
     await page
-      .getByRole("link", { name: "Back to reviews", exact: true })
+      .getByRole("button", { name: "Hide PR list", exact: true })
       .click();
     await expect(
-      page.getByRole("button", { name: "Mine", exact: true }),
-    ).toHaveAttribute("aria-pressed", "true");
-    await card(page, mine)
-      .getByText("My authored change", { exact: true })
-      .click();
-    await page.getByRole("link", { name: "Reviewer", exact: true }).click();
+      page.getByRole("textbox", { name: "Search pull requests" }),
+    ).toBeHidden();
     await page
-      .getByRole("button", { name: "Stop reviewing one by one" })
+      .getByRole("button", { name: "Show PR list", exact: true })
       .click();
     await expect(
-      page.getByRole("button", { name: "Mine", exact: true }),
-    ).toHaveAttribute("aria-pressed", "true");
+      page.getByRole("textbox", { name: "Search pull requests" }),
+    ).toHaveValue("authored");
+    await page
+      .getByRole("button", {
+        name: `fakeorg/demo #${other.number} Another authored change Approved`,
+        exact: true,
+      })
+      .click();
+    await expect(
+      workspace.getByRole("heading", { name: /Another authored change/ }),
+    ).toBeVisible();
+    await expect
+      .poll(async () => {
+        const rows = await page
+          .getByRole("region", { name: "My open pull requests", exact: true })
+          .getByRole("listitem")
+          .all();
+        const first = await rows[0]!.boundingBox();
+        const second = await rows[1]!.boundingBox();
+        return (
+          first !== null &&
+          second !== null &&
+          first.y + first.height <= second.y + 1
+        );
+      })
+      .toBe(true);
+    await page.goto(
+      `/agents/reviews/fakeorg/demo/${theirs.number}?q=no-matches#discussion`,
+    );
+    await expect(
+      workspace.getByRole("heading", { name: /Someone else's change/ }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/agents/reviews" &&
+        url.searchParams.get("pr") === `fakeorg/demo#${theirs.number}` &&
+        url.searchParams.get("q") === "no-matches" &&
+        url.hash === "#discussion",
+    );
+    await page.setViewportSize({ width: 640, height: 900 });
+    await page
+      .getByRole("button", { name: "Show PR list", exact: true })
+      .click();
+    await expect(workspace).toBeHidden();
+    await page
+      .getByRole("button", { name: "Back to selected PR", exact: true })
+      .click();
+    await expect(workspace).toBeVisible();
+    await page
+      .getByRole("button", { name: "Close PR details", exact: true })
+      .click();
+    await expect(
+      page.getByRole("textbox", { name: "Search pull requests" }),
+    ).toHaveValue("no-matches");
+    await expect(page).toHaveURL((url) => !url.searchParams.has("pr"));
   });
 
   test("queues requested reviews before own drafts and keeps marked-ready PRs open", async ({
@@ -250,7 +330,9 @@ test.describe("my pull requests", () => {
       titles.findIndex((text) => text.includes("My authored change")),
     );
     await page.getByText("Review one by one (2)").click();
-    await expect(page).toHaveURL(new RegExp(`/demo/${assigned.number}`));
+    await expect(page).toHaveURL(
+      (url) => url.searchParams.get("pr") === `fakeorg/demo#${assigned.number}`,
+    );
     const changes = page.locator(".review-code-view");
     await expect
       .poll(() => changes.evaluate((node) => node.scrollHeight))
@@ -264,7 +346,9 @@ test.describe("my pull requests", () => {
     await page
       .getByRole("button", { name: "Approve & next", exact: true })
       .click();
-    await expect(page).toHaveURL(new RegExp(`/demo/${mine.number}`));
+    await expect(page).toHaveURL(
+      (url) => url.searchParams.get("pr") === `fakeorg/demo#${mine.number}`,
+    );
     await expect.poll(() => changes.evaluate((node) => node.scrollTop)).toBe(0);
     const readyResponse = page.waitForResponse(
       (response) =>
@@ -280,7 +364,9 @@ test.describe("my pull requests", () => {
     await expect(
       page.getByRole("button", { name: "Finish", exact: true }),
     ).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/demo/${mine.number}`));
+    await expect(page).toHaveURL(
+      (url) => url.searchParams.get("pr") === `fakeorg/demo#${mine.number}`,
+    );
     await page.getByRole("button", { name: "Finish", exact: true }).click();
     await expect(page).toHaveURL(/tab=to-review/);
     await expect(

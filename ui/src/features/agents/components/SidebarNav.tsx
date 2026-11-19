@@ -1,3 +1,4 @@
+import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { useScrollIntoView } from "@/lib/useScrollIntoView"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { useQuery } from "@tanstack/react-query"
@@ -5,30 +6,14 @@ import { api } from "@/lib/api"
 import { useProfile } from "@/lib/profile"
 import { useSession } from "@/lib/session"
 import { SlackLinks } from "@/lib/slack-links"
-import { Button } from "@langchain/macaw-components/Button"
-import { CaretRightIcon } from "@langchain/macaw-components/icons"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuTrigger,
-} from "@langchain/macaw-components/DropdownMenu"
-import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
-import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { useRef } from "react"
 
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 
-import { DropdownMenuItem, DropdownMenuSubTrigger } from "@/components/MenuItem"
-import { MenuCheckItem } from "@/features/agents/components/MenuCheckItem"
-import { useSidebarPrefs } from "@/features/agents/lib/sidebarPrefs"
 import { pluginIcon, pluginRoot } from "@/features/plugins/lib/icons"
 import { usePlugins } from "@/features/plugins/lib/queries"
 import type { SectionRoot } from "@/lib/appLocation"
@@ -93,7 +78,6 @@ export function SidebarNav({
   activeThreadId?: string
   onNavigate: () => void
 }) {
-  const { prefs, toggleNavItemHidden } = useSidebarPrefs()
   const plugins = usePlugins()
   const session = useSession()
   const profile = useProfile()
@@ -117,8 +101,6 @@ export function SidebarNav({
     )
   )
   const linkTarget = useHrefLinkOptions()
-  // Keep focus on the page when navigation closes the menu.
-  const navigated = useRef(false)
   const items: ReadonlyArray<NavItem> = [
     ...NAV,
     ...(plugins.data ?? []).map((plugin) => ({
@@ -127,11 +109,6 @@ export function SidebarNav({
       icon: pluginIcon(plugin.manifest.sidebar.icon),
     })),
   ]
-
-  const hidden = items.filter(
-    (item) =>
-      prefs.hiddenNavItems.includes(item.to) && item.to !== activeSection
-  )
 
   const target = (to: SectionRoot) =>
     linkTarget(activeSection === to ? to : getLastSectionLocation(to))
@@ -183,18 +160,16 @@ export function SidebarNav({
         data-sidebar-loading={plugins.isLoading ? "" : undefined}
       >
         <nav className={cn("flex flex-col gap-0.5", className)}>
-          {items
-            .filter((item) => !hidden.includes(item))
-            .map((item) => (
-              <SidebarNavLink
-                key={item.to}
-                item={item}
-                href={target(item.to)}
-                active={activeSection === item.to}
-                onNavigate={onNavigate}
-              />
-            ))}
-          {plugins.isLoading ? (
+          {items.map((item) => (
+            <SidebarNavLink
+              key={item.to}
+              item={item}
+              href={target(item.to)}
+              active={activeSection === item.to}
+              onNavigate={onNavigate}
+            />
+          ))}
+          {plugins.isLoading && (
             <div
               data-sidebar-loading
               role="status"
@@ -203,78 +178,6 @@ export function SidebarNav({
             >
               <Skeleton className="h-2.5 w-24" />
             </div>
-          ) : (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  color="secondary"
-                  variant="plain"
-                  size="sm"
-                  aria-label="More"
-                  type="button"
-                  className={cn(
-                    ROW,
-                    // Match the Link rows' box and hover: Macaw's plain variant adds a
-                    // 1px transparent border that shifts the label, and its own dark hover.
-                    "h-auto justify-start border-0 text-secondary data-[state=open]:bg-surface-level-2-hover dark:hover:bg-surface-level-2-hover"
-                  )}
-                >
-                  <DotsThreeIcon size={16} weight="bold" className="shrink-0" />
-                  More
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                side="right"
-                align="start"
-                className="w-48"
-                onCloseAutoFocus={(event) => {
-                  if (navigated.current) event.preventDefault()
-                  navigated.current = false
-                }}
-              >
-                {hidden.map((item) => (
-                  <DropdownMenuItem key={item.to} asChild>
-                    <Link
-                      {...target(item.to)}
-                      onClick={() => {
-                        navigated.current = true
-                        onNavigate()
-                      }}
-                    >
-                      <item.icon
-                        size={14}
-                        weight="regular"
-                        className="shrink-0"
-                      />
-                      {item.label}
-                    </Link>
-                  </DropdownMenuItem>
-                ))}
-                {hidden.length > 0 && <DropdownMenuSeparator />}
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <PencilSimpleIcon size={14} weight="regular" />
-                    Edit sidebar
-                    <CaretRightIcon
-                      size={12}
-                      weight="regular"
-                      className="ml-auto text-icon-secondary"
-                    />
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent className="w-48">
-                    {items.map((item) => (
-                      <MenuCheckItem
-                        key={item.to}
-                        checked={!prefs.hiddenNavItems.includes(item.to)}
-                        onCheckedChange={() => toggleNavItemHidden(item.to)}
-                      >
-                        {item.label}
-                      </MenuCheckItem>
-                    ))}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              </DropdownMenuContent>
-            </DropdownMenu>
           )}
         </nav>
       </div>

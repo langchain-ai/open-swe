@@ -6,7 +6,7 @@ import { parsePullRequestReference } from "@/features/reviews/search"
 
 /** Jumps to the review of a pasted GitHub pull request link. */
 export function OpenPullRequestInput() {
-  const navigate = useNavigate()
+  const navigate = useNavigate({ from: "/agents/reviews/" })
   const [value, setValue] = useState("")
   const [invalid, setInvalid] = useState(false)
 
@@ -19,8 +19,14 @@ export function OpenPullRequestInput() {
     setValue("")
     setInvalid(false)
     void navigate({
-      to: "/agents/reviews/$owner/$repo/$number",
-      params: { owner: pr.owner, repo: pr.repo, number: String(pr.number) },
+      to: "/agents/reviews",
+      search: (previous) => ({
+        ...previous,
+        pr: `${pr.owner}/${pr.repo}#${pr.number}`,
+        queue: undefined,
+        files: undefined,
+        at: undefined,
+      }),
     })
   }
 

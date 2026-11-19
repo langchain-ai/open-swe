@@ -54,6 +54,7 @@ vi.mock("@/lib/session", () => ({
 const navigate = vi.hoisted(() => vi.fn())
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigate,
+  useElementScrollRestoration: () => undefined,
   Link: ({
     params,
     children,
@@ -851,7 +852,7 @@ describe("My PRs", () => {
     ).toBe(false)
   })
 
-  it("opens the preview from the title, keeps the number plain, and provides explicit destination links", async () => {
+  it("opens the selected PR from the title without a separate reviewer destination", async () => {
     mount()
     const title = await screen.findByText("Change 1")
     const card = title.closest("li")!
@@ -865,9 +866,7 @@ describe("My PRs", () => {
     expect(
       within(card).getByRole("link", { name: "GitHub" }).getAttribute("href")
     ).toBe("https://github.com/acme/app/pull/1")
-    expect(
-      within(card).getByRole("link", { name: "Reviewer" }).getAttribute("href")
-    ).toBe("/agents/reviews/acme/app/1")
+    expect(within(card).queryByRole("link", { name: "Reviewer" })).toBeNull()
   })
   it("shows pending checks as Pending alongside the PR's other conditions", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({

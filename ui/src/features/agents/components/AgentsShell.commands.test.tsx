@@ -94,8 +94,13 @@ vi.mock("@tanstack/react-router", () => ({
   }: {
     select: (state: {
       location: { pathname: string; search: Record<string, unknown> }
+      matches: { staticData: { historyControls?: boolean } }[]
     }) => unknown
-  }) => select({ location: { pathname: "/agents/thread-1", search: {} } }),
+  }) =>
+    select({
+      location: { pathname: "/agents/thread-1", search: {} },
+      matches: [{ staticData: { historyControls: true } }],
+    }),
   useSearch: () => undefined,
   useRouter: () => ({ options: { parseSearch: () => ({}) } }),
 }))
@@ -534,4 +539,28 @@ it("opens asynchronous workers as real conversations and expands the selected wo
   expect(
     screen.getByRole("link", { name: /Inspect code/ }).getAttribute("href")
   ).toBe("/agents/parent?subagent=sync-tool")
+})
+
+it("always shows the Recents organize and new thread controls", async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { enabled: false, retry: false } },
+  })
+  client.setQueryData(projectKeys.all, [])
+  render(
+    <QueryClientProvider client={client}>
+      <AppCommandProvider>
+        <AgentsShell user={USER}>
+          <div />
+        </AgentsShell>
+      </AppCommandProvider>
+    </QueryClientProvider>
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }))
+  expect(screen.queryByRole("button", { name: "Organize" })).toBeNull()
+  const organize = await screen.findByRole("button", {
+    name: "Recents options",
+  })
+  const newThread = screen.getByRole("button", { name: "New thread" })
+  for (const control of [organize, newThread])
+    expect(control.className).not.toMatch(/\bopacity-0\b/)
 })
