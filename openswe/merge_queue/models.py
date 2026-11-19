@@ -1,5 +1,6 @@
 """Queue history. Membership and evidence are snapshots, not live PR metadata."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -120,3 +121,11 @@ class Decision(Record):
     plan: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
     lease_owner: Mapped[UUID]
     fence: Mapped[int] = mapped_column(BigInteger)
+
+    @staticmethod
+    async def budget_used(decisions: Sequence[Decision]) -> int:
+        return sum(
+            decision.plan.get("kind") != "native-recovery"
+            or decision.plan.get("status") != "superseded"
+            for decision in decisions
+        )

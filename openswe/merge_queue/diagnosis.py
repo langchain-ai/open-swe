@@ -23,7 +23,7 @@ from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.jobs import queue as jobs
 from openswe.jobs.queue import Job
 from openswe.merge_queue.configuration import QueueConfiguration
-from openswe.merge_queue.models import Lease
+from openswe.merge_queue.models import Decision, Lease
 from openswe.merge_queue.recovery import RecoveryDecision, RecoveryProposal, RecoveryThread
 from openswe.merge_queue.store import BatchHistory, LeaseLost, MergeQueue, NativeSelection
 from openswe.prompts import prompt
@@ -206,7 +206,7 @@ class QueueRecovery:
             for d in history.decisions
             if d.plan.get("kind") == "native-recovery"
             and (saved := RecoveryDecision.model_validate(d.plan)).status
-            in {"applied", "escalated"}
+            in {"applied", "escalated", "superseded"}
             and saved.proposal.action != "retry"
         }
         resumed = history.batch.policy.get("recovery_resumes", {})
@@ -291,7 +291,9 @@ class QueueRecovery:
             "candidate": history.batch.candidate,
             "deadline": history.batch.deadline.isoformat(),
             "remaining_attempts": max(0, history.batch.max_attempts - len(history.attempts)),
-            "remaining_decisions": max(0, history.batch.max_plans - len(history.decisions)),
+            "remaining_decisions": max(
+                0, history.batch.max_plans - await Decision.budget_used(history.decisions)
+            ),
             "members": [entry.model_dump(mode="json") for entry in selection.entries],
             "attempts": [
                 {"id": str(a.id), "state": a.state, "deadline": a.deadline.isoformat()}
@@ -315,7 +317,7 @@ class QueueRecovery:
             if row.plan.get("kind") != "native-recovery":
                 continue
             decision = RecoveryDecision.model_validate(row.plan)
-            if decision.status not in {"applied", "escalated"}:
+            if decision.status not in {"applied", "escalated", "superseded"}:
                 continue
             proposal = decision.proposal
             if proposal.action == "retry":
@@ -326,7 +328,15 @@ class QueueRecovery:
             reason = escape(proposal.reason)
             fix = escape(proposal.suggested_fix)
             prefix = f"Merge queue batch `{history.batch.id}`: "
-            if decision.status == "escalated" or proposal.action == "escalate":
+            if decision.status == "superseded":
+                member = proposal.member
+                assert member is not None
+                text = (
+                    f"{prefix}cancelled the planned removal of PR #{member.number} because main "
+                    "advanced before removal. Robin did not dequeue it. The current candidate "
+                    "must be validated before diagnosing its PRs; the decision budget is unchanged."
+                )
+            elif decision.status == "escalated" or proposal.action == "escalate":
                 next_step = (
                     "Inspect the current GitHub queue membership and resolve the controller error "
                     "before resuming. Removal is unconfirmed."

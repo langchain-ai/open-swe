@@ -25,6 +25,7 @@ class QueueConfiguration(BaseModel):
     workflow_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     sync_workflow_policy: bool = False
     workflow_policy_revision: int = Field(default=0, ge=0, strict=True)
+    allow_main_advance: bool = Field(default=False, exclude_if=lambda value: not value)
     check_app_id: int | None = Field(default=None, gt=0, strict=True)
     operator_emails: frozenset[str] = Field(min_length=1)
     policy: QueuePolicy = Field(default_factory=lambda: QueuePolicy(checks={}))
@@ -76,6 +77,7 @@ class QueueConfiguration(BaseModel):
                         "dispatch_url",
                         "workflow_digest",
                         "check_app_id",
+                        "allow_main_advance",
                     },
                 ),
                 **(
@@ -115,6 +117,7 @@ class QueueConfiguration(BaseModel):
             and (
                 approved.workflow_digest != self.workflow_digest
                 or approved.validation_suite != validation.suite
+                or approved.allow_main_advance != self.allow_main_advance
             )
         ):
             raise ValueError("Workflow policy revision is stale or was reused")
@@ -122,6 +125,7 @@ class QueueConfiguration(BaseModel):
             update={
                 "workflow_digest": approved.workflow_digest,
                 "workflow_policy_revision": approved.workflow_policy_revision,
+                "allow_main_advance": approved.allow_main_advance,
                 "policy": self.policy.model_copy(
                     update={
                         "validation": validation.model_copy(
@@ -134,6 +138,8 @@ class QueueConfiguration(BaseModel):
 
     @model_validator(mode="after")
     def validate_controller(self) -> Self:
+        if self.allow_main_advance and not self.sync_workflow_policy:
+            raise ValueError("Main advancement requires synchronized gateway policy")
         if self.recovery is not None and (self.mode != "native" or self.check_app_id is None):
             raise ValueError("Automatic recovery requires a native validation gate")
         if self.sync_workflow_policy and (self.mode != "native" or self.check_app_id is None):

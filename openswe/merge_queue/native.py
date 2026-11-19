@@ -16,14 +16,15 @@ from openswe.github.queue import NativeQueueSnapshot
 from openswe.merge_queue.admission import QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.dispatch import (
+    CandidateAcceptance,
     DispatchEnvelope,
     DispatchGateway,
     DispatchRejected,
     WorkflowPolicyMismatch,
 )
-from openswe.merge_queue.models import Lease
+from openswe.merge_queue.models import Batch, Lease
 from openswe.merge_queue.runtime import QueueJob
-from openswe.merge_queue.store import LeaseLost, MergeQueue
+from openswe.merge_queue.store import LeaseLost, MergeQueue, NativeSelection
 from openswe.merge_queue.validation import InvalidValidation, ValidationEvidence
 from openswe.merge_queue.validation_contract import WORKFLOW
 
@@ -100,15 +101,15 @@ class NativeQueueRuntime:
         history = await queue.native_validation_history(lease)
         previous = history[0] if history else None
         for work in history:
-            if (
-                work.attempt.state == "succeeded"
-                and snapshot.main_sha != work.request.workflow_sha
-                and await repo.merge_base(work.request.candidate_sha, snapshot.main_sha)
-                == work.request.candidate_sha
-            ):
-                await queue.record_native_landing(work, lease)
-                previous = None
-                break
+            if work.attempt.state == "succeeded" and snapshot.main_sha != work.request.workflow_sha:
+                landed = False
+                for candidate_sha in (*work.accepted_candidates, work.request.candidate_sha):
+                    if await repo.merge_base(candidate_sha, snapshot.main_sha) == candidate_sha:
+                        await queue.record_native_landing(work, lease)
+                        previous, landed = None, True
+                        break
+                if landed:
+                    break
         policy = (
             QueuePolicy.model_validate(previous.batch.policy["policy"])
             if previous is not None and previous.batch.policy.get("trust") == trust
@@ -123,8 +124,17 @@ class NativeQueueRuntime:
             actual_digest = hashlib.sha256(workflow).hexdigest() if workflow is not None else None
         if actual_digest != config.workflow_digest:
             raise ValueError("Queue workflow changed")
+        main_advance = (
+            await self._main_advance_from(repo, snapshot, previous.batch) if previous else None
+        )
         work = await queue.prepare_native_validation(
-            snapshot, timeout, lease, policy=config.policy, trust=trust
+            snapshot,
+            timeout,
+            lease,
+            policy=config.policy,
+            trust=trust,
+            allow_main_advance=config.allow_main_advance,
+            main_advance_from=main_advance,
         )
         if work is None:
             return
@@ -148,6 +158,7 @@ class NativeQueueRuntime:
                     work.attempt.deadline,
                     workflow_policy_revision=revision,
                     workflow_digest=workflow_digest,
+                    members=work.members,
                 )
             except WorkflowPolicyMismatch:
                 logger.info(
@@ -157,6 +168,9 @@ class NativeQueueRuntime:
                 await queue.record_evidence(work.attempt.id, "dispatch-policy-deferred", {}, lease)
                 return
             except DispatchRejected as exc:
+                await queue.record_evidence(
+                    work.attempt.id, "dispatch-rejected", {"status": exc.status}, lease
+                )
                 await queue.finish_native_validation(
                     work, {"error": str(exc)}, lease, succeeded=False
                 )
@@ -168,8 +182,10 @@ class NativeQueueRuntime:
                     "in_progress",
                     workflow_policy_revision=revision,
                     workflow_digest=workflow_digest,
+                    members=work.members,
                 )
             return
+        await self._reconcile_checks(queue, repo, lease, attempt_id=work.attempt.id)
         run_id = work.run_id
         if work.attempt.state == "running":
             evidence = ValidationEvidence(repo)
@@ -195,7 +211,17 @@ class NativeQueueRuntime:
         if await self._timeout(repo, policy) != timeout:
             raise ValueError("Native queue deadline changed during validation")
         await queue.renew(lease, timedelta(seconds=60))
-        if await queue.authorize_native_result(work, snapshot, lease):
+        main_advance = await self._main_advance_from(repo, snapshot, work.batch)
+        if await queue.authorize_native_result(
+            work, snapshot, lease, main_advance_from=main_advance
+        ):
+            candidate = NativeSelection.model_validate(work.batch.candidate).candidate(snapshot)
+            assert candidate is not None
+            acceptance = (
+                CandidateAcceptance(base_sha=snapshot.main_sha, candidate_sha=candidate.head_sha)
+                if candidate.head_sha != work.request.candidate_sha
+                else None
+            )
             async with queue.native_publication(lease):
                 await dispatcher.report(
                     work.request,
@@ -204,7 +230,22 @@ class NativeQueueRuntime:
                     run_id=run_id,
                     workflow_policy_revision=revision,
                     workflow_digest=workflow_digest,
+                    members=work.members,
+                    acceptance=acceptance,
                 )
+
+    async def _main_advance_from(
+        self, repo: RepoClient, snapshot: NativeQueueSnapshot, batch: Batch
+    ) -> str | None:
+        if self.config is None or not self.config.allow_main_advance:
+            return None
+        observed = batch.policy.get("observed_main_sha", batch.base_sha)
+        if not isinstance(observed, str):
+            raise ValueError("Invalid observed main revision")
+        for base in {batch.base_sha, observed}:
+            if base != snapshot.main_sha and await repo.merge_base(base, snapshot.main_sha) != base:
+                return None
+        return batch.base_sha
 
     async def _recover(
         self,
@@ -216,14 +257,25 @@ class NativeQueueRuntime:
         decision = await queue.pending_native_recovery(lease)
         if decision is None:
             return False
-        if decision.status == "applying":
-            # A previous worker may have sent the mutation. Read the outcome; never resend it.
-            await queue.settle_native_deferral(decision, snapshot, lease)
-            return True
         try:
+            history = await queue.history(decision.proposal.batch_id)
+            main_advance = await self._main_advance_from(repo, snapshot, history.batch)
+            if (
+                main_advance is not None
+                and snapshot.main_sha != history.batch.base_sha
+                and decision.status == "pending"
+                and history.batch.policy.get("allow_main_advance") is True
+            ):
+                await queue.settle_native_deferral(decision, snapshot, lease, supersede=True)
+                return False
+            if decision.status == "applying":
+                # A previous worker may have sent the mutation. Read the outcome; never resend it.
+                await queue.settle_native_deferral(
+                    decision, snapshot, lease, main_advance_from=main_advance
+                )
+                return True
             if self.dispatcher is None:
                 raise ValueError("Native deferral transport is unavailable")
-            history = await queue.history(decision.proposal.batch_id)
             if self.config is None or history.batch.policy.get("trust") != self.config.native_trust:
                 raise ValueError("Recovery policy changed")
             if history.batch.state != "active" or history.batch.deadline <= datetime.now(UTC):
@@ -251,6 +303,7 @@ class NativeQueueRuntime:
                     "expires_at": attempt.deadline,
                     "workflow_policy_revision": workflow_policy.get("revision"),
                     "workflow_digest": workflow_policy.get("digest"),
+                    "members": references.get("native-members", {}).get("members", []),
                 }
             )
             current = await repo.native_queue(queue.target_branch)
@@ -279,7 +332,12 @@ class NativeQueueRuntime:
             after = await repo.native_queue(queue.target_branch)
             if after.repository_id != self.repository_id:
                 raise ValueError("Native queue repository identity changed")
-            await queue.settle_native_deferral(decision, after, lease)
+            await queue.settle_native_deferral(
+                decision,
+                after,
+                lease,
+                main_advance_from=await self._main_advance_from(repo, after, history.batch),
+            )
         except LeaseLost:
             raise
         except Exception as exc:
@@ -293,12 +351,20 @@ class NativeQueueRuntime:
             )
         return True
 
-    async def _reconcile_checks(self, queue: MergeQueue, repo: RepoClient, lease: Lease) -> None:
+    async def _reconcile_checks(
+        self, queue: MergeQueue, repo: RepoClient, lease: Lease, *, attempt_id: UUID | None = None
+    ) -> None:
         assert self.dispatcher is not None
         snapshot = await repo.native_queue(queue.target_branch)
         if snapshot.repository_id != self.repository_id:
             raise ValueError("Native queue repository identity changed")
-        async with queue.native_check_update(snapshot, lease) as update:
+        history = await queue.native_validation_history(lease)
+        main_advance = (
+            await self._main_advance_from(repo, snapshot, history[0].batch) if history else None
+        )
+        async with queue.native_check_update(
+            snapshot, lease, main_advance_from=main_advance, attempt_id=attempt_id
+        ) as update:
             if update is None:
                 return
             envelope = update.envelope
@@ -314,6 +380,8 @@ class NativeQueueRuntime:
                 update.state,
                 workflow_policy_revision=envelope.workflow_policy_revision,
                 workflow_digest=envelope.workflow_digest,
+                members=envelope.members,
+                acceptance=update.acceptance,
             )
 
     async def reconcile(self, payload: QueueJob) -> None:

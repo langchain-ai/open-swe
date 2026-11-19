@@ -10,6 +10,7 @@ from uuid import UUID, uuid7
 import httpx2
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr
 
+from openswe.merge_queue.git import SHA
 from openswe.merge_queue.recovery import RecoveryMember
 from openswe.merge_queue.validation_contract import ValidationRequest
 from openswe.utils.http_pool import pooled_transport
@@ -21,6 +22,14 @@ class DispatchEnvelope(BaseModel):
     expires_at: datetime
     workflow_policy_revision: int | None = None
     workflow_digest: str | None = None
+    members: tuple[RecoveryMember, ...] = Field(default=(), exclude_if=lambda value: not value)
+
+
+class CandidateAcceptance(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    base_sha: SHA
+    candidate_sha: SHA
 
 
 class WorkflowPolicy(BaseModel):
@@ -33,6 +42,7 @@ class WorkflowPolicy(BaseModel):
     workflow_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     dispatch_actor_id: int = Field(gt=0, strict=True)
     check_app_id: int = Field(gt=0, strict=True)
+    allow_main_advance: bool = Field(default=False, exclude_if=lambda value: not value)
     validation_suite: Literal["smoke", "services"] = Field(
         default="smoke", exclude_if=lambda value: value == "smoke"
     )
@@ -147,15 +157,21 @@ class DispatchGateway:
         run_id: int | None = None,
         workflow_policy_revision: int | None = None,
         workflow_digest: str | None = None,
+        members: tuple[RecoveryMember, ...] = (),
+        acceptance: CandidateAcceptance | None = None,
     ) -> None:
         envelope = DispatchEnvelope(
             contract=contract,
             expires_at=expires_at,
             workflow_policy_revision=workflow_policy_revision,
             workflow_digest=workflow_digest,
+            members=members,
         )
         report = CheckReport(
-            dispatch_body=envelope.model_dump_json(exclude_none=True), state=state, run_id=run_id
+            dispatch_body=envelope.model_dump_json(exclude_none=True),
+            state=state,
+            run_id=run_id,
+            acceptance=acceptance,
         )
         body = report.model_dump_json(exclude_none=True).encode()
         signature = self._signature(body, b"check-report:")
@@ -180,6 +196,7 @@ class DispatchGateway:
         *,
         workflow_policy_revision: int | None = None,
         workflow_digest: str | None = None,
+        members: tuple[RecoveryMember, ...] = (),
     ) -> None:
         body = (
             DispatchEnvelope(
@@ -187,6 +204,7 @@ class DispatchGateway:
                 expires_at=expires_at,
                 workflow_policy_revision=workflow_policy_revision,
                 workflow_digest=workflow_digest,
+                members=members,
             )
             .model_dump_json(exclude_none=True)
             .encode()
@@ -228,6 +246,7 @@ class CheckReport(BaseModel):
     dispatch_body: str
     state: Literal["in_progress", "recovering", "cancelled", "success"]
     run_id: int | None = None
+    acceptance: CandidateAcceptance | None = None
 
 
 class DeferralRequest(RecoveryMember):

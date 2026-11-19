@@ -130,7 +130,8 @@ async def test_dispatch_retries_only_authenticated_preflight_failures(
     assert all(request.content == sent[0].content for request in sent)
 
 
-def test_service_suite_policy_requires_new_revision_and_changes_validation_trust():
+@pytest.mark.parametrize("change", [{"validation_suite": "services"}, {"allow_main_advance": True}])
+def test_service_suite_policy_requires_new_revision_and_changes_validation_trust(change):
     config = QueueConfiguration(
         routing_id=uuid7(),
         repository="acme/widgets",
@@ -152,14 +153,15 @@ def test_service_suite_policy_requires_new_revision_and_changes_validation_trust
         workflow_policy_revision=1,
         dispatch_actor_id=123,
         check_app_id=456,
-        validation_suite="services",
+        **change,
     )
     with pytest.raises(ValueError, match="revision"):
         config.with_workflow_policy(approved)
     updated = config.with_workflow_policy(
         approved.model_copy(update={"workflow_policy_revision": 2})
     )
-    assert updated.policy.validation.suite == "services"
+    assert updated.policy.validation.suite == approved.validation_suite
+    assert updated.allow_main_advance == approved.allow_main_advance
     assert updated.native_trust != config.native_trust
     assert updated.generation != config.generation
 

@@ -145,6 +145,9 @@ The `merge-queue-recovery` skill uses read tools for diagnosis and guarded tools
 The dispatch gateway owns GitHub writes: workflow dispatch, passing-check publication, and native queue removal.
 Robin's controller retains diagnosis, pause/resume state, dependency checks, and outcome reconciliation; its native-queue GitHub token is read-only.
 
+The gateway policy `allow_main_advance` (default false; enable with a new policy revision) permits successful tests to approve a replacement candidate after main advances, only for the same ordered queue entries and PR heads under unchanged validation policy.
+The check records both tested and accepted SHAs; failed old runs retry on current main within the original batch budget, while changed membership requires fresh testing.
+
 Deferral sends a `POST` to the sibling `deferrals` endpoint of the configured `dispatch_url`.
 The request includes the exact original dispatch body, recovery request key, queue entry ID, PR number/head SHA, and persisted batch deadline.
 Its signature is HMAC-SHA256 over `b"deferral:" + body` with the existing dispatch secret.

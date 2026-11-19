@@ -71,7 +71,7 @@ class RecoveryDecision(BaseModel):
     thread_id: str
     members: tuple[RecoveryMember, ...]
     generation: str | None
-    status: Literal["pending", "applying", "applied", "escalated"]
+    status: Literal["pending", "applying", "applied", "escalated", "superseded"]
     detail: str = ""
 
     async def check_dependencies(self, repo: RepoClient, snapshot: NativeQueueSnapshot) -> None:

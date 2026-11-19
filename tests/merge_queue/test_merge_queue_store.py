@@ -1663,13 +1663,29 @@ async def test_native_partial_batches_obey_collection_without_expiring_backlog(
 
 
 @pytest.mark.parametrize(
-    "fault", ["head", "review", "base", "pause", "deadline", "lease", "batch_deadline"]
+    "fault",
+    [
+        "head",
+        "review",
+        "base",
+        "pause",
+        "deadline",
+        "lease",
+        "batch_deadline",
+        "rewound_main",
+        "deferred",
+    ],
 )
 async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault):
     policy, lease, operator = await enable_native_validation(queue)
     snapshot = native_snapshot()
     work = await queue.prepare_native_validation(
-        snapshot, 600, lease, policy=policy, trust="trusted-policy"
+        snapshot,
+        600,
+        lease,
+        policy=policy,
+        trust="trusted-policy",
+        allow_main_advance=fault in {"rewound_main", "deferred"},
     )
     assert work is not None
     await queue.bind_validation_run(work.attempt.id, 42, lease)
@@ -1728,7 +1744,13 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
         with pytest.raises(LeaseLost):
             await queue.authorize_native_result(work, snapshot, lease)
         return
-    assert not await queue.authorize_native_result(work, snapshot, lease)
+    if fault == "deferred":
+        await queue.record_evidence(work.attempt.id, "dispatch-policy-deferred", {}, lease)
+        work = (await queue.native_validation_history(lease))[0]
+        snapshot = native_snapshot(main="d" * 40)
+    assert not await queue.authorize_native_result(
+        work, snapshot, lease, main_advance_from="a" * 40 if fault == "deferred" else None
+    )
 
 
 @pytest.mark.parametrize(
@@ -1739,9 +1761,12 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
         "dispatch_tuning",
         "dispatch_response_lost",
         "dispatch_policy_mismatch",
+        "rejected_dispatch_cleanup",
         "report_policy_mismatch",
         "policy_discovery",
         "policy_adoption_after_success",
+        "policy_adoption_with_main_advance",
+        "policy_revokes_main_advance",
         "rerun_after_success",
         "validation_failed",
         "report_rejected",
@@ -1749,6 +1774,7 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
         "capacity",
         "timeout",
         "allgreen",
+        "main_advance",
     ],
 )
 async def test_native_runtime_recovers_publication_without_revoking_verified_success(
@@ -1778,6 +1804,12 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         policy=policy,
     )
     config = config.model_copy(update={"sync_workflow_policy": True, "workflow_policy_revision": 1})
+    if fault in {
+        "main_advance",
+        "policy_adoption_with_main_advance",
+        "policy_revokes_main_advance",
+    }:
+        config = config.model_copy(update={"allow_main_advance": True})
     await save_configuration(config)
     repo = Mock(spec=RepoClient)
     repo.raw_file = AsyncMock(return_value=b"reviewed workflow")
@@ -1857,10 +1889,17 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             assert body["dispatch_body"].encode() in {
                 item.content for item in sent if item.url.path.endswith("/dispatch")
             }
+            if (
+                fault == "rejected_dispatch_cleanup"
+                and body["dispatch_body"].encode() == sent[0].content
+            ):
+                return httpx2.Response(409)
             if body["state"] in {"recovering", "cancelled"}:
                 return httpx2.Response(report_status)
             if body["state"] == "success":
                 return httpx2.Response(report_status)
+        elif fault == "rejected_dispatch_cleanup" and len(sent) == 1:
+            return httpx2.Response(409)
         elif fault == "slow_dispatch":
             await asyncio.sleep(6)
         elif fault == "dispatch_tuning":
@@ -1944,7 +1983,19 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         assert len(sent) == count
         assert await QueueConfiguration.load(queue.bound_routing_id) == configured
         policy_revision = 2
-    request = ValidationRequest.model_validate(json.loads(sent[0].content)["contract"])
+    if fault == "rejected_dispatch_cleanup":
+        rejected = ValidationRequest.model_validate(json.loads(sent[0].content)["contract"])
+        # Older rejected attempts lack the marker that suppresses receipt-less cleanup.
+        async with postgres.session() as session:
+            await session.execute(
+                delete(Evidence).where(
+                    Evidence.attempt_id == rejected.attempt_id, Evidence.key == "dispatch-rejected"
+                )
+            )
+        repo.native_queue.return_value = native_snapshot((1, 3, 4, 5, 6))
+        await reconcile()
+    dispatched = [r for r in sent if r.url.path.endswith("/dispatch")]
+    request = ValidationRequest.model_validate(json.loads(dispatched[-1].content)["contract"])
     run = ValidationRun(
         id=42,
         actor_id=123,
@@ -1992,6 +2043,21 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             "tested_sha": request.candidate_sha,
         }
     )
+    if fault == "main_advance":
+        repo.native_queue.return_value = native_snapshot((1, 2, 3, 4, 5, 6), main="d" * 40)
+        repo.merge_base = AsyncMock(
+            side_effect=lambda base, head: (
+                base if base in {request.workflow_sha, "d" * 40, "e" * 40} else request.workflow_sha
+            )
+        )
+        repo.validation_run.return_value = run.model_copy(
+            update={"status": "in_progress", "conclusion": None}
+        )
+        await reconcile()
+        progress = json.loads(sent[-1].content)
+        assert progress["state"] == "in_progress"
+        assert progress["acceptance"]["base_sha"] == "d" * 40
+        repo.validation_run.return_value = run
     if fault == "validation_failed":
         repo.validation_run.return_value = run.model_copy(update={"conclusion": "failure"})
         await reconcile()
@@ -2018,7 +2084,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         return
     with pytest.raises(httpx2.HTTPStatusError):
         await reconcile()
-    assert (await queue.history(request.batch_id)).attempts[0].state == "succeeded"
+    assert (await queue.history(request.batch_id)).attempts[-1].state == "succeeded"
     report_status = 409 if fault == "report_rejected" else 204
     if fault in {"rerun_after_success", "report_rejected"}:
         repo.validation_run.return_value = run.model_copy(update={"run_attempt": 2})
@@ -2028,10 +2094,10 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     else:
         await reconcile()
     history = await queue.history(request.batch_id)
-    assert history.attempts[0].state == "succeeded"
+    assert history.attempts[-1].state == "succeeded"
     assert all(evidence.key != "validation-revoked" for evidence in history.evidence)
     assert len([r for r in sent if r.url.path.endswith("/dispatch")]) == (
-        2 if fault == "dispatch_policy_mismatch" else 1
+        2 if fault in {"dispatch_policy_mismatch", "rejected_dispatch_cleanup"} else 1
     )
     successes = [
         r
@@ -2041,7 +2107,29 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     assert len(successes) == 2
     assert successes[0].content == successes[1].content
 
-    if fault == "policy_adoption_after_success":
+    if fault == "main_advance":
+        original = json.loads(successes[0].content)
+        assert original["acceptance"]["base_sha"] == "d" * 40
+        repo.native_queue.return_value = native_snapshot((1, 2, 3, 4, 5, 6), main="e" * 40)
+        await reconcile()
+        accepted = json.loads(sent[-1].content)["acceptance"]
+        assert accepted["base_sha"] == "e" * 40
+        assert accepted["candidate_sha"] != original["acceptance"]["candidate_sha"]
+        assert len([r for r in sent if r.url.path.endswith("/dispatch")]) == 1
+        repo.native_queue.return_value = native_snapshot((), main=accepted["candidate_sha"])
+        repo.merge_base = AsyncMock(
+            side_effect=lambda base, head: (
+                base if base == accepted["candidate_sha"] else request.workflow_sha
+            )
+        )
+        await reconcile()
+        assert (await queue.history(request.batch_id)).batch.state == "landed"
+
+    if fault in {
+        "policy_adoption_after_success",
+        "policy_adoption_with_main_advance",
+        "policy_revokes_main_advance",
+    }:
         from openswe.merge_queue.dispatch import WorkflowPolicy
 
         config = config.model_copy(update={"policy": tuned.policy})
@@ -2057,6 +2145,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
                 dispatch_actor_id=123,
                 check_app_id=456,
                 validation_suite="services",
+                allow_main_advance=fault == "policy_adoption_with_main_advance",
             ),
         )
         lease = await queue.claim(uuid7(), timedelta(minutes=1), config=config)
@@ -2066,13 +2155,19 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         pending_rebuild = native_snapshot().model_copy(update={"main_sha": "e" * 40})
         assert (
             await queue.prepare_native_validation(
-                pending_rebuild, 600, lease, policy=policy, trust=config.native_trust
+                pending_rebuild,
+                600,
+                lease,
+                policy=policy,
+                trust=config.native_trust,
+                allow_main_advance=config.allow_main_advance,
             )
             is None
         )
         assert (await queue.history(request.batch_id)).batch.state == "active"
         await queue.release(lease)
         repo.native_queue.return_value = native_snapshot(main="e" * 40)
+        repo.merge_base = AsyncMock(return_value=request.workflow_sha)
         await reconcile()
         replacement = await queue.history(request.batch_id)
         assert replacement.batch.deadline == history.batch.deadline
@@ -2220,17 +2315,135 @@ async def test_native_check_expiry_does_not_cancel_live_policy_replacements(queu
     assert (await queue.history(work.batch.id)).attempts[0].state == "timed_out"
 
 
+class TestNativeReplacementCheck:
+    @staticmethod
+    @pytest.mark.parametrize("expired", [False, True])
+    async def test_progress_recovery_and_cleanup_follow_every_target(queue, expired):
+        policy, lease, _ = await enable_native_validation(queue)
+        work = await queue.prepare_native_validation(
+            native_snapshot(),
+            600,
+            lease,
+            policy=policy,
+            trust="trusted-policy",
+            allow_main_advance=True,
+        )
+        assert work is not None
+        targets = {work.request.candidate_sha}
+        for main in ("d" * 40, "e" * 40):
+            current = native_snapshot(main=main)
+            async with queue.native_check_update(
+                current, lease, main_advance_from="a" * 40
+            ) as status:
+                assert status is not None and status.state == "in_progress"
+                assert status.envelope.contract == work.request
+                assert status.acceptance is not None and status.acceptance.base_sha == main
+                targets.add(status.acceptance.candidate_sha)
+        assert len(targets) == 3
+        async with queue.native_check_update(current, lease, main_advance_from="a" * 40) as replay:
+            assert replay is None
+        await queue.finish_native_validation(work, {}, lease, succeeded=False)
+        async with queue.native_check_update(
+            current, lease, main_advance_from="a" * 40
+        ) as recovery:
+            assert recovery is not None and recovery.state == "recovering"
+            assert recovery.acceptance == status.acceptance
+        if expired:
+            async with postgres.session() as session:
+                await session.execute(
+                    update(Attempt)
+                    .where(Attempt.id == work.attempt.id)
+                    .values(deadline=func.clock_timestamp() - timedelta(seconds=1))
+                )
+        else:
+            current = native_snapshot((), main="e" * 40)
+        cancelled = set()
+        for _ in targets:
+            async with queue.native_check_update(
+                current, lease, main_advance_from="a" * 40
+            ) as cleanup:
+                assert cleanup is not None and cleanup.state == "cancelled"
+                cancelled.add(
+                    cleanup.acceptance.candidate_sha
+                    if cleanup.acceptance
+                    else cleanup.envelope.contract.candidate_sha
+                )
+        assert cancelled == targets
+        async with queue.native_check_update(
+            current, lease, main_advance_from="a" * 40
+        ) as complete:
+            assert complete is None
+
+
 class TestNativeRecovery:
+    @pytest.mark.parametrize("change", ["reordered", "rewrite", "budget", "expired"])
+    async def test_main_advance_does_not_bypass_membership_ancestry_or_budget(self, queue, change):
+        policy, lease, _, initial, work, proposal = await self.failed(
+            queue, allow_main_advance=True
+        )
+        if change == "budget":
+            async with postgres.session() as session:
+                await session.execute(
+                    update(Batch).where(Batch.id == work.batch.id).values(max_attempts=1)
+                )
+        elif change == "expired":
+            async with postgres.session() as session:
+                await session.execute(
+                    update(Attempt)
+                    .where(Attempt.id == work.attempt.id)
+                    .values(
+                        state="running",
+                        finished_at=None,
+                        deadline=func.clock_timestamp() - timedelta(seconds=1),
+                    )
+                )
+        current = native_snapshot(
+            (2, 1, 3, 4, 5, 6) if change == "reordered" else (1, 2, 3, 4, 5, 6), main="d" * 40
+        )
+        assert (
+            await queue.prepare_native_validation(
+                current,
+                600,
+                lease,
+                policy=policy,
+                trust="trusted-policy",
+                allow_main_advance=True,
+                main_advance_from=None if change == "rewrite" else initial.main_sha,
+            )
+            is None
+        )
+        history = await queue.history(work.batch.id)
+        assert history.batch.deadline == work.batch.deadline and len(history.attempts) == 1
+        if change == "budget":
+            decision = await queue.decide_native_recovery(
+                proposal.model_copy(update={"action": "escalate"}),
+                "recovery-thread",
+                current,
+                lease,
+                trust="trusted-policy",
+            )
+            assert decision.status == "applied"
+        elif change == "expired":
+            assert history.attempts[0].state == "timed_out"
+        else:
+            assert history.batch.state == "invalidated"
+
     @staticmethod
     async def failed(
         queue: MergeQueue,
         *,
         bind: bool = True,
+        allow_main_advance: bool = False,
     ) -> tuple[QueuePolicy, Lease, User, NativeQueueSnapshot, NativeWork, RecoveryProposal]:
         policy, lease, operator = await enable_native_validation(queue)
         snapshot = native_snapshot((1, 2, 3, 4, 5, 6))
         work = await queue.prepare_native_validation(
-            snapshot, 600, lease, policy=policy, trust="trusted-policy"
+            snapshot,
+            600,
+            lease,
+            policy=policy,
+            trust="trusted-policy",
+            allow_main_advance=allow_main_advance,
         )
         assert work is not None
         await queue.finish_native_validation(
@@ -2359,12 +2572,30 @@ class TestNativeRecovery:
         assert "superseded_attempts" not in history.batch.policy
 
     @pytest.mark.parametrize(
-        "outcome", ["removed", "lost_response", "publication_timeout", "rejected", "forbidden"]
+        "outcome",
+        [
+            "removed",
+            "lost_response",
+            "publication_timeout",
+            "rejected",
+            "forbidden",
+            "advanced_before",
+            "advanced_after",
+            "history_error",
+            "ancestry_error",
+        ],
     )
     async def test_deferral_through_gateway_requires_fresh_survivor_validation(
-        self, queue, outcome
+        self, queue, monkeypatch, outcome
     ):
-        policy, lease, _, snapshot, work, proposal = await self.failed(queue)
+        advancing = outcome in {
+            "advanced_before",
+            "advanced_after",
+            "ancestry_error",
+        }
+        policy, lease, _, snapshot, work, proposal = await self.failed(
+            queue, allow_main_advance=advancing
+        )
         proposal = proposal.model_copy(
             update={
                 "action": "defer",
@@ -2374,7 +2605,7 @@ class TestNativeRecovery:
         await queue.decide_native_recovery(
             proposal, "recovery-thread", snapshot, lease, trust="trusted-policy"
         )
-        after = native_snapshot((1, 3, 4, 5, 6))
+        after = native_snapshot((1, 3, 4, 5, 6), main="d" * 40 if advancing else snapshot.main_sha)
         repo = Mock(spec=RepoClient)
         repo.native_queue = AsyncMock(
             side_effect=[snapshot, snapshot if outcome == "publication_timeout" else after]
@@ -2422,10 +2653,73 @@ class TestNativeRecovery:
             queue.id,
             42,
             Mock(),
-            config=Mock(spec=QueueConfiguration, native_trust="trusted-policy", check_app_id=456),
+            config=Mock(
+                spec=QueueConfiguration,
+                native_trust="trusted-policy",
+                check_app_id=456,
+                allow_main_advance=advancing,
+            ),
             dispatcher=gateway,
         )
 
+        if outcome in {"history_error", "ancestry_error"}:
+            with monkeypatch.context() as patch:
+                patch.setattr(
+                    queue if outcome == "history_error" else repo,
+                    "history" if outcome == "history_error" else "merge_base",
+                    AsyncMock(side_effect=RuntimeError("Lookup unavailable")),
+                )
+                assert await runner._recover(queue, repo, native_snapshot(main="d" * 40), lease)
+            assert (await queue.history(work.batch.id)).decisions[0].plan["status"] == "escalated"
+            assert await queue.pending_native_recovery(lease) is None
+            assert (await queue.snapshot(limit=1))[0]
+            gateway.defer.assert_not_awaited()
+            return
+
+        if outcome == "advanced_before":
+            async with postgres.session() as session:
+                await session.execute(
+                    update(Batch).where(Batch.id == work.batch.id).values(max_plans=1)
+                )
+            after = native_snapshot((1, 2, 3, 4, 5, 6), main="d" * 40)
+            assert not await runner._recover(queue, repo, after, lease)
+            gateway.defer.assert_not_awaited()
+            assert (await queue.history(work.batch.id)).decisions[0].plan["status"] == "superseded"
+            replacement = await queue.prepare_native_validation(
+                after,
+                600,
+                lease,
+                policy=policy,
+                trust="trusted-policy",
+                allow_main_advance=True,
+                main_advance_from=snapshot.main_sha,
+            )
+            assert replacement is not None and replacement.request.workflow_sha == after.main_sha
+            assert replacement.batch.id == work.batch.id
+            assert replacement.batch.deadline == work.batch.deadline
+            async with queue.native_check_update(
+                after, lease, main_advance_from=after.main_sha
+            ) as cleanup:
+                assert cleanup is not None and cleanup.state == "cancelled"
+                assert cleanup.envelope.contract == work.request
+                assert cleanup.acceptance is None
+            async with queue.native_check_update(
+                after, lease, main_advance_from=after.main_sha
+            ) as pending:
+                assert pending is None
+            await queue.finish_native_validation(replacement, {}, lease, succeeded=False)
+            retry = proposal.model_copy(
+                update={
+                    "request_key": uuid7(),
+                    "attempt_id": replacement.attempt.id,
+                    "candidate_sha": replacement.request.candidate_sha,
+                }
+            )
+            saved = await queue.decide_native_recovery(
+                retry, "recovery-thread", after, lease, trust="trusted-policy"
+            )
+            assert saved.status == "pending"
+            return
         assert await runner._recover(queue, repo, snapshot, lease)
 
         gateway.defer.assert_awaited_once()
@@ -2453,7 +2747,13 @@ class TestNativeRecovery:
         assert not (await queue.snapshot(limit=1))[0]
         assert await queue.pending_native_recovery(lease) is None
         replacement = await queue.prepare_native_validation(
-            after, 600, lease, policy=policy, trust="trusted-policy"
+            after,
+            600,
+            lease,
+            policy=policy,
+            trust="trusted-policy",
+            allow_main_advance=advancing,
+            main_advance_from=snapshot.main_sha if advancing else None,
         )
         assert replacement is not None and replacement.dispatch
         assert replacement.request.attempt_id != work.request.attempt_id

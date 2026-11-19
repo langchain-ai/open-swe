@@ -164,9 +164,11 @@ class TestRecoveryDelivery:
         with pytest.raises(PermissionError, match="authorization changed"):
             await service.bound()
 
-    @pytest.mark.parametrize("mapped_author", [False, True])
+    @pytest.mark.parametrize(
+        "mapped_author,status", [(False, "applied"), (True, "applied"), (False, "superseded")]
+    )
     async def test_notice_waits_for_removal_and_uses_verified_identity(
-        self, monkeypatch, mapped_author
+        self, monkeypatch, mapped_author, status
     ):
         service, state, _ = await self.setup(monkeypatch)
         service.config.repository = "acme/widgets"
@@ -192,10 +194,28 @@ class TestRecoveryDelivery:
         history = Mock(
             decisions=[row],
             evidence=[],
-            batch=Mock(id=proposal.batch_id, state="active", policy={}),
+            attempts=[],
+            batch=Mock(
+                id=proposal.batch_id,
+                state="active",
+                policy={},
+                candidate={"entries": []},
+                deadline=datetime.now(UTC),
+                max_plans=1,
+                max_attempts=3,
+            ),
         )
         assert await service.notices(history, state) == {}
-        row.plan = decision.model_copy(update={"status": "applied"}).model_dump(mode="json")
+        assert (await service.context(history, state))["remaining_decisions"] == 0
+        row.plan = decision.model_copy(update={"status": status}).model_dump(mode="json")
+        if status == "superseded":
+            context = await service.context(history, state)
+            assert context["remaining_decisions"] == 1
+            key = f"decision:{row.id}:superseded"
+            assert "did not dequeue" in (await service.notices(history, state))[key]
+            state = state.model_copy(update={"notices": {key: "123.456"}})
+            assert await service.notices(history, state) == {}
+            return
         connection = AsyncMock()
         github = connection.__aenter__.return_value
         github.repo = Mock(
