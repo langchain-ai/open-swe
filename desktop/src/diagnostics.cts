@@ -36,6 +36,8 @@ export interface DiagnosticsReportInput {
   backendHost: string | null;
   renderer: ReadonlyArray<ConsoleEntry>;
   main: ReadonlyArray<ConsoleEntry>;
+  /** Starts and quits of this and earlier launches, from the lifecycle log. */
+  lifecycle?: string | null;
   /** `window.__openSwePerf.export()` from the renderer, when available. */
   perf: string | null;
 }
@@ -158,6 +160,9 @@ export function buildDiagnosticsReport(input: DiagnosticsReportInput): string {
     "",
     `## Main process console (${input.main.length} entries, newest last)`,
     formatEntries(input.main),
+    "",
+    "## Launches and quits (this and earlier sessions, newest last)",
+    input.lifecycle ? redactSecrets(input.lifecycle.trimEnd()) : "(none)",
     "",
     "## Performance spans",
     input.perf ? redactSecrets(input.perf) : "(none recorded)",

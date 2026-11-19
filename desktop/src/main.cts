@@ -25,6 +25,7 @@ const {
   buildDiagnosticsReport,
   captureProcessConsole,
   diagnosticsFileName,
+  redactSecrets,
   normalizeConsoleMessage,
 } = require("./diagnostics.cjs");
 const { LocalBridges } = require("./local-bridges.cjs");
@@ -75,6 +76,7 @@ const { PREVIEW_SCHEME, PreviewFiles } = require("./preview-files.cjs");
 const { DesktopLinks } = require("./desktop-links.cjs");
 const { DesktopEnvironments } = require("./desktop-environments.cjs");
 const { CloseConfirmation } = require("./close-confirmation.cjs");
+const { LifecycleLog } = require("./lifecycle-log.cjs");
 const {
   APP_ORIGIN,
   APP_URL,
@@ -118,6 +120,28 @@ if (appRuntime.userDataPath) {
   app.setPath("userData", appRuntime.userDataPath);
 }
 app.setAppUserModelId(appRuntime.appUserModelId);
+
+// Outlives the process, unlike the console buffers: says why a launch ended.
+fs.mkdirSync(app.getPath("userData"), { recursive: true });
+const lifecycleLog = new LifecycleLog(
+  path.join(app.getPath("userData"), "desktop-lifecycle.log"),
+);
+lifecycleLog.watchQuits(app);
+lifecycleLog.record("start", {
+  version: app.getVersion(),
+  packaged: app.isPackaged,
+  platform: `${process.platform}-${process.arch}`,
+  os: require("node:os").release(),
+  argv: redactSecrets(process.argv.slice(1).join(" ")),
+});
+app.on("child-process-gone", (_event, details) =>
+  lifecycleLog.record("child-process-gone", {
+    type: details.type,
+    reason: details.reason,
+    exitCode: details.exitCode,
+    name: details.name,
+  }),
+);
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -211,6 +235,12 @@ function setUpdateState(
   status: DesktopUpdateState["status"],
   version?: string,
 ) {
+  if (status !== updateState.status || version !== updateState.version)
+    lifecycleLog.record("update-state", {
+      from: updateState.status,
+      to: status,
+      version,
+    });
   updateState = { status, ...(version ? { version } : {}) };
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("desktop:update-state", updateState);
@@ -2074,7 +2104,18 @@ function createWindow(initialUrl = APP_URL) {
   });
 
   window.once("ready-to-show", () => window.show());
+  lifecycleLog.record("window-created", { id: window.id });
+  window.on("close", () =>
+    lifecycleLog.record("window-close", { id: window.id }),
+  );
+  window.webContents.on("render-process-gone", (_event, details) =>
+    lifecycleLog.record("render-process-gone", {
+      reason: details.reason,
+      exitCode: details.exitCode,
+    }),
+  );
   window.on("closed", () => {
+    lifecycleLog.record("window-closed");
     if (mainWindow !== window) return;
     mainWindow = null;
     if (menuCommands.reset()) createMenu();
@@ -2161,6 +2202,7 @@ async function saveDiagnosticsReport() {
     backendHost: backendUrl ? new URL(backendUrl).host : null,
     renderer: rendererConsole.entries(),
     main: mainConsole.entries(),
+    lifecycle: lifecycleLog.read(),
     perf: await collectPerfSpans(window),
   });
   const options = {
@@ -2306,10 +2348,14 @@ app.on("continue-activity", (event, type, _userInfo, details) => {
 });
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
+lifecycleLog.record("single-instance-lock", {
+  acquired: hasSingleInstanceLock,
+});
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   app.on("second-instance", (_event, commandLine) => {
+    lifecycleLog.record("second-instance");
     if (isDevelopment) {
       app.relaunch({ args: commandLine.slice(1) });
       app.quit();
@@ -2324,6 +2370,8 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     app.setName(appRuntime.name);
+    lifecycleLog.record("ready");
+    powerMonitor.on("shutdown", () => lifecycleLog.record("system-shutdown"));
     migrateStoredConfig();
     try {
       backendUrl = resolveBackendUrl({
