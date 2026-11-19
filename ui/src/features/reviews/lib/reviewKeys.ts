@@ -4,7 +4,6 @@ import { api } from "@/lib/api"
 import { DashboardRequestError } from "@/lib/dashboard-fetch"
 import { BROWSER_CACHE_MAX_AGE_MS } from "@/lib/query"
 import type { ReviewPageRef } from "@/features/agents/lib/types"
-import { reviewChatQuery } from "@/features/agents/lib/queries"
 import {
   pullRequestChecksTopic,
   pullRequestTopic,
@@ -79,8 +78,19 @@ export const reviewDetailQuery = (pr: PullRequestRef) =>
     ...sharedReviewOptions(pr),
   })
 
-/** The PR's chat. Reading it creates the thread, so it waits until the page has found the PR. */
+/**
+ * The PR's chat: the person's thread for it, which reading it finds or makes.
+ * Read alongside the PR, since the backend confirms the PR exists before it makes one.
+ */
+export function reviewChatQuery(pr: PullRequestRef) {
+  return {
+    queryKey: ["review-chat", pr.owner, pr.repo, pr.number],
+    queryFn: () => api.getReviewChat(pr.owner, pr.repo, pr.number),
+    retry: reviewReadOptions.retry,
+    retryDelay: reviewReadOptions.retryDelay,
+  } as const
+}
+
 export function useReviewChat(pr: PullRequestRef) {
-  const found = useQuery(reviewDetailQuery(pr)).isSuccess
-  return useQuery({ ...reviewChatQuery(pr), enabled: found })
+  return useQuery(reviewChatQuery(pr))
 }

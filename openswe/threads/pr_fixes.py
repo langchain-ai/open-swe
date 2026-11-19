@@ -12,6 +12,7 @@ from pydantic.alias_generators import to_camel
 
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.dispatch import dispatch_agent_run
+from openswe.github.http import GitHubClient
 from openswe.github.pull_request_status import pull_request_identity
 from openswe.github.pull_requests import PullRequest
 from openswe.input_messages import SystemIdentity, build_run_input
@@ -425,6 +426,12 @@ async def start_pull_request_thread(
         raise HTTPException(422, "invalid pull request")
     await require_repo_access_for_user(login, full_name)
     await _ensure_dashboard_github_token(login)
+    # The review page asks for its chat before it has read the PR, so a PR no thread links
+    # yet is read on GitHub before the lookup below can write a record or a thread for it.
+    stored = await PullRequest.get(owner, repo, number)
+    if stored is None or not stored.thread_ids:
+        async with GitHubClient.as_user(login) as github:
+            await github.repo(owner, repo).pull_request(number).pull()
     url = f"https://github.com/{full_name}/pull/{number}"
     prompt = (
         intent.prompt(url, login=login, findings=await _open_findings(owner, repo, number))

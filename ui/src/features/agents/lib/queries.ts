@@ -433,13 +433,6 @@ export function markReviewViewed(
     )
 }
 
-export function reviewChatQuery(review: ReviewPageRef) {
-  return {
-    queryKey: ["review-chat", review.owner, review.repo, review.number],
-    queryFn: () => api.getReviewChat(review.owner, review.repo, review.number),
-  } as const
-}
-
 export function setAgentThreadResolved(
   queryClient: QueryClient,
   threadId: string,

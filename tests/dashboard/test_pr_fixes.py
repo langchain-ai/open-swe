@@ -4,9 +4,13 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
+import httpx2
 import pytest
 from fastapi import HTTPException
 
+from openswe.dashboard import profiles
+from openswe.github.http import GitHubError
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.threads import pr_fixes, proxy
 from tests.conftest import ThreadStoreOverClient
 
@@ -52,6 +56,10 @@ class FakeRegistry:
         self.number = number
 
     @classmethod
+    async def get(cls, owner: str, repo: str, number: int) -> FakeRegistry:
+        return cls(owner, repo, number)
+
+    @classmethod
     async def load(cls, owner: str, repo: str, number: int) -> FakeRegistry:
         if cls.unavailable:
             raise RuntimeError("postgres unavailable")
@@ -77,6 +85,8 @@ def setup(monkeypatch):
     FakeRegistry.linked = []
     FakeRegistry.discovered = []
     FakeRegistry.unavailable = False
+    monkeypatch.setattr(profiles, "get_valid_access_token", AsyncMock(return_value="token"))
+    monkeypatch.setattr(PullRequestClient, "pull", AsyncMock(return_value={"number": 12}))
 
     async def get(thread_id: str) -> dict[str, Any]:
         return threads[thread_id]
@@ -198,6 +208,22 @@ async def test_a_linked_thread_that_cannot_be_read_fails_the_open_instead_of_sta
 
     with pytest.raises(RuntimeError):
         await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=OPEN)
+    pr_fixes.create_dashboard_thread_record.assert_not_awaited()
+
+
+async def test_a_number_github_has_no_pull_request_for_gets_no_thread_or_record(setup, monkeypatch):
+    from openswe.review.routes import api_get_review_chat
+
+    FakeRegistry.thread_ids = []
+    monkeypatch.setattr(FakeRegistry, "load", AsyncMock())
+    not_found = httpx2.Response(
+        404, request=httpx2.Request("GET", "https://api.github.com/repos/acme/app/pulls/12")
+    )
+    monkeypatch.setattr(PullRequestClient, "pull", AsyncMock(side_effect=GitHubError(not_found)))
+
+    with pytest.raises(GitHubError):
+        await api_get_review_chat("acme", "app", 12, {"sub": "alice"})
+    FakeRegistry.load.assert_not_awaited()
     pr_fixes.create_dashboard_thread_record.assert_not_awaited()
 
 
