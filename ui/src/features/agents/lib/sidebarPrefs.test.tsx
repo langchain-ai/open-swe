@@ -76,7 +76,6 @@ describe("sidebar grouping", () => {
     ["none", "date"],
     ["date", "date"],
     ["repo", "repo"],
-    ["workspace", "workspace"],
   ])("reads saved grouping %s as %s", (organize, expected) => {
     window.localStorage.setItem(
       SIDEBAR_PREFS_STORAGE_KEY,
@@ -85,4 +84,19 @@ describe("sidebar grouping", () => {
     render(<OrganizeAndPins />)
     expect(screen.getByRole("status").textContent).toBe(expected)
   })
+})
+
+it("migrates saved environment grouping to repositories without losing pins", () => {
+  window.localStorage.setItem(
+    SIDEBAR_PREFS_STORAGE_KEY,
+    JSON.stringify({
+      organize: "workspace",
+      pinnedRepoKeys: ["repo:acme/api"],
+      collapsedRepoKeys: ["repo:acme/web"],
+    })
+  )
+  render(<OrganizeAndPins />)
+  expect(screen.getByRole("status").textContent).toBe(
+    "repo repo:acme/api repo:acme/web"
+  )
 })

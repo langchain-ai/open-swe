@@ -4,7 +4,7 @@ import asyncio
 
 from openswe.slack.channels import SlackChannel
 from openswe.workspaces import refresh
-from openswe.workspaces.store import Workspace, WorkspaceUpdate
+from openswe.workspaces.store import Workspace, WorkspaceRoutingUpdate, WorkspaceUpdate
 
 
 async def require_kitchen_eligible(channel_ids: list[str]) -> None:
@@ -20,7 +20,7 @@ async def require_kitchen_eligible(channel_ids: list[str]) -> None:
             )
 
 
-async def configure_workspace(previous: Workspace, update: WorkspaceUpdate) -> Workspace:
+async def configure_workspace(previous: Workspace, update: WorkspaceRoutingUpdate) -> Workspace:
     """Validate a definition update before saving it and synchronizing rebuilds."""
     for field in ("kitchen_channel_ids", "ask_channel_ids"):
         if (channels := getattr(update, field)) is not None:
@@ -28,4 +28,6 @@ async def configure_workspace(previous: Workspace, update: WorkspaceUpdate) -> W
             await require_kitchen_eligible(
                 [channel for channel in channels if channel not in already]
             )
-    return await refresh.save_definition(previous, update)
+    return await refresh.save_definition(
+        previous, WorkspaceUpdate.model_validate(update.model_dump(exclude_unset=True))
+    )

@@ -4,8 +4,8 @@ Two kinds of refresh, both on a throwaway builder sandbox that is stopped once
 its capture lands:
 
 - ``full``: boot from the base snapshot, run ``setup_script`` then
-  ``update_script``, capture. Nightly per workspace on a LangGraph cron, and on
-  demand from ``snapshotctl`` or the dashboard. This is the lineage reset —
+  ``update_script``, capture. Runs nightly or after repository routing changes
+  while legacy execution is enabled. This is the lineage reset —
   every update chains snapshot to snapshot, and the nightly rebuild from base
   keeps drift from accumulating.
 - ``update``: boot from the workspace's *current* snapshot, run only
@@ -27,8 +27,13 @@ import hashlib
 import logging
 import shlex
 import uuid
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from functools import partial
+from typing import TYPE_CHECKING, Any, Protocol
+
+from pydantic import JsonValue
 
 from openswe.config import ENV, EnvVar
 from openswe.jobs import queue
@@ -37,13 +42,19 @@ from openswe.workspaces.store import (
     WORKSPACES,
     RefreshInFlightError,
     RefreshKind,
+    RefreshStatus,
     RefreshStep,
+    SandboxResources,
+    StepStatus,
     Workspace,
     WorkspaceUpdate,
     capture_workspace_snapshot,
     script_command,
     script_log_path,
 )
+
+if TYPE_CHECKING:
+    from deepagents.backends.protocol import SandboxBackendProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +140,7 @@ async def remove_refresh_cron(record: Workspace | None) -> None:
         )
 
 
-async def _release_builder_sandbox(sandbox_id: str) -> None:
+async def release_builder_sandbox(sandbox_id: str) -> None:
     """Stop the builder so the platform reclaims it on its delete-after-stop window.
 
     Nothing here deletes a sandbox: an id-keyed delete is how a running sandbox with
@@ -146,7 +157,38 @@ async def _release_builder_sandbox(sandbox_id: str) -> None:
         )
 
 
-async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) -> Any:
+class BuilderDefinition(Protocol):
+    @property
+    def setup_script(self) -> str: ...
+
+    @property
+    def update_script(self) -> str: ...
+
+    @property
+    def repos(self) -> list[str]: ...
+
+    def sandbox_resources(self) -> SandboxResources: ...
+
+    def sandbox_create_params(self) -> dict[str, JsonValue]: ...
+
+
+class RefreshProgress(Protocol):
+    async def start_step(self, label: str, *, log_path: str | None = None) -> None: ...
+
+    async def finish_step(
+        self, label: str, status: StepStatus, *, exit_code: int | None = None
+    ) -> None: ...
+
+    async def publish_builder(self, sandbox_id: str) -> None: ...
+
+    async def settle(
+        self, status: RefreshStatus, *, log: str | None = None, error: str | None = None
+    ) -> None: ...
+
+
+async def _create_builder_sandbox(
+    record: BuilderDefinition, snapshot_id: str | None
+) -> SandboxBackendProtocol:
     from openswe.github.sandbox_access import installation_token
     from openswe.sandboxes.providers.langsmith import (
         configure_sandbox_proxy,
@@ -171,7 +213,7 @@ async def _create_builder_sandbox(record: Workspace, snapshot_id: str | None) ->
 
 
 def _scripts_to_run(
-    record: Workspace, kind: RefreshKind, *, work_dir: str = "/workspace"
+    record: BuilderDefinition, kind: RefreshKind, *, work_dir: str = "/workspace"
 ) -> list[tuple[str, str, int]]:
     """The scripts a refresh runs, in order, as ``(label, command, timeout)``.
 
@@ -196,6 +238,68 @@ def _scripts_to_run(
             )
         )
     return steps
+
+
+@dataclass
+class SnapshotBuild:
+    definition: BuilderDefinition
+    base_snapshot_id: str | None
+    kind: RefreshKind
+    progress: RefreshProgress
+    capture: Callable[[str], Awaitable[object]]
+
+    async def run(self) -> dict[str, JsonValue]:
+        """Build, validate and capture one pinned definition on a disposable sandbox."""
+        from openswe.sandboxes.paths import declared_work_dir
+
+        started = datetime.now(UTC)
+        sandbox_id: str | None = None
+        log = ""
+        step = "boot"
+        try:
+            await self.progress.start_step(step)
+            backend = await _create_builder_sandbox(self.definition, self.base_snapshot_id)
+            sandbox_id = str(backend.id)
+            await self.progress.finish_step(step, "success")
+            await self.progress.publish_builder(sandbox_id)
+            for label, command, timeout in _scripts_to_run(
+                self.definition, self.kind, work_dir=declared_work_dir(backend) or "/workspace"
+            ):
+                step = label
+                await self.progress.start_step(label, log_path=script_log_path(label))
+                result = await backend.aexecute(command, timeout=timeout)
+                log = f"{log}\n--- {label} script ---\n{result.output or ''}".strip()
+                if result.exit_code != 0:
+                    await self.progress.finish_step(label, "failed", exit_code=result.exit_code)
+                    error = f"{label} script exited {result.exit_code}"
+                    await self.progress.settle("failed", log=log, error=error)
+                    return {
+                        "status": "failed",
+                        "script": label,
+                        "exit_code": result.exit_code,
+                        "error": error,
+                        "log": log,
+                    }
+                await self.progress.finish_step(label, "success", exit_code=0)
+            step = "capture"
+            await self.progress.start_step(step)
+            await self.capture(sandbox_id)
+            await self.progress.finish_step(step, "success")
+        except asyncio.CancelledError:
+            logger.warning("Refresh interrupted", extra={"step": step, "sandbox_id": sandbox_id})
+            await self.progress.settle("failed", log=log, error="interrupted")
+            raise
+        except Exception as exc:
+            logger.warning("Refresh failed", extra={"step": step}, exc_info=True)
+            error = str(exc) or type(exc).__name__
+            await self.progress.settle("failed", log=log, error=error)
+            return {"status": "failed", "error": error, "log": log}
+        finally:
+            if sandbox_id:
+                await release_builder_sandbox(sandbox_id)
+        elapsed = int((datetime.now(UTC) - started).total_seconds())
+        await self.progress.settle("success", log=log)
+        return {"status": "success", "kind": self.kind, "seconds": elapsed, "log": log}
 
 
 def is_snapshot_stale(
@@ -238,6 +342,10 @@ async def maybe_start_update(record: Workspace | None) -> str | None:
     if record is None or not is_update_due(record):
         return None
     try:
+        from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS
+
+        if await EXECUTION_DEFAULTS.is_enabled():
+            return None
         run_id = await start_refresh_run(record.slug, kind="update")
     except Exception:
         logger.warning(
@@ -273,8 +381,10 @@ async def refresh_workspace(
     background run, and none of them should surface a traceback. The same detail
     lands on the workspace record.
     """
-    from openswe.sandboxes.paths import declared_work_dir
+    from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS
 
+    if await EXECUTION_DEFAULTS.is_enabled():
+        return {"status": "global_execution_enabled", "slug": slug}
     record = await WORKSPACES.get(slug)
     if record is None:
         return {"status": "unknown_workspace", "slug": slug}
@@ -318,90 +428,20 @@ async def refresh_workspace(
             },
         )
         if record.refresh_sandbox_id:
-            await _release_builder_sandbox(record.refresh_sandbox_id)
+            await release_builder_sandbox(record.refresh_sandbox_id)
     logger.info("Refresh started", extra={**context, "base_snapshot_id": base})
-    started = datetime.now(UTC)
-    sandbox_id: str | None = None
-    log = ""
-    step = "boot"
-    try:
-        await attempt.start_step("boot")
-        backend = await _create_builder_sandbox(record, base)
-        sandbox_id = str(backend.id)
-        await attempt.finish_step("boot", "success")
-        # Published before the first script so a poll can tail the trace while it
-        # runs; cleared when the refresh settles and the builder is released.
-        await attempt.publish_builder(sandbox_id)
-        # Every script runs before the capture, so a snapshot only ships once the
-        # whole of what produced it worked.
-        for label, command, timeout in _scripts_to_run(
-            record, kind, work_dir=declared_work_dir(backend) or "/workspace"
-        ):
-            step = label
-            await attempt.start_step(label, log_path=script_log_path(label))
-            result = await backend.aexecute(command, timeout=timeout)
-            log = f"{log}\n--- {label} script ---\n{result.output or ''}".strip()
-            if result.exit_code != 0:
-                await attempt.finish_step(label, "failed", exit_code=result.exit_code)
-                error = f"{label} script exited {result.exit_code}"
-                await attempt.settle("failed", log=log, error=error)
-                return {
-                    "status": "failed",
-                    "slug": slug,
-                    "script": label,
-                    "exit_code": result.exit_code,
-                    "error": error,
-                    "log": log,
-                }
-            await attempt.finish_step(label, "success", exit_code=0)
-        step = "capture"
-        await attempt.start_step("capture")
-        await capture_workspace_snapshot(slug, sandbox_id, timeout=capture_timeout())
-        await attempt.finish_step("capture", "success")
-    except asyncio.CancelledError:
-        # A shutdown cancels the job mid-refresh, past ``except Exception``. Settled here
-        # so the record stops claiming a refresh nobody runs; a hard kill skips this,
-        # and the job's retry takes its own marker over instead.
-        logger.warning(
-            "Refresh interrupted",
-            extra={**context, "step": step, "sandbox_id": sandbox_id},
-        )
-        await attempt.settle("failed", log=log, error="interrupted")
-        raise
-    except Exception as exc:
-        logger.warning("Refresh failed", extra={**context, "step": step}, exc_info=True)
-        error = str(exc) or type(exc).__name__
-        await attempt.settle("failed", log=log, error=error)
-        return {"status": "failed", "slug": slug, "error": error, "log": log}
-    finally:
-        if sandbox_id:
-            await _release_builder_sandbox(sandbox_id)
-
-    elapsed = int((datetime.now(UTC) - started).total_seconds())
-    await attempt.settle("success", log=log)
-    logger.info(
-        "Refreshed workspace",
-        extra={**context, "elapsed_seconds": elapsed},
+    build = SnapshotBuild(
+        record,
+        base,
+        kind,
+        attempt,
+        partial(capture_workspace_snapshot, slug, timeout=capture_timeout()),
     )
-    return {"status": "success", "slug": slug, "kind": kind, "seconds": elapsed, "log": log}
+    return {"slug": slug, **await build.run()}
 
 
 class RefreshStartError(RuntimeError):
     """The refresh job could not be queued."""
-
-
-async def start_refresh(record: Workspace, kind: RefreshKind = "full") -> str:
-    """Start an on-demand refresh of ``record`` and return its run id.
-
-    Raises ``ValueError`` (:class:`RefreshInFlightError` when one is already
-    running) if it cannot start now, and :class:`RefreshStartError` if the job
-    could not be queued.
-    """
-    record.assert_refreshable(kind)
-    run_id = await start_refresh_run(record.slug, kind)
-    if run_id is None:
-        raise RefreshStartError("could not start the refresh job")
-    return run_id
 
 
 async def save_definition(previous: Workspace, update: WorkspaceUpdate) -> Workspace:
@@ -419,7 +459,13 @@ async def save_definition(previous: Workspace, update: WorkspaceUpdate) -> Works
     if repos_changed and previous.refresh_in_flight():
         raise RefreshInFlightError(previous.slug, previous.refresh_run_id)
     record = await WORKSPACES.apply_update(previous.slug, update)
-    if not record.setup_script or record.inherit_default_sandbox:
+    from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS
+
+    if (
+        not record.setup_script
+        or record.inherit_default_sandbox
+        or await EXECUTION_DEFAULTS.is_enabled()
+    ):
         return record
     await ensure_refresh_cron(record.slug)
     if not repos_changed:
@@ -472,7 +518,7 @@ def refresh_task_id(run_id: str) -> str:
 
 
 def owns_task(task_id: str) -> bool:
-    return task_id.startswith((f"{TASK_PREFIX}-", f"{_LEGACY_TASK_PREFIX}-"))
+    return task_id.startswith((f"{TASK_PREFIX}-", f"{_LEGACY_TASK_PREFIX}-", "image-"))
 
 
 def _run_id_of(task_id: str) -> str:
@@ -492,7 +538,7 @@ async def _record_for_task(task_id: str) -> Workspace | None:
     return None
 
 
-async def _read_builder_log(sandbox_id: str, path: str) -> str | None:
+async def read_builder_log(sandbox_id: str, path: str) -> str | None:
     """Tail a script's live ``bash -x`` trace off the builder, or ``None``.
 
     Best-effort by design: the builder is released the moment the capture lands,
@@ -529,11 +575,18 @@ def _trace_location(record: Workspace) -> tuple[str, str] | None:
 async def builder_trace(record: Workspace) -> str | None:
     """A tail of the running script's live ``bash -x`` trace, or ``None``."""
     location = _trace_location(record)
-    return None if location is None else await _read_builder_log(*location)
+    return None if location is None else await read_builder_log(*location)
 
 
 async def task_status(task_id: str, *, with_output: bool = True) -> dict[str, Any]:
     """One refresh, in the shape ``background_task`` reports every task in."""
+    if task_id.startswith("image-"):
+        from openswe.execution_images import EXECUTION_IMAGES
+        from openswe.tools.access import Policy, resolve_access
+
+        if not (await resolve_access()).mode(Policy(trusted="admin_surface", actor="admin")):
+            return {"error": "Read global image tasks in a private admin thread or Slack DM."}
+        return await EXECUTION_IMAGES.task_status(task_id, with_output=with_output)
     record = await _record_for_task(task_id)
     if record is None:
         return {
@@ -563,7 +616,7 @@ async def task_status(task_id: str, *, with_output: bool = True) -> dict[str, An
     # While a script runs its trace only exists on the builder; once the refresh
     # settles the builder is gone and the record holds the whole log.
     if (location := _trace_location(record)) is not None:
-        state["output"] = await _read_builder_log(*location)
+        state["output"] = await read_builder_log(*location)
         state["output_source"] = "builder"
         state["output_path"] = location[1]
         state["output_truncated"] = True
@@ -583,11 +636,25 @@ async def task_list() -> list[dict[str, Any]]:
         for record in await WORKSPACES.list_all()
         if record.refresh_run_id and record.refresh_status != "never"
     ]
+    from openswe.execution_images import EXECUTION_IMAGES
+    from openswe.tools.access import Policy, resolve_access
+
+    if (await resolve_access()).mode(Policy(trusted="admin_surface", actor="admin")):
+        status = await EXECUTION_IMAGES.status(with_output=False)
+        if status.get("task_id"):
+            tasks.append(status)
     return sorted(tasks, key=lambda task: task.get("started_at") or "", reverse=True)
 
 
 async def task_stop(task_id: str) -> dict[str, Any]:
     """Cancel a running refresh. The previous snapshot stays in place."""
+    if task_id.startswith("image-"):
+        from openswe.execution_images import EXECUTION_IMAGES
+        from openswe.tools.access import Policy, resolve_access
+
+        if not (await resolve_access()).mode(Policy(trusted="admin_surface", actor="admin")):
+            return {"error": "Stop global image tasks in a private admin thread or Slack DM."}
+        return await EXECUTION_IMAGES.task_stop(task_id)
     record = await _record_for_task(task_id)
     if record is None:
         return {"error": "task not found", "task_id": task_id}
@@ -603,7 +670,7 @@ async def task_stop(task_id: str) -> dict[str, Any]:
         return {"error": "could not cancel the refresh run", "task_id": task_id}
     await WORKSPACES.mark_refresh_settled(record.slug, "failed", error="cancelled")
     if record.refresh_sandbox_id:
-        await _release_builder_sandbox(record.refresh_sandbox_id)
+        await release_builder_sandbox(record.refresh_sandbox_id)
     return await task_status(task_id)
 
 

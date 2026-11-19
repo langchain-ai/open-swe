@@ -42,8 +42,11 @@ async def get_profile_default_repo(
     profile = await load_profile(login)
     if not profile:
         return None
+    from openswe.execution import ExecutionProfile
+
+    scope = None if await ExecutionProfile.use_defaults() else workspace
     return RepositoryDefaults.model_validate(profile).repo_config(
-        workspace, fallback_global=fallback_global
+        scope, fallback_global=fallback_global
     )
 
 

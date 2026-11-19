@@ -140,6 +140,8 @@ export function AgentsHome({
     null
   )
   const defaultWorkspaceSlug = workspaceOptionsQuery.data?.default_slug ?? null
+  const robinWideDefaults =
+    workspaceOptionsQuery.data?.execution_defaults_enabled === true
   const { projects, isPending: projectsPending } = useProjects({
     enabled: cloudEnabled,
   })
@@ -242,9 +244,10 @@ export function AgentsHome({
     instanceDefault: defaultWorkspaceSlug,
     workspaces,
   })
-  const personalWorkspaceRepo = preferredWorkspace
-    ? profileQuery.data?.workspace_default_repos?.[preferredWorkspace]
-    : undefined
+  const personalWorkspaceRepo =
+    !robinWideDefaults && preferredWorkspace
+      ? profileQuery.data?.workspace_default_repos?.[preferredWorkspace]
+      : undefined
   const namedRepo = (
     repoSelection === undefined
       ? personalWorkspaceRepo
@@ -290,18 +293,16 @@ export function AgentsHome({
   const pickedRepo = pickComposerRepo({
     override: repoSelection,
     userDefault: userDefaultRepo,
-    userWorkspaceDefault: selectedWorkspace
-      ? profileQuery.data?.workspace_default_repos?.[selectedWorkspace]
-      : undefined,
+    userWorkspaceDefault:
+      !robinWideDefaults && selectedWorkspace
+        ? profileQuery.data?.workspace_default_repos?.[selectedWorkspace]
+        : undefined,
     workspaceDefault:
       workspaces.find((workspace) => workspace.slug === selectedWorkspace)
         ?.default_repo ?? null,
     offered: workspaceRepos,
   })
   const repo = gitHubLinkUser ? null : pickedRepo
-  const selectWorkspace = (slug: string | null) => {
-    setWorkspaceOverride(slug)
-  }
   const selectProject = (next: string | null) => {
     setProjectId(next)
     // The new project's own workspace and repository apply again.
@@ -868,13 +869,6 @@ export function AgentsHome({
                   !startingThread && cloudEnabled ? selectProject : undefined
                 }
                 onCreateProject={setCreatingProject}
-                workspaceOptions={workspaces}
-                selectedWorkspace={selectedWorkspace}
-                onWorkspaceChange={
-                  !startingThread && runTarget === "cloud"
-                    ? selectWorkspace
-                    : undefined
-                }
                 skills={skills.data}
               />
             </AgentComposerDock>

@@ -369,14 +369,16 @@ class User(Base):
         self, workspace: str | None = None, *, fallback_global: bool = True
     ) -> dict[str, str] | None:
         """This person's repository default in the selected workspace."""
+        from openswe.execution import ExecutionProfile
         from openswe.users.records import UserRecords
         from openswe.users.repository_defaults import RepositoryDefaults
 
         if not self.github_login:
             return None
         profile = await UserRecords("profile").get(self.github_login) or {}
+        scope = None if await ExecutionProfile.use_defaults() else workspace
         return RepositoryDefaults.model_validate(profile).repo_config(
-            workspace, fallback_global=fallback_global
+            scope, fallback_global=fallback_global
         )
 
     @property

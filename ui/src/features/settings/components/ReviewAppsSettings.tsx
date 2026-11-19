@@ -7,9 +7,8 @@ import { Textarea } from "@langchain/macaw-components/Textarea"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import type { App } from "@/features/plugins/lib/api"
 import { useApps } from "@/features/plugins/lib/queries"
-import type { ScopedSettings } from "@/features/settings/lib/settingsScope"
+import type { InstanceSettings } from "@/features/settings/lib/settingsScope"
 import type { AppRelease } from "@/lib/api"
-import { TierRow } from "./WorkspaceSettingsSections"
 
 /** What an app's newest release has a review do, in a few words. */
 function stepSummary(app: App): string {
@@ -33,7 +32,7 @@ export function ReviewAppsSettings({
   settings,
   editable,
 }: {
-  settings: ScopedSettings
+  settings: InstanceSettings
   editable: boolean
 }) {
   const apps = useApps()
@@ -56,9 +55,7 @@ export function ReviewAppsSettings({
   return (
     <SettingsSection title="Apps in reviews">
       <div className="divide-y divide-default">
-        <TierRow
-          settings={settings}
-          fields={["review_apps"]}
+        <SettingsRow
           label="Apps reviews work for"
           description="Reviews of private repositories also do what these apps ask, such as saving screenshots of a frontend pull request's preview to Design QA."
           control={null}
@@ -145,7 +142,7 @@ function PreviewChecks({
   settings,
   editable,
 }: {
-  settings: ScopedSettings
+  settings: InstanceSettings
   editable: boolean
 }) {
   const [draft, setDraft] = useState(
@@ -161,9 +158,7 @@ function PreviewChecks({
     (settings.data?.review_app_preview_checks ?? []).join("\n")
   return (
     <div>
-      <TierRow
-        settings={settings}
-        fields={["review_app_preview_checks"]}
+      <SettingsRow
         label="Preview checks"
         description="A review usually finishes before a pull request's preview is up. When one of these checks passes for a pull request, Robin does the apps' work on its preview."
         control={null}
@@ -205,7 +200,7 @@ export function ReviewBrowserSettings({
   settings,
   editable,
 }: {
-  settings: ScopedSettings
+  settings: InstanceSettings
   editable: boolean
 }) {
   const savedDomains = (settings.saved?.review_browser_domains ?? []).join(", ")
@@ -232,7 +227,7 @@ export function ReviewBrowserSettings({
   return (
     <SettingsSection
       title="Review browser"
-      description="Reviews that work for apps, such as Design QA, open the pull request's preview in this browser. Every environment's reviews sign in only to these domains, and only on LangSmith sites, with the one tool named here."
+      description="Reviews that work for apps, such as Design QA, open the pull request's preview in this browser. Reviews sign in only to these domains, and only on LangSmith sites, with the one tool named here."
     >
       <div className="flex flex-col gap-space-3 p-space-4">
         <Input

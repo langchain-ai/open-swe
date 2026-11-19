@@ -2,8 +2,12 @@ Rebind this thread to a fresh sandbox.
 
 ``source`` selects what the new sandbox boots from:
 
-- ``workspace`` (default): the thread's workspace snapshot, with its repositories already checked out.
-  On a private admin surface, pass ``workspace=<slug>`` (a slug from ``list_workspaces``) to boot a different workspace's snapshot instead; other threads are refused.
+- ``workspace`` (default): the trusted execution profile selected for this replacement.
+  With **Use Robin-wide Defaults** enabled, it uses the same Robin-wide defaults for every environment; passing a legacy workspace does not select different execution configuration.
+  With the toggle off, it uses the thread's legacy workspace snapshot.
+  On a private admin surface, pass ``workspace=<slug>`` (from ``list_workspaces``) to request a different legacy image; other threads are refused.
+  Cloud environment selectors are removed.
+  The replacement's configuration is pinned when requested, not reselected from mutable thread metadata.
 - ``base``: the deployment's base snapshot with no workspace content — the same sandbox a thread without a workspace would get.
   Use this when the user asks for an empty or clean sandbox.
 

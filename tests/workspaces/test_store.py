@@ -311,6 +311,41 @@ async def test_failed_recapture_keeps_booting_from_the_previous_snapshot() -> No
     delete_snapshot.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_staged_execution_config_retains_global_base_and_legacy_rollback_images(
+    enabled: bool,
+) -> None:
+    from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS
+
+    await EXECUTION_DEFAULTS.records.put(
+        "", {"enabled": enabled, "snapshot_id": "initial-shared", "base_snapshot_id": "base-image"}
+    )
+    await WORKSPACES.create(WorkspaceCreate(name="legacy", repos=["acme/legacy"]), "admin")
+    await WORKSPACES.mark_captured(
+        "legacy", snapshot_id="initial-shared", snapshot_name="legacy", source_sandbox_id="sb-old"
+    )
+    await EXECUTION_DEFAULTS.records.patch("", {"snapshot_id": "global-image"})
+    await WORKSPACES.mark_captured(
+        "legacy", snapshot_id="legacy-new", snapshot_name="legacy", source_sandbox_id="sb-new"
+    )
+    context = _sandbox_client(AsyncMock())
+    deleted = AsyncMock()
+    context.__aenter__.return_value.delete_snapshot = deleted
+    with patch(
+        "openswe.sandboxes.providers.langsmith.get_async_sandbox_client", return_value=context
+    ):
+        await env_store._delete_snapshot("global-image")
+        await env_store._delete_snapshot("base-image")
+        await env_store.retire_superseded_snapshot("legacy", "initial-shared", "legacy-new")
+        await env_store._delete_snapshot("legacy-new")
+        deleted.assert_not_awaited()
+        await EXECUTION_DEFAULTS.records.delete("")
+        await env_store._delete_snapshot("unprotected")
+    deleted.assert_awaited_once_with("unprotected")
+
+
 # --- per-thread selection ---
 
 
@@ -358,36 +393,6 @@ async def test_workspace_options_omit_admin_only_settings() -> None:
 
     await WORKSPACES.mark_capturing("default")
     assert (await env_store.list_workspace_options())[0]["has_snapshot"] is True
-
-
-@pytest.mark.asyncio
-@pytest.mark.usefixtures("registry_db")
-async def test_publish_writes_definition_and_image_together() -> None:
-    """One put carries both, so a record can never show a new definition on an old image."""
-    record = await WORKSPACES.publish(
-        "base",
-        WorkspaceCreate(name="base", repos=["acme/base"], prompt="p1", setup_script="make setup"),
-        snapshot_id="snap-1",
-        snapshot_name="openswe-environment-base",
-        source_sandbox_id="sb-1",
-        created_by="ramon",
-    )
-    assert (record.prompt, record.snapshot_id, record.snapshot_status) == ("p1", "snap-1", "ready")
-    assert record.created_by == "ramon"
-
-    updated = await WORKSPACES.publish(
-        "base",
-        WorkspaceUpdate(prompt="p2"),
-        snapshot_id="snap-2",
-        snapshot_name="openswe-environment-base",
-        source_sandbox_id="sb-2",
-        created_by="ramon",
-    )
-    stored = await WORKSPACES.get("base")
-    assert stored is not None
-    assert (stored.prompt, stored.snapshot_id) == ("p2", "snap-2")
-    assert stored.setup_script == "make setup"
-    assert updated.source_sandbox_id == "sb-2"
 
 
 # --- Slack channels and uniqueness ---

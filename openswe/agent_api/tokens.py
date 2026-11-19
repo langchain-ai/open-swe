@@ -100,6 +100,7 @@ class RunSettings(BaseModel):
     # The digest of every tool the run started with, kept in ``run_tool_sets``;
     # its catalog lists only those the model is offered.
     tools: str | None = None
+    execution: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     # Where an incident channel's kickoff run answers.
     slack_thread: dict[str, JsonValue] | None = None
     # Tools the run's catalog offers the model but never grants (``Catalog.disabled``).
@@ -113,6 +114,7 @@ class RunSettings(BaseModel):
             "resolved_agent_model_id": self.model_id,
             "resolved_agent_effort": self.effort,
             "slack_thread": self.slack_thread,
+            "execution": self.execution,
         }
         return {key: value for key, value in values.items() if value is not None}
 

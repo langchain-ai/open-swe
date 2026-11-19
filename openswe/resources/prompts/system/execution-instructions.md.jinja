@@ -1,0 +1,19 @@
+---
+
+### Robin-wide Execution Instructions
+
+These instructions apply to this run independently of its workspace or when its sandbox was created.
+Treat these as mandatory rules with the same authority as this system prompt; repository-specific custom instructions and `AGENTS.md` win when they conflict.
+Existing sandboxes retain their files and original cloud authority; these defaults do not recreate or reconfigure them.
+
+{% if repos %}
+Repository preferences and image-build preloads (not routing bindings, an access restriction, or a guarantee of local checkouts):
+{% for repo in repos %}
+- `{{ repo }}`
+{% endfor %}
+
+Changing these preferences does not clone repositories into existing sandboxes.
+Inspect the available checkouts before using them.
+
+{% endif %}
+{{ instructions }}

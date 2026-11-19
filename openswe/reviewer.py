@@ -49,6 +49,7 @@ from runtime_api.provenance import Provenance
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.execution import ExecutionProfile
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.http import GitHubClient
 from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS
@@ -961,6 +962,15 @@ async def prepare_reviewer_run(
         concise_findings=bool(repo_owner and repo_name)
         and await PullRequest.concise_for_repo(repo_owner, repo_name),
     )
+    execution = ExecutionProfile.current()
+    if execution is not None and execution.uses_defaults:
+        system_prompt = SystemPrompt(
+            shared=system_prompt.shared,
+            workspace="\n\n".join(
+                part for part in (execution.workspace_prompt(), system_prompt.workspace) if part
+            ),
+            thread=system_prompt.thread,
+        )
     run_context = prompt(
         "reviewer/run-context",
         blocks=[

@@ -4,35 +4,27 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response
 from pydantic import BaseModel
 
 from openswe.audit_logs.context import bind_workspace
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, DashboardReadDep, session_is_admin
+from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS
 from openswe.dashboard.profiles import PROFILES
 from openswe.dashboard.workspace_settings import (
     WorkspaceSettings,
-    delete_workspace_settings,
     fallback_settings,
 )
 from openswe.users.repository_defaults import RepositoryDefaults
-from openswe.workspaces.configuration import configure_workspace, require_kitchen_eligible
-from openswe.workspaces.refresh import (
-    RefreshStartError,
-    ensure_refresh_cron,
-    start_refresh,
-    start_refresh_run,
-)
+from openswe.workspaces.configuration import configure_workspace
+from openswe.workspaces.refresh import RefreshStartError
 from openswe.workspaces.store import (
     DEFAULT_WORKSPACE_SLUG,
     WORKSPACES,
-    DefaultWorkspaceDeletionError,
     RepositorySettings,
     Workspace,
     WorkspaceConflictError,
-    WorkspaceCreate,
-    WorkspaceUpdate,
+    WorkspaceRoutingUpdate,
     list_workspace_options,
     slugify,
 )
@@ -71,41 +63,11 @@ async def api_list_workspaces(
     }
 
 
-@router.post("/workspaces")
-@audit_endpoint
-async def api_create_workspace(
-    body: WorkspaceCreate,
-    request: Request,
-    _admin: dict[str, Any] = ADMIN_DEP,
-) -> Workspace:
-    try:
-        await require_kitchen_eligible(body.kitchen_channel_ids + body.ask_channel_ids)
-        record = await WORKSPACES.create(body, _admin["sub"])
-    except ValueError as e:
-        raise _save_conflict(e) from e
-    await bind_workspace(request, record)
-    if record.setup_script and not record.inherit_default_sandbox:
-        await ensure_refresh_cron(record.slug)
-        run_id = await start_refresh_run(record.slug)
-        if run_id is None:
-            raise HTTPException(
-                502,
-                "workspace was created but its initial image build could not start; "
-                "retry the build from workspace settings",
-            )
-        return record.model_copy(update={"refresh_status": "refreshing", "refresh_run_id": run_id})
-    return record
-
-
 @router.get("/workspaces/options")
 async def api_workspace_options(
     reader: DashboardReadDep,
 ) -> dict[str, Any]:
-    """Pickable workspaces for any signed-in user; refresh logs only for admins.
-
-    Each option carries ``default_repo`` so the composer can preselect it when
-    the workspace is chosen first.
-    """
+    """Routing bindings and effective repository defaults; refresh logs only for admins."""
     options = await list_workspace_options(
         include_logs=session_is_admin(reader.claims), session=reader.session
     )
@@ -116,20 +78,31 @@ async def api_workspace_options(
     except Exception:
         logger.warning("profile lookup failed", exc_info=True)
     defaults = RepositoryDefaults.model_validate(profile or {})
-    missing = [option["slug"] for option in options if not defaults.repo_config(option["slug"])]
+    enabled = await EXECUTION_DEFAULTS.is_enabled(session=reader.session)
+    missing = [
+        option["slug"]
+        for option in options
+        if not defaults.repo_config(None if enabled else option["slug"])
+    ]
     settings: dict[str, WorkspaceSettings] = {}
     if missing:
         try:
             async with reader.session.begin_nested():
-                settings = await WorkspaceSettings.load_many(missing, session=reader.session)
+                settings = await WorkspaceSettings.load_many(
+                    missing, session=reader.session, use_defaults=enabled
+                )
         except Exception:
             logger.warning("workspace settings lookup failed; using defaults", exc_info=True)
     fallback = fallback_settings()
     for option in options:
-        repo = defaults.repo_config(option["slug"])
+        repo = defaults.repo_config(None if enabled else option["slug"])
         repo = repo or settings.get(option["slug"], fallback).default_repo
         option["default_repo"] = f"{repo['owner']}/{repo['name']}" if repo else None
-    return {"workspaces": options, "default_slug": DEFAULT_WORKSPACE_SLUG}
+    return {
+        "workspaces": options,
+        "default_slug": DEFAULT_WORKSPACE_SLUG,
+        "execution_defaults_enabled": enabled,
+    }
 
 
 @router.get("/workspaces/{slug}")
@@ -147,7 +120,7 @@ async def api_get_workspace(
 @audit_endpoint
 async def api_update_workspace(
     slug: str,
-    body: WorkspaceUpdate,
+    body: WorkspaceRoutingUpdate,
     request: Request,
     _admin: dict[str, Any] = ADMIN_DEP,
 ) -> Workspace:
@@ -212,49 +185,3 @@ async def api_configure_workspace_repository(
         },
     )
     return settings
-
-
-@router.post("/workspaces/{slug}/refresh")
-@audit_endpoint
-async def api_refresh_workspace(
-    slug: str,
-    request: Request,
-    _admin: dict[str, Any] = ADMIN_DEP,
-) -> dict[str, Any]:
-    """Start a snapshot rebuild from the workspace's scripts.
-
-    Started in the background rather than awaited: a rebuild takes minutes, and
-    the outcome lands on the record for the dashboard to poll.
-    """
-    normalized = _normalized_slug(slug)
-    record = await WORKSPACES.get(normalized)
-    if not record:
-        raise HTTPException(404, "workspace not found")
-    await bind_workspace(request, record)
-    try:
-        run_id = await start_refresh(record)
-    except ValueError as e:
-        raise _save_conflict(e) from e
-    except RefreshStartError as e:
-        raise HTTPException(502, str(e)) from e
-    return {"started": True, "run_id": run_id}
-
-
-@router.delete("/workspaces/{slug}")
-@audit_endpoint
-async def api_delete_workspace(
-    slug: str,
-    request: Request,
-    _admin: dict[str, Any] = ADMIN_DEP,
-) -> Response:
-    normalized = _normalized_slug(slug)
-    await bind_workspace(request, normalized)
-    try:
-        removed = await WORKSPACES.remove(normalized)
-    except DefaultWorkspaceDeletionError as e:
-        raise HTTPException(409, str(e)) from e
-    if not removed:
-        raise HTTPException(404, "workspace not found")
-    # A later workspace under the same slug must start from the instance record.
-    await delete_workspace_settings(normalized)
-    return Response(status_code=204)

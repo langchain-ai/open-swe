@@ -68,7 +68,7 @@ export interface ScheduleCreateRequest {
   effort?: string | null
   /** Slug of the workspace every run launches in. */
   workspace: string
-  /** The environment's, not the creator's: admins only, unbounded. */
+  /** Robin's, not the creator's: admins only, unbounded. */
   system?: boolean
 }
 

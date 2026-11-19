@@ -86,6 +86,7 @@ from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from openswe.slack.records import lookup_slack_thread_id  # noqa: E402
 from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
+from openswe.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate  # noqa: E402
 
 MDA_SERVICE_SECRET = os.environ["MDA_SERVICE_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -157,9 +158,29 @@ async def _cancel_inflight_runs() -> None:
             continue
 
 
+@app.post("/control/workspaces")
+async def control_seed_workspace(body: WorkspaceCreate) -> JSONResponse:
+    from openswe.workspaces.store import slugify
+
+    slug = slugify(body.name)
+    if await WORKSPACES.get(slug) is None:
+        record = await WORKSPACES.create(body, "alice")
+    else:
+        record = await WORKSPACES.apply_update(
+            slug, WorkspaceUpdate.model_validate(body.model_dump(exclude_unset=True))
+        )
+    return JSONResponse(record.model_dump(mode="json"))
+
+
+@app.delete("/control/workspaces/{slug}")
+async def control_delete_workspace(slug: str) -> JSONResponse:
+    await WORKSPACES.delete(slug)
+    return JSONResponse({"ok": True})
+
+
 @app.post("/control/reset-default-workspace")
 async def control_reset_default_workspace() -> JSONResponse:
-    """Put back the seeded ``default`` workspace, which the app itself refuses to delete."""
+    """Restore the seeded ``default`` workspace for execution-selection fixtures."""
     from sqlalchemy import text
 
     from openswe.dashboard.workspace_settings import delete_workspace_settings

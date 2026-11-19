@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 
 import type { App } from "@/features/plugins/lib/api"
-import type { ScopedSettings } from "@/features/settings/lib/settingsScope"
+import type { InstanceSettings } from "@/features/settings/lib/settingsScope"
 import type { FeaturedApp } from "@/lib/api"
 import { FeaturedAppsSettings } from "./FeaturedAppsSettings"
 
@@ -57,14 +57,10 @@ const app = (
 const scoped = (
   featured: Array<FeaturedApp>,
   save = vi.fn()
-): ScopedSettings => ({
-  scope: { kind: "instance" },
-  data: { featured_apps: featured } as ScopedSettings["data"],
+): InstanceSettings => ({
+  data: { featured_apps: featured } as InstanceSettings["data"],
   saved: undefined,
-  isPending: false,
-  inherits: () => false,
   save,
-  reset: vi.fn(),
 })
 
 it("adds a listed app for everyone at its newest release, and offers no unlisted one", () => {

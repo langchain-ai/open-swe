@@ -12,7 +12,7 @@ _WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("scope"))
 @expose_mcp(access="admin")
 @access(_READ)
 async def read_execution_defaults() -> dict[str, object]:
-    """Read the instructions and sandbox configuration saved under Defaults."""
+    """Read the Robin-wide activation toggle, instructions and sandbox configuration under Defaults."""
     return (await EXECUTION_DEFAULTS.load()).model_dump(mode="json")
 
 
@@ -20,6 +20,6 @@ async def read_execution_defaults() -> dict[str, object]:
 @audit_tool()
 @access(_WRITE)
 async def configure_execution_defaults(update: ExecutionDefaults) -> dict[str, object]:
-    """Save only supplied Defaults fields without changing environments or building an image."""
+    """Save supplied Robin-wide defaults; enabled switches future work without recreating sandboxes."""
     saved = await EXECUTION_DEFAULTS.update(update)
     return {"scope": "execution", "settings": saved.model_dump(mode="json")}

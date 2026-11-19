@@ -3,23 +3,13 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 
-import { SettingsSection } from "@/components/AppShell"
-import {
-  useScopedSettings,
-  type SettingsScope,
-} from "@/features/settings/lib/settingsScope"
+import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { useInstanceSettings } from "@/features/settings/lib/settingsScope"
 import { ReviewAppsSettings, ReviewBrowserSettings } from "./ReviewAppsSettings"
-import { TierRow } from "./WorkspaceSettingsSections"
 
-/** Review guidelines and toggles at one tier: the instance, or one workspace's overrides. */
-export function ReviewSettings({
-  scope,
-  canEdit,
-}: {
-  scope: SettingsScope
-  canEdit: boolean
-}) {
-  const settings = useScopedSettings(scope)
+/** Instance review guidelines and toggles. */
+export function ReviewSettings({ canEdit }: { canEdit: boolean }) {
+  const settings = useInstanceSettings()
   const [guidelinesDraft, setGuidelinesDraft] = useState("")
 
   const guidelinesValue = settings.saved?.org_guidelines ?? ""
@@ -31,8 +21,6 @@ export function ReviewSettings({
 
   // Until the settings arrive a toggle would write a value nobody chose.
   const editable = canEdit && settings.data !== undefined
-  const scoped = scope.kind === "workspace"
-  const guidelinesInherited = settings.inherits("org_guidelines")
 
   const trimmedGuidelines = guidelinesDraft.trim()
   const savedGuidelines = (settings.data?.org_guidelines ?? "").trim()
@@ -54,20 +42,9 @@ export function ReviewSettings({
     <>
       <SettingsSection
         title="Review Guidelines"
-        description={
-          scoped
-            ? "Instructions injected into every review this environment runs, across all of its repositories. Until this environment sets its own, the instance guidelines apply. Repository-specific style prompts take precedence when they conflict."
-            : "Instructions injected into every review, in every environment that does not set its own. Repository-specific style prompts take precedence when they conflict."
-        }
+        description="Default instructions for reviews. Repository-specific style prompts take precedence when they conflict."
       >
         <div className="flex flex-col gap-space-2 p-space-4">
-          {scoped && (
-            <p className="text-xs text-secondary">
-              {guidelinesInherited
-                ? "Inherited from the instance."
-                : "Overridden for this environment."}
-            </p>
-          )}
           <Textarea
             aria-label="Review guidelines"
             size="md"
@@ -89,17 +66,6 @@ export function ReviewSettings({
               >
                 Save guidelines
               </Button>
-              {scoped && !guidelinesInherited && (
-                <Button
-                  size="xs"
-                  color="secondary"
-                  variant="plain"
-                  disabled={!editable}
-                  onClick={() => settings.reset("org_guidelines")}
-                >
-                  Reset to instance
-                </Button>
-              )}
               {guidelinesDirty && (
                 <span className="text-xs text-secondary">Unsaved changes</span>
               )}
@@ -110,23 +76,17 @@ export function ReviewSettings({
 
       <SettingsSection title="Review Configuration">
         <div className="divide-y divide-default">
-          <TierRow
-            settings={settings}
-            fields={["review_draft_prs"]}
+          <SettingsRow
             label="Review Draft PRs"
             description="Whether Robin Review runs on draft PRs. Each user can override it in their Git settings."
             control={toggle("review_draft_prs", "Review Draft PRs")}
           />
-          <TierRow
-            settings={settings}
-            fields={["pr_summaries"]}
+          <SettingsRow
             label="PR Summaries"
             description="Generate descriptions on pull requests"
             control={toggle("pr_summaries", "PR Summaries")}
           />
-          <TierRow
-            settings={settings}
-            fields={["review_trace_links"]}
+          <SettingsRow
             label="Reviewer trace links"
             description="Link each review comment to the reviewer's own LangSmith run. Only members of your LangSmith workspace can open it."
             control={toggle("review_trace_links", "Reviewer trace links")}
@@ -135,9 +95,7 @@ export function ReviewSettings({
       </SettingsSection>
 
       <ReviewAppsSettings settings={settings} editable={editable} />
-      {!scoped && (
-        <ReviewBrowserSettings settings={settings} editable={editable} />
-      )}
+      <ReviewBrowserSettings settings={settings} editable={editable} />
 
       {!canEdit && (
         <p className="text-xs text-secondary">

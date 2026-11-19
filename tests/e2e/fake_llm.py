@@ -949,15 +949,6 @@ def _plan_complete_step(messages: list[BaseMessage]) -> AIMessage:
     )
 
 
-WORKSPACE_NAME = "default"
-WORKSPACE_PROMPT = (
-    "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`."
-)
-WORKSPACE_SETUP_SCRIPT = (
-    "set -euo pipefail\nmkdir -p repos && echo provisioned > repos/.provisioned && ls -a repos"
-)
-WORKSPACE_UPDATE_SCRIPT = "echo refreshed >> repos/.provisioned"
-
 FOLLOW_UP_REPLY = "Thanks! The PR is ready for review — anything else you'd like changed?"
 
 
@@ -1076,23 +1067,6 @@ def _inspected_thread_id(messages: list[BaseMessage]) -> str:
     if not isinstance(thread_id, str):
         raise ValueError("get_thread did not return the target thread")
     return thread_id
-
-
-def _workspace_poll_step(messages: list[BaseMessage]) -> AIMessage:
-    """Follow the reproducibility rebuild through the one poll tool."""
-    task_id = _tool_payload(messages, "snapshotctl").get("task_id")
-    if not isinstance(task_id, str):
-        raise ValueError("snapshotctl did not return a task id")
-    return AIMessage(
-        content="Following the rebuild.",
-        tool_calls=[
-            {
-                "name": "background_task",
-                "args": {"action": "status", "task_id": task_id},
-                "id": "call-env-poll",
-            }
-        ],
-    )
 
 
 def _list_threads_step(_messages: list[BaseMessage]) -> AIMessage:
@@ -1787,36 +1761,6 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         _dynamic_step(_plan_complete_step),
         StepSpec(content="The requested plan is published as an HTML artifact."),
     ),
-    "workspace": (
-        # Build here, with ordinary tools, then publish this sandbox as the image.
-        _tool_step(
-            "Provisioning this sandbox.",
-            "execute",
-            {"command": WORKSPACE_SETUP_SCRIPT},
-            "call-env-provision",
-        ),
-        _tool_step(
-            "Publishing this sandbox as the workspace image.",
-            "publish_workspace",
-            {
-                "name": WORKSPACE_NAME,
-                "prompt": WORKSPACE_PROMPT,
-                "setup_script": WORKSPACE_SETUP_SCRIPT,
-                "update_script": WORKSPACE_UPDATE_SCRIPT,
-                "repos": [f"{OWNER}/{REPO}"],
-            },
-            "call-env-publish",
-        ),
-        # Then prove the script reproduces it, the way the nightly cron will.
-        _tool_step(
-            "Checking the setup script reproduces the image.",
-            "snapshotctl",
-            {"action": "rebuild", "workspace": WORKSPACE_NAME},
-            "call-env-refresh",
-        ),
-        _dynamic_step(_workspace_poll_step),
-        StepSpec(content=f"The `{WORKSPACE_NAME}` workspace is captured and live."),
-    ),
     "followup": (_dynamic_step(_followup_step),),
 }
 
@@ -1831,11 +1775,6 @@ def _is_iframe_request(text: str) -> bool:
 
 def _is_plan_request(text: str) -> bool:
     return "plan" in text.lower()
-
-
-def _is_workspace_request(text: str) -> bool:
-    lowered = text.lower()
-    return "workspace" in lowered or "environment" in lowered
 
 
 def _is_breakout_request(text: str) -> bool:
@@ -1900,9 +1839,6 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ScriptRule(
         "desktop",
         lambda ctx: ctx.human_count <= 1 and "E2E_DESKTOP_LOCAL" in ctx.first_text,
-    ),
-    ScriptRule(
-        "workspace", lambda ctx: ctx.human_count <= 1 and _is_workspace_request(ctx.first_text)
     ),
     ScriptRule(
         "expedite_fix",

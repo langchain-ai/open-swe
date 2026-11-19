@@ -1,53 +1,7 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { createFileRoute } from "@tanstack/react-router"
 
-import { AppShell } from "@/components/AppShell"
-import { useWorkspaceOptions } from "@/features/agents/lib/queries"
-import { WorkspaceSettingsPanel } from "@/features/settings/components/WorkspaceSettings"
-import { RequireLogin } from "@/lib/auth-redirect"
-import { pageTitle } from "@/lib/pageTitle"
-import { useSession } from "@/lib/session"
+import { LegacySettingsRedirect } from "@/features/settings/components/LegacySettingsRedirect"
 
 export const Route = createFileRoute("/workspaces_/$slug")({
-  component: WorkspaceSettingsPage,
-  head: ({ params }: { params: { slug: string } }) => ({
-    meta: [{ title: pageTitle(params.slug) }],
-  }),
+  component: LegacySettingsRedirect,
 })
-
-function WorkspaceSettingsPage() {
-  const { slug } = Route.useParams()
-  const navigate = Route.useNavigate()
-  const session = useSession()
-  const options = useWorkspaceOptions(!!session.data)
-
-  if (session.isLoading) {
-    return (
-      <main className="p-space-6">
-        <Skeleton className="h-40 w-full" />
-      </main>
-    )
-  }
-  if (!session.data) return <RequireLogin />
-  if (!session.data.is_admin) return <Navigate to="/workspaces" />
-
-  const name =
-    options.data?.workspaces.find((workspace) => workspace.slug === slug)
-      ?.name ?? slug
-
-  return (
-    <AppShell
-      user={session.data}
-      title={name}
-      description="Everything configured for this environment: what it owns, the sandbox image its runs boot from, model defaults, and review settings."
-      backTo={{ to: "/workspaces", label: "Back to Environments" }}
-    >
-      <WorkspaceSettingsPanel
-        key={slug}
-        slug={slug}
-        canEdit
-        onDeleted={() => void navigate({ to: "/workspaces" })}
-      />
-    </AppShell>
-  )
-}

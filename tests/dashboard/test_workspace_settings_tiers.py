@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from pydantic import ValidationError
 
 from openswe.audit_logs import tools as audit_tools
@@ -30,6 +30,7 @@ from openswe.dashboard.workspace_settings import (
     upsert_workspace_overrides,
 )
 from openswe.database import postgres
+from openswe.execution import ExecutionProfile
 from openswe.sandboxes.lifecycle import SandboxCreateConfig
 from openswe.tools import access as tool_access
 from openswe.tools.access import Access
@@ -189,20 +190,11 @@ async def test_workspace_settings_api_refuses_unknown_and_unslugifiable_names(
     assert missing.value.status_code == 404
 
 
-async def test_workspace_settings_api_round_trips_overrides(registry_db, reader) -> None:
+async def test_workspace_settings_api_reads_saved_overrides(registry_db, reader) -> None:
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "alice")
     await upsert_instance_settings(WorkspaceSettingsUpdate(review_draft_prs=True))
 
-    entry = AuditLog(operation_name="put_workspace_settings")
-    request = Request({"type": "http", "state": {"audit_log": entry}})
-    saved = await workspace_settings.api_put_workspace_settings(
-        workspace=" OSS ",
-        body=WorkspaceSettingsUpdate(review_draft_prs=False),
-        request=request,
-        _admin={"sub": "alice"},
-    )
-    assert entry.workspace_id == await WORKSPACES.id_for_slug("oss")
-    assert entry.enrichments.workspace == "oss"
+    saved = await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate(review_draft_prs=False))
     assert saved["overrides"] == {"review_draft_prs": False}
     assert saved["effective"]["review_draft_prs"] is False
 
@@ -254,6 +246,122 @@ async def test_execution_defaults_persist_without_changing_live_environments(reg
     assert cleared.snapshot_id is None
     assert cleared.repos == []
     assert cleared.prompt == saved.prompt
+
+
+async def test_execution_cutover_switches_every_workspace_and_rolls_back(registry_db) -> None:
+    await WORKSPACES.create(
+        WorkspaceCreate(name="oss team", prompt="Legacy OSS instructions"), "alice"
+    )
+    await WORKSPACES.create(
+        WorkspaceCreate(name="Core", prompt="Legacy core instructions"), "alice"
+    )
+    await upsert_instance_settings(WorkspaceSettingsUpdate(org_guidelines="Robin-wide policy"))
+    for slug in ("default", "oss-team", "core"):
+        await upsert_workspace_overrides(
+            slug,
+            WorkspaceSettingsUpdate(org_guidelines=f"Legacy {slug} policy", pr_summaries=False),
+        )
+        assert (
+            await workspace_settings_cache.cached_workspace_settings(slug)
+        ).org_review_guidelines == f"Legacy {slug} policy"
+    legacy_oss = await WORKSPACES.get("oss-team")
+    legacy_settings = await workspace_settings.workspace_record("oss-team")
+    legacy_profile = await ExecutionProfile.resolve("oss-team")
+    await EXECUTION_DEFAULTS.update(
+        ExecutionDefaults(
+            prompt="Robin-wide instructions", repos=["acme/shared"], snapshot_id="global-image"
+        )
+    )
+
+    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=True))
+    active = await EXECUTION_DEFAULTS.load()
+    assert active.prompt == "Robin-wide instructions"
+    assert active.repos == ["acme/shared"]
+    assert active.snapshot_id == "global-image"
+    global_profile = await ExecutionProfile.resolve("oss-team")
+    for slug in ("default", "oss-team", "core"):
+        settings = await workspace_settings_cache.cached_workspace_settings(slug)
+        assert settings.org_review_guidelines == "Robin-wide policy"
+        assert settings["pr_summaries"] is True
+        assert (await SandboxCreateConfig.resolve(slug)).snapshot_id == "global-image"
+    with ExecutionProfile.bind(legacy_profile):
+        assert (
+            await workspace_settings_cache.cached_workspace_settings("oss-team")
+        ).org_review_guidelines == "Legacy oss-team policy"
+
+    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=False))
+    for slug in ("default", "oss-team", "core"):
+        assert (
+            await workspace_settings_cache.cached_workspace_settings(slug)
+        ).org_review_guidelines == f"Legacy {slug} policy"
+        assert (await SandboxCreateConfig.resolve(slug)).snapshot_id is None
+    with ExecutionProfile.bind(global_profile):
+        assert (
+            await workspace_settings_cache.cached_workspace_settings("oss-team")
+        ).org_review_guidelines == "Robin-wide policy"
+        assert (await SandboxCreateConfig.resolve("oss-team")).snapshot_id == "global-image"
+    assert await WORKSPACES.get("oss-team") == legacy_oss
+    assert await workspace_settings.workspace_record("oss-team") == legacy_settings
+    assert (await EXECUTION_DEFAULTS.load()).prompt == "Robin-wide instructions"
+
+
+async def test_personal_scoped_repositories_are_ignored_and_restored_without_changing_bindings(
+    registry_db, reader, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openswe.dashboard.agent_overrides import get_profile_default_repo
+    from openswe.dashboard.profiles import PROFILES
+    from openswe.workspaces.routes import api_workspace_options
+
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
+    await WORKSPACES.create(
+        WorkspaceCreate(
+            name="oss team",
+            repos=["acme/oss"],
+            slack_channel_ids=["C123", "C456"],
+            kitchen_channel_ids=["C123"],
+            ask_channel_ids=["C456"],
+        ),
+        "alice",
+    )
+    await PROFILES.put(
+        "alice",
+        {"default_repo": "acme/global", "workspace_default_repos": {"oss-team": "acme/oss"}},
+    )
+    original_profile = await PROFILES.get("alice")
+    before = await api_workspace_options(reader=reader)
+    assert before["execution_defaults_enabled"] is False
+    before_oss = next(option for option in before["workspaces"] if option["slug"] == "oss-team")
+    assert before_oss["default_repo"] == "acme/oss"
+    assert await reader.user.default_repo("oss-team") == {"owner": "acme", "name": "oss"}
+
+    await EXECUTION_DEFAULTS.update(
+        ExecutionDefaults(
+            enabled=True,
+            prompt="Private shared instructions",
+            repos=["acme/preloaded"],
+            create_params={"region": "private-region"},
+        )
+    )
+    during = await api_workspace_options(reader=reader)
+    assert during["execution_defaults_enabled"] is True
+    during_oss = next(option for option in during["workspaces"] if option["slug"] == "oss-team")
+    assert during_oss["default_repo"] == "acme/global"
+    for key in ("repos", "slack_channel_ids", "kitchen_channel_ids", "ask_channel_ids"):
+        assert during_oss[key] == before_oss[key]
+    assert "Private shared instructions" not in str(during)
+    assert "private-region" not in str(during)
+    assert "acme/preloaded" not in str(during)
+    assert await reader.user.default_repo("oss-team") == {"owner": "acme", "name": "global"}
+    assert await get_profile_default_repo("alice", "oss-team", fallback_global=False) is None
+
+    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=False))
+    assert await api_workspace_options(reader=reader) == before
+    assert await reader.user.default_repo("oss-team") == {"owner": "acme", "name": "oss"}
+    assert await get_profile_default_repo("alice", "oss-team", fallback_global=False) == {
+        "owner": "acme",
+        "name": "oss",
+    }
+    assert await PROFILES.get("alice") == original_profile
 
 
 @pytest.mark.parametrize("existing", [False, True])
@@ -316,7 +424,11 @@ async def test_execution_defaults_api_is_admin_only_and_round_trips(
         ) as client:
             response = await client.patch(
                 "/dashboard/api/settings/execution",
-                json={"prompt": "Private instructions", "create_params": {"region": "us"}},
+                json={
+                    "enabled": True,
+                    "prompt": "Private instructions",
+                    "create_params": {"region": "us"},
+                },
             )
             assert response.status_code == status, response.text
             fetched = await client.get("/dashboard/api/settings/execution")
@@ -324,6 +436,7 @@ async def test_execution_defaults_api_is_admin_only_and_round_trips(
             if status == 200:
                 assert fetched.json() == response.json()
                 assert fetched.json()["prompt"] == "Private instructions"
+                assert fetched.json()["enabled"] is True
     finally:
         current_audit_log.reset(token)
     if status != 200:
@@ -332,6 +445,7 @@ async def test_execution_defaults_api_is_admin_only_and_round_trips(
     else:
         assert entry.enrichments.settings_scope == "execution"
         assert entry.enrichments.settings_changes == {
+            "enabled": {"before": "[REDACTED]", "after": "[REDACTED]"},
             "prompt": {"before": "[REDACTED]", "after": "[REDACTED]"},
             "create_params": {"before": "[REDACTED]", "after": "[REDACTED]"},
         }
@@ -343,6 +457,9 @@ async def test_execution_defaults_api_is_admin_only_and_round_trips(
     "changes",
     [
         {"slack_channel_ids": ["C123"]},
+        {"enabled": "false"},
+        {"enabled": 1},
+        {"enabled": None},
         {"vcpus": 0},
         {"create_params": {"api_key": "must-not-persist"}},
         {"create_params": {"proxy_config": {"rules": "invalid"}}},
@@ -379,13 +496,15 @@ async def test_execution_defaults_tool_rechecks_admin_access_and_redacts_shared_
     await configure(ExecutionDefaults(prompt="Private instructions"))
     assert (await read_execution_defaults())["prompt"] == "Private instructions"
     access.return_value = Access(admin=True, sole=True)
-    assert await configure(ExecutionDefaults(vcpus=6)) == {
+    assert await configure(ExecutionDefaults(enabled=True, vcpus=6)) == {
         "ok": True,
         "scope": "execution",
     }
     assert (await read_execution_defaults())["ok"] is False
     access.return_value = Access(sole=True)
-    assert (await configure(ExecutionDefaults(vcpus=1)))["ok"] is False
-    assert (await EXECUTION_DEFAULTS.load()).vcpus == 6
+    assert (await configure(ExecutionDefaults(enabled=False, vcpus=1)))["ok"] is False
+    saved = await EXECUTION_DEFAULTS.load()
+    assert saved.enabled is True
+    assert saved.vcpus == 6
     assert [entry.operation_succeeded for entry in entries] == [True, True, False]
     assert all("Private instructions" not in entry.model_dump_json() for entry in entries)

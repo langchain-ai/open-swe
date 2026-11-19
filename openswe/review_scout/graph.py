@@ -26,6 +26,7 @@ from runtime_api.provenance import Provenance
 
 from openswe.dashboard.options import gate_fable_model
 from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.execution import ExecutionProfile
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import PullRequestClient
@@ -196,6 +197,11 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             repo_full_name=cfg.repo.full_name,
             concise_walkthrough=await workspace.pull_request.concise_walkthrough(),
         )
+        execution = ExecutionProfile.current()
+        if execution is not None and execution.uses_defaults:
+            system_prompt = "\n\n".join(
+                part for part in (system_prompt, execution.workspace_prompt()) if part
+            )
         run_context = prompt(
             "review-scout/run-context",
             pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),

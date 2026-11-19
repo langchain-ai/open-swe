@@ -200,9 +200,9 @@ describe("OwnershipPicker", () => {
   it("groups rows by ownership and keeps other workspaces' rows unselectable", async () => {
     renderPicker()
 
-    expect(await screen.findByText("In this environment · 1")).toBeTruthy()
+    expect(await screen.findByText("Selected · 1")).toBeTruthy()
     expect(screen.getByText("Available · 1")).toBeTruthy()
-    expect(screen.getByText("Owned by another environment · 1")).toBeTruthy()
+    expect(screen.getByText("Already bound · 1")).toBeTruthy()
     const taken = screen.getByRole("checkbox", { name: "#commits" })
     expect(taken.hasAttribute("disabled")).toBe(true)
     expect(screen.getByText("Core")).toBeTruthy()
@@ -244,7 +244,7 @@ describe("OwnershipPicker", () => {
     expect(
       screen.getByRole("checkbox", { name: "#oss-maintainers" })
     ).toBeTruthy()
-    expect(screen.getByText("In this environment · 2")).toBeTruthy()
+    expect(screen.getByText("Selected · 2")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
 
     expect(onChange).not.toHaveBeenCalled()
@@ -263,7 +263,7 @@ describe("OwnershipPicker", () => {
     fireEvent.change(input, { target: { value: "c0999" } })
     fireEvent.click(screen.getByRole("button", { name: "Add" }))
     expect(screen.getByRole("checkbox", { name: "C0999" })).toBeTruthy()
-    expect(screen.getByText("In this environment · 1")).toBeTruthy()
+    expect(screen.getByText("Selected · 1")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
     expect(onChange).toHaveBeenCalledWith(["C0999"])
@@ -317,6 +317,29 @@ describe("OwnershipPicker", () => {
     renderPicker({ selected: ["C1", "C0OLD"] })
 
     expect(await screen.findByRole("checkbox", { name: "C0OLD" })).toBeTruthy()
-    expect(screen.getByText("In this environment · 2")).toBeTruthy()
+    expect(screen.getByText("Selected · 2")).toBeTruthy()
   })
+})
+
+it("keeps unresolved Slack bindings removable without displaying raw channel IDs", async () => {
+  vi.mocked(useSlackChannelDirectory).mockReturnValue({
+    data: undefined,
+    isLoading: true,
+    isError: false,
+    error: null,
+    refresh: vi.fn(),
+    isRefreshing: false,
+  })
+  const onChange = vi.fn()
+  render(
+    <SlackChannelPicker selected={["CUNRESOLVED"]} onChange={onChange} />,
+    { wrapper: TooltipProvider }
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
+  fireEvent.click(
+    await screen.findByRole("checkbox", { name: "Slack channel 1" })
+  )
+  expect(screen.queryByText("CUNRESOLVED")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Save 0 channels" }))
+  expect(onChange).toHaveBeenCalledWith([])
 })

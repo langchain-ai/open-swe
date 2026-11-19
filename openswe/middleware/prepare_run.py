@@ -30,8 +30,13 @@ class PrepareRunState(AgentState):
     rendered_workspace_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
     # How the rendered prompt ends: the part only this thread's says.
     rendered_thread_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
-    # Set once the prompt is the thread's for good; a thread from before that renders it once more.
     system_prompt_fixed: NotRequired[Annotated[bool, OmitFromOutput, _take_latest]]
+    execution_prompt_enabled: NotRequired[Annotated[bool, OmitFromOutput, _take_latest]]
+    execution_shared_prompt: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
+    execution_thread_prompt: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
+    legacy_system_prompt: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
+    legacy_workspace_prompt: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
+    legacy_thread_prompt: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
     requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
     requested_effort: NotRequired[Annotated[str | None, OmitFromOutput]]
     selected_model_id: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 
 import type { App } from "@/features/plugins/lib/api"
-import type { ScopedSettings } from "@/features/settings/lib/settingsScope"
+import type { InstanceSettings } from "@/features/settings/lib/settingsScope"
 import type { AppRelease } from "@/lib/api"
 import { ReviewAppsSettings, ReviewBrowserSettings } from "./ReviewAppsSettings"
 
@@ -49,14 +49,10 @@ const app = (
 const scoped = (
   reviewApps: Array<AppRelease>,
   save = vi.fn()
-): ScopedSettings => ({
-  scope: { kind: "instance" },
-  data: { review_apps: reviewApps } as ScopedSettings["data"],
+): InstanceSettings => ({
+  data: { review_apps: reviewApps } as InstanceSettings["data"],
   saved: undefined,
-  isPending: false,
-  inherits: () => false,
   save,
-  reset: vi.fn(),
 })
 
 it("offers only apps with a review step and saves the list reviews work for", () => {

@@ -185,8 +185,14 @@ async def workspace_token(
     callers that must not reach anything else, such as the reviewer or a thread
     started by an event on a public repository.
     """
+    from openswe.execution import ExecutionProfile
+
     slug = workspace_slug or DEFAULT_WORKSPACE_SLUG
-    if slug != DEFAULT_WORKSPACE_SLUG and not await WORKSPACES.slug_exists(slug):
+    if (
+        slug != DEFAULT_WORKSPACE_SLUG
+        and not await ExecutionProfile.use_defaults()
+        and not await WORKSPACES.slug_exists(slug)
+    ):
         raise ValueError(f"Workspace {slug!r} does not exist")
     if repositories is not None:
         return await repository_token(

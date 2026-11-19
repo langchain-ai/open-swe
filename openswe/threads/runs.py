@@ -602,10 +602,13 @@ async def create_dashboard_session(
     )
     workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
     if body.repo is None and identity.user_id is None:
+        from openswe.execution import ExecutionProfile
+
         preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
-        if profile.workspace_default_repos.get(preferred_workspace):
-            workspace = preferred_workspace
-        repo = profile.repository(workspace)
+        if not await ExecutionProfile.use_defaults():
+            if profile.workspace_default_repos.get(preferred_workspace):
+                workspace = preferred_workspace
+            repo = profile.repository(workspace)
     if body.repo is None and identity.github_login:
         from openswe.webhooks.common import account_link_reason
 

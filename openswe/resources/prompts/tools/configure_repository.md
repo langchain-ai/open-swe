@@ -2,7 +2,7 @@ Change how one of a workspace's repositories is configured inside that workspace
 
 Belonging to a workspace says the agent may work in a repository.
 These settings say what the repository itself may do, and they are deliberately separate, so binding one never grants it anything.
-A repository that is not bound to the workspace cannot be configured; bind it with ``publish_workspace`` first.
+A repository that is not bound to the workspace cannot be configured; manage repository bindings in **Integrations** (`/admin/integrations`) first.
 
 Settings you leave out keep their current value.
 

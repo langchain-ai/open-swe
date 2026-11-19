@@ -1646,7 +1646,7 @@ export function useShareThreadWithWorkspace() {
   return useMutation({
     mutationFn: (threadId: string) =>
       agentsApi.shareThreadWithWorkspace(threadId),
-    meta: { errorTitle: "Couldn't share thread with environment" },
+    meta: { errorTitle: "Couldn't share thread" },
     onSuccess: async (thread) => {
       await Promise.all([
         queryClient.cancelQueries({

@@ -378,7 +378,7 @@ export interface AgentSchedule {
   lastError?: string | null
   lastErrorAt?: string | null
   ownerId?: string | null
-  /** The environment's, not its creator's: only admins manage it. */
+  /** Robin's, not its creator's: only admins manage it. */
   system?: boolean
   createdBy?: string | null
   updatedBy?: string | null

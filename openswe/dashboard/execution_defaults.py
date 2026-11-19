@@ -1,20 +1,31 @@
 """Robin-wide instructions and sandbox configuration, stored independently of environments."""
 
+import logging
+
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.audit_logs.models import SettingsChange
 from openswe.dashboard.deps import ADMIN_DEP
 from openswe.dashboard.settings_records import SettingsRecords
+from openswe.ui_invalidations import Topic
 from openswe.utils.json_types import JsonObject
 from openswe.workspaces.store import WorkspaceUpdate
+
+logger = logging.getLogger(__name__)
 
 
 class ExecutionDefaults(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    enabled: bool = Field(
+        default=False,
+        strict=True,
+        description="Use Robin-wide defaults for future work instead of legacy environment settings.",
+    )
     prompt: str = ""
     repos: list[str] = Field(default_factory=list)
     setup_script: str = ""
@@ -45,8 +56,11 @@ class ExecutionDefaultsStore:
     def __init__(self) -> None:
         self.records = SettingsRecords("execution")
 
-    async def load(self) -> ExecutionDefaults:
-        return ExecutionDefaults.model_validate(await self.records.get() or {})
+    async def load(self, *, session: AsyncSession | None = None) -> ExecutionDefaults:
+        return ExecutionDefaults.model_validate(await self.records.get(session=session) or {})
+
+    async def is_enabled(self, *, session: AsyncSession | None = None) -> bool:
+        return (await self.load(session=session)).enabled
 
     async def update(self, update: ExecutionDefaults) -> ExecutionDefaults:
         changes: JsonObject = update.model_dump(mode="json", exclude_unset=True)
@@ -61,7 +75,20 @@ class ExecutionDefaultsStore:
                 for field, value in changes.items()
                 if before.get(field) != value
             }
-        return ExecutionDefaults.model_validate(saved)
+        settings = ExecutionDefaults.model_validate(saved)
+        if before.get("enabled", False) != settings.enabled:
+            from openswe.dashboard.workspace_settings_cache import forget_cached_settings
+
+            await forget_cached_settings()
+            await Topic.WORKSPACES.invalidate()
+        if settings.enabled:
+            from openswe.execution_images import EXECUTION_IMAGES
+
+            try:
+                await EXECUTION_IMAGES.ensure_refresh_cron()
+            except Exception:
+                logger.warning("Could not schedule the Robin-wide image refresh", exc_info=True)
+        return settings
 
 
 EXECUTION_DEFAULTS = ExecutionDefaultsStore()

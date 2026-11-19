@@ -1,6 +1,9 @@
 # Workspaces architecture
 
-This document records the architecture, routing, settings hierarchy, migration behavior, and known gaps of Robin workspaces.
+This document records the retained legacy workspace architecture.
+Cloud environment authoring and selection are removed in both modes.
+**Use Robin-wide Defaults** is off by default: OFF runs with saved legacy configuration and automatic image refreshes; ON uses shared execution defaults and ignores, without deleting, workspace execution overrides.
+Admins edit Robin-wide execution in **Defaults** and repository/Slack routing in **Integrations**.
 
 ## Summary
 
@@ -72,7 +75,9 @@ Existing GitHub user and installation access checks remain in place.
 
 Workspaces, and the repository and Slack-channel bindings that route to them, live in PostgreSQL: a `workspace` table (one row per workspace, slug unique) plus `workspace_repository` and `workspace_slack_channel`, which key on the bound resource (`repository_id`, referencing the `repository` table, and `channel_id`), so the database itself enforces that a repository is preferred by, and a Slack channel bound to, at most one workspace.
 Settings and MCP connections live in their own PostgreSQL tables, keyed by workspace slug.
-`Workspace`, `WorkspaceCreate`, and `WorkspaceUpdate` remain the domain and API shape that the dashboard, the agent tools, and routing read and write; the tables are an implementation detail behind `WorkspaceStore`, swappable again without touching a caller.
+`Workspace` remains the read model; `WorkspaceRoutingUpdate` limits dashboard and agent routing writes to repository and Slack bindings.
+`WorkspaceCreate` and `WorkspaceUpdate` are internal validation and fixture shapes, not environment-authoring APIs.
+Creation, deletion and manual legacy rebuild endpoints are removed; saved records and images remain.
 
 ### Routing
 
@@ -180,11 +185,10 @@ Role-based access per workspace is explicitly deferred.
 
 ### Dashboard
 
-The Environments page becomes the Workspaces page, with repositories and Slack channels editable.
-The composer picks the workspace first and the repository second: every workspace lists every accessible repository, and choosing a workspace preselects its default repository.
-A repository named from outside — a link or the profile default — selects the workspace that prefers it.
-The dashboard has no separate "project" notion: the sidebar nests each repository folder under the workspace that prefers it, and `default` for one no workspace prefers.
-Admin settings and MCP connections gain a workspace selector.
+Cloud Environments pages, workspace grouping and the composer environment picker are removed.
+Instance settings are edited in **Defaults** (`/admin`); flat repository and Slack routing is edited in **Integrations** (`/admin/integrations`).
+The former workspace settings editor and its inheritance/reset controls are removed.
+Saved overrides still resolve while Robin-wide defaults are OFF and remain intact while ON.
 
 ### Migration
 

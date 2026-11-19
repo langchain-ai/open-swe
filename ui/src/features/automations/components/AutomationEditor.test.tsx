@@ -285,104 +285,56 @@ describe("AutomationEditor", () => {
     expect(memberMarkup).not.toContain("Save changes")
   })
 
-  it("shows the workspace an existing automation runs in", () => {
-    vi.mocked(useSession).mockReturnValue({
-      data: { is_admin: true },
-    } as unknown as ReturnType<typeof useSession>)
-
-    const markup = renderToStaticMarkup(
-      <TooltipProvider>
-        <AutomationEditor
-          mode="edit"
-          schedule={{
-            id: "sched_1",
-            name: "Nightly",
-            prompt: "Check dependencies",
-            schedule: "0 9 * * *",
-            triggers: [
-              { id: "trigger_1", kind: "schedule", cron: "0 9 * * *" },
-            ],
-            scope: "workspace",
-            workspace: "core",
-            adminThread: false,
-            model: "Default",
-            enabled: true,
-          }}
-        />
-      </TooltipProvider>
+  it("keeps an existing legacy context hidden and unchanged on unrelated edits", () => {
+    signInAsAdmin()
+    render(
+      <AutomationEditor
+        mode="edit"
+        schedule={{ ...SCHEDULE, workspace: "core" }}
+      />,
+      { wrapper: TooltipProvider }
     )
-
-    expect(markup).toContain(">Core<")
-    expect(markup).not.toContain(">OSS<")
+    expect(screen.queryByRole("button", { name: "Environment" })).toBeNull()
+    fireEvent.change(screen.getByLabelText("Automation name"), {
+      target: { value: "Renamed" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(mocks.updateMutate.mock.calls[0]?.[0].body).not.toHaveProperty(
+      "workspace"
+    )
   })
 
-  it("starts a new automation in the default workspace", () => {
+  it("starts a new automation in the hidden default context", () => {
     signInAsAdmin()
     render(<AutomationEditor mode="create" template={TEMPLATE} />, {
       wrapper: TooltipProvider,
     })
-
-    expect(
-      screen.getByRole("button", { name: "Environment" }).textContent
-    ).toContain("Default")
+    expect(screen.queryByRole("button", { name: "Environment" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Create" }))
-
     expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
       workspace: "default",
     })
   })
 
-  it("sends a workspace the user picked", () => {
+  it("allows the server to resolve a deleted legacy context without retargeting the saved schedule", () => {
     signInAsAdmin()
-    render(<AutomationEditor mode="create" template={TEMPLATE} />, {
-      wrapper: TooltipProvider,
+    render(
+      <AutomationEditor
+        mode="edit"
+        schedule={{ ...SCHEDULE, workspace: "gone" }}
+      />,
+      { wrapper: TooltipProvider }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }))
+    expect(mocks.triggerMutate.mock.calls[0]?.[0]).toBe("sched_1")
+    fireEvent.change(screen.getByLabelText("Automation name"), {
+      target: { value: "Renamed" },
     })
-
-    fireEvent.keyDown(screen.getByRole("button", { name: "Environment" }), {
-      key: "Enter",
-    })
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Core/ }))
-    fireEvent.click(screen.getByRole("button", { name: "Create" }))
-
-    expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
-      workspace: "core",
-    })
-  })
-
-  it("lets an automation whose workspace was deleted move to the only one left", () => {
-    signInAsAdmin()
-    const previous = mocks.workspaces
-    mocks.workspaces = [previous[0]!]
-    try {
-      render(
-        <AutomationEditor
-          mode="edit"
-          schedule={{
-            id: "sched_1",
-            name: "Nightly",
-            prompt: "Check dependencies",
-            schedule: "0 9 * * *",
-            triggers: [
-              { id: "trigger_1", kind: "schedule", cron: "0 9 * * *" },
-            ],
-            scope: "workspace",
-            workspace: "gone",
-            adminThread: false,
-            model: "Default",
-            enabled: true,
-          }}
-        />,
-        { wrapper: TooltipProvider }
-      )
-
-      expect(screen.getByText(/gone.*no longer exists/)).toBeTruthy()
-      fireEvent.keyDown(screen.getByRole("button", { name: "Environment" }), {
-        key: "Enter",
-      })
-      expect(screen.getByRole("menuitem", { name: /^Default/ })).toBeTruthy()
-    } finally {
-      mocks.workspaces = previous
-    }
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(mocks.updateMutate.mock.calls[0]?.[0].body).not.toHaveProperty(
+      "workspace"
+    )
+    expect(screen.queryByRole("button", { name: "Environment" })).toBeNull()
   })
 
   it("saves a GitHub trigger with its own repository and branch filters beside the schedule", () => {

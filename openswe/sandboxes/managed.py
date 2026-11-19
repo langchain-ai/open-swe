@@ -89,16 +89,18 @@ class ManagedSandbox(BaseModel):
             host = ThreadMetadata.model_validate(sandbox_metadata)
             if host.sandbox_owner != "mda" or host.sandbox_id != metadata.sandbox_id:
                 return None
-        elif (
-            metadata.sandbox_id is not None
-            and metadata.sandbox_owner != "mda"
-            and not await hand_gone_sandbox_to_mda(thread_id, metadata.sandbox_id)
-        ):
-            return None
-        config = await SandboxCreateConfig.for_thread(raw, workspace_slug)
+        elif metadata.sandbox_id is not None and metadata.sandbox_owner != "mda":
+            if not await hand_gone_sandbox_to_mda(thread_id, metadata.sandbox_id):
+                return None
+            sandbox_metadata = {**raw, "sandbox_id": None}
+        config = await SandboxCreateConfig.for_thread(
+            sandbox_metadata, workspace_slug, thread_id=owner or thread_id
+        )
         carries_checkout = sandbox_metadata.get(HANDOFF_FROM_KEY) is not None
         return cls(
-            create=config.langsmith_options(),
+            create=await config.recreation_options()
+            if isinstance(sandbox_metadata.get("sandbox_id"), str)
+            else config.langsmith_options(),
             thread_id=owner,
             sandbox_id=metadata.sandbox_id if owner or metadata.sandbox_owner == "mda" else None,
             # The sandbox's own thread decides: a worker's coordinator.

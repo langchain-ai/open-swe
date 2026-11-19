@@ -68,6 +68,7 @@ from openswe.plugins.records import (
 from openswe.review.approval_withdrawal import ApprovalWithdrawal
 
 __all__ = ["WORKER"]
+from openswe.execution_images import EXECUTION_IMAGES
 from openswe.reconcile import reconcile_stale_runs
 from openswe.review.findings import get_thread_metadata
 from openswe.review.publish import (
@@ -178,6 +179,11 @@ async def _monitors(job: Job) -> bool:
 async def _baby_sit(job: Job) -> str | None:
     key = _text(job, "watch_key")
     return None if key is None else await evaluate_watch(key)
+
+
+@_sandbox_work(EXECUTION_IMAGES.JOB)
+async def _execution_image_refresh(job: Job) -> object:
+    return await EXECUTION_IMAGES.refresh(job)
 
 
 @_sandbox_work(WORKSPACE_REFRESH)

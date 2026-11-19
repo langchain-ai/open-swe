@@ -20,7 +20,7 @@ const FILTERS = [
   ["operation_name", "Operation", "e.g. save_user_settings"],
   ["user_id", "User ID", "Exact UUID"],
   ["api_key_id", "API key ID", "Exact key ID"],
-  ["workspace_id", "Environment ID", "Exact UUID"],
+  ["workspace_id", "Legacy routing ID", "Exact UUID"],
 ] as const
 const UUID_PATTERN =
   "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -82,8 +82,8 @@ function AuditDetails({ log }: { log: AuditLog }) {
     ["Actor / initiating login", meta.actor_login],
     ["User ID", log.user_id],
     ["API key ID", log.api_key_id],
-    ["Target environment ID", log.workspace_id],
-    ["Execution environment", meta.workspace],
+    ["Target legacy routing ID", log.workspace_id],
+    ["Legacy execution context", meta.workspace],
     ["Source", meta.source],
     ["HTTP method", meta.request_method],
     ["Route template", meta.request_path],

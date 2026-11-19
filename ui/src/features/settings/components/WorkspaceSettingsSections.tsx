@@ -1,87 +1,31 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useState } from "react"
 import type { ModelOption, Repository, WorkspaceSettings } from "@/lib/api"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { Button } from "@langchain/macaw-components/Button"
 import { Select } from "@langchain/macaw-components/Select"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import {
-  useScopedSettings,
-  type ScopedSettings,
-  type SettingsScope,
+  useInstanceSettings,
+  type InstanceSettings,
   type StringSettingField,
 } from "@/features/settings/lib/settingsScope"
 
-/**
- * A settings row whose value may come from the tier above. On a workspace it
- * says whether the value is inherited or overridden and offers a way back.
- */
-export function TierRow({
-  settings,
-  fields,
-  label,
-  description,
-  control,
-}: {
-  settings: ScopedSettings
-  fields: Array<keyof WorkspaceSettings>
-  label: string
-  description: string
-  control: ReactNode
-}) {
-  const scoped = settings.scope.kind === "workspace"
-  const inherits = settings.inherits(...fields)
-  return (
-    <SettingsRow
-      label={label}
-      description={description}
-      badge={scoped ? (inherits ? "Inherited" : "Overridden") : undefined}
-      badgeClassName={!inherits ? "text-error-secondary" : undefined}
-      control={
-        <div className="flex items-center gap-space-2">
-          {control}
-          {scoped && !inherits && (
-            <Button
-              size="xs"
-              color="secondary"
-              variant="plain"
-              onClick={() => settings.reset(...fields)}
-              aria-label={`Reset ${label} to the instance value`}
-            >
-              Reset
-            </Button>
-          )}
-        </div>
-      }
-    />
-  )
-}
-
 export function DefaultRepoSection({
-  scope,
   repositories,
 }: {
-  scope: SettingsScope
   /** Every repository the installation can see: any workspace may default to any of them. */
   repositories: Array<Repository>
 }) {
-  const settings = useScopedSettings(scope)
-  const scoped = scope.kind === "workspace"
+  const settings = useInstanceSettings()
   return (
     <SettingsSection
       title="Default Repository"
-      description={
-        scoped
-          ? "Where a run in this environment lands when nothing names a repository. Any repository the GitHub App can access will do."
-          : "Where a run lands when nothing names a repository and the environment sets no default of its own."
-      }
+      description="Default repository when a run does not name one."
     >
       <div className="divide-y divide-default">
-        <TierRow
-          settings={settings}
-          fields={["default_repo"]}
+        <SettingsRow
           label="Repository"
           description="Used when a run names no repository and the user has no profile default."
           control={
@@ -105,7 +49,7 @@ export function DefaultRepoSection({
 }
 
 interface ModelRowProps {
-  settings: ScopedSettings
+  settings: InstanceSettings
   models: Array<ModelOption>
   label: string
   description: string
@@ -128,9 +72,7 @@ function ModelRow({
     return next
   }
   return (
-    <TierRow
-      settings={settings}
-      fields={[modelField, effortField]}
+    <SettingsRow
       label={label}
       description={
         modelField === "default_agent_subagent_model"
@@ -157,23 +99,16 @@ function ModelRow({
 }
 
 export function ModelDefaultsSection({
-  scope,
   models,
 }: {
-  scope: SettingsScope
   models: Array<ModelOption>
 }) {
-  const settings = useScopedSettings(scope)
-  const scoped = scope.kind === "workspace"
+  const settings = useInstanceSettings()
 
   return (
     <SettingsSection
       title="Model Defaults"
-      description={
-        scoped
-          ? "Models for runs in this environment. Rows marked Inherited follow the instance defaults; change one to override it here. Each user's Agent settings override the agent defaults."
-          : "Models for runs in every environment that does not override them. Each user's Agent settings override the agent defaults."
-      }
+      description="Default models for runs. Each user's Agent settings override the agent defaults."
     >
       <div className="divide-y divide-default">
         <ModelRow
@@ -230,13 +165,6 @@ interface ModelPairControlProps {
   onChange: (model: string, effort: string) => void
   disabled: boolean
   parentModel?: string | null
-  /**
-   * When set, the model dropdown gains a leading "unset" option with this
-   * label. Selecting it calls {@link onInherit}; an unset `model` renders as
-   * this option.
-   */
-  inheritLabel?: string
-  onInherit?: () => void
 }
 
 const INHERIT_VALUE = "__inherit__"
@@ -250,24 +178,17 @@ export function ModelPairControl({
   onChange,
   disabled,
   parentModel,
-  inheritLabel,
-  onInherit,
 }: ModelPairControlProps) {
-  const modelItems = [
-    ...(inheritLabel ? [{ value: INHERIT_VALUE, label: inheritLabel }] : []),
-    ...models.map((m) => ({ value: m.id, label: m.label })),
-  ]
-  const inheritFallback = inheritLabel ? INHERIT_VALUE : ""
-  const [localModel, setLocalModel] = useState<string>(model ?? inheritFallback)
+  const modelItems = models.map((m) => ({ value: m.id, label: m.label }))
+  const [localModel, setLocalModel] = useState<string>(model ?? "")
   const [localEffort, setLocalEffort] = useState<string>(effort ?? "")
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect
-    setLocalModel(model ?? inheritFallback)
+    setLocalModel(model ?? "")
     setLocalEffort(effort ?? "")
-  }, [model, effort, inheritFallback])
+  }, [model, effort])
 
-  const isInherit = localModel === INHERIT_VALUE
   const inheritsParentEffort = Boolean(
     parentModel && localModel === parentModel
   )
@@ -276,12 +197,6 @@ export function ModelPairControl({
 
   const handleModelChange = (value: string | undefined) => {
     if (!value) return
-    if (value === INHERIT_VALUE) {
-      setLocalModel(INHERIT_VALUE)
-      setLocalEffort("")
-      onInherit?.()
-      return
-    }
     const nextModel = models.find((m) => m.id === value)
     if (!nextModel) return
     const nextEffort = nextModel.efforts.includes(localEffort)
@@ -293,7 +208,7 @@ export function ModelPairControl({
   }
 
   const handleEffortChange = (value: string | undefined) => {
-    if (!value || !localModel || isInherit) return
+    if (!value || !localModel) return
     setLocalEffort(value)
     onChange(localModel, value)
   }
@@ -318,7 +233,7 @@ export function ModelPairControl({
         }
         value={inheritsParentEffort ? INHERIT_VALUE : localEffort || undefined}
         onChange={handleEffortChange}
-        disabled={disabled || !localModel || isInherit || inheritsParentEffort}
+        disabled={disabled || !localModel || inheritsParentEffort}
         triggerClassName="w-28"
       />
     </div>
@@ -345,22 +260,18 @@ const ROUTING_PATCHES: Record<RoutingMode, Partial<WorkspaceSettings>> = {
 }
 
 export function ModelRoutingSection({
-  scope,
   models,
 }: {
-  scope: SettingsScope
   models: Array<ModelOption>
 }) {
-  const settings = useScopedSettings(scope)
+  const settings = useInstanceSettings()
   return (
     <SettingsSection
       title="Model Routing"
       description="How a thread on Auto picks its model. A model someone picks in the composer, or asks for in a message, always wins, and automations, API clients and Slack bots run the Robin Agent model."
     >
       <div className="divide-y divide-default">
-        <TierRow
-          settings={settings}
-          fields={["model_routing_enabled", "model_routing_split"]}
+        <SettingsRow
           label="Routing"
           description="Off runs the Robin Agent model. Adaptive has the classifier pick a tier for each thread. The 50/50 split runs half of threads on Balanced and half on Performance, by thread."
           control={
@@ -376,9 +287,7 @@ export function ModelRoutingSection({
             />
           }
         />
-        <TierRow
-          settings={settings}
-          fields={["model_selection_enabled"]}
+        <SettingsRow
           label="Allow model selection in thread composers"
           description="Off hides the model picker and uses Auto for new threads. Existing thread selections and requests in conversation or other surfaces remain available."
           control={

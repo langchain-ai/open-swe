@@ -11,7 +11,6 @@ import {
   ModelDefaultsSection,
   ModelRoutingSection,
 } from "@/features/settings/components/WorkspaceSettingsSections"
-import { INSTANCE_SCOPE } from "@/features/settings/lib/settingsScope"
 import { useOptions, useRepos } from "@/lib/profile"
 import { pageTitle } from "@/lib/pageTitle"
 
@@ -33,25 +32,19 @@ function AdminDefaultsPage() {
         repositories={repos.data?.repositories ?? []}
       />
       <ModelDefaultsSection
-        scope={INSTANCE_SCOPE}
         models={(modelOptions.data?.models ?? []).filter(
           (model) => model.can_be_default !== false
         )}
       />
       <ModelRoutingSection
-        scope={INSTANCE_SCOPE}
         models={(modelOptions.data?.models ?? []).filter(
           (model) => model.can_be_default !== false
         )}
       />
-      <DefaultRepoSection
-        scope={INSTANCE_SCOPE}
-        repositories={repos.data?.repositories ?? []}
-      />
-      <ReviewSettings scope={INSTANCE_SCOPE} canEdit />
-      <ExpeditedReviewSection scope={INSTANCE_SCOPE} />
+      <DefaultRepoSection repositories={repos.data?.repositories ?? []} />
+      <ReviewSettings canEdit />
+      <ExpeditedReviewSection />
       <ShadowReviewSection
-        scope={INSTANCE_SCOPE}
         models={(modelOptions.data?.models ?? []).filter(
           (model) => model.can_be_default !== false
         )}

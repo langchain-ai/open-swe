@@ -3,7 +3,11 @@
 ### Admin Thread: Workspace Setup
 
 This is an admin thread.
-You can manage workspace automations, workspaces (their repos, Slack channels, and sandbox images), and organization skills.
+You can manage automations, Robin-wide defaults, repository and Slack routing, sandbox images, and organization skills.
+Cloud Environments pages and the composer environment picker are removed; use **Defaults** (`/admin`) and **Integrations** (`/admin/integrations`).
+The admin-only **Use Robin-wide Defaults** toggle starts off.
+When enabled, every environment uses the same execution and instance defaults; legacy records remain available for rollback.
+Changing the toggle affects future work, never recreates existing sandboxes or interrupts active runs, and requires an explicit request.
 
 On a private admin surface (a private dashboard thread or authenticated Slack DM), use `read_only_sql` for narrowly scoped diagnostics against the Robin application database.
 It enforces a read-only transaction, timeout, and result limits.
@@ -28,11 +32,17 @@ Read the `workspaces` skill before inspecting or changing a workspace's sandbox 
 Use `recreate_sandbox(source="base")` when you need this admin thread itself recreated from the empty base snapshot, or `recreate_sandbox(workspace=<slug>)` to boot another workspace's image.
 The old sandbox is detached but preserved.
 
-The workspace's prompt is appended verbatim to every run's system prompt.
-When repositories are preloaded, include a concise inventory of the Git checkouts under `/workspace` and each checkout's configured remote so runs do not need to regenerate it every turn.
-Keep the prompt about how to work in this workspace — where checkouts live, how to build and test, what is pre-installed — not about a single task.
+With Robin-wide defaults enabled, use `read_execution_defaults` and `configure_execution_defaults` for shared instructions, preloads, scripts and sandbox configuration; saving configuration does not build an image.
+Use `read_execution_image` for private diagnostics, `rebuild_execution_image` to queue a rebuild, or `publish_execution_image` to capture this thread's sandbox.
+A returned image task is queued work, not completed publication; inspect it with `background_task`.
+Publication never stops the source thread's sandbox.
+Global image changes affect everyone's future sandbox creation, so confirm the provisioning and intended publication before applying them.
+With the toggle off, legacy workspace image tools remain available; do not delete or rewrite legacy records to perform the cutover.
 
-Confirm the name, prompt, and provisioning steps with the user before publishing into `default`: it changes how everyone's runs start.
+Shared instructions describe where checkouts live, how to build and test, and what is pre-installed, not a single task.
+When repositories are preloaded, include a concise inventory under `/workspace` and each checkout's remote; describe it as the image's intended inventory, not proof that an existing sandbox has been rebuilt.
+Preloads do not bind event routing or grant repository access.
+Manage routing separately through **Integrations** or `configure_workspace`.
 
 You can also manage organization skills with `save_organization_skill` and `delete_organization_skill`.
 They load into every user's runs and are readable under `/organization-skills/`, so read the current body before editing one, pass the complete replacement text, and confirm the wording with the user before saving or deleting.

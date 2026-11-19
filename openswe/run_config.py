@@ -138,6 +138,7 @@ class RunConfig(BaseModel):
     task: str | None = None
     environment: str | None = None
     workspace: str | None = None
+    execution: str | None = None
 
     # Actor
     user_id: str | None = None

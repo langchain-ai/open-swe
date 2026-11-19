@@ -15,15 +15,14 @@ import { PermissionList } from "@/features/plugins/components/PluginsSettings"
 import type { App } from "@/features/plugins/lib/api"
 import { useApps, useAppVersion } from "@/features/plugins/lib/queries"
 import {
-  INSTANCE_SCOPE,
-  useScopedSettings,
-  type ScopedSettings,
+  useInstanceSettings,
+  type InstanceSettings,
 } from "@/features/settings/lib/settingsScope"
 import type { FeaturedApp } from "@/lib/api"
 
 /** Instance admins add listed apps to everyone's web UI. */
 export function FeaturedAppsSection() {
-  const settings = useScopedSettings(INSTANCE_SCOPE)
+  const settings = useInstanceSettings()
   return (
     <FeaturedAppsSettings
       settings={settings}
@@ -41,7 +40,7 @@ export function FeaturedAppsSettings({
   settings,
   editable,
 }: {
-  settings: ScopedSettings
+  settings: InstanceSettings
   editable: boolean
 }) {
   const apps = useApps()

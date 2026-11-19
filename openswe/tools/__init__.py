@@ -19,7 +19,6 @@ _TOOL_MODULES = {
     "create_automation": ".automations",
     "create_sandbox_file_download_url": ".create_sandbox_file_download_url",
     "delete_automation": ".automations",
-    "delete_workspace": ".workspaces",
     "discover_managed_tools": ".discover_managed_tools",
     "dismiss_human_review_request": ".request_human_review",
     "expedite_pr_approval": ".expedite_pr_approval",
@@ -64,7 +63,6 @@ _TOOL_MODULES = {
     "reply_to_finding_thread": ".reply_to_finding_thread",
     "resolve_finding_thread": ".resolve_finding_thread",
     "delete_organization_skill": ".organization_skills",
-    "publish_workspace": ".workspaces",
     "save_organization_skill": ".organization_skills",
     "preview_app": ".apps",
     "save_app_document": ".review_apps",
@@ -112,7 +110,6 @@ __all__ = [
     "create_automation",
     "create_sandbox_file_download_url",
     "delete_automation",
-    "delete_workspace",
     "discover_managed_tools",
     "dismiss_human_review_request",
     "expedite_pr_approval",
@@ -156,7 +153,6 @@ __all__ = [
     "recheck_pr_approval",
     "reply_to_finding_thread",
     "resolve_finding_thread",
-    "publish_workspace",
     "save_organization_skill",
     "delete_organization_skill",
     "preview_app",
@@ -298,9 +294,7 @@ if TYPE_CHECKING:
     from openswe.tools.workspaces import (
         configure_repository,
         configure_workspace,
-        delete_workspace,
         list_workspaces,
-        publish_workspace,
         snapshotctl,
     )
 

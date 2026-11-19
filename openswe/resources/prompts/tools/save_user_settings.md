@@ -2,7 +2,10 @@ Update the authenticated requester's ordinary personal settings in a private das
 
 Pass only the fields the user asked to change in `settings`; omitted fields stay unchanged.
 No login, email, thread ID, or on-behalf-of identity is accepted.
-Model selection uses workspace defaults and per-thread overrides, not personal settings.
+Model selection uses shared defaults and per-thread overrides, not personal settings.
+Cloud environment selectors are removed.
+Hidden legacy workspace preferences are compatibility fields: preserve them unless the requester explicitly asks to change them.
+When **Use Robin-wide Defaults** is enabled, workspace-scoped repository overrides are ignored without being deleted; the ordinary global repository default still applies.
 
 Supported profile fields:
 - `personal_kitchen_channel_id`: one internal Slack channel the requester created and Robin has joined; requires a linked Slack account.
@@ -11,9 +14,10 @@ Supported profile fields:
   Robin queues a personal-kitchen label for the channel description, preserving existing text, and removes its label when switched or cleared.
   The existing description and label must fit Slack’s 250-character limit.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
-- `workspace_default_repos`: a complete map of workspace slugs to `owner/repo` defaults.
-  Read the current map first and preserve entries the user did not ask to change.
-  Omit a workspace from the map to restore its global fallback; an empty map clears all workspace overrides.
+- `workspace_default_repos`: legacy compatibility map of workspace slugs to `owner/repo` defaults, ignored while Robin-wide defaults are enabled.
+  It has no normal dashboard editor.
+  Preserve the current map unless the requester explicitly asks for a legacy compatibility change.
+  Read it first and preserve entries not being changed; omitting a workspace restores its global fallback and an empty map clears all legacy overrides.
 - `auto_fix_ci`: boolean preference.
 - `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.
 - Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Robin user record.
@@ -26,7 +30,8 @@ Supported profile fields:
 
 Supported dashboard preferences:
 - `default_visibility`: `private` or `public`, for future threads only.
-- `default_workspace`: workspace slug; null clears the default.
+- `default_workspace`: hidden legacy routing preference, not a cloud environment selector; null clears it.
+  Preserve it unless an explicit compatibility change is requested.
 - `follow_up_behavior`: `queue` or `steer`.
   What a message sent while a run is live does: wait for the run to end, or steer the running agent.
 - `auto_show_changes`: boolean (default true); whether a thread's Changes panel opens when a run that edited files finishes.

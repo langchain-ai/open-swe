@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from croniter import croniter
 from pydantic import BaseModel, JsonValue
 from sqlalchemy import RowMapping, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.database.postgres import transaction
 
@@ -138,6 +139,21 @@ class Job(BaseModel):
                     "interrupted": interrupted or self.lapsed_lease is not None,
                 },
             )
+
+    async def held(self, *, session: AsyncSession) -> bool:
+        """Lock and verify this run's unexpired queue claim before publishing."""
+        if self.claim_token is None:
+            return False
+        return (
+            await session.scalar(
+                text(
+                    "SELECT 1 FROM job WHERE id = :id AND claim_token = :token "
+                    "AND locked_until > clock_timestamp() FOR UPDATE"
+                ),
+                {"id": self.id, "token": self.claim_token},
+            )
+            is not None
+        )
 
     async def finish(self) -> None:
         """Delete a one-shot job, or move a cron job to its next fire time."""

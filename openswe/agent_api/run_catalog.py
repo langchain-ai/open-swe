@@ -38,6 +38,7 @@ from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings, RemoteRu
 from openswe.agent_api.tool_sets import ToolSet
 from openswe.config import ENV
 from openswe.dispatch import COMPLETION_WEBHOOK_URL
+from openswe.execution import ExecutionProfile
 from openswe.prompts import common_prompt, prompt
 from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_runtime import EXCLUDED_TOOLS, ModelChoice, ToolSurface
@@ -92,28 +93,42 @@ class RunCatalog:
     """A run's catalog as its kind resolves it, before MDA starts the run."""
 
     def __init__(
-        self, kind: RunKind, run: RemoteRun, surface: ToolSurface, config: RunnableConfig
+        self,
+        kind: RunKind,
+        run: RemoteRun,
+        surface: ToolSurface,
+        config: RunnableConfig,
+        execution: ExecutionProfile | None = None,
     ) -> None:
         self.kind = kind
         self.run = run
         self.surface = surface
         self.config = config
+        self.execution = execution
 
     @classmethod
     async def of(cls, kind: RunKind, run: RemoteRun) -> RunCatalog:
         # Resolved from the run as dispatch stamped it, never from the settings it decides.
         config = run_config(run, settled=False)
+        cfg = RunConfig.from_config(config)
+        execution = await ExecutionProfile.resolve(cfg.workspace_slug, thread_id=run.thread_id)
+        config["configurable"] = {
+            **(config.get("configurable") or {}),
+            "execution": await execution.keep(),
+        }
         surface = ToolSurface()
         # The kind's lookups consult the thread's ownership and access many times over.
-        async with shared_thread_reads():
-            await kind.catalog(config, surface)
-            await surface.prepare()
-        return cls(kind, run, surface, config)
+        with ExecutionProfile.bind(execution):
+            async with shared_thread_reads():
+                await kind.catalog(config, surface)
+                await surface.prepare()
+        return cls(kind, run, surface, config, execution)
 
     async def start(self) -> RunStart:
         """What MDA builds the run from, and the settings its calls read."""
-        tools, catalog = await asyncio.gather(self._keep_tool_set(), self.granted())
-        settings = self.settings().model_copy(update={"tools": tools})
+        with ExecutionProfile.bind(self.execution):
+            tools, catalog = await asyncio.gather(self._keep_tool_set(), self.granted())
+            settings = self.settings().model_copy(update={"tools": tools})
         return RunStart(catalog=catalog.model_copy(update={"tool_set": tools}), settings=settings)
 
     async def _keep_tool_set(self) -> str:
@@ -324,6 +339,7 @@ class RunCatalog:
         slack_thread = configurable.get("slack_thread")
         return RunSettings(
             source=cfg.source,
+            execution=cfg.execution,
             draft_prs=cfg.draft_prs,
             model_id=cfg.resolved_agent_model_id,
             effort=cfg.resolved_agent_effort,

@@ -173,6 +173,7 @@ from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.analytics.segment_activity import SegmentActivity
 from openswe.config import ENV
 from openswe.dashboard.langsmith_oauth import LangSmithModelAccess
+from openswe.execution import ExecutionProfile
 from openswe.github.proxy import proxy_token_set_since
 from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
@@ -339,12 +340,15 @@ class TokenRun:
     ) -> JsonValue:
         """Answer one call the MDA run makes (``runtime_api``)."""
         raw_id = raw.get("run_id") if isinstance(raw, Mapping) else None
-        call = cls(kind, run, raw_id if isinstance(raw_id, str) else None)
-        if endpoint != PREPARE.name:
-            return await CALLS.dispatch(endpoint, call, raw)
-        # Preparing reads the same thread from many places; one read serves them.
-        async with shared_thread_reads():
-            return await CALLS.dispatch(endpoint, call, raw)
+        execution = (
+            await ExecutionProfile.kept(run.settings.execution) if run.settings.execution else None
+        )
+        with ExecutionProfile.bind(execution):
+            call = cls(kind, run, raw_id if isinstance(raw_id, str) else None)
+            if endpoint != PREPARE.name:
+                return await CALLS.dispatch(endpoint, call, raw)
+            async with shared_thread_reads():
+                return await CALLS.dispatch(endpoint, call, raw)
 
     def _config(self, invocation_id: str | None = None) -> RunnableConfig:
         """The run's config, as invocation ``invocation_id`` when given: a report a later run

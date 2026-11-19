@@ -6,7 +6,6 @@ import httpx
 import pytest
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs import middleware, store
 from openswe.audit_logs.context import current_audit_log
@@ -17,10 +16,9 @@ from openswe.bridge import routes as bridge_routes
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, oauth, workspace_settings
 from openswe.dashboard.langsmith_api_keys import LangSmithApiKey
-from openswe.dashboard.settings_records import INSTANCE_SETTINGS, WORKSPACE_SETTINGS
+from openswe.dashboard.settings_records import INSTANCE_SETTINGS
 from openswe.threads import principals
 from openswe.threads.principals import PrincipalDep
-from openswe.workspaces.store import WORKSPACES
 from tests.conftest import LangSmithUsers
 
 
@@ -161,10 +159,9 @@ async def test_telemetry_keeps_its_effects_without_audit_entries(
     assert [entry.operation_name for entry in entries] == ["save"]
 
 
-@pytest.mark.parametrize("workspace", [None, "preview"])
 @pytest.mark.usefixtures("registry_db")
 async def test_settings_audit_changes_are_redacted_and_track_resets(
-    monkeypatch: pytest.MonkeyPatch, workspace: str | None
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
     monkeypatch.setattr(deps, "is_admin", lambda email, *, login: login == "admin")
@@ -173,22 +170,12 @@ async def test_settings_audit_changes_are_redacted_and_track_resets(
     async def append(entry: AuditLog) -> None:
         entries.append(entry)
 
-    async def workspace_exists(slug: str, *, session: AsyncSession | None = None) -> dict[str, str]:
-        return {"slug": slug}
-
     monkeypatch.setattr(middleware, "append_safely", append)
-    monkeypatch.setattr(WORKSPACES, "get", workspace_exists)
     application = app()
     application.include_router(workspace_settings.router, prefix="/dashboard/api")
-    records = INSTANCE_SETTINGS if workspace is None else WORKSPACE_SETTINGS
-    await records.put(
-        workspace or "",
+    await INSTANCE_SETTINGS.put(
+        "",
         {"model_routing_enabled": False, "org_guidelines": "old-secret", "unknown": "secret"},
-    )
-    path = (
-        "/dashboard/api/settings"
-        if workspace is None
-        else f"/dashboard/api/workspaces/{workspace}/settings"
     )
     user_id = uuid4()
     async with httpx.AsyncClient(
@@ -201,15 +188,13 @@ async def test_settings_audit_changes_are_redacted_and_track_resets(
             {"model_routing_enabled": True, "org_guidelines": "new-secret"},
             {},
         ):
-            assert (await client.put(path, json=payload)).status_code == 200
+            assert (await client.put("/dashboard/api/settings", json=payload)).status_code == 200
     changed, noop, reset = entries
     assert changed.user_id == user_id
     assert changed.operation_succeeded is True
-    assert changed.operation_name == (
-        "put_instance_settings" if workspace is None else "put_workspace_settings"
-    )
-    assert changed.enrichments.settings_scope == ("instance" if workspace is None else "workspace")
-    assert changed.enrichments.workspace == workspace
+    assert changed.operation_name == "put_instance_settings"
+    assert changed.enrichments.settings_scope == "instance"
+    assert changed.enrichments.workspace is None
     assert changed.enrichments.settings_changes == {
         "model_routing_enabled": {"before": False, "after": True},
         "org_guidelines": {"before": "[REDACTED]", "after": "[REDACTED]"},

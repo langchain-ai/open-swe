@@ -68,7 +68,7 @@ async def test_a_running_refresh_reports_its_step_and_the_live_trace(admin: Any)
         _store(_running()),
         patch.object(
             refresh,
-            "_read_builder_log",
+            "read_builder_log",
             new_callable=AsyncMock,
             return_value="+ apt-get install -y ripgrep",
         ) as read_log,

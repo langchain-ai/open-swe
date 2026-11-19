@@ -8,27 +8,8 @@ import {
   api,
   type WorkspaceSettings,
   type WorkspaceSettingsOverrides,
-  type WorkspaceSettingsView,
 } from "@/lib/api"
 
-/** Which settings record a page edits: the instance, or one workspace's overrides. */
-export type SettingsScope =
-  | { kind: "instance" }
-  | { kind: "workspace"; slug: string }
-
-export const INSTANCE_SCOPE: SettingsScope = { kind: "instance" }
-
-export function settingsQueryKey(scope: SettingsScope): Array<string> {
-  return scope.kind === "instance"
-    ? ["instanceSettings"]
-    : ["workspaceSettings", scope.slug]
-}
-
-function saveMutationKey(scope: SettingsScope): Array<string> {
-  return ["saveSettings", ...settingsQueryKey(scope)]
-}
-
-/** The settings fields whose values are strings, for rows that pick one. */
 export type StringSettingField = {
   [K in keyof WorkspaceSettings]-?: WorkspaceSettings[K] extends
     | string
@@ -38,162 +19,63 @@ export type StringSettingField = {
     : never
 }[keyof WorkspaceSettings]
 
-export interface ScopedSettings {
-  scope: SettingsScope
-  /** What runs in this scope see, including saves still in flight; undefined until loaded. */
+export interface InstanceSettings {
   data: WorkspaceSettings | undefined
-  /** What the server last confirmed, for drafts that must survive a failed save. */
   saved: WorkspaceSettings | undefined
-  isPending: boolean
-  /** Whether every one of `fields` comes from the tier above; always false on the instance. */
-  inherits: (...fields: Array<keyof WorkspaceSettings>) => boolean
-  /** Sets `patch` on this scope's own record. */
   save: (patch: WorkspaceSettingsOverrides) => void
-  /** Drops `fields` from a workspace's record so they inherit again; no-op on the instance. */
-  reset: (...fields: Array<keyof WorkspaceSettings>) => void
 }
 
-interface Snapshot {
-  effective: WorkspaceSettings
-  overrides: WorkspaceSettingsOverrides
-}
+const QUERY_KEY = ["instanceSettings"]
+const MUTATION_KEY = ["saveSettings", ...QUERY_KEY]
 
-async function load(scope: SettingsScope): Promise<Snapshot> {
-  if (scope.kind === "instance") {
-    return { effective: await api.getInstanceSettings(), overrides: {} }
-  }
-  return api.getWorkspaceSettings(scope.slug)
-}
-
-interface SettingsEdit {
-  scope: SettingsScope
-  set: WorkspaceSettingsOverrides
-  clear: Array<keyof WorkspaceSettings>
-}
-
-function applyEdit(snapshot: Snapshot, edit: SettingsEdit): Snapshot {
-  const overrides = { ...snapshot.overrides, ...edit.set }
-  for (const field of edit.clear) delete overrides[field]
-  return { effective: { ...snapshot.effective, ...edit.set }, overrides }
-}
-
-async function persist(
-  scope: SettingsScope,
-  next: Snapshot
-): Promise<Snapshot> {
-  if (scope.kind === "instance") {
-    const saved = await api.saveInstanceSettings(next.effective)
-    return { effective: saved, overrides: {} }
-  }
-  const view: WorkspaceSettingsView = await api.saveWorkspaceSettings(
-    scope.slug,
-    next.overrides
-  )
-  return view
-}
-
-/**
- * Reads and writes the settings record for `scope`.
- *
- * The instance record is written whole. A workspace's record holds only the
- * fields an admin set there, so a save sends the current overrides plus the
- * patch, and a reset sends them minus the fields. The scope travels in the
- * mutation variables because TanStack Query rebinds a pending mutation's
- * callbacks to the latest render: a save started before the admin navigated
- * to another workspace must not land in that workspace's cache.
- *
- * Every section edits the same record through its own instance of this hook,
- * so saves run one at a time per scope and each builds its request from the
- * server's latest answer; the cache only ever holds confirmed data, and
- * pending edits are layered on top for display, so a failed save drops just
- * its own edit.
- */
-export function useScopedSettings(
-  scope: SettingsScope,
-  onSaved?: () => void
-): ScopedSettings {
+/** Serialize section saves against confirmed settings and overlay pending edits. */
+export function useInstanceSettings(): InstanceSettings {
   const qc = useQueryClient()
   const snapshot = useQuery({
-    queryKey: settingsQueryKey(scope),
-    queryFn: () => load(scope),
+    queryKey: QUERY_KEY,
+    queryFn: api.getInstanceSettings,
   })
-  const instance = useQuery({
-    queryKey: settingsQueryKey(INSTANCE_SCOPE),
-    queryFn: () => load(INSTANCE_SCOPE),
-    enabled: scope.kind === "workspace",
-  })
-  const mutationKey = saveMutationKey(scope)
   const mutation = useMutation({
-    mutationKey,
-    scope: { id: JSON.stringify(mutationKey) },
+    mutationKey: MUTATION_KEY,
+    scope: { id: JSON.stringify(MUTATION_KEY) },
     meta: { errorTitle: "Couldn't save settings" },
-    mutationFn: (edit: SettingsEdit) => {
-      const base = qc.getQueryData<Snapshot>(settingsQueryKey(edit.scope))
+    mutationFn: (patch: WorkspaceSettingsOverrides) => {
+      const base = qc.getQueryData<WorkspaceSettings>(QUERY_KEY)
       if (!base) throw new Error("Settings are not loaded.")
-      return persist(edit.scope, applyEdit(base, edit))
+      return api.saveInstanceSettings({ ...base, ...patch })
     },
-    onMutate: async (edit) => {
-      await qc.cancelQueries({ queryKey: settingsQueryKey(edit.scope) })
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: QUERY_KEY })
     },
-    onSuccess: (saved, edit) => {
-      qc.setQueryData(settingsQueryKey(edit.scope), saved)
-      onSaved?.()
+    onSuccess: (saved) => {
+      qc.setQueryData(QUERY_KEY, saved)
     },
-    onSettled: async (_data, _error, edit) => {
-      if (qc.isMutating({ mutationKey: saveMutationKey(edit.scope) }) > 1)
-        return
+    onSettled: async () => {
+      if (qc.isMutating({ mutationKey: MUTATION_KEY }) > 1) return
       await Promise.all([
-        qc.invalidateQueries({ queryKey: settingsQueryKey(edit.scope) }),
+        qc.invalidateQueries({ queryKey: QUERY_KEY }),
         qc.invalidateQueries({ queryKey: ["options"] }),
-        edit.scope.kind === "instance" &&
-          qc.invalidateQueries({ queryKey: ["workspaceSettings"] }),
+        qc.invalidateQueries({ queryKey: ["workspaceSettings"] }),
       ])
     },
   })
   const pendingEdits = useMutationState({
-    filters: { mutationKey, exact: true, status: "pending" },
-    select: (m) => m.state.variables as SettingsEdit,
+    filters: { mutationKey: MUTATION_KEY, exact: true, status: "pending" },
+    select: (m) => m.state.variables as WorkspaceSettingsOverrides,
   })
-
   const confirmed = snapshot.data
-  const current =
-    confirmed && (scope.kind === "instance" || instance.data)
-      ? pendingEdits.reduce(applyEdit, confirmed)
-      : undefined
-  const write = (
-    set: WorkspaceSettingsOverrides,
-    clear: SettingsEdit["clear"]
-  ) => mutation.mutate({ scope, set, clear })
+  const current = confirmed
+    ? pendingEdits.reduce<WorkspaceSettings>(
+        (data, patch) => ({ ...data, ...patch }),
+        confirmed
+      )
+    : undefined
 
   return {
-    scope,
-    data: current?.effective,
-    saved: confirmed?.effective,
-    isPending:
-      snapshot.isPending || (scope.kind === "workspace" && instance.isPending),
-    inherits: (...fields) =>
-      scope.kind === "workspace" &&
-      current !== undefined &&
-      fields.every((field) => !(field in current.overrides)),
+    data: current,
+    saved: confirmed,
     save: (patch) => {
-      if (!current) return
-      const fields = Object.keys(patch) as Array<keyof WorkspaceSettings>
-      write(
-        patch,
-        scope.kind === "workspace" &&
-          fields.every((field) => {
-            const inherited = instance.data?.effective[field]
-            return field === "model_routing_enabled"
-              ? !!patch[field] === !!inherited
-              : (patch[field] ?? null) === (inherited ?? null)
-          })
-          ? fields
-          : []
-      )
-    },
-    reset: (...fields) => {
-      if (!current || scope.kind !== "workspace") return
-      write({}, fields)
+      if (current) mutation.mutate(patch)
     },
   }
 }

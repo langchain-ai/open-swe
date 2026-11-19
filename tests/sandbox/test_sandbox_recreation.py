@@ -50,7 +50,7 @@ async def test_worker_cannot_recreate_shared_sandbox(sandbox_client: AsyncMock) 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stop_failure", [None, RuntimeError("stop unavailable"), TimeoutError()])
 async def test_recreating_an_old_sandbox_hands_the_thread_to_mda(
-    sandbox_client: AsyncMock, stop_failure: Exception | None
+    sandbox_client: AsyncMock, registry_db: None, stop_failure: Exception | None
 ) -> None:
     async def hanging_stop(_sandbox_id: str) -> None:
         await asyncio.Event().wait()
@@ -73,8 +73,11 @@ async def test_recreating_an_old_sandbox_hands_the_thread_to_mda(
         patch(
             "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
         ) as update,
+        patch("openswe.threads.store.THREADS.update", new=update),
     ):
-        handed = await hand_sandbox_to_mda(thread_id, workspace_slug="large", source="base")
+        handed = await hand_sandbox_to_mda(
+            thread_id, workspace_slug="large", source="base", invocation_id="request-1"
+        )
 
     sandbox_client.stop_sandbox.assert_awaited_once_with("sandbox-old")
     if stop_failure is None:

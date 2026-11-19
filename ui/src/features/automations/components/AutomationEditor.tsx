@@ -31,7 +31,6 @@ import { AUTOMATION_EVENT_PROVIDERS } from "@/features/agents/lib/types"
 import type { AutomationTemplate } from "@/features/automations/lib/automation-templates"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
-import { WorkspaceSelector } from "@/features/agents/components/composer/WorkspaceSelector"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { TriggerMenu } from "@/features/automations/components/TriggerMenu"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
@@ -120,7 +119,7 @@ export function AutomationEditor({
   const navigate = useNavigate()
   const session = useSession()
   const isAdmin = session.data?.is_admin === true
-  // A system automation belongs to the environment and only admins manage it; a
+  // A system automation belongs to Robin and only admins manage it; a
   // personal one, its creator or an admin.
   const [system, setSystem] = useState(schedule?.system ?? false)
   const canManage =
@@ -158,25 +157,10 @@ export function AutomationEditor({
   )
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
-  // null = untouched: an existing automation keeps its workspace, and a new
-  // one starts in the instance's default workspace.
-  const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
-    null
-  )
-  const workspaces = workspaceOptionsQuery.data?.workspaces ?? []
   const workspace =
-    workspaceOverride ??
     schedule?.workspace ??
-    (mode === "create"
-      ? (workspaceOptionsQuery.data?.default_slug ?? DEFAULT_WORKSPACE_SLUG)
-      : null)
-  // A workspace deleted after the automation was saved: its runs are refused
-  // until someone picks another, so the picker must stay reachable.
-  const savedWorkspaceMissing =
-    workspaceOverride === null &&
-    !!schedule?.workspace &&
-    workspaceOptionsQuery.data !== undefined &&
-    !workspaces.some((option) => option.slug === schedule.workspace)
+    workspaceOptionsQuery.data?.default_slug ??
+    DEFAULT_WORKSPACE_SLUG
   // undefined = untouched (derive from the schedule / default as models load).
   const [selectionOverride, setSelectionOverride] = useState<
     ModelSelection | null | undefined
@@ -196,8 +180,6 @@ export function AutomationEditor({
       enabled !== (schedule?.enabled ?? true) ||
       adminThread !== (schedule?.adminThread ?? false) ||
       system !== (schedule?.system ?? false) ||
-      (workspaceOverride !== null &&
-        workspaceOverride !== (schedule?.workspace ?? null)) ||
       activeSelection?.modelId !== initialSelection?.modelId ||
       activeSelection?.effort !== initialSelection?.effort)
   const allowNavigation = useUnsavedChangesWarning(isDirty)
@@ -208,7 +190,6 @@ export function AutomationEditor({
     name.trim().length > 0 &&
     prompt.trim().length > 0 &&
     workspace !== null &&
-    !savedWorkspaceMissing &&
     drafts.length > 0 &&
     drafts.every((draft) => draftProblem(draft, isPublicRepo) === null)
 
@@ -316,9 +297,6 @@ export function AutomationEditor({
           effort,
           enabled,
           ...(system !== (schedule.system ?? false) ? { system } : {}),
-          ...(workspaceOverride !== null
-            ? { workspace: workspaceOverride }
-            : {}),
         },
       },
       {
@@ -337,8 +315,7 @@ export function AutomationEditor({
     !isDirty &&
     !isSaving &&
     !deleteSchedule.isPending &&
-    !triggerSchedule.isPending &&
-    !savedWorkspaceMissing
+    !triggerSchedule.isPending
 
   const handleRun = () => {
     if (!canRun || !schedule) return
@@ -447,17 +424,6 @@ export function AutomationEditor({
             label={enabled ? "Active" : "Paused"}
             labelClassName="text-xs text-secondary"
           />
-          <span aria-hidden="true" className="text-quaternary">
-            |
-          </span>
-          <WorkspaceSelector
-            workspaces={workspaces}
-            selectedSlug={workspace}
-            onChange={(slug) => setWorkspaceOverride(slug)}
-            disabled={!canManage}
-            placeholder="Choose environment"
-            showWithOneWorkspace
-          />
           {schedule?.createdBy && (
             <>
               <span aria-hidden="true" className="text-quaternary">
@@ -469,12 +435,6 @@ export function AutomationEditor({
             </>
           )}
         </div>
-        {savedWorkspaceMissing && (
-          <p role="alert" className="mt-space-2 text-xs text-error-secondary">
-            Environment {schedule?.workspace} no longer exists, so runs are
-            refused. Pick another environment and save.
-          </p>
-        )}
 
         <SectionLabel>Triggers</SectionLabel>
         <div className="flex flex-col gap-space-2">
@@ -797,8 +757,8 @@ export function AutomationEditor({
                 id="automation-system-description"
                 className="mt-0.5 pl-space-5 text-xs text-tertiary"
               >
-                Owned by the environment, not you: only admins manage it.
-                Personal automations run as you, on Auto.
+                Owned by Robin, not you: only admins manage it. Personal
+                automations run as you, on Auto.
               </p>
             </div>
           )}

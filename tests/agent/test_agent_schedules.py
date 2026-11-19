@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from openswe.agent_api.tokens import verify_runtime_token
 from openswe.dashboard import repo_access
+from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS, ExecutionDefaults
 from openswe.dashboard.langsmith_login import LangSmithAccount, LangSmithLogin
 from openswe.dashboard.options import fable_disabled_fallback
 from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
@@ -180,7 +181,7 @@ def fake_client(monkeypatch) -> _FakeClient:  # noqa: ANN001
 
 
 @pytest.fixture
-async def auth(monkeypatch) -> None:  # noqa: ANN001
+async def auth(monkeypatch, registry_db: None) -> None:  # noqa: ANN001
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice,bob")
     await User.sign_in("github", "alice", login="alice", email="alice@example.com")
     await User.sign_in("github", "bob", login="bob", email="bob@example.com")
@@ -598,9 +599,13 @@ async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
     assert fake_client.runs.created[-1]["metadata"]["origin"] == "dashboard"
 
 
+@pytest.mark.parametrize("enabled", [False, True])
 async def test_a_test_run_is_refused_when_repo_access_is_revoked(
-    fake_client, auth, monkeypatch
+    fake_client, auth, monkeypatch, enabled: bool
 ) -> None:  # noqa: ANN001, ARG001
+    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=enabled))
+    if enabled:
+        monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=False))
     record = {
         "id": SCHED_1,
         "name": "Issue responder",
@@ -627,9 +632,13 @@ async def test_a_test_run_is_refused_when_repo_access_is_revoked(
     assert stored["last_error"] == "repository unavailable to the automation owner"
 
 
+@pytest.mark.parametrize("enabled", [False, True])
 async def test_github_issue_automations_match_the_repo_and_run_the_channels_prompt(
-    fake_client, auth, planning
+    fake_client, auth, planning, monkeypatch: pytest.MonkeyPatch, enabled: bool
 ) -> None:  # noqa: ANN001, ARG001
+    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=enabled))
+    if enabled:
+        monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=False))
     record = {
         "id": SCHED_1,
         "name": "Issue responder",
@@ -1033,23 +1042,25 @@ def _scheduled_record(**overrides: Any) -> dict[str, Any]:
     return {**record, **overrides}
 
 
+@pytest.mark.usefixtures("auth")
 async def test_an_automation_runs_in_its_own_workspace_not_its_repositorys(
-    fake_client, auth, registry_db
-) -> None:  # noqa: ANN001, ARG001
+    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
     await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
     await _seed(_scheduled_record(workspace="core"))
 
     assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
+    monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=False))
+    assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "unknown_workspace"
+    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=True))
+    assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
 
-    configurable = fake_client.runs.created[0]["config"]["configurable"]
+    configurable = fake_client.runs.created[-1]["config"]["configurable"]
     assert configurable["workspace"] == configurable["environment"] == "core"
-    opening = next(
-        update["metadata"]
-        for update in fake_client.threads.updated
-        if "source" in update["metadata"]
-    )
-    assert opening["workspace"] == "core"
+    assert (await schedules.get_agent_schedule(SCHED_1))["workspace"] == "core"
+    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=False))
+    assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "unknown_workspace"
 
 
 async def test_admin_automations_refuse_events_from_public_repositories(
@@ -1237,8 +1248,9 @@ async def test_a_slack_trigger_needs_a_channel_open_swe_reads(
         assert refused.value.status_code == 422
 
 
+@pytest.mark.parametrize("enabled", [False, True])
 async def test_a_linear_automation_runs_once_per_delivery_within_its_hourly_cap(
-    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch
+    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch, enabled: bool
 ) -> None:
     monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
     stub_mda_runtime(monkeypatch)
@@ -1277,6 +1289,9 @@ async def test_a_linear_automation_runs_once_per_delivery_within_its_hourly_cap(
             )
         )
 
+    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=enabled))
+    if enabled:
+        monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=False))
     first = await plan("d1")
     assert first is not None
     # A thread of its own, for this automation and delivery; MDA's call sent again gets
@@ -1997,41 +2012,6 @@ async def test_an_automation_can_move_to_another_workspace(fake_client, auth, re
             SCHED_1, "alice", ScheduleUpdateBody(workspace="gone")
         )
     assert refused.value.status_code == 422
-
-
-async def test_deleting_a_workspace_deletes_its_automations(fake_client, auth, registry_db) -> None:  # noqa: ANN001, ARG001
-    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
-    for schedule_id, workspace in ((SCHED_1, "core"), (SCHED_2, "default")):
-        await _seed(
-            _scheduled_record(id=schedule_id, workspace=workspace, cron_id=_job_id(schedule_id)),
-        )
-
-    assert await WORKSPACES.remove("core")
-
-    remaining = {item["id"] for item in await schedules.list_agent_schedules(None)}
-    assert remaining == {SCHED_2}
-    assert fake_client.jobs.deleted == [_job_id(SCHED_1)]
-
-
-async def test_retrying_a_failed_workspace_delete_finishes_it(
-    fake_client, auth, registry_db, monkeypatch
-) -> None:  # noqa: ANN001, ARG001
-    """The automations go first, so a failure leaves a workspace that can be deleted again."""
-    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
-    await _seed(_scheduled_record(workspace="core", cron_id=_job_id(SCHED_1)))
-    real_delete = WORKSPACES.delete
-    monkeypatch.setattr(WORKSPACES, "delete", AsyncMock(side_effect=RuntimeError("db down")))
-
-    with pytest.raises(RuntimeError):
-        await WORKSPACES.remove("core")
-    assert await WORKSPACES.get("core") is not None
-
-    monkeypatch.setattr(WORKSPACES, "delete", real_delete)
-    assert await WORKSPACES.remove("core")
-
-    assert await WORKSPACES.get("core") is None
-    assert await schedules.list_agent_schedules(None) == []
-    assert fake_client.jobs.deleted == [_job_id(SCHED_1)]
 
 
 async def test_a_scheduler_cron_adopted_again_keeps_the_job_it_moved_to() -> None:

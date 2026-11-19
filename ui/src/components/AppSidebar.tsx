@@ -2,7 +2,6 @@ import { Button } from "@langchain/macaw-components/Button"
 import {
   ArrowLeftIcon,
   ArticleRegularIcon,
-  CubeRegularIcon,
   GearRegularIcon,
   InfoRegularIcon,
   SlidersHorizontalRegularIcon,
@@ -25,7 +24,6 @@ import { UsersIcon } from "@phosphor-icons/react/dist/ssr/Users"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { Fragment } from "react"
 
-import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import type { SessionUser } from "@/lib/api"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
 import {
@@ -94,7 +92,6 @@ const NAV: Array<NavGroup> = [
         label: "Repository Instructions",
         icon: FileTextIcon,
       },
-      { to: "/workspaces", label: "Environments", icon: CubeRegularIcon },
       { to: "/usage", label: "Usage", icon: ChartBarIcon },
     ],
   },
@@ -142,28 +139,6 @@ const LINK_CLASS =
 
 const ACTIVE_LINK_PROPS = {
   className: "bg-surface-level-2-hover text-primary font-medium",
-}
-
-function WorkspaceNavItems({ onNavigate }: { onNavigate: () => void }) {
-  const options = useWorkspaceOptions()
-  const workspaces = options.data?.workspaces ?? []
-  if (workspaces.length === 0) return null
-  return (
-    <div className="ml-[1.1rem] flex flex-col gap-0.5 border-l border-default pl-space-2">
-      {workspaces.map((workspace) => (
-        <Link
-          key={workspace.slug}
-          to="/workspaces/$slug"
-          params={{ slug: workspace.slug }}
-          onClick={onNavigate}
-          className={cn(LINK_CLASS, "py-space-1")}
-          activeProps={ACTIVE_LINK_PROPS}
-        >
-          <span className="truncate">{workspace.name}</span>
-        </Link>
-      ))}
-    </div>
-  )
 }
 
 export function AppSidebar({ user }: { user: SessionUser }) {
@@ -224,9 +199,6 @@ export function AppSidebar({ user }: { user: SessionUser }) {
                       <Icon size={16} weight="regular" />
                       <span>{item.label}</span>
                     </Link>
-                    {item.to === "/workspaces" && user.is_admin && (
-                      <WorkspaceNavItems onNavigate={layout.closeOnMobile} />
-                    )}
                   </Fragment>
                 )
               })}

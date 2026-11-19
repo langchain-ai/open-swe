@@ -21,7 +21,6 @@ import {
   setNotificationsPref,
 } from "@/lib/notifications"
 import { agentsApi } from "@/features/agents/lib/api"
-import { useWorkspaceOptions } from "@/features/agents/lib/queries"
 import { api } from "@/lib/api"
 import type {
   FollowUpBehavior,
@@ -47,10 +46,6 @@ const FOLLOW_UP_BEHAVIORS: Array<{ value: FollowUpBehavior; label: string }> = [
   { value: "queue", label: "Queue" },
   { value: "steer", label: "Steer" },
 ]
-
-// Select values are non-empty strings, so "no default" needs a sentinel that
-// is translated back to null on save.
-const NO_DEFAULT_WORKSPACE = "__no_default_workspace__"
 
 const PREFERENCES_KEY = ["myPreferences"]
 const SAVE_PREFERENCES_KEY = ["saveMyPreferences"]
@@ -96,14 +91,6 @@ export function GeneralSettings() {
         ? undefined
         : qc.invalidateQueries({ queryKey: PREFERENCES_KEY }),
   })
-  const workspaceOptions = useWorkspaceOptions()
-  const workspaceItems = [
-    { value: NO_DEFAULT_WORKSPACE, label: "Environment default" },
-    ...(workspaceOptions.data?.workspaces ?? []).map((workspace) => ({
-      value: workspace.slug,
-      label: workspace.name,
-    })),
-  ]
   const [confirmingArchive, setConfirmingArchive] = useState(false)
   const archiveThreads = useMutation({
     meta: { errorTitle: "Couldn't archive threads" },
@@ -171,27 +158,6 @@ export function GeneralSettings() {
           }
         />
         <SettingsRow
-          label="Default environment"
-          description="Preselected in the composer when the chosen repository doesn't belong to another environment."
-          control={
-            <Select
-              aria-label="Default environment"
-              options={workspaceItems}
-              value={
-                preferences.data?.default_workspace ?? NO_DEFAULT_WORKSPACE
-              }
-              onChange={(v) =>
-                v &&
-                savePreferences.mutate({
-                  default_workspace: v === NO_DEFAULT_WORKSPACE ? null : v,
-                })
-              }
-              disabled={preferences.isLoading || workspaceOptions.isLoading}
-              triggerClassName="w-48"
-            />
-          }
-        />
-        <SettingsRow
           label="Follow-up behavior"
           description="Queue follow-ups until the run ends, or steer the current run with them. ⌘↵ does the opposite for one message."
           control={
@@ -226,7 +192,7 @@ export function GeneralSettings() {
           label="Personal kitchen channel"
           description={
             session.data?.slack_user_id
-              ? "Robin responds to your messages in this channel without an @mention. Only your messages get kitchen handling; environment kitchen channels stay unchanged. Choose an internal channel Robin has joined. Clear to turn off."
+              ? "Robin responds to your messages in this channel without an @mention. Only your messages get kitchen handling; shared channel modes stay unchanged. Choose an internal channel Robin has joined. Clear to turn off."
               : "Link Slack in Connections to choose a channel where Robin responds to your messages without an @mention."
           }
           control={

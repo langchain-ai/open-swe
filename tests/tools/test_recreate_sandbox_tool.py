@@ -20,12 +20,18 @@ def _backend_owned_sandbox() -> object:
 
 @pytest.mark.asyncio
 async def test_recreate_sandbox_leaves_an_mda_sandbox_to_mda(
-    grant_tool_access: Callable[..., None], _backend_owned_sandbox: AsyncMock
+    grant_tool_access: Callable[..., None], _backend_owned_sandbox: AsyncMock, registry_db: None
 ) -> None:
     """MDA replaces its own sandbox; the backend answers what with, and never makes one itself."""
     grant_tool_access()
     _backend_owned_sandbox.return_value = {"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}
-    config = {"configurable": {"thread_id": "thread-1", "workspace": "open-swe"}}
+    config = {
+        "configurable": {
+            "thread_id": "thread-1",
+            "workspace": "open-swe",
+            "invocation_id": "request-1",
+        }
+    }
     with (
         patch("openswe.run_config.get_config", return_value=config),
         patch(
@@ -34,9 +40,7 @@ async def test_recreate_sandbox_leaves_an_mda_sandbox_to_mda(
         patch(
             "openswe.tools.recreate_sandbox.hand_sandbox_to_mda", new_callable=AsyncMock
         ) as recreate,
-        patch(
-            "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
-        ) as update,
+        patch("openswe.threads.store.THREADS.update", new_callable=AsyncMock) as update,
     ):
         result = await recreate_sandbox(source="base")
 
@@ -57,7 +61,13 @@ async def test_recreate_sandbox_hands_an_old_sandbox_to_mda_with_the_admin_works
     stop_error: str | None,
 ) -> None:
     grant_tool_access(admin=True, admin_surface=True)
-    config = {"configurable": {"thread_id": "thread-1", "workspace": "open-swe"}}
+    config = {
+        "configurable": {
+            "thread_id": "thread-1",
+            "workspace": "open-swe",
+            "invocation_id": "request-1",
+        }
+    }
     with (
         patch("openswe.run_config.get_config", return_value=config),
         patch(
@@ -85,7 +95,13 @@ async def test_recreate_sandbox_refuses_other_workspace_outside_private_admin_su
     grant_tool_access: Callable[..., None],
 ) -> None:
     grant_tool_access(admin=True, admin_thread=True)
-    config = {"configurable": {"thread_id": "thread-1", "workspace": "open-swe"}}
+    config = {
+        "configurable": {
+            "thread_id": "thread-1",
+            "workspace": "open-swe",
+            "invocation_id": "request-1",
+        }
+    }
     with (
         patch("openswe.run_config.get_config", return_value=config),
         patch(

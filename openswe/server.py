@@ -18,6 +18,7 @@ from uuid import UUID
 from runtime_api.provenance import Provenance
 
 from openswe.config import ENV
+from openswe.execution import ExecutionProfile
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +188,6 @@ from openswe.tools import (
     delete_automation,
     delete_organization_skill,
     delete_user_skill,
-    delete_workspace,
     discover_managed_tools,
     dismiss_human_review_request,
     execute_database_sql,
@@ -215,7 +215,6 @@ from openswe.tools import (
     preview_app,
     publish_app,
     publish_artifact,
-    publish_workspace,
     read_only_sql,
     read_user_settings,
     recheck_pr_approval,
@@ -289,6 +288,11 @@ from openswe.tools.task_threads import (
     control_worker,
     message_task_thread,
     task_status,
+)
+from openswe.tools.workspaces import (
+    publish_execution_image,
+    read_execution_image,
+    rebuild_execution_image,
 )
 from openswe.users import User
 from openswe.utils import ttl_cache
@@ -602,8 +606,8 @@ INCIDENT_KICKOFF_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "configure_repository",
         "configure_workspace",
         "configure_execution_defaults",
-        "delete_workspace",
-        "publish_workspace",
+        "publish_execution_image",
+        "rebuild_execution_image",
         "snapshotctl",
         "save_user_skill",
         "delete_user_skill",
@@ -672,13 +676,14 @@ ADMIN_TOOLS = (
     trigger_automation,
     delete_automation,
     list_workspaces,
-    publish_workspace,
+    publish_execution_image,
+    read_execution_image,
+    rebuild_execution_image,
     snapshotctl,
     configure_repository,
     configure_workspace,
     read_execution_defaults,
     configure_execution_defaults,
-    delete_workspace,
     save_organization_skill,
     delete_organization_skill,
     send_announcement,
@@ -1487,9 +1492,14 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         configurable = (self._config or {}).get("configurable") or {}
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
-        # A thread's system prompt is rendered on its first run and never again.
+        execution = ExecutionProfile.current()
+        global_prompt = execution is not None and execution.uses_defaults
         render_prompt = not (
             state.get("system_prompt_fixed") and state.get("rendered_system_prompt")
+        ) or (
+            global_prompt
+            and SystemPrompt.from_state(state) is None
+            and not isinstance(state.get("execution_shared_prompt"), str)
         )
         github_token = await resolving_token
         triggering_user_identity_task = asyncio.create_task(
@@ -1595,7 +1605,14 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             recent_threads=await recent_threads,
         )
         added = [*sender_messages, *turn.messages(visible_dynamic_context_hashes(state))]
-        system_prompt = (await rendered_prompt).state() if rendered_prompt is not None else {}
+        system_prompt = SystemPrompt.execution_update(
+            state,
+            await rendered_prompt if rendered_prompt is not None else None,
+            enabled=global_prompt,
+            workspace=execution.workspace_prompt()
+            if global_prompt and execution is not None
+            else "",
+        )
         return {
             "work_dir": work_dir,
             "requested_model": requested_model,

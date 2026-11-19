@@ -2,9 +2,9 @@
 
 Graph factories read these on every run, so they are cached, in the platform
 cache every replica shares (Redis on a deployment, memory under ``langgraph dev``).
-The slug is part of the key: the workspace that populated a key first must not
-answer for the others. Keys also carry a generation that every save replaces,
-so a save reaches every replica's next read at once.
+Robin-wide mode uses the instance cache; legacy mode keys include the slug.
+Keys also carry a generation that every save replaces, so a save reaches every
+replica's next read at once.
 
 Callers pass the run's slug explicitly. A factory runs outside the graph's
 context, where :func:`openswe.dashboard.workspace_settings.resolve_settings_workspace`
@@ -58,6 +58,14 @@ async def _cached(name: str, load: Callable[[], Awaitable[WorkspaceSettings]]) -
 
 
 async def cached_workspace_settings(workspace: str | None) -> WorkspaceSettings:
+    from openswe.execution import ExecutionProfile
+
+    try:
+        if await ExecutionProfile.use_defaults():
+            return await cached_instance_settings()
+    except Exception:
+        logger.warning("Execution defaults lookup failed; using defaults", exc_info=True)
+        return fallback_settings()
     slug = resolve_settings_workspace(workspace)
     return await _cached(f"workspace:{slug}", lambda: load_workspace_settings(slug))
 

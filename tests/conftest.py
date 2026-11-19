@@ -376,6 +376,21 @@ async def registry_db(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[None]:
         yield
 
 
+@pytest.fixture(autouse=True)
+def _legacy_execution_defaults(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DB-less tests keep legacy defaults unless they explicitly supply a configuration."""
+    if {"registry_db", "analytics_db", "deployment_db"}.intersection(request.fixturenames):
+        return
+    from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS, ExecutionDefaults
+    from openswe.execution import SANDBOX_EXECUTION
+
+    monkeypatch.setattr(EXECUTION_DEFAULTS, "load", AsyncMock(return_value=ExecutionDefaults()))
+    monkeypatch.setattr(SANDBOX_EXECUTION, "bound", AsyncMock(return_value=None))
+    monkeypatch.setattr(SANDBOX_EXECUTION, "pending", AsyncMock(return_value=None))
+
+
 @pytest.fixture
 def no_local_threads(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every thread takes new activity itself, for tests without the thread index."""

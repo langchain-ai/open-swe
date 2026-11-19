@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest"
 import type { AgentThread } from "./types"
 import {
   cloudSidebarThread,
-  groupRepoGroupsByWorkspace,
   groupSidebarThreadsByRecency,
   sortSidebarThreads,
   sidebarRefreshInterval,
@@ -273,55 +272,5 @@ describe("groupSidebarThreadsByDate", () => {
       groupSidebarThreadsByRecency([thread], now).map((group) => group.label)
     ).toEqual(["Today"])
     expect(groupSidebarThreadsByRecency([], now)).toEqual([])
-  })
-})
-
-describe("groupRepoGroupsByWorkspace", () => {
-  it("nests repository groups under their owning workspace, defaulting the rest", () => {
-    const groups = [
-      { key: "repo:acme/alpha", label: "alpha" },
-      { key: "repo:acme/beta", label: "beta" },
-      { key: "repo:acme/gamma", label: "gamma" },
-    ]
-    const repos = [
-      { key: "repo:acme/alpha", label: "alpha", workspace: "oss" },
-      { key: "repo:acme/beta", label: "beta", workspace: "oss" },
-      // No workspace field at all: falls under "default".
-      { key: "repo:acme/gamma", label: "gamma" },
-    ]
-    const workspaces = [
-      { slug: "oss", name: "Open Source" },
-      { slug: "default", name: "Default" },
-    ]
-
-    const grouped = groupRepoGroupsByWorkspace(groups, repos, workspaces)
-
-    expect(
-      grouped.map((workspace) => [
-        workspace.slug,
-        workspace.name,
-        workspace.repos.map((repo) => repo.key).sort(),
-      ])
-    ).toEqual(
-      expect.arrayContaining([
-        ["oss", "Open Source", ["repo:acme/alpha", "repo:acme/beta"]],
-        ["default", "Default", ["repo:acme/gamma"]],
-      ])
-    )
-    expect(grouped).toHaveLength(2)
-  })
-
-  it("falls back to the slug as a display name for an unknown workspace", () => {
-    const repos = [{ key: "repo:acme/solo", label: "solo", workspace: "ghost" }]
-
-    const grouped = groupRepoGroupsByWorkspace(repos, repos, [])
-
-    expect(grouped).toEqual([
-      {
-        slug: "ghost",
-        name: "ghost",
-        repos: [expect.objectContaining({ key: "repo:acme/solo" })],
-      },
-    ])
   })
 })

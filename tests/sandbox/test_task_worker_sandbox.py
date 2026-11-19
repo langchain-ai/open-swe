@@ -77,8 +77,13 @@ def shared_sandbox(monkeypatch: pytest.MonkeyPatch) -> dict[str, dict[str, objec
 async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     shared_sandbox: dict[str, dict[str, object]],
     monkeypatch: pytest.MonkeyPatch,
+    registry_db,
     owner_type: str,
 ) -> None:
+    from openswe.execution import SANDBOX_EXECUTION, ExecutionProfile
+    from openswe.github.sandbox_access import SandboxGitHubAccess
+    from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
+
     if owner_type == "system":
         for metadata in shared_sandbox.values():
             metadata["owner_type"] = "system"
@@ -87,6 +92,15 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
             monkeypatch.setattr(User, method, AsyncMock(side_effect=AssertionError("User lookup")))
     host_sandbox_id = "sb-replacement"
     shared_sandbox["coordinator"]["sandbox_id"] = host_sandbox_id
+    proxy_config = {"rules": [{"name": "retained-egress", "match_hosts": ["retained.invalid"]}]}
+    profile = ExecutionProfile(
+        uses_defaults=True,
+        create=LangSmithCreateOptions.resolve(
+            snapshot_id=None, create_params={"proxy_config": proxy_config}
+        ),
+    )
+    monkeypatch.setattr("openswe.threads.store.THREADS.update", AsyncMock())
+    await SANDBOX_EXECUTION.bind("coordinator", host_sandbox_id, profile, {})
     backend = MagicMock(id=host_sandbox_id)
     connect = AsyncMock(return_value=backend)
     refresh = AsyncMock()
@@ -100,6 +114,24 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     assert shared_sandbox["worker"]["sandbox_id"] == host_sandbox_id
     connect.assert_awaited_once_with(host_sandbox_id)
     assert refresh.await_args.kwargs["thread_id"] == "coordinator"
+    assert refresh.await_args.kwargs["base_proxy_config"] == proxy_config
+    shared_sandbox["worker"]["sandbox_base_proxy_config"] = {"rules": ["injected"]}
+    configure = AsyncMock()
+    render = AsyncMock(return_value={})
+    monkeypatch.setattr(
+        lifecycle, "workspace_token", AsyncMock(return_value=SandboxGitHubAccess("token"))
+    )
+    monkeypatch.setattr(lifecycle, "configure_sandbox_proxy", configure)
+    monkeypatch.setattr(lifecycle, "sandbox_proxy_config", render)
+    await lifecycle.refresh_thread_github_proxy("worker")
+    assert configure.await_args.kwargs["base_proxy_config"] == proxy_config
+    await lifecycle.mda_proxy_config("worker", host_sandbox_id, workspace_slug="default")
+    assert render.await_args.kwargs["base_proxy_config"] == proxy_config
+    shared_sandbox["worker"]["sandbox_host_thread_id"] = "another-coordinator"
+    with pytest.raises(PermissionError, match="does not match"):
+        await lifecycle.refresh_thread_github_proxy("worker")
+    with pytest.raises(PermissionError, match="does not match"):
+        await lifecycle.mda_proxy_config("worker", host_sandbox_id, workspace_slug="default")
     if owner_type == "system":
         assert all("owner_user_id" not in metadata for metadata in shared_sandbox.values())
     else:

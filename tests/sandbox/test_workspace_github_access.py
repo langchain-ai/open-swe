@@ -579,17 +579,32 @@ async def test_expiry_refresh_keeps_workspace_and_custom_proxy_rules(
     assert custom in config["rules"]
 
 
+@pytest.mark.parametrize("global_defaults", [False, True])
 async def test_missing_workspace_does_not_inherit_default_access(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
+    global_defaults: bool,
 ) -> None:
+    from openswe.execution import ExecutionProfile
+    from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
+
     async def exists(slug: str) -> bool:
         return slug == "default"
 
     monkeypatch.setattr(WORKSPACES, "slug_exists", exists)
-    with pytest.raises(ValueError, match="does not exist"):
-        await _connect(workspace_slug="deleted")
-    assert github == []
+    profile = ExecutionProfile(
+        uses_defaults=global_defaults,
+        create=LangSmithCreateOptions.resolve(snapshot_id=None, create_params={}),
+        repos=["acme/internal"],
+    )
+    with ExecutionProfile.bind(profile):
+        if not global_defaults:
+            with pytest.raises(ValueError, match="does not exist"):
+                await _connect(workspace_slug="deleted")
+            assert github == []
+            return
+        await _connect(workspace_slug="deleted", github_proxy_repositories=["acme/api"])
+    assert injected_auth(github) == ["x-access-token:repos:11"]
 
 
 async def test_scoped_token_failure_does_not_inject_discovery_token(

@@ -307,7 +307,6 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       await sidebar.getByRole("button", { name: "Today", exact: true }).click();
       for (const [menu, grouping] of [
         ["Recents options", "Project"],
-        ["Projects options", "Environment"],
         ["Projects options", "Date"],
       ]) {
         await sidebar.getByRole("button", { name: menu, exact: true }).click();

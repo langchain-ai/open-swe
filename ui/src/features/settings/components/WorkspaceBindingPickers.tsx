@@ -10,6 +10,7 @@ import { RepositoryLabels } from "@/lib/repo"
 import { useRepos } from "@/lib/profile"
 import {
   rankSlackChannels,
+  slackChannelLabel,
   rememberSlackChannels,
   useRecentSlackChannels,
   useSlackChannelDirectory,
@@ -42,16 +43,16 @@ interface BindingPickerProps {
   selected: Array<string>
   onChange: (ids: Array<string>) => void
   /** The workspace being edited; null while creating one. */
-  workspaceSlug: string | null
-  workspaces: Array<WorkspaceOption>
+  workspaceSlug?: string | null
+  workspaces?: Array<WorkspaceOption>
   disabled?: boolean
 }
 
 export function RepositoryPicker({
   selected,
   onChange,
-  workspaceSlug,
-  workspaces,
+  workspaceSlug = null,
+  workspaces = [],
   disabled,
 }: BindingPickerProps) {
   const repos = useRepos()
@@ -79,7 +80,7 @@ export function RepositoryPicker({
     <OwnershipPicker
       triggerLabel="Choose repositories"
       title="Bound Repositories"
-      description="Events on these repositories run in this environment, and its image preloads them. A repository is bound to one environment."
+      description="Bind repositories for inbound GitHub and Linear routing. This does not grant access or change preloads."
       noun="repository"
       pluralNoun="repositories"
       items={items}
@@ -125,8 +126,8 @@ export function RepositoryPicker({
 export function SlackChannelPicker({
   selected,
   onChange,
-  workspaceSlug,
-  workspaces,
+  workspaceSlug = null,
+  workspaces = [],
   disabled,
 }: BindingPickerProps) {
   const directory = useSlackChannelDirectory(true)
@@ -160,11 +161,15 @@ export function SlackChannelPicker({
       ? undefined
       : "Invite Robin to this channel, then refresh to select it.",
   }))
+  for (const id of selected) {
+    if (!items.some((item) => item.id === id))
+      items.push({ id, label: slackChannelLabel(directory.data, id, selected) })
+  }
   return (
     <OwnershipPicker
       triggerLabel="Choose channels"
       title="Slack channels"
-      description="Mentions in these channels start runs in this environment. A channel belongs to one environment."
+      description="Bind channels where Robin responds to mentions. Set Mention-only, Kitchen, or Ask after saving."
       noun="channel"
       pluralNoun="channels"
       items={items}

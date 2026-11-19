@@ -713,6 +713,10 @@ async def workspace_scoped_default_repo(
     its own default repository takes over when it has one. Every workspace can
     use every repository, so the candidate stays otherwise.
     """
+    from openswe.execution import ExecutionProfile
+
+    if await ExecutionProfile.use_defaults():
+        return candidate
     personal = await common.get_profile_default_repo(login, workspace, fallback_global=False)
     if personal:
         return Repo.model_validate(personal)

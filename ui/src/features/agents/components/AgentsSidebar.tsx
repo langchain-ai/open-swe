@@ -6,7 +6,6 @@ import {
   MagnifyingGlassRegularIcon,
   PlusIcon,
   PushPinRegularIcon,
-  StackRegularIcon,
 } from "@langchain/macaw-components/icons"
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
@@ -48,7 +47,6 @@ import type { AgentThread } from "@/features/agents/lib/types"
 import type {
   SidebarRepoGroup,
   SidebarThreadItem,
-  SidebarWorkspaceGroup,
 } from "@/features/agents/lib/sidebarThreads"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
@@ -96,7 +94,6 @@ import {
   useSidebarRepos,
   useSidebarRepoThreads,
   useSidebarRecents,
-  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import {
   MenuCheckItem,
@@ -110,7 +107,6 @@ import { useLocalThreads } from "@/features/agents/lib/desktopLocal"
 import {
   cloudSidebarThread,
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
-  groupRepoGroupsByWorkspace,
   groupSidebarThreadsByRecency,
   sidebarRepoKey,
   sortSidebarThreads,
@@ -265,12 +261,7 @@ export function AgentsSidebar({
     )
   }, [updateState])
   const updateInstalling = updateState.status === "installing"
-  const workspaceOrganize = prefs.organize === "workspace"
-  // "workspace" mode groups the same repo folders as "repo" mode; it
-  // only changes how the unpinned ones are laid out (nested under a workspace
-  // header instead of a flat list), so every other repo-mode query and
-  // computation below applies to both.
-  const repoMode = prefs.organize === "repo" || workspaceOrganize
+  const repoMode = prefs.organize === "repo"
   const includeAutomations =
     prefs.filters.includeAutomations ||
     prefs.filters.sources.includes("schedule")
@@ -289,7 +280,6 @@ export function AgentsSidebar({
   })
   const sidebarReposQuery = useSidebarRepos({
     measure:
-      workspaceOrganize ||
       !prefs.collapsedSectionKeys.includes("repos") ||
       (!prefs.collapsedSectionKeys.includes("pinned") &&
         prefs.pinnedRepoKeys.length > 0),
@@ -299,13 +289,6 @@ export function AgentsSidebar({
     includeSlack: prefs.filters.includeSlack,
     enabled: repoMode,
   })
-  const workspaceOptionsQuery = useWorkspaceOptions(workspaceOrganize)
-  // One workspace — or none yet, while the list loads — has nothing to group
-  // by, so the header would add a level of nesting that says nothing. The
-  // composer's workspace picker and the admin page hide themselves the same way.
-  const workspaceMode =
-    workspaceOrganize &&
-    (workspaceOptionsQuery.data?.workspaces.length ?? 0) > 1
   const pinThread = usePinAgentThread()
   const reorderPins = useReorderPinnedThreads()
   const resolveThread = useResolveAgentThread()
@@ -558,30 +541,6 @@ export function AgentsSidebar({
   const unpinnedGroups = repoGroups.filter(
     (group) => !pinnedRepoKeys.has(group.key)
   )
-  // Each repository folder sits under the workspace that prefers it, even
-  // though threads from other workspaces may use it; local-only folders (no
-  // server-side repo) fall under the default workspace.
-  const repoWorkspaceOptions = [
-    ...keyedCloudRepos.map(({ repo, key }) => ({
-      key,
-      label: repo.name,
-      workspace: repo.workspace,
-    })),
-    ...projects.map((project) => ({
-      key: `project:${project.id}`,
-      label: project.name,
-      workspace: project.workspace,
-    })),
-  ]
-  const workspaceGroups: Array<SidebarWorkspaceGroup<HydratedRepoGroup>> =
-    workspaceMode
-      ? groupRepoGroupsByWorkspace(
-          unpinnedGroups,
-          repoWorkspaceOptions,
-          workspaceOptionsQuery.data?.workspaces ?? []
-        )
-      : []
-
   const pullRequestFor = useSidebarPullRequests(allItems, true)
   const isArchived = (item: SidebarThreadItem) => item.thread.resolved === true
   const toggleArchived = (item: SidebarThreadItem) => {
@@ -657,7 +616,6 @@ export function AgentsSidebar({
         options={[
           { value: "date", label: "Date" },
           { value: "repo", label: "Project" },
-          { value: "workspace", label: "Environment" },
         ]}
       />
       <DropdownMenuSeparator />
@@ -794,8 +752,7 @@ export function AgentsSidebar({
     repoMode &&
     (sidebarReposQuery.isPending ||
       projectsPending ||
-      (isDesktop && !localReposLoaded) ||
-      (workspaceOrganize && workspaceOptionsQuery.isPending))
+      (isDesktop && !localReposLoaded))
   const pinnedPending =
     pinnedQuery.isPending || (foldersPending && prefs.pinnedRepoKeys.length > 0)
   const cloudPending =
@@ -1056,22 +1013,13 @@ export function AgentsSidebar({
 
             {repoMode && (
               <section
-                className={cn(
-                  "mb-space-3",
-                  workspaceOrganize &&
-                    workspaceOptionsQuery.isPending &&
-                    "invisible"
-                )}
+                className="mb-space-3"
                 data-sidebar-loading={foldersPending ? "" : undefined}
               >
                 <SidebarSectionHeader
-                  label={workspaceMode ? "Environments" : "Projects"}
-                  collapsed={!workspaceMode && sectionCollapsed("repos")}
-                  onToggleCollapsed={
-                    workspaceMode
-                      ? undefined
-                      : () => toggleSectionCollapsed("repos")
-                  }
+                  label="Projects"
+                  collapsed={sectionCollapsed("repos")}
+                  onToggleCollapsed={() => toggleSectionCollapsed("repos")}
                   menu={
                     <SidebarSectionMenu label="Projects options">
                       {viewMenuItems}
@@ -1086,39 +1034,22 @@ export function AgentsSidebar({
                     />
                   }
                 />
-                <div hidden={!workspaceMode && sectionCollapsed("repos")}>
-                  {(workspaceMode || !sectionCollapsed("repos")) &&
-                    foldersPending && (
-                      <ThreadListSkeleton label="Loading projects" />
-                    )}
+                <div hidden={sectionCollapsed("repos")}>
+                  {!sectionCollapsed("repos") && foldersPending && (
+                    <ThreadListSkeleton label="Loading projects" />
+                  )}
                   {(!foldersPending || pendingStarts.length > 0) && (
                     <div className="sidebar-groups">
-                      {workspaceMode
-                        ? workspaceGroups.map((workspace) => (
-                            <WorkspaceGroupSection
-                              key={workspace.slug}
-                              workspace={workspace}
-                              collapsed={sectionCollapsed(
-                                `workspace:${workspace.slug}`
-                              )}
-                              onToggleCollapsed={() =>
-                                toggleSectionCollapsed(
-                                  `workspace:${workspace.slug}`
-                                )
-                              }
-                              renderRepoGroup={renderRepoGroup}
-                            />
-                          ))
-                        : unpinnedGroups.map((group) =>
-                            renderRepoGroup(
-                              group,
-                              () => {
-                                if (sectionCollapsed("repos"))
-                                  toggleSectionCollapsed("repos")
-                              },
-                              sectionCollapsed("repos")
-                            )
-                          )}
+                      {unpinnedGroups.map((group) =>
+                        renderRepoGroup(
+                          group,
+                          () => {
+                            if (sectionCollapsed("repos"))
+                              toggleSectionCollapsed("repos")
+                          },
+                          sectionCollapsed("repos")
+                        )
+                      )}
                     </div>
                   )}
                 </div>
@@ -1181,68 +1112,6 @@ export function AgentsSidebar({
         )}
       </div>
     </SidebarFrame>
-  )
-}
-
-/**
- * A workspace header inside the "Workspaces" section, nesting the repo
- * folders that belong to it. Collapse state reuses the sidebar's generic
- * collapsed-section keys (`workspace:<slug>`), the same mechanism the
- * Pinned/Repositories/Recents headers use.
- */
-function WorkspaceGroupSection({
-  workspace,
-  collapsed,
-  onToggleCollapsed,
-  renderRepoGroup,
-}: {
-  workspace: SidebarWorkspaceGroup<HydratedRepoGroup>
-  collapsed: boolean
-  onToggleCollapsed: () => void
-  renderRepoGroup: (
-    group: HydratedRepoGroup,
-    onActive: () => void,
-    hidden: boolean
-  ) => React.ReactNode
-}) {
-  const Caret = collapsed ? CaretRightIcon : CaretDownIcon
-  return (
-    <div className="sidebar-group mb-space-1">
-      <div className={GROUP_HEADER_CLASS}>
-        <Button
-          color="secondary"
-          variant="plain"
-          size="sm"
-          aria-label={workspace.name}
-          type="button"
-          onClick={onToggleCollapsed}
-          aria-expanded={!collapsed}
-          className={GROUP_ROW_CLASS}
-        >
-          <StackRegularIcon size={16} className="shrink-0" />
-          <SidebarGroupHeading label={workspace.name} />
-          <Caret
-            weight="regular"
-            className={cn(
-              GROUP_CARET_CLASS,
-              !collapsed &&
-                "invisible group-focus-within/folder:visible group-hover/folder:visible"
-            )}
-          />
-        </Button>
-      </div>
-      <div hidden={collapsed} className="sidebar-groups pl-space-2">
-        {workspace.repos.map((group) =>
-          renderRepoGroup(
-            group,
-            () => {
-              if (collapsed) onToggleCollapsed()
-            },
-            collapsed
-          )
-        )}
-      </div>
-    </div>
   )
 }
 

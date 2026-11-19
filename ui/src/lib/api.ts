@@ -906,21 +906,9 @@ export interface SlackChannelDirectory {
 }
 
 export interface WorkspaceOptionList {
+  execution_defaults_enabled?: boolean
   workspaces: Array<WorkspaceOption>
   default_slug: string
-}
-
-/** Body for `POST /workspaces`; `name` is the only required field. */
-export interface WorkspaceCreate {
-  inherit_default_sandbox?: boolean
-  name: string
-  prompt?: string
-  repos?: Array<string>
-  slack_channel_ids?: Array<string>
-  kitchen_channel_ids?: Array<string>
-  ask_channel_ids?: Array<string>
-  setup_script?: string
-  update_script?: string
 }
 
 export type JsonValue =
@@ -932,6 +920,7 @@ export type JsonValue =
   | { [key: string]: JsonValue }
 
 export interface ExecutionDefaults {
+  enabled: boolean
   prompt: string
   repos: string[]
   setup_script: string
@@ -947,28 +936,15 @@ export interface ExecutionDefaults {
 
 /** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
 export interface WorkspaceUpdate {
-  inherit_default_sandbox?: boolean
-  create_params?: Record<string, JsonValue>
-  name?: string
-  prompt?: string
   repos?: Array<string>
   slack_channel_ids?: Array<string>
   kitchen_channel_ids?: Array<string>
   ask_channel_ids?: Array<string>
-  setup_script?: string
-  update_script?: string
-  vcpus?: number | null
-  mem_bytes?: number | null
-  fs_capacity_bytes?: number | null
 }
 
 export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
 
-/**
- * A workspace as `GET /workspaces/{slug}` returns it. The first five fields
- * are what `createWorkspace`/`updateWorkspace` guarantee; the rest describe
- * the sandbox image and its last rebuild.
- */
+/** A retained workspace and its routing and image state. */
 export interface WorkspaceRecord {
   inherit_default_sandbox?: boolean
   create_params?: Record<string, JsonValue>
@@ -999,12 +975,6 @@ export interface WorkspaceRecord {
 export interface RepositorySettings {
   repo: string
   may_start_threads: boolean
-}
-
-/** What `POST /workspaces/{slug}/refresh` answers. */
-export interface WorkspaceRefreshStart {
-  started: boolean
-  run_id: string
 }
 
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
@@ -1677,24 +1647,10 @@ export const api = {
     request<WorkspaceOptionList>("/workspaces/options"),
   getWorkspace: (slug: string) =>
     request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`),
-  createWorkspace: (body: WorkspaceCreate) =>
-    request<WorkspaceRecord>("/workspaces", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  refreshWorkspace: (slug: string) =>
-    request<WorkspaceRefreshStart>(
-      `/workspaces/${encodeURIComponent(slug)}/refresh`,
-      { method: "POST" }
-    ),
   updateWorkspace: (slug: string, body: WorkspaceUpdate) =>
     request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`, {
       method: "PUT",
       body: JSON.stringify(body),
-    }),
-  deleteWorkspace: (slug: string) =>
-    request<void>(`/workspaces/${encodeURIComponent(slug)}`, {
-      method: "DELETE",
     }),
   listWorkspaceRepositories: (slug: string) =>
     request<RepositorySettings[]>(
@@ -1723,15 +1679,6 @@ export const api = {
   getWorkspaceSettings: (slug: string) =>
     request<WorkspaceSettingsView>(
       `/workspaces/${encodeURIComponent(slug)}/settings`
-    ),
-  /** Replaces the workspace's overrides; a field left out inherits the instance value. */
-  saveWorkspaceSettings: (
-    slug: string,
-    overrides: WorkspaceSettingsOverrides
-  ) =>
-    request<WorkspaceSettingsView>(
-      `/workspaces/${encodeURIComponent(slug)}/settings`,
-      { method: "PUT", body: JSON.stringify(overrides) }
     ),
   pendingNotifications: () => request<AppNotification[]>("/notifications"),
   acknowledgeNotification: (id: string) =>

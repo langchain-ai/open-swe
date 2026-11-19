@@ -11,18 +11,13 @@ import {
 } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import {
-  api,
-  type WorkspaceSettings,
-  type WorkspaceSettingsView,
-} from "@/lib/api"
+import { api } from "@/lib/api"
 
 import {
   SlackIntegrationSection,
   UsersSection,
 } from "@/features/settings/components/AdminSections"
 import { AnnouncementsSection } from "@/features/settings/components/AnnouncementsSection"
-import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 
 afterEach(cleanup)
 
@@ -122,75 +117,6 @@ describe("UsersSection", () => {
     })
     expect(await screen.findByText("No users match your search")).toBeTruthy()
     client.clear()
-  })
-})
-
-describe("ReviewSettings", () => {
-  const settings = (review_draft_prs: boolean): WorkspaceSettings => ({
-    pr_summaries: false,
-    review_trace_links: false,
-    review_draft_prs,
-  })
-  const loaded = (review_draft_prs: boolean): WorkspaceSettingsView => ({
-    effective: settings(review_draft_prs),
-    overrides: {},
-  })
-
-  afterEach(() => vi.restoreAllMocks())
-
-  it("caches a save under the workspace it started in, not the one shown when it finishes", async () => {
-    const qc = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    })
-    vi.spyOn(api, "getInstanceSettings").mockResolvedValue(settings(false))
-    vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () =>
-      loaded(false)
-    )
-    let finishSave: (saved: WorkspaceSettingsView) => void = () => {}
-    const save = vi
-      .spyOn(api, "saveWorkspaceSettings")
-      .mockImplementation(
-        () =>
-          new Promise<WorkspaceSettingsView>(
-            (resolve) => (finishSave = resolve)
-          )
-      )
-    const section = (slug: string) => (
-      <QueryClientProvider client={qc}>
-        <ReviewSettings scope={{ kind: "workspace", slug }} canEdit />
-      </QueryClientProvider>
-    )
-
-    const view = render(section("alpha"))
-    const row = (
-      await within(view.container).findByText("Review Draft PRs")
-    ).closest("label")!.parentElement!
-    const toggle = within(row).getByRole("switch")
-    await waitFor(() => {
-      expect(toggle.hasAttribute("disabled")).toBe(false)
-      expect(toggle.hasAttribute("data-disabled")).toBe(false)
-      expect(toggle.getAttribute("aria-disabled")).not.toBe("true")
-    })
-    fireEvent.click(toggle)
-    await waitFor(() =>
-      expect(save).toHaveBeenCalledWith("alpha", { review_draft_prs: true })
-    )
-
-    view.rerender(section("beta"))
-    const saved: WorkspaceSettingsView = {
-      effective: settings(true),
-      overrides: { review_draft_prs: true },
-    }
-    finishSave(saved)
-
-    await waitFor(() =>
-      expect(qc.getQueryData(["workspaceSettings", "alpha"])).toEqual(saved)
-    )
-    await waitFor(() =>
-      expect(qc.getQueryData(["workspaceSettings", "beta"])).toEqual(
-        loaded(false)
-      )
-    )
   })
 })
 

@@ -24,7 +24,6 @@ async def test_catalog_respects_admin_and_uses_python_schema(
     assert "read_execution_defaults" in tools
     assert "configure_execution_defaults" in tools
     assert "upload_session" in tools
-    assert "publish_workspace" not in tools
     parameters = tool_parameters(tools["manage_feature_flags"][0])
     assert parameters["required"] == ["action"]
     properties = parameters["properties"]

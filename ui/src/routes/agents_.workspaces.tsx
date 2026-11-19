@@ -1,9 +1,7 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
+
+import { LegacySettingsRedirect } from "@/features/settings/components/LegacySettingsRedirect"
 
 export const Route = createFileRoute("/agents_/workspaces")({
-  component: WorkspacesRedirect,
+  component: LegacySettingsRedirect,
 })
-
-function WorkspacesRedirect() {
-  return <Navigate to="/workspaces" />
-}

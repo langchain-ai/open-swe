@@ -343,28 +343,31 @@ class TestMdaProxyConfig:
     @pytest.mark.parametrize(
         ("metadata", "expected"),
         [
-            # Before binding records the replacement's rules.
-            ({"sandbox_replacement": _REPLACEMENT}, _AWS_RULE),
-            # A replacement whose create failed after the old sandbox was renamed: the next
-            # run creates the sandbox from the record, so the old sandbox's recorded rules are stale.
+            ({"sandbox_replacement": _REPLACEMENT}, None),
             (
                 {
+                    "sandbox_id": "sandbox-abc",
                     "sandbox_replacement": _REPLACEMENT,
                     SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [_RECORDED_RULE]},
+                    "sandbox_create_options": {
+                        "extra_fields": {"proxy_config": {"rules": [_AWS_RULE]}}
+                    },
                 },
-                _AWS_RULE,
+                _RECORDED_RULE,
             ),
-            # With no replacement pending, the rules recorded for the bound sandbox.
-            ({SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [_RECORDED_RULE]}}, _RECORDED_RULE),
+            (
+                {
+                    "sandbox_id": "sandbox-abc",
+                    SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [_RECORDED_RULE]},
+                },
+                _RECORDED_RULE,
+            ),
         ],
     )
     async def test_the_backends_part_keeps_the_cloud_identity_the_sandbox_was_created_with(
-        self, metadata: dict[str, object], expected: dict[str, object]
+        self, metadata: dict[str, object], expected: dict[str, object] | None
     ) -> None:
-        """MDA writes the whole proxy config of its sandbox, so the backend's part must carry the
-        workspace's cloud identity rule, the one the sandbox was created with: that of the
-        replacement ``recreate_sandbox`` asked for until the backend reconnects to it, never
-        the old sandbox's."""
+        """Informational replacement metadata cannot select a different cloud identity."""
         from openswe.sandboxes.lifecycle import mda_proxy_config
         from openswe.workspaces.store import Workspace
 
@@ -390,6 +393,10 @@ class TestMdaProxyConfig:
                 return_value=tools_rule,
             ),
         ):
+            if expected is None:
+                with pytest.raises(ValueError, match="not privately pinned"):
+                    await mda_proxy_config("thread-123", "sandbox-abc", workspace_slug="mine")
+                return
             config = await mda_proxy_config("thread-123", "sandbox-abc", workspace_slug="mine")
 
         assert config["rules"] == [tools_rule, expected]

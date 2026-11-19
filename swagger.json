@@ -2832,6 +2832,12 @@
             "title": "Create Params",
             "type": "object"
           },
+          "enabled": {
+            "default": false,
+            "description": "Use Robin-wide defaults for future work instead of legacy environment settings.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
           "fs_capacity_bytes": {
             "anyOf": [
               {
@@ -2936,6 +2942,12 @@
             },
             "title": "Create Params",
             "type": "object"
+          },
+          "enabled": {
+            "default": false,
+            "description": "Use Robin-wide defaults for future work instead of legacy environment settings.",
+            "title": "Enabled",
+            "type": "boolean"
           },
           "fs_capacity_bytes": {
             "anyOf": [
@@ -10989,132 +11001,6 @@
         "title": "Workspace",
         "type": "object"
       },
-      "WorkspaceCreate": {
-        "properties": {
-          "ask_channel_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Ask Channel Ids",
-            "type": "array"
-          },
-          "base_snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Snapshot Id"
-          },
-          "create_params": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/pydantic__types__JsonValue"
-            },
-            "title": "Create Params",
-            "type": "object"
-          },
-          "fs_capacity_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fs Capacity Bytes"
-          },
-          "inherit_default_sandbox": {
-            "default": true,
-            "title": "Inherit Default Sandbox",
-            "type": "boolean"
-          },
-          "kitchen_channel_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Kitchen Channel Ids",
-            "type": "array"
-          },
-          "mem_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mem Bytes"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "prompt": {
-            "default": "",
-            "title": "Prompt",
-            "type": "string"
-          },
-          "repos": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Repos",
-            "type": "array"
-          },
-          "setup_script": {
-            "default": "",
-            "title": "Setup Script",
-            "type": "string"
-          },
-          "slack_channel_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Slack Channel Ids",
-            "type": "array"
-          },
-          "snapshot_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Name"
-          },
-          "update_script": {
-            "default": "",
-            "title": "Update Script",
-            "type": "string"
-          },
-          "vcpus": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vcpus"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "WorkspaceCreate",
-        "type": "object"
-      },
       "WorkspaceDirectory": {
         "properties": {
           "entries": {
@@ -11213,6 +11099,70 @@
           "paths"
         ],
         "title": "WorkspaceFileIndex",
+        "type": "object"
+      },
+      "WorkspaceRoutingUpdate": {
+        "additionalProperties": false,
+        "description": "Routing changes for a retained workspace.",
+        "properties": {
+          "ask_channel_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ask Channel Ids"
+          },
+          "kitchen_channel_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kitchen Channel Ids"
+          },
+          "repos": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repos"
+          },
+          "slack_channel_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slack Channel Ids"
+          }
+        },
+        "title": "WorkspaceRoutingUpdate",
         "type": "object"
       },
       "WorkspaceSettingsUpdate": {
@@ -11713,196 +11663,6 @@
           "overrides"
         ],
         "title": "WorkspaceSettingsView",
-        "type": "object"
-      },
-      "WorkspaceUpdate": {
-        "description": "Partial update: only the fields present are written.",
-        "properties": {
-          "ask_channel_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ask Channel Ids"
-          },
-          "base_snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Snapshot Id"
-          },
-          "create_params": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/pydantic__types__JsonValue"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Create Params"
-          },
-          "fs_capacity_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fs Capacity Bytes"
-          },
-          "inherit_default_sandbox": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inherit Default Sandbox"
-          },
-          "kitchen_channel_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Kitchen Channel Ids"
-          },
-          "mem_bytes": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mem Bytes"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "prompt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prompt"
-          },
-          "repos": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Repos"
-          },
-          "setup_script": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Setup Script"
-          },
-          "slack_channel_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Channel Ids"
-          },
-          "snapshot_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Name"
-          },
-          "update_script": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Update Script"
-          },
-          "vcpus": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vcpus"
-          }
-        },
-        "title": "WorkspaceUpdate",
         "type": "object"
       },
       "_EndpointThreadChannel": {
@@ -28506,56 +28266,11 @@
           "dashboard",
           "workspaces"
         ]
-      },
-      "post": {
-        "operationId": "api_create_workspace_dashboard_api_workspaces_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkspaceCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Workspace"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Create Workspace",
-        "tags": [
-          "dashboard",
-          "workspaces"
-        ]
       }
     },
     "/dashboard/api/workspaces/options": {
       "get": {
-        "description": "Pickable workspaces for any signed-in user; refresh logs only for admins.\n\nEach option carries ``default_repo`` so the composer can preselect it when\nthe workspace is chosen first.",
+        "description": "Routing bindings and effective repository defaults; refresh logs only for admins.",
         "operationId": "api_workspace_options_dashboard_api_workspaces_options_get",
         "responses": {
           "200": {
@@ -28584,50 +28299,6 @@
       }
     },
     "/dashboard/api/workspaces/{slug}": {
-      "delete": {
-        "operationId": "api_delete_workspace_dashboard_api_workspaces__slug__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Delete Workspace",
-        "tags": [
-          "dashboard",
-          "workspaces"
-        ]
-      },
       "get": {
         "operationId": "api_get_workspace_dashboard_api_workspaces__slug__get",
         "parameters": [
@@ -28691,7 +28362,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/WorkspaceUpdate"
+                "$ref": "#/components/schemas/WorkspaceRoutingUpdate"
               }
             }
           },
@@ -28725,57 +28396,6 @@
           }
         ],
         "summary": "Api Update Workspace",
-        "tags": [
-          "dashboard",
-          "workspaces"
-        ]
-      }
-    },
-    "/dashboard/api/workspaces/{slug}/refresh": {
-      "post": {
-        "description": "Start a snapshot rebuild from the workspace's scripts.\n\nStarted in the background rather than awaited: a rebuild takes minutes, and\nthe outcome lands on the record for the dashboard to poll.",
-        "operationId": "api_refresh_workspace_dashboard_api_workspaces__slug__refresh_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Refresh Workspace Dashboard Api Workspaces  Slug  Refresh Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Refresh Workspace",
         "tags": [
           "dashboard",
           "workspaces"
@@ -28953,62 +28573,6 @@
           }
         ],
         "summary": "Api Get Workspace Settings",
-        "tags": [
-          "dashboard",
-          "settings"
-        ]
-      },
-      "put": {
-        "operationId": "api_put_workspace_settings_dashboard_api_workspaces__workspace__settings_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workspace",
-            "required": true,
-            "schema": {
-              "title": "Workspace",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkspaceSettingsUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceSettingsView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Put Workspace Settings",
         "tags": [
           "dashboard",
           "settings"

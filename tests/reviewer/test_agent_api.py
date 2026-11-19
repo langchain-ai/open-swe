@@ -889,6 +889,7 @@ async def test_a_report_whose_reply_was_not_kept_holds_up_nothing_behind_it(
 
 async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     monkeypatch: pytest.MonkeyPatch,
+    registry_db: None,
 ) -> None:
     from unittest.mock import AsyncMock
 
@@ -896,10 +897,31 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     from langgraph.config import get_config
 
     from openswe.agent_api import agent
+    from openswe.agent_api.runs import run_config
+    from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS, ExecutionDefaults
+    from openswe.dashboard.settings_records import SettingsRecords
+    from openswe.execution import ExecutionProfile
+    from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
+
+    defaults = ExecutionDefaults()
+    monkeypatch.setattr(EXECUTION_DEFAULTS, "load", AsyncMock(return_value=defaults))
+    profile = ExecutionProfile(
+        uses_defaults=True,
+        create=LangSmithCreateOptions.resolve(
+            snapshot_id="pinned-image",
+            create_params={"env_vars": {"TEST_AUTHORITY": "private-value"}},
+        ),
+    )
+    digest = await profile.keep()
+    observed: list[tuple[str | None, bool]] = []
 
     @tool
-    def draft_preference(note: str) -> str:
+    async def draft_preference(note: str) -> str:
         """Say whether this run opens pull requests as drafts."""
+        current = ExecutionProfile.current()
+        observed.append(
+            (current.create.snapshot_id if current else None, await ExecutionProfile.use_defaults())
+        )
         return f"{note}: {get_config()['configurable'].get('draft_prs')}"
 
     monkeypatch.setattr(
@@ -908,7 +930,19 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     monkeypatch.setattr(agent, "resolve_github_token", AsyncMock())
     parts = _NeverPlanned()
     # The settings decided as the run started, signed into its token.
-    run = RUN.model_copy(update={"assistant_id": "agent", "settings": RunSettings(draft_prs=False)})
+    run = RUN.model_copy(
+        update={
+            "assistant_id": "agent",
+            "configurable": {**RUN.configurable, "execution": "f" * 64},
+            "settings": RunSettings(draft_prs=False, execution=digest),
+        }
+    )
+    run = verify_runtime_token(sign_runtime_token(run))
+    assert run_config(run)["configurable"]["execution"] == digest
+    assert run.settings.execution == digest
+    assert "private-value" not in str(
+        jwt.decode(sign_runtime_token(run), options={"verify_signature": False})
+    )
     call = {
         "run_id": "run-1",
         "name": "draft_preference",
@@ -937,11 +971,33 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     )
 
     assert isinstance(result, dict) and result["content"] == "drafts: False"
+    assert observed == [("pinned-image", True)]
     assert verdict == {"allowed": True, "command": None, "refusal": None}
     assert disabled_run.grant("draft_preference") is None
     for refused in (ungranted, regranted, disabled):
         assert isinstance(refused, dict) and refused["status"] == "error"
         assert "not one of this run's operations" in str(refused["content"])
+
+    defaults.enabled = True
+    legacy = run.model_copy(update={"settings": RunSettings(draft_prs=False)})
+    assert run_config(legacy)["configurable"]["execution"] is None
+    await TokenRun.answer(
+        parts,
+        legacy,
+        "operation",
+        {**call, "request_id": "legacy", "grant": legacy.grant("draft_preference")},
+    )
+    assert observed[-1] == (None, False)
+    missing = run.model_copy(update={"settings": RunSettings(execution="f" * 64)})
+    with pytest.raises(LookupError, match="no longer available"):
+        await TokenRun.answer(parts, missing, "check_shell", {"tool": "execute", "command": "ls"})
+    records = SettingsRecords("execution")
+    await records.put(
+        f"run:{digest}",
+        profile.model_copy(update={"instructions": "changed"}).model_dump(mode="json"),
+    )
+    with pytest.raises(ValueError, match="profile has changed"):
+        await TokenRun.answer(parts, run, "check_shell", {"tool": "execute", "command": "ls"})
 
 
 @pytest.mark.parametrize("environment", ["preview", "staging", "production"])

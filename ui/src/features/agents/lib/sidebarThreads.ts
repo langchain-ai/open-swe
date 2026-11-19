@@ -46,20 +46,7 @@ export interface SidebarRepoGroup extends SidebarRepoOption {
   threads: Array<SidebarThreadItem>
 }
 
-/** A repo option annotated with the workspace slug that owns its repository. */
-export type SidebarWorkspacedRepoOption = SidebarRepoOption & {
-  workspace?: string
-}
-
 export const DEFAULT_SIDEBAR_WORKSPACE_SLUG = "default"
-
-export interface SidebarWorkspaceGroup<
-  TRepo extends SidebarRepoOption = SidebarRepoGroup,
-> {
-  slug: string
-  name: string
-  repos: Array<TRepo>
-}
 
 /**
  * Identity, not display name: `owner/repo` for cloud and the checkout path for
@@ -116,48 +103,6 @@ export function cloudSidebarThread(thread: AgentThread): SidebarThreadItem {
     waitingForDelegatedWork: thread.waitingForDelegatedWork,
     thread,
   }
-}
-
-/**
- * Buckets already-built repo groups by the workspace that owns them, using
- * each entry's `workspace` field from `repos` — falling back to
- * {@link DEFAULT_SIDEBAR_WORKSPACE_SLUG} for a repo with no workspace
- * (a repository is preferred by at most one workspace, and one no workspace
- * prefers is annotated `default`, so this only fires for a repo the caller
- * didn't annotate). A workspace absent from `workspaces`
- * displays its slug as its own name.
- *
- * Generic over the repo-group shape so callers with richer, hydrated
- * groups (live thread counts, active-thread hints) can bucket those directly
- * instead of rebuilding them from raw threads.
- */
-export function groupRepoGroupsByWorkspace<TRepo extends SidebarRepoOption>(
-  groups: ReadonlyArray<TRepo>,
-  repos: ReadonlyArray<SidebarWorkspacedRepoOption>,
-  workspaces: ReadonlyArray<{ slug: string; name: string }>
-): Array<SidebarWorkspaceGroup<TRepo>> {
-  const workspaceByRepoKey = new Map(
-    repos.map((repo) => [
-      repo.key,
-      repo.workspace ?? DEFAULT_SIDEBAR_WORKSPACE_SLUG,
-    ])
-  )
-  const names = new Map(
-    workspaces.map((workspace) => [workspace.slug, workspace.name])
-  )
-  const buckets = new Map<string, SidebarWorkspaceGroup<TRepo>>()
-  for (const group of groups) {
-    const slug =
-      workspaceByRepoKey.get(group.key) ?? DEFAULT_SIDEBAR_WORKSPACE_SLUG
-    const bucket = buckets.get(slug) ?? {
-      slug,
-      name: names.get(slug) ?? slug,
-      repos: [],
-    }
-    bucket.repos.push(group)
-    buckets.set(slug, bucket)
-  }
-  return [...buckets.values()]
 }
 
 export type SidebarSort = "created" | "updated" | "manual"

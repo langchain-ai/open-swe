@@ -2,65 +2,18 @@ import { test, expect, type Page } from "@playwright/test";
 
 import { seedRepoSidebar, typeIntoComposer } from "./helpers/dashboard";
 
-// Workspaces end-to-end: dashboard management, the admin gate, and an admin
-// thread that creates, provisions, and captures its own sandbox. The agent, the
-// tools, store writes, and prompt injection are real; only the LLM and snapshot
-// service are faked (see patches.py).
 const ADMIN = { login: "alice", email: "alice@example.com" };
 const MEMBER = { login: "bob", email: "bob@example.com" };
 
-const DEFAULT_SLUG = "default";
-const DRAFT_NAME = "Staging Box";
 const DRAFT_SLUG = "staging-box";
-const EXPECTED_SNAPSHOT_NAME = "openswe-environment-default";
 const ALT_NAME = "Alt Box";
 const ALT_SLUG = "alt-box";
 const DEFAULT_WORKSPACE_PROMPT = "Default workspace: run make test.";
 const ALT_WORKSPACE_PROMPT = "Alt workspace: run pytest -q.";
-// Mirrors fake_llm.py's workspace script.
-const WORKSPACE_PROMPT =
-  "Checkouts live in /workspace/repos. Build with `make build`, test with `make test`.";
-
-interface Workspace {
-  slug: string;
-  name: string;
-  prompt: string;
-  repos: Array<string>;
-  snapshot_id: string | null;
-  snapshot_name: string | null;
-  update_script?: string;
-  snapshot_status: string;
-  snapshot_tag?: string | null;
-  refresh_kind?: string | null;
-  refresh_status?: string;
-  refresh_error?: string | null;
-  refresh_log?: string | null;
-  refresh_sandbox_id?: string | null;
-  refresh_steps?: Array<{
-    label: string;
-    status: string;
-    exit_code?: number | null;
-    log_path?: string | null;
-  }>;
-}
-
 async function loginAs(page: Page, user: { login: string; email: string }) {
   const res = await page.request.post("/control/login", { data: user });
   expect(res.ok()).toBeTruthy();
   await seedRepoSidebar(page);
-}
-
-async function listWorkspaces(page: Page): Promise<Array<Workspace>> {
-  const res = await page.request.get("/dashboard/api/workspaces");
-  expect(res.ok()).toBeTruthy();
-  return ((await res.json()) as { workspaces: Array<Workspace> }).workspaces;
-}
-
-async function findWorkspace(
-  page: Page,
-  slug: string,
-): Promise<Workspace | undefined> {
-  return (await listWorkspaces(page)).find((env) => env.slug === slug);
 }
 
 const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
@@ -70,7 +23,7 @@ const BASE_URL = `http://127.0.0.1:${process.env.E2E_PORT ?? 2024}`;
 const SAME_ORIGIN_HEADERS = { origin: BASE_URL, referer: `${BASE_URL}/` };
 
 async function deleteWorkspace(page: Page, slug: string) {
-  await page.request.delete(`/dashboard/api/workspaces/${slug}`, {
+  await page.request.delete(`/control/workspaces/${slug}`, {
     headers: SAME_ORIGIN_HEADERS,
   });
 }
@@ -82,10 +35,9 @@ async function resetDefaultWorkspace(page: Page) {
 }
 
 async function setDefaultWorkspacePrompt(page: Page, prompt: string) {
-  const res = await page.request.put(
-    `/dashboard/api/workspaces/${DEFAULT_SLUG}`,
-    { headers: SAME_ORIGIN_HEADERS, data: { prompt, repos: ["e2e/default"] } },
-  );
+  const res = await page.request.post("/control/workspaces", {
+    data: { name: "Default", prompt, repos: ["e2e/default"] },
+  });
   expect(res.ok()).toBeTruthy();
 }
 
@@ -106,28 +58,6 @@ async function saveDefaultModel(page: Page) {
     },
   });
   expect(res.ok()).toBeTruthy();
-}
-
-async function capturedSnapshots(page: Page): Promise<
-  Array<{
-    snapshot_id: string;
-    name: string;
-    tag: string | null;
-    sandbox_id: string;
-  }>
-> {
-  const res = await page.request.get("/control/snapshots");
-  expect(res.ok()).toBeTruthy();
-  return (
-    (await res.json()) as {
-      captured: Array<{
-        snapshot_id: string;
-        name: string;
-        tag: string | null;
-        sandbox_id: string;
-      }>;
-    }
-  ).captured;
 }
 
 async function lastSystemPrompt(page: Page): Promise<string> {
@@ -151,7 +81,7 @@ async function createWorkspace(
   // A workspace owns at least one repository and a repository has exactly one
   // owner, so every test workspace claims one named after itself.
   const repo = `e2e/${name.toLowerCase().replace(/\s+/g, "-")}`;
-  const created = await page.request.post("/dashboard/api/workspaces", {
+  const created = await page.request.post("/control/workspaces", {
     headers: SAME_ORIGIN_HEADERS,
     data: { name, prompt, repos: [repo] },
   });
@@ -166,12 +96,12 @@ test.describe("Workspaces", () => {
     page,
   }) => {
     await loginAs(page, ADMIN);
-    const slug = "cloud-profile-form";
+    const original = await (
+      await page.request.get("/dashboard/api/settings/execution")
+    ).json();
     const tag = "00000000-0000-0000-0000-000000000001";
-    await deleteWorkspace(page, slug);
     try {
-      await createWorkspace(page, "Cloud Profile Form", "");
-      await page.goto(`/workspaces/${slug}`);
+      await page.goto("/admin");
       const proxy = page
         .getByRole("heading", { name: "Sandbox Proxy", exact: true })
         .locator("xpath=ancestor::section");
@@ -220,8 +150,8 @@ test.describe("Workspaces", () => {
         .toBe(`tag:${tag}`);
       const saved = page.waitForResponse(
         (response) =>
-          response.url().endsWith(`/workspaces/${slug}`) &&
-          response.request().method() === "PUT",
+          response.url().endsWith("/settings/execution") &&
+          response.request().method() === "PATCH",
       );
       await proxy
         .getByRole("button", { name: "Save proxy configuration" })
@@ -238,8 +168,8 @@ test.describe("Workspaces", () => {
       await proxy.getByLabel("Governed Tag Value IDs").fill("");
       const refused = page.waitForResponse(
         (response) =>
-          response.url().endsWith(`/workspaces/${slug}`) &&
-          response.request().method() === "PUT",
+          response.url().endsWith("/settings/execution") &&
+          response.request().method() === "PATCH",
       );
       await proxy
         .getByRole("button", { name: "Save proxy configuration" })
@@ -247,107 +177,68 @@ test.describe("Workspaces", () => {
       expect((await refused).status()).toBe(422);
       await expect(proxy.getByRole("alert")).toBeVisible();
     } finally {
-      await deleteWorkspace(page, slug);
-    }
-  });
-
-  test("creating a workspace with scripts builds its first image", async ({
-    page,
-  }) => {
-    await loginAs(page, ADMIN);
-    const slug = "initial-build";
-    await deleteWorkspace(page, slug);
-    try {
-      await page.goto("/workspaces");
-      await page.getByRole("button", { name: "Add environment" }).click();
-      await page.getByLabel("Environment name").fill("Initial Build");
-      await page.getByRole("button", { name: "Choose repositories" }).click();
-      await page
-        .getByLabel("Add a repository by name")
-        .fill("e2e/initial-build");
-      await page.getByRole("button", { name: "Add", exact: true }).click();
-      await page.getByRole("button", { name: "Save 1 repository" }).click();
-      for (const [label, script] of [
-        ["Setup script", "set -euo pipefail\necho initial-setup-complete"],
-        ["Update script", "echo initial-update-complete"],
-      ]) {
-        await page
-          .getByRole("button", { name: `Edit ${label.toLowerCase()}` })
-          .click();
-        await page.getByRole("textbox", { name: label, exact: true }).focus();
-        await page.keyboard.insertText(script);
-        await page.getByRole("button", { name: "Done", exact: true }).click();
-      }
-      await expect(page.getByRole("dialog")).toHaveCount(0);
-      await page.route("**/dashboard/api/workspaces", async (route) => {
-        const request = route.request();
-        if (request.method() !== "POST") return route.continue();
-        await route.continue({
-          postData: JSON.stringify({
-            ...request.postDataJSON(),
-            inherit_default_sandbox: false,
-          }),
-        });
+      await page.request.patch("/dashboard/api/settings/execution", {
+        headers: SAME_ORIGIN_HEADERS,
+        data: { create_params: original.create_params },
       });
-      await page
-        .getByRole("button", { name: "Create environment", exact: true })
-        .click();
-      await expect(page.getByLabel("Environment name")).toHaveCount(0);
-      await expect
-        .poll(async () => (await findWorkspace(page, slug))?.refresh_status, {
-          timeout: 60_000,
-        })
-        .toBe("success");
-      const workspace = await findWorkspace(page, slug);
-      expect(workspace?.snapshot_status).toBe("ready");
-      expect(workspace?.refresh_log).toContain("initial-setup-complete");
-      expect(workspace?.refresh_log).toContain("initial-update-complete");
-    } finally {
-      await deleteWorkspace(page, slug);
     }
   });
 
-  test("an admin views workspaces and editing instructions in Settings", async ({
+  test("cloud environment controls stay absent with Robin-wide Defaults off and on", async ({
     page,
   }) => {
     await loginAs(page, ADMIN);
-    await deleteWorkspace(page, DRAFT_SLUG);
-    await createWorkspace(page, DRAFT_NAME, "");
-
-    await page.goto("/workspaces");
-    const section = page
-      .getByRole("heading", { name: "Environments", level: 2 })
-      .locator("xpath=ancestor::section");
-    await expect(section).toBeVisible();
-    await expect(section.getByText(DRAFT_NAME)).toBeVisible();
-    await expect(section.getByText("No snapshot").first()).toBeVisible();
-    await expect(section.getByText(/enable admin mode/)).toBeVisible();
-    await expect(section.getByRole("button", { name: "Save" })).toHaveCount(0);
-    await expect(section.getByRole("button", { name: /^Delete/ })).toHaveCount(
-      0,
+    const originalResponse = await page.request.get(
+      "/dashboard/api/settings/execution",
     );
-    await section
-      .getByRole("link", { name: `Configure ${DRAFT_NAME}` })
-      .click();
-    await expect(page).toHaveURL(new RegExp(`/workspaces/${DRAFT_SLUG}$`));
-    await page
-      .getByRole("button", { name: `Delete ${DRAFT_NAME}`, exact: true })
-      .click();
-    const confirmation = page.getByRole("dialog");
-    await expect(confirmation).toContainText(`Delete ${DRAFT_NAME}?`);
-    await confirmation.getByRole("button", { name: "Cancel" }).click();
-    expect(await findWorkspace(page, DRAFT_SLUG)).toBeDefined();
-
-    await page
-      .getByRole("button", { name: `Delete ${DRAFT_NAME}`, exact: true })
-      .click();
-    await confirmation
-      .getByRole("button", { name: "Delete environment" })
-      .click();
-    await expect(page).toHaveURL(/\/workspaces$/);
-    await expect(confirmation).toHaveCount(0);
-    await expect(section.getByText(DRAFT_NAME, { exact: true })).toHaveCount(0);
-    expect(await findWorkspace(page, DRAFT_SLUG)).toBeUndefined();
+    expect(originalResponse.ok()).toBeTruthy();
+    const original = (await originalResponse.json()) as { enabled: boolean };
+    expect(original.enabled).toBe(false);
+    try {
+      for (const enabled of [false, true]) {
+        await page.goto("/admin");
+        const toggle = page.getByRole("switch", {
+          name: "Use Robin-wide Defaults",
+        });
+        if (enabled) await toggle.click();
+        await expect(toggle).toBeChecked({ checked: enabled });
+        for (const path of [
+          "/workspaces",
+          `/workspaces/${DRAFT_SLUG}`,
+          "/agents/workspaces",
+        ]) {
+          await page.goto(path);
+          await expect(page).toHaveURL(/\/admin$/);
+          await expect(toggle).toBeChecked({ checked: enabled });
+          await expect(
+            page.getByRole("link", { name: "Environments", exact: true }),
+          ).toHaveCount(0);
+          await expect(
+            page.getByRole("button", { name: "Add environment" }),
+          ).toHaveCount(0);
+        }
+        await openNewAgentHome(page);
+        await expect(
+          page.getByRole("button", { name: "Environment", exact: true }),
+        ).toHaveCount(0);
+      }
+      await page.goto("/admin/integrations");
+      await expect(
+        page.getByRole("button", { name: "Choose repositories" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Choose channels" }),
+      ).toBeVisible();
+    } finally {
+      const restored = await page.request.patch(
+        "/dashboard/api/settings/execution",
+        {
+          headers: SAME_ORIGIN_HEADERS,
+          data: { enabled: original.enabled },
+        },
+      );
+      expect(restored.ok()).toBeTruthy();
+    }
   });
 
   test("a non-admin cannot reach the workspaces page or API", async ({
@@ -359,23 +250,14 @@ test.describe("Workspaces", () => {
     expect(res.status()).toBe(403);
 
     await page.goto("/agents/workspaces");
-    await expect(page).toHaveURL(/\/workspaces$/);
+    await expect(page).toHaveURL(/\/agents$/);
     await expect(
       page.getByRole("heading", { name: "Environments", level: 2 }),
-    ).toBeVisible();
-    await expect(page.getByText(/ask a Robin admin/)).toBeVisible();
+    ).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^Delete / })).toHaveCount(0);
     await page.goto(`/workspaces/${DRAFT_SLUG}`);
-    await expect(page).toHaveURL(/\/workspaces$/);
+    await expect(page).toHaveURL(/\/agents$/);
     await expect(page.getByRole("button", { name: /^Delete / })).toHaveCount(0);
-    const deletion = await page.request.delete(
-      `/dashboard/api/workspaces/${DRAFT_SLUG}`,
-      {
-        headers: SAME_ORIGIN_HEADERS,
-      },
-    );
-    expect(deletion.status()).toBe(403);
-
     // No Admin toggle in the composer, so they cannot start an admin thread.
     await openNewAgentHome(page);
     await expect(page.getByTestId("composer-editor")).toBeVisible();
@@ -384,63 +266,54 @@ test.describe("Workspaces", () => {
     ).toHaveCount(0);
   });
 
-  test("the composer picker appears only with several workspaces, and the pick reaches the run", async ({
+  test("the composer hides environments while OFF preserves a saved context and its run instructions", async ({
     page,
   }) => {
     await loginAs(page, ADMIN);
     await resetDefaultWorkspace(page);
     await deleteWorkspace(page, ALT_SLUG);
     await setDefaultWorkspacePrompt(page, DEFAULT_WORKSPACE_PROMPT);
-
-    // One workspace: the choice is already made, so no control is rendered.
-    // Exact: the sidebar's "Workspaces" group header is a button too.
-    await openNewAgentHome(page);
-    await expect(
-      page.getByRole("button", { name: "Environment", exact: true }),
-    ).toHaveCount(0);
-
-    await createWorkspace(page, ALT_NAME, ALT_WORKSPACE_PROMPT);
-    await page.reload();
-    const picker = page.getByRole("button", {
-      name: "Environment",
-      exact: true,
-    });
-    await expect(picker).toBeVisible();
-    // Defaults to the workspace named `default`.
-    await expect(picker).toContainText("Default");
-
-    await picker.click();
-    await page.getByRole("menuitem", { name: new RegExp(ALT_NAME) }).click();
-    await expect(picker).toContainText(ALT_NAME);
-
-    await typeIntoComposer(page, "Which instructions apply? E2E_FOLLOWUP");
-    await expect(page).toHaveURL(/\/agents\/[^/]+$/);
-    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
-
-    // The thread records the pick, and the run's prompt carries that
-    // workspace's instructions — not the default's.
-    await expect
-      .poll(async () => {
-        const res = await page.request.get(
-          `/dashboard/api/threads/${threadId}?mark_viewed=false`,
-        );
-        return res.ok()
-          ? ((await res.json()) as { workspace?: string | null }).workspace
-          : undefined;
-      })
-      .toBe(ALT_SLUG);
-    await expect
-      .poll(() => lastSystemPrompt(page), { timeout: 30_000 })
-      .toContain(ALT_WORKSPACE_PROMPT);
-    expect(await lastSystemPrompt(page)).not.toContain(
-      DEFAULT_WORKSPACE_PROMPT,
-    );
-    await expect(
-      page.getByText(/anything else you'd like changed/),
-    ).toBeVisible();
-
-    await deleteWorkspace(page, ALT_SLUG);
-    await resetDefaultWorkspace(page);
+    const preferences = await (
+      await page.request.get("/dashboard/api/me/preferences")
+    ).json();
+    try {
+      await createWorkspace(page, ALT_NAME, ALT_WORKSPACE_PROMPT);
+      const saved = await page.request.put("/dashboard/api/me/preferences", {
+        headers: SAME_ORIGIN_HEADERS,
+        data: { ...preferences, default_workspace: ALT_SLUG },
+      });
+      expect(saved.ok()).toBeTruthy();
+      await openNewAgentHome(page);
+      await expect(
+        page.getByRole("button", { name: "Environment", exact: true }),
+      ).toHaveCount(0);
+      await typeIntoComposer(page, "Which instructions apply? E2E_FOLLOWUP");
+      await expect(page).toHaveURL(/\/agents\/[^/]+$/);
+      const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
+      await expect
+        .poll(async () => {
+          const response = await page.request.get(
+            `/dashboard/api/threads/${threadId}?mark_viewed=false`,
+          );
+          return response.ok()
+            ? ((await response.json()) as { workspace?: string }).workspace
+            : undefined;
+        })
+        .toBe(ALT_SLUG);
+      await expect
+        .poll(() => lastSystemPrompt(page), { timeout: 30_000 })
+        .toContain(ALT_WORKSPACE_PROMPT);
+      expect(await lastSystemPrompt(page)).not.toContain(
+        DEFAULT_WORKSPACE_PROMPT,
+      );
+    } finally {
+      await page.request.put("/dashboard/api/me/preferences", {
+        headers: SAME_ORIGIN_HEADERS,
+        data: preferences,
+      });
+      await deleteWorkspace(page, ALT_SLUG);
+      await resetDefaultWorkspace(page);
+    }
   });
 
   test("a /workspace: command on the opening Slack message selects the workspace", async ({
@@ -470,155 +343,5 @@ test.describe("Workspaces", () => {
     expect(systemPrompt).not.toContain(`/workspace:${ALT_SLUG}`);
 
     await deleteWorkspace(page, ALT_SLUG);
-  });
-
-  test("an admin thread provisions its sandbox, captures it, and later runs boot with the workspace prompt", async ({
-    page,
-  }) => {
-    await loginAs(page, ADMIN);
-    await resetDefaultWorkspace(page);
-    await page.request.post("/control/reset");
-
-    await openNewAgentHome(page);
-    await expect(
-      page.getByRole("button", { name: "Thread visibility" }),
-    ).toContainText("Private");
-
-    await typeIntoComposer(
-      page,
-      "Please set up the default workspace for this repo and capture it.",
-    );
-    await expect(page).toHaveURL(/\/agents\/[^/]+$/);
-    const threadId = new URL(page.url()).pathname.split("/").pop() ?? "";
-    expect(threadId).not.toBe("");
-    await expect
-      .poll(async () => {
-        const response = await page.request.get(
-          `/dashboard/api/threads/${threadId}?mark_viewed=false`,
-        );
-        if (!response.ok()) return undefined;
-        const thread = (await response.json()) as {
-          adminThread: boolean;
-          visibility: string;
-        };
-        return {
-          adminThread: thread.adminThread,
-          visibility: thread.visibility,
-        };
-      })
-      .toEqual({ adminThread: true, visibility: "private" });
-
-    // The agent's own summary, after the real save + capture tools ran.
-    await expect(
-      page.getByText(/workspace is captured and live/),
-    ).toBeVisible();
-
-    // Publishing captured this thread's sandbox synchronously, so a bootable
-    // image is on the record as soon as the tool returned. The reproducibility
-    // rebuild it then kicked off is a background job whose own capture flips the
-    // status to "capturing" while the snapshot stays bootable, and with the fake
-    // sandbox it can get there before this read, so either status is fine here.
-    const published = await findWorkspace(page, DEFAULT_SLUG);
-    expect(published?.snapshot_id).toBeTruthy();
-    expect(published?.snapshot_name).toBe(EXPECTED_SNAPSHOT_NAME);
-    expect(["ready", "capturing"]).toContain(published?.snapshot_status);
-    // Wait for the rebuild on the record; it ends on "ready", checked below.
-    await expect
-      .poll(
-        async () => (await findWorkspace(page, DEFAULT_SLUG))?.refresh_status,
-        { timeout: 60_000 },
-      )
-      .toBe("success");
-
-    // The record the real tools wrote: prompt, repos, and a ready snapshot.
-    const record = await findWorkspace(page, DEFAULT_SLUG);
-    expect(record).toBeDefined();
-    expect(record?.prompt).toBe(WORKSPACE_PROMPT);
-    expect(record?.repos).toEqual(["fakeorg/demo"]);
-    expect(record?.snapshot_status).toBe("ready");
-    expect(record?.snapshot_name).toBe(EXPECTED_SNAPSHOT_NAME);
-
-    // The scripts ran and the whole refresh is recorded, log and all.
-    expect(record?.refresh_status).toBe("success");
-    expect(record?.refresh_error).toBeNull();
-    expect(record?.refresh_log).toContain("--- setup script ---");
-    expect(record?.refresh_log).toContain(".provisioned");
-    expect(record?.refresh_log).toContain("--- update script ---");
-    // `bash -x` traces each command, which is what makes the log worth keeping.
-    expect(record?.refresh_log).toContain("+ ");
-    // The save ran a full rebuild; hourly updates are a separate kind.
-    expect(record?.refresh_kind).toBe("full");
-
-    // Every stage is recorded as it happens, which is what the one poll tool
-    // reports while a rebuild is still running.
-    expect(
-      record?.refresh_steps?.map((step) => [step.label, step.status]),
-    ).toEqual([
-      ["boot", "success"],
-      ["setup", "success"],
-      ["update", "success"],
-      ["capture", "success"],
-    ]);
-    // Script steps carry where their live trace was written; the builder does not.
-    const setupStep = record?.refresh_steps?.find((s) => s.label === "setup");
-    expect(setupStep?.log_path).toContain("/logs/setup.log");
-    // The builder is released with the refresh, so it is no longer offered.
-    expect(record?.refresh_sandbox_id).toBeNull();
-
-    // Two captures under the same name:latest — the tag moved. The first came
-    // from this thread's own sandbox (the publish); the second from the
-    // reproducibility rebuild's throwaway builder, and it is what the record
-    // points at now.
-    const captures = await capturedSnapshots(page);
-    expect(captures.map((c) => c.name)).toEqual([
-      EXPECTED_SNAPSHOT_NAME,
-      EXPECTED_SNAPSHOT_NAME,
-    ]);
-    expect(captures.map((c) => c.tag)).toEqual(["latest", "latest"]);
-    const threadRes = await page.request.get(
-      `/dashboard/api/threads/${threadId}?mark_viewed=false`,
-    );
-    expect(threadRes.ok()).toBeTruthy();
-    const thread = (await threadRes.json()) as { sandboxId?: string | null };
-    expect(captures[0]?.sandbox_id).toBe(thread.sandboxId);
-    expect(captures[1]?.sandbox_id).not.toBe(thread.sandboxId);
-    expect(record?.snapshot_id).toBe(captures[1]?.snapshot_id);
-
-    // A later thread is told about the workspace: the prompt is appended verbatim.
-    // This thread's own system prompt was fixed by its first run, before the save.
-    await openNewAgentHome(page);
-    await typeIntoComposer(page, "Anything else to do? E2E_FOLLOWUP");
-    await expect(
-      page.getByText(/anything else you'd like changed/),
-    ).toBeVisible();
-    const systemPrompt = await lastSystemPrompt(page);
-    expect(systemPrompt).toContain("### Workspace Instructions (default)");
-    expect(systemPrompt).toContain(WORKSPACE_PROMPT);
-    // Admin threads also carry the workspace-management instructions.
-    expect(systemPrompt).toContain("### Admin Thread: Workspace Setup");
-
-    await page.goto("/workspaces");
-    await expect(page.getByRole("main").getByText("Default")).toBeVisible();
-    await expect(page.getByText("Snapshot ready")).toBeVisible();
-    // The save ran a full rebuild, so the row reads "Rebuilt …", not "Updated …".
-    await expect(page.getByText(/^Rebuilt /)).toBeVisible();
-    await expect(page.getByText("Refresh log")).toBeVisible();
-    // Each stage is visible to everyone, not only through the agent's tools.
-    for (const label of ["boot", "setup", "update", "capture"]) {
-      await expect(
-        page.getByText(label, { exact: true }).getByLabel("Succeeded"),
-      ).toBeVisible();
-    }
-    await expect(
-      page.getByRole("link", { name: "Configure default", exact: true }),
-    ).toBeVisible();
-
-    // Leave a fresh default behind: later specs' runs would boot from its image.
-    await resetDefaultWorkspace(page);
-    await expect
-      .poll(
-        async () => (await findWorkspace(page, DEFAULT_SLUG))?.snapshot_status,
-      )
-      .toBe("none");
   });
 });

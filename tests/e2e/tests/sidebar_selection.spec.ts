@@ -28,7 +28,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem(
       "open-swe.agents.sidebar-prefs",
-      JSON.stringify({ organize: "workspace" }),
+      JSON.stringify({ organize: "repo" }),
     );
   });
   await page.goto("/agents");

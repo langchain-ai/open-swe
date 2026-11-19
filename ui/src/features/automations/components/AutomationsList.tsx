@@ -1,4 +1,4 @@
-import { PlusIcon, StackRegularIcon } from "@langchain/macaw-components/icons"
+import { PlusIcon } from "@langchain/macaw-components/icons"
 import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { Text } from "@langchain/macaw-components/Text"
 import { useState } from "react"
@@ -26,7 +26,6 @@ import {
   useAgentSchedules,
   useTriggerAgentSchedule,
   useUpdateAgentSchedule,
-  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { usePendingVariables } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
@@ -239,10 +238,6 @@ function AutomationRow({
   const navigate = useNavigate()
   const updateSchedule = useUpdateAgentSchedule()
   const triggerSchedule = useTriggerAgentSchedule()
-  const workspaces = useWorkspaceOptions().data?.workspaces ?? []
-  const workspaceName =
-    workspaces.find((option) => option.slug === schedule.workspace)?.name ??
-    schedule.workspace
   const isToggling = usePendingVariables<{ scheduleId: string }>(
     agentMutationKeys.updateSchedule
   ).some((vars) => vars.scheduleId === schedule.id)
@@ -308,12 +303,6 @@ function AutomationRow({
                 <ClockIcon size={14} weight="regular" />
                 {describeTriggers(schedule)}
               </span>
-              {workspaces.length > 1 && (
-                <span className="flex items-center gap-space-1">
-                  <StackRegularIcon size={14} />
-                  {workspaceName}
-                </span>
-              )}
               <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
             </div>
             <div className="mt-space-1 flex flex-wrap gap-x-space-3 gap-y-space-1 text-xs break-all text-tertiary">

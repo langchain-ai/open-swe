@@ -29,6 +29,7 @@ def run_config(run: RemoteRun, *, settled: bool = True) -> RunnableConfig:
         "configurable": {
             **run.configurable,
             **(run.settings.configurable() if settled else {}),
+            "execution": run.settings.execution if settled else None,
             "thread_id": run.thread_id,
             "__is_for_execution__": True,
         },

@@ -38,7 +38,7 @@ export async function seedRepoSidebar(page: Page) {
       localStorage.setItem(
         "open-swe.agents.sidebar-prefs",
         JSON.stringify({
-          organize: "workspace",
+          organize: "repo",
           hiddenNavItems: ["/incidents"],
         }),
       );

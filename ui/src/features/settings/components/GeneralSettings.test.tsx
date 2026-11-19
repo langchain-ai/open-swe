@@ -73,36 +73,14 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-it("keeps preference labels when closed and saves workspace values, not labels", async () => {
-  vi.mocked(api.me).mockResolvedValue({
-    login: "alice",
-    email: "alice@example.com",
-    avatar_url: "",
-    is_admin: false,
-    slack_user_id: null,
-  })
+it("preserves the hidden saved context when unrelated preferences change", async () => {
   let stored: UserPreferences = {
     default_visibility: "private",
-    default_workspace: null,
+    default_workspace: "engineering",
     follow_up_behavior: "queue",
     auto_show_changes: true,
   }
   vi.spyOn(api, "getMyPreferences").mockImplementation(async () => stored)
-  vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
-    default_slug: "engineering",
-    workspaces: [
-      {
-        slug: "engineering",
-        name: "Engineering workspace",
-        repos: [],
-        default_repo: null,
-        slack_channel_ids: [],
-        kitchen_channel_ids: [],
-        is_default: true,
-        has_snapshot: true,
-      },
-    ],
-  })
   const save = vi
     .spyOn(api, "saveMyPreferences")
     .mockImplementation(async (value) => {
@@ -118,64 +96,22 @@ it("keeps preference labels when closed and saves workspace values, not labels",
     </QueryClientProvider>,
     { wrapper: TooltipProvider }
   )
-  const workspace = screen.getAllByRole("combobox")[2]!
-  expect(
-    screen
-      .getByRole("combobox", { name: "Personal kitchen channel" })
-      .hasAttribute("disabled")
-  ).toBe(true)
-
-  await waitFor(() => expect(workspace.hasAttribute("disabled")).toBe(false))
-  expect(
-    screen
-      .getAllByRole("combobox")
-      .slice(0, 4)
-      .map((element) => element.textContent)
-  ).toEqual(
-    ["System", "Private · only me", "Environment default", "Queue"].map(
-      (label) => expect.stringContaining(label)
-    )
-  )
+  const followUp = screen.getByRole("combobox", { name: "Follow-up behavior" })
+  await waitFor(() => expect(followUp.hasAttribute("disabled")).toBe(false))
+  expect(screen.queryByText("Default environment")).toBeNull()
+  expect(screen.queryByRole("combobox", { name: /environment/i })).toBeNull()
   expect(save).not.toHaveBeenCalled()
-
-  fireEvent.click(workspace)
-  expect(
-    await screen.findByRole("option", { name: "Environment default" })
-  ).toBeTruthy()
-  fireEvent.keyDown(workspace, { key: "Escape" })
-  await waitFor(() => expect(screen.queryByRole("option")).toBeNull())
-  expect(workspace.textContent).toContain("Environment default")
-  expect(save).not.toHaveBeenCalled()
-
-  fireEvent.click(workspace)
-  const engineering = await screen.findByRole("option", {
-    name: "Engineering workspace",
-  })
-  fireEvent.pointerDown(engineering)
-  fireEvent.click(engineering)
+  fireEvent.click(followUp)
+  const steer = await screen.findByRole("option", { name: "Steer" })
+  fireEvent.pointerDown(steer)
+  fireEvent.click(steer)
   await waitFor(() =>
-    expect(save.mock.lastCall?.[0]).toEqual(
-      expect.objectContaining({ default_workspace: "engineering" })
-    )
-  )
-  await waitFor(() =>
-    expect(workspace.textContent).toContain("Engineering workspace")
-  )
-  await waitFor(() => expect(workspace.hasAttribute("disabled")).toBe(false))
-
-  fireEvent.click(workspace)
-  const workspaceDefault = await screen.findByRole("option", {
-    name: "Environment default",
-  })
-  fireEvent.pointerDown(workspaceDefault)
-  fireEvent.click(workspaceDefault)
-  await waitFor(() =>
-    expect(save.mock.lastCall?.[0]).toEqual(
-      expect.objectContaining({ default_workspace: null })
-    )
-  )
-  await waitFor(() =>
-    expect(workspace.textContent).toContain("Environment default")
+    expect(save.mock.lastCall?.[0]).toEqual({
+      default_visibility: "private",
+      default_workspace: "engineering",
+      follow_up_behavior: "steer",
+      auto_show_changes: true,
+    })
   )
 })
 

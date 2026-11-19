@@ -25,6 +25,8 @@ from runtime_api.sandbox_setup import GitIdentity
 from openswe.bridge.backend import BridgeSandboxBackend
 from openswe.bridge.store import Bridge
 from openswe.config import ENV
+from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS, ExecutionDefaults
+from openswe.execution import SANDBOX_EXECUTION, ExecutionProfile
 from openswe.github.app import PermissionMap
 from openswe.github.proxy import (
     clear_proxy_token_expiry,
@@ -37,6 +39,7 @@ from openswe.github.sandbox_access import (
     workspace_token,
 )
 from openswe.review.findings import REVIEWER_SHADOW_THREAD_KIND, REVIEWER_THREAD_KIND
+from openswe.run_config import RunConfig
 from openswe.sandboxes.handoff import complete_handoff
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import (
@@ -63,6 +66,8 @@ from openswe.sandboxes.state import (
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 from openswe.tasks.schemas import ThreadMetadata
 from openswe.tasks.store import TaskMembership
+from openswe.threads.store import THREADS
+from openswe.utils.json_types import JsonObject
 from openswe.utils.startup_trace import aphase
 from openswe.utils.time import parse_iso
 from openswe.workspaces.refresh import is_snapshot_stale, maybe_start_update
@@ -105,6 +110,9 @@ class SandboxCreateConfig:
     resources: SandboxResources = field(default_factory=SandboxResources)
     create_params: dict[str, Any] = field(default_factory=dict)
     workspace: Workspace | None = None
+    options: LangSmithCreateOptions | None = None
+    global_defaults: bool = False
+    profile: ExecutionProfile | None = None
 
     @classmethod
     async def resolve(
@@ -113,7 +121,18 @@ class SandboxCreateConfig:
         *,
         source: SandboxSource = "workspace",
     ) -> SandboxCreateConfig:
-        workspace = None if source == "base" else await load_workspace(workspace_slug)
+        if source == "base":
+            return cls(snapshot_id=None, create_params={"preserve_memory_on_stop": True})
+        profile = ExecutionProfile.current()
+        if profile is not None:
+            return await cls.from_profile(profile)
+        if await ExecutionProfile.use_defaults():
+            return await cls.from_profile(await ExecutionProfile.resolve(workspace_slug))
+        return await cls.legacy(workspace_slug)
+
+    @classmethod
+    async def legacy(cls, workspace_slug: str | None = None) -> SandboxCreateConfig:
+        workspace = await load_workspace(workspace_slug)
         create_params = workspace.sandbox_create_params() if workspace is not None else {}
         if workspace is not None and workspace.inherit_default_sandbox:
             workspace = await load_workspace(None)
@@ -127,27 +146,156 @@ class SandboxCreateConfig:
             workspace=workspace,
         )
 
+    @classmethod
+    def from_defaults(cls, defaults: ExecutionDefaults) -> SandboxCreateConfig:
+        resources: SandboxResources = {}
+        if defaults.vcpus is not None:
+            resources["vcpus"] = defaults.vcpus
+        if defaults.mem_bytes is not None:
+            resources["mem_bytes"] = defaults.mem_bytes
+        if defaults.fs_capacity_bytes is not None:
+            resources["fs_capacity_bytes"] = defaults.fs_capacity_bytes
+        return cls(
+            snapshot_id=defaults.snapshot_id,
+            resources=resources,
+            create_params={**defaults.create_params, "preserve_memory_on_stop": True},
+            global_defaults=True,
+        )
+
+    @classmethod
+    def from_options(cls, options: LangSmithCreateOptions) -> SandboxCreateConfig:
+        return cls(snapshot_id=options.snapshot_id, options=options)
+
+    @classmethod
+    async def from_profile(cls, profile: ExecutionProfile) -> SandboxCreateConfig:
+        workspace = (
+            await load_workspace(profile.refresh_workspace)
+            if not profile.uses_defaults and profile.refresh_workspace is not None
+            else None
+        )
+        return cls(
+            snapshot_id=profile.create.snapshot_id,
+            options=profile.create,
+            workspace=workspace
+            if workspace and workspace.ready_snapshot_id == profile.create.snapshot_id
+            else None,
+            global_defaults=profile.uses_defaults,
+            profile=profile,
+        )
+
+    def authority_profile(self) -> ExecutionProfile:
+        if self.profile is not None:
+            return self.profile.model_copy(
+                update={"name": None, "instructions": "", "repos": [], "replacement": None}
+            )
+        return ExecutionProfile(
+            uses_defaults=self.global_defaults,
+            create=self.langsmith_options(),
+            refresh_workspace=self.workspace.slug if self.workspace else None,
+        )
+
     @property
     def proxy_config(self) -> dict[str, Any] | None:
-        return get_sandbox_proxy_config(self.create_params)
+        return get_sandbox_proxy_config(
+            self.options.extra_fields if self.options is not None else self.create_params
+        )
+
+    @classmethod
+    async def bound_profile(
+        cls, thread_id: str, metadata: Mapping[str, object]
+    ) -> ExecutionProfile | None:
+        sandbox_id = metadata.get("sandbox_id")
+        if not isinstance(sandbox_id, str):
+            return None
+        if metadata.get("task_id") is not None:
+            worker = ThreadMetadata.model_validate(metadata)
+            context = await TaskMembership.context_for_thread(thread_id)
+            host_id = context.task.coordinator_thread_id if context is not None else None
+            if (
+                context is None
+                or context.membership.role != "worker"
+                or context.task.id != worker.task_id
+                or not host_id
+                or host_id == thread_id
+                or host_id != worker.sandbox_host_thread_id
+            ):
+                raise PermissionError("The shared sandbox host does not match this worker's task")
+            host = ThreadMetadata.model_validate(await get_sandbox_metadata(host_id))
+            if host.sandbox_host_thread_id or host.task_id or host.sandbox_id != sandbox_id:
+                raise PermissionError("The coordinator's shared sandbox binding changed")
+            thread_id = host_id
+        return await SANDBOX_EXECUTION.bound(thread_id, sandbox_id)
 
     @classmethod
     async def for_thread(
-        cls, metadata: Mapping[str, object], workspace_slug: str | None
+        cls,
+        metadata: Mapping[str, object],
+        workspace_slug: str | None,
+        *,
+        thread_id: str,
     ) -> SandboxCreateConfig:
-        """What the thread's next sandbox is created from: the replacement it asked for, if any."""
-        requested = metadata.get(_REPLACEMENT_METADATA_KEY)
-        if not isinstance(requested, Mapping):
-            return await cls.resolve(workspace_slug)
-        workspace = requested.get("workspace")
-        return await cls.resolve(
-            workspace if isinstance(workspace, str) else None,
-            source="base" if requested.get("source") == "base" else "workspace",
-        )
+        """Resolve authority only through this server thread's private sandbox binding."""
+        sandbox_id = metadata.get("sandbox_id")
+        if isinstance(sandbox_id, str):
+            bound = await cls.bound_profile(thread_id, metadata)
+            if bound is not None:
+                return await cls.from_profile(bound)
+            legacy = await cls.legacy(workspace_slug)
+            create = legacy.langsmith_options()
+            proxy = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
+            create = create.model_copy(
+                update={
+                    "extra_fields": {
+                        **create.extra_fields,
+                        "proxy_config": proxy if isinstance(proxy, dict) else {},
+                    }
+                }
+            )
+            return cls.from_options(create)
+        pending = await SANDBOX_EXECUTION.pending(thread_id)
+        if pending is not None:
+            profile = ExecutionProfile.current()
+            if profile is None or profile.replacement != pending.pin():
+                raise ValueError("The sandbox replacement changed; start a new run")
+            return await cls.from_profile(await ExecutionProfile.kept(pending.execution))
+        if metadata.get(_REPLACEMENT_METADATA_KEY) is not None:
+            raise ValueError(
+                "This legacy sandbox replacement is not privately pinned; reissue recreate_sandbox"
+            )
+        return await cls.resolve(workspace_slug)
+
+    async def recreation_options(self) -> LangSmithCreateOptions:
+        """Use the source's current image without changing the bound sandbox's authority."""
+        options = self.langsmith_options()
+        if self.profile is None:
+            return options
+        if self.profile.uses_defaults:
+            snapshot_id = (await EXECUTION_DEFAULTS.load()).snapshot_id
+        elif self.profile.refresh_workspace is not None:
+            source = await type(self).legacy(self.profile.refresh_workspace)
+            snapshot_id = source.snapshot_id
+        else:
+            return options
+        return options.model_copy(update={"snapshot_id": snapshot_id})
+
+    def record_boot(self, thread_id: str) -> None:
+        if self.workspace is not None and is_snapshot_stale(self.workspace):
+            _STALE_BOOTS[thread_id] = self.workspace
+        if self.global_defaults:
+            from openswe.execution_images import EXECUTION_IMAGES
+
+            profile = self.authority_profile()
+            if profile.stale():
+                _STALE_BOOTS[thread_id] = profile
+            _fire_and_forget(
+                EXECUTION_IMAGES.maybe_start_update(), "execution image update trigger"
+            )
+        else:
+            _fire_and_forget(maybe_start_update(self.workspace), "workspace update trigger")
 
     def langsmith_options(self) -> LangSmithCreateOptions:
         """Include immutable federation authority at create; we refresh managed credentials later."""
-        return LangSmithCreateOptions.resolve(
+        return self.options or LangSmithCreateOptions.resolve(
             snapshot_id=self.snapshot_id, create_params=self.create_params, **self.resources
         )
 
@@ -169,11 +317,11 @@ async def _proxy_token(
         )
 
 
-_STALE_BOOTS: dict[str, Workspace] = {}
+_STALE_BOOTS: dict[str, Workspace | ExecutionProfile] = {}
 
 
-def take_stale_boot(thread_id: str) -> Workspace | None:
-    """The workspace whose stale snapshot this thread's new sandbox booted from, once."""
+def take_stale_boot(thread_id: str) -> Workspace | ExecutionProfile | None:
+    """The pinned stale image this thread's new sandbox booted from, once."""
     return _STALE_BOOTS.pop(thread_id, None)
 
 
@@ -288,9 +436,14 @@ async def refresh_thread_github_proxy(
     sandbox_id = metadata.get("sandbox_id")
     if not isinstance(sandbox_id, str) or Bridge.bridge_id_of(sandbox_id) is not None:
         return None
+    bound = await SandboxCreateConfig.bound_profile(thread_id, metadata)
+    base_proxy_config = (
+        SandboxCreateConfig.from_options(bound.create).proxy_config or {}
+        if bound is not None
+        else metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
+    )
     if not await SandboxCredentialPolicy(ThreadMetadata.model_validate(metadata)).allows_github():
         clear_proxy_token_expiry(thread_id)
-        base_proxy_config = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
         await configure_sandbox_proxy(
             sandbox_id,
             None,
@@ -306,7 +459,6 @@ async def refresh_thread_github_proxy(
     access = await _proxy_token(
         thread_id, workspace_slug, repositories, permissions, force_refresh=force_refresh
     )
-    base_proxy_config = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
     async with aphase(thread_id, "sandbox.proxy_refresh"):
         await _configure_proxy(
             sandbox_id,
@@ -594,16 +746,8 @@ async def mda_proxy_config(
     rest of what the backend writes on a sandbox, its tool channel's capability for it included.
     """
     metadata = await get_sandbox_metadata(thread_id)
-    base_proxy_config = metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
-    if isinstance(metadata.get(_REPLACEMENT_METADATA_KEY), Mapping) or not isinstance(
-        base_proxy_config, dict
-    ):
-        # The rules the sandbox was created with, its workspace's cloud identity among them,
-        # which binding a new sandbox and reconnecting to a replacement record; MDA writes
-        # before either. A replacement's come from what recreate_sandbox asked for, never
-        # from the old sandbox's, as reconnecting to it takes them.
-        config = await SandboxCreateConfig.for_thread(metadata, workspace_slug)
-        base_proxy_config = config.proxy_config or {}
+    config = await SandboxCreateConfig.for_thread(metadata, workspace_slug, thread_id=thread_id)
+    base_proxy_config = config.proxy_config or {}
     return await sandbox_proxy_config(
         sandbox_id, None, base_proxy_config=base_proxy_config, thread_id=thread_id
     )
@@ -703,9 +847,12 @@ async def ensure_sandbox_for_thread(
         async with aphase(thread_id, "sandbox.handoff"):
             await complete_handoff(thread_id, sandbox_metadata, bridged)
         return set_sandbox_backend(thread_id, bridged)
+    bound = await SANDBOX_EXECUTION.bound(thread_id, sandbox_id)
     metadata_proxy_config = sandbox_metadata.get(SANDBOX_PROXY_CONFIG_METADATA_KEY)
     base_proxy_config = (
-        metadata_proxy_config
+        SandboxCreateConfig.from_options(bound.create).proxy_config or {}
+        if bound is not None
+        else metadata_proxy_config
         if isinstance(metadata_proxy_config, dict)
         else get_recorded_proxy_base_config(thread_id)
     )
@@ -809,34 +956,54 @@ async def _bind_mda_sandbox(
     thread_id: str, sandbox_id: str | None, raw: Mapping[str, object], workspace_slug: str | None
 ) -> None:
     metadata = ThreadMetadata.model_validate(raw)
-    bind_metadata: dict[str, Any] = {"sandbox_owner": "mda"}
-    config = await SandboxCreateConfig.for_thread(raw, workspace_slug)
-    if sandbox_id is not None and sandbox_id != metadata.sandbox_id:
-        bind_metadata["sandbox_id"] = sandbox_id
-        if raw.get(_REPLACEMENT_METADATA_KEY) is not None:
-            bind_metadata[_REPLACEMENT_METADATA_KEY] = None
-        if config.proxy_config is not None:
-            bind_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = config.proxy_config
-        if metadata.sandbox_id is not None:
-            SANDBOX_CONNECTIONS.pop(metadata.sandbox_id, None)
-        if config.workspace is not None and is_snapshot_stale(config.workspace):
-            _STALE_BOOTS[thread_id] = config.workspace
-        _fire_and_forget(maybe_start_update(config.workspace), "workspace update trigger")
+    bind_metadata: JsonObject = {"sandbox_owner": "mda"}
+    if sandbox_id is None or sandbox_id == metadata.sandbox_id:
+        await THREADS.update(thread_id=thread_id, metadata=bind_metadata)
+        return
+    config = await SandboxCreateConfig.for_thread(raw, workspace_slug, thread_id=thread_id)
+    bind_metadata["sandbox_id"] = sandbox_id
+    if raw.get(_REPLACEMENT_METADATA_KEY) is not None:
+        bind_metadata[_REPLACEMENT_METADATA_KEY] = None
+    bind_metadata[SANDBOX_PROXY_CONFIG_METADATA_KEY] = config.proxy_config or {}
+    profile = ExecutionProfile.current()
     async with aphase(thread_id, "sandbox.bind_thread"):
-        await client.threads.update(thread_id=thread_id, metadata=bind_metadata)
+        await SANDBOX_EXECUTION.bind(
+            thread_id,
+            sandbox_id,
+            config.authority_profile(),
+            bind_metadata,
+            replacement=profile.replacement if profile else None,
+        )
+    if metadata.sandbox_id is not None:
+        SANDBOX_CONNECTIONS.pop(metadata.sandbox_id, None)
+    config.record_boot(thread_id)
 
 
 async def request_mda_replacement(
-    thread_id: str, *, workspace_slug: str | None, source: SandboxSource
+    thread_id: str,
+    *,
+    workspace_slug: str | None,
+    source: SandboxSource,
+    invocation_id: str | None = None,
+    run_id: str | None = None,
 ) -> LangSmithCreateOptions:
-    """What MDA replaces the thread's sandbox with, recorded so the reconnect applies its proxy.
-
-    The reconnect takes the proxy config from this record, never from anything MDA sends.
-    """
-    config = await SandboxCreateConfig.resolve(workspace_slug, source=source)
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={_REPLACEMENT_METADATA_KEY: {"workspace": workspace_slug, "source": source}},
+    """Privately pin the authorized replacement to the requesting invocation."""
+    if invocation_id is None:
+        runtime = RunConfig.from_runtime()
+        invocation_id, run_id = runtime.invocation_id, runtime.run_id
+    if not invocation_id:
+        raise ValueError("A sandbox replacement requires the requesting invocation")
+    config = (
+        await SandboxCreateConfig.legacy(workspace_slug)
+        if source == "workspace" and not await ExecutionProfile.use_defaults()
+        else await SandboxCreateConfig.resolve(workspace_slug, source=source)
+    )
+    await SANDBOX_EXECUTION.request(
+        thread_id,
+        config.authority_profile(),
+        invocation_id,
+        {_REPLACEMENT_METADATA_KEY: {"workspace": workspace_slug, "source": source}},
+        run_id=run_id,
     )
     return config.langsmith_options()
 
@@ -847,22 +1014,33 @@ async def reconnect_replaced_sandbox(
     workspace_slug: str | None = None,
     github_proxy_repositories: Sequence[str] | None = None,
     github_proxy_permissions: PermissionMap | None = None,
+    invocation_id: str | None = None,
 ) -> SandboxBackendProtocol:
     """Connect again to the thread's sandbox, which MDA just replaced with a fresh one of the same name.
 
     A replacement from another workspace or the base snapshot brings that one's proxy rules.
     """
     metadata = await get_sandbox_metadata(thread_id)
-    if isinstance(metadata.get(_REPLACEMENT_METADATA_KEY), Mapping):
-        config = await SandboxCreateConfig.for_thread(metadata, workspace_slug)
-        await client.threads.update(
-            thread_id=thread_id,
-            metadata={
+    sandbox_id = metadata.get("sandbox_id")
+    pending = await SANDBOX_EXECUTION.pending(thread_id)
+    if pending is not None:
+        if pending.invocation_id != invocation_id:
+            raise ValueError("This invocation does not own the pending sandbox replacement")
+        if not isinstance(sandbox_id, str):
+            raise ValueError("There is no bound sandbox to replace")
+        profile = await ExecutionProfile.kept(pending.execution)
+        config = await SandboxCreateConfig.from_profile(profile)
+        await SANDBOX_EXECUTION.bind(
+            thread_id,
+            sandbox_id,
+            profile,
+            {
                 SANDBOX_PROXY_CONFIG_METADATA_KEY: config.proxy_config or {},
                 _REPLACEMENT_METADATA_KEY: None,
             },
+            replacement=pending.pin(),
         )
-    sandbox_id = metadata.get("sandbox_id")
+        config.record_boot(thread_id)
     if isinstance(sandbox_id, str):
         SANDBOX_CONNECTIONS.pop(sandbox_id, None)
     backend = await ensure_sandbox_for_thread(
@@ -927,6 +1105,7 @@ async def hand_sandbox_to_mda(
     *,
     workspace_slug: str | None = None,
     source: SandboxSource = "workspace",
+    invocation_id: str | None = None,
 ) -> HandedOver:
     """Stop the sandbox the backend gave the thread and unbind it; MDA creates its next one.
 
@@ -951,6 +1130,9 @@ async def hand_sandbox_to_mda(
 
     from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
 
+    await request_mda_replacement(
+        thread_id, workspace_slug=workspace_slug, source=source, invocation_id=invocation_id
+    )
     stop_error = None
     try:
         async with asyncio.timeout(10), get_async_sandbox_client() as sandbox_client:
@@ -966,10 +1148,6 @@ async def hand_sandbox_to_mda(
             extra={"sandbox_id": old_sandbox_id, "thread_id": thread_id},
             exc_info=True,
         )
-    await client.threads.update(
-        thread_id=thread_id,
-        metadata={_REPLACEMENT_METADATA_KEY: {"workspace": workspace_slug, "source": source}},
-    )
     await _hand_to_mda(thread_id, old_sandbox_id)
     return HandedOver(old_sandbox_id, stop_error)
 

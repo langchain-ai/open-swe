@@ -107,6 +107,7 @@ class RunSandbox:
                 workspace_slug=self._cfg.workspace_slug,
                 github_proxy_repositories=repositories,
                 github_proxy_permissions=permissions,
+                invocation_id=self._cfg.invocation_id,
             )
 
         await in_graph_context({**self.config, "run_name": "sandbox"}, reconnect)

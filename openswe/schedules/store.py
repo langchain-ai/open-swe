@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe import event_claims
 from openswe.dashboard.admin import is_admin
+from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS
 from openswe.dashboard.options import gate_fable_model, normalize_model_choice
 from openswe.dashboard.profiles import get_profile, get_valid_access_token
 from openswe.dashboard.repo_access import (
@@ -1030,28 +1031,6 @@ async def delete_agent_schedule(schedule_id: str, *, login: str | None = None) -
         )
 
 
-async def delete_workspace_automations(workspace: str) -> int:
-    """Delete a workspace's automations and their crons; returns how many.
-
-    Runs before the workspace row goes, which would cascade the rows anyway:
-    the crons live in the LangGraph API, outside that transaction.
-    """
-    async with transaction() as conn:
-        records = await _load_records(conn, "WHERE w.slug = :slug", {"slug": workspace})
-    for record in records:
-        for trigger in record.get("triggers") or []:
-            await _delete_cron(trigger.get("cron_id"))
-    async with transaction() as conn:
-        await conn.execute(
-            text(
-                "DELETE FROM automation WHERE workspace_id = "
-                "(SELECT id FROM workspace WHERE slug = :slug)"
-            ),
-            {"slug": workspace},
-        )
-    return len(records)
-
-
 def _admin_thread_enabled(record: dict[str, Any]) -> bool:
     """An automation runs as an admin thread only while the person who made it is an admin."""
     email = record.get("user_email")
@@ -1261,10 +1240,10 @@ async def _launch_agent_schedule_record(
 
     policy = await AutomationPolicy.for_record(record)
     workspace = _record_workspace(record)
-    if not await WORKSPACES.slug_exists(workspace):
+    if not await EXECUTION_DEFAULTS.is_enabled() and not await WORKSPACES.slug_exists(workspace):
         # Running in another workspace would hand it that workspace's settings
         # and connections, which nobody chose for it.
-        error = f"workspace {workspace!r} no longer exists"
+        error = f"saved automation configuration {workspace!r} is unavailable"
         await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
         return {"status": "unknown_workspace", "schedule_id": schedule_id, "error": error}
 
@@ -1597,10 +1576,10 @@ async def _planned_github_automation(
     from openswe.github.channel import CHANNEL as GITHUB_CHANNEL
 
     workspace = _record_workspace(record)
-    if not await WORKSPACES.slug_exists(workspace):
+    if not await EXECUTION_DEFAULTS.is_enabled() and not await WORKSPACES.slug_exists(workspace):
         # Running in another workspace would hand it that workspace's settings
         # and connections, which nobody chose for it.
-        error = f"workspace {workspace!r} no longer exists"
+        error = f"saved automation configuration {workspace!r} is unavailable"
         await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
         return None
     try:
@@ -1856,8 +1835,8 @@ async def plan_linear_automation(request: PlanLinearAutomation) -> LinearAutomat
     if not claimed and not await event_claims.held(_DELIVERY_CLAIM_SCOPE, claim_key):
         return None
     workspace = _record_workspace(record)
-    if not await WORKSPACES.slug_exists(workspace):
-        error = f"workspace {workspace!r} no longer exists"
+    if not await EXECUTION_DEFAULTS.is_enabled() and not await WORKSPACES.slug_exists(workspace):
+        error = f"saved automation configuration {workspace!r} is unavailable"
         await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
         await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
         return None
@@ -2028,5 +2007,7 @@ async def trigger_agent_schedule(
             result.get("error") or "automation repository unavailable",
         )
     if status == "unknown_workspace":
-        raise HTTPException(409, result.get("error") or "automation workspace no longer exists")
+        raise HTTPException(
+            409, result.get("error") or "saved automation configuration is unavailable"
+        )
     raise HTTPException(502, result.get("error") or "failed to start automation test")

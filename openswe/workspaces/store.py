@@ -104,10 +104,6 @@ class _ChannelBindings(NamedTuple):
     ask: list[str]
 
 
-class DefaultWorkspaceDeletionError(ValueError):
-    """The ``default`` workspace was asked to be deleted."""
-
-
 class WorkspaceConflictError(ValueError):
     """Another workspace already holds the slug or binding this write claims.
 
@@ -500,8 +496,31 @@ class WorkspaceCreate(WorkspaceChannels):
         return self
 
 
-class WorkspaceUpdate(BaseModel):
+class WorkspaceRoutingUpdate(BaseModel):
+    """Routing changes for a retained workspace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repos: list[str] | None = None
+    slack_channel_ids: list[str] | None = None
+    kitchen_channel_ids: list[str] | None = None
+    ask_channel_ids: list[str] | None = None
+
+    @field_validator("repos")
+    @classmethod
+    def _check_repos(cls, v: list[str] | None) -> list[str] | None:
+        return None if v is None else _validate_repos(v)
+
+    @field_validator("slack_channel_ids", "kitchen_channel_ids", "ask_channel_ids")
+    @classmethod
+    def _check_slack_channel_ids(cls, v: list[str] | None) -> list[str] | None:
+        return None if v is None else _validate_slack_channel_ids(v)
+
+
+class WorkspaceUpdate(WorkspaceRoutingUpdate):
     """Partial update: only the fields present are written."""
+
+    model_config = ConfigDict(extra="ignore")
 
     inherit_default_sandbox: bool | None = None
 
@@ -511,10 +530,6 @@ class WorkspaceUpdate(BaseModel):
     update_script: str | None = None
     base_snapshot_id: str | None = None
     snapshot_name: str | None = None
-    repos: list[str] | None = None
-    slack_channel_ids: list[str] | None = None
-    kitchen_channel_ids: list[str] | None = None
-    ask_channel_ids: list[str] | None = None
     mem_bytes: int | None = Field(default=None, gt=0)
     vcpus: int | None = Field(default=None, gt=0)
     fs_capacity_bytes: int | None = Field(default=None, gt=0)
@@ -539,16 +554,6 @@ class WorkspaceUpdate(BaseModel):
     @classmethod
     def _check_snapshot_name(cls, v: str | None) -> str | None:
         return _validate_snapshot_name(v)
-
-    @field_validator("repos")
-    @classmethod
-    def _check_repos(cls, v: list[str] | None) -> list[str] | None:
-        return None if v is None else _validate_repos(v)
-
-    @field_validator("slack_channel_ids", "kitchen_channel_ids", "ask_channel_ids")
-    @classmethod
-    def _check_slack_channel_ids(cls, v: list[str] | None) -> list[str] | None:
-        return None if v is None else _validate_slack_channel_ids(v)
 
     @field_validator("create_params")
     @classmethod
@@ -698,19 +703,6 @@ class Workspace(WorkspaceChannels):
         if started_at is None:
             return False
         return (datetime.now(UTC) - started_at).total_seconds() < STALE_REFRESH_SECONDS
-
-    def assert_refreshable(self, kind: RefreshKind) -> None:
-        """Raise ``ValueError`` when a refresh of ``kind`` cannot start now."""
-        if self.inherit_default_sandbox:
-            raise ValueError(f"workspace {self.slug!r} boots the default workspace's image")
-        if kind == "full" and not self.setup_script:
-            raise ValueError(f"workspace {self.slug!r} has no setup script to run")
-        if kind == "update" and not self.update_script:
-            raise ValueError(f"workspace {self.slug!r} has no update script to run")
-        if kind == "update" and self.ready_snapshot_id is None:
-            raise ValueError(f"workspace {self.slug!r} has no snapshot to update")
-        if self.refresh_in_flight():
-            raise RefreshInFlightError(self.slug, self.refresh_run_id)
 
     def refresh_log_tail(self, *, chars: int = REFRESH_LOG_TAIL_CHARS) -> str | None:
         """The end of the last settled refresh's log, where a failing script says why."""
@@ -1246,78 +1238,6 @@ class WorkspaceStore:
             await Topic.WORKSPACES.invalidate(session)
             return record
 
-    async def assert_publishable(
-        self, slug: str, definition: WorkspaceCreate | WorkspaceUpdate
-    ) -> None:
-        """Run the save-time checks now, before an expensive snapshot capture.
-
-        ``publish`` repeats them: minutes of capture pass in between, and
-        another workspace may claim a repository while they do.
-        """
-        await self._assert_unique(await self._publishable_record(slug, definition, "open-swe"))
-
-    async def _publishable_record(
-        self, slug: str, definition: WorkspaceCreate | WorkspaceUpdate, created_by: str
-    ) -> Workspace:
-        if isinstance(definition, WorkspaceCreate):
-            if await self.get(slug) is not None:
-                raise WorkspaceConflictError(f"workspace {definition.name!r} already exists")
-            return Workspace.seed(definition, created_by)
-        existing = await self.get(slug)
-        if existing is None:
-            raise ValueError(f"no workspace named {slug!r}")
-        return _apply(existing, definition)
-
-    async def publish(
-        self,
-        slug: str,
-        definition: WorkspaceCreate | WorkspaceUpdate,
-        *,
-        snapshot_id: str,
-        snapshot_name: str,
-        source_sandbox_id: str,
-        created_by: str,
-    ) -> Workspace:
-        """Write a definition and the image it was captured from as one store write.
-
-        The image already exists by the time this runs; what must not happen is a
-        record that carries the new definition but still points at the old image,
-        or a new workspace with no image at all. One ``put`` cannot land half.
-        """
-        record = await self._publishable_record(slug, definition, created_by)
-        await self._assert_unique(record)
-        _stamp_captured(
-            record,
-            snapshot_id=snapshot_id,
-            snapshot_name=snapshot_name,
-            source_sandbox_id=source_sandbox_id,
-        )
-        return await self.save(record)
-
-    async def remove(self, slug: str) -> bool:
-        """Delete a workspace; ``default`` refuses with :class:`DefaultWorkspaceDeletionError`.
-
-        Unrouted work lands in ``default``, so it always exists.
-        """
-        if slug == DEFAULT_WORKSPACE_SLUG:
-            raise DefaultWorkspaceDeletionError("the default workspace cannot be deleted")
-        record = await self.get(slug)
-        if record is None:
-            return False
-        # Its automations go first. Deleting them shares no transaction with
-        # this delete, so a failure part way leaves the workspace in place, and
-        # deleting it again finishes the job; the other order would strand
-        # automations nothing can delete by retrying.
-        from openswe.schedules.store import delete_workspace_automations
-
-        await delete_workspace_automations(slug)
-        await self.delete(slug)
-        from openswe.workspaces.refresh import remove_refresh_cron
-
-        await remove_refresh_cron(record)
-        await _delete_snapshot(record.snapshot_id)
-        return True
-
     async def mark_capturing(self, slug: str) -> Workspace | None:
         def change(record: Workspace) -> None:
             record.snapshot_status = "capturing"
@@ -1768,9 +1688,12 @@ async def _delete_snapshot(snapshot_id: object) -> None:
     """Best-effort delete of a superseded snapshot."""
     if not isinstance(snapshot_id, str) or not snapshot_id:
         return
+    from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS
     from openswe.sandboxes.providers.langsmith import get_async_sandbox_client
 
     try:
+        if await EXECUTION_DEFAULTS.records.get() is not None:
+            return
         async with get_async_sandbox_client() as client:
             await client.delete_snapshot(snapshot_id)
     except Exception:  # noqa: BLE001
@@ -1853,18 +1776,6 @@ async def capture_sandbox_snapshot(sandbox_id: str, snapshot_name: str, *, timeo
         },
     )
     return str(snapshot.id)
-
-
-async def discard_unreferenced_snapshot(slug: str, snapshot_id: str) -> None:
-    """Delete a snapshot that was captured but never made it onto the record.
-
-    Re-reads first so a capture that *did* land — by this caller or a concurrent
-    one — is never deleted from under it.
-    """
-    current = await WORKSPACES.get(slug)
-    if current is not None and current.snapshot_id == snapshot_id:
-        return
-    await _delete_snapshot(snapshot_id)
 
 
 async def retire_superseded_snapshot(slug: str, previous_id: str | None, current_id: str) -> None:

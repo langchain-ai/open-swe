@@ -321,7 +321,7 @@ def apply() -> None:
     from openswe.workspaces import refresh as workspace_refresh
 
     workspace_refresh._create_builder_sandbox = _fake_builder_sandbox
-    workspace_refresh._release_builder_sandbox = _release_nothing
+    workspace_refresh.release_builder_sandbox = _release_nothing
 
     # Every MDA run names its thread's browser, so sharing a thread deletes it.
     # No browser exists without LangSmith, so deleting one finds nothing.

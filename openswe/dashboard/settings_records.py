@@ -56,18 +56,24 @@ class SettingsRecords:
                 )
             )
 
-    async def patch(self, key: str, value: JsonObject) -> tuple[JsonObject, JsonObject]:
-        async with postgres.session() as session:
-            await session.execute(
-                insert(SettingsRecord)
-                .values(tier=self.tier, key=key, value={})
-                .on_conflict_do_nothing(index_elements=[SettingsRecord.tier, SettingsRecord.key])
+    async def lock(self, key: str = "", *, session: AsyncSession) -> JsonObject:
+        """Read a record under the caller's transaction lock, creating an empty one if absent."""
+        await session.execute(
+            insert(SettingsRecord)
+            .values(tier=self.tier, key=key, value={})
+            .on_conflict_do_nothing(index_elements=[SettingsRecord.tier, SettingsRecord.key])
+        )
+        return (
+            await session.scalars(
+                select(SettingsRecord.value).where(self._where(key)).with_for_update()
             )
-            before = (
-                await session.scalars(
-                    select(SettingsRecord.value).where(self._where(key)).with_for_update()
-                )
-            ).one()
+        ).one()
+
+    async def patch(
+        self, key: str, value: JsonObject, *, session: AsyncSession | None = None
+    ) -> tuple[JsonObject, JsonObject]:
+        async with postgres.session(session) as session:
+            before = await self.lock(key, session=session)
             upsert = insert(SettingsRecord).values(tier=self.tier, key=key, value=value)
             saved = await session.scalar(
                 upsert.on_conflict_do_update(

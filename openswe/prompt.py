@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -87,22 +87,89 @@ def _render_collaboration_section() -> str:
 
 @dataclass(frozen=True)
 class SystemPrompt:
-    """A thread's system prompt, rendered on its first run and kept for its whole life.
-
-    Any byte that differs between two runs makes the model provider's prompt cache
-    miss from there on, so every later turn would pay again for the whole
-    conversation. What can change from one turn to the next is a ``TurnContext``.
-
-    ``shared`` is the same for every thread of the deployment, ``workspace`` for every
-    thread of its workspace, and
-    ``thread`` is what only this thread's says. Each part is shared by fewer threads
-    than the one before it, so a new thread's first model call reads the parts ahead
-    of its own from the cache earlier threads wrote.
-    """
+    """Cacheable shared, execution/workspace and thread prompt components."""
 
     shared: str
     workspace: str = ""
     thread: str = ""
+
+    @staticmethod
+    def execution_section(_name: str | None, instructions: str, repos: list[str]) -> str:
+        if not instructions.strip() and not repos:
+            return ""
+        return prompt(
+            "system/execution-instructions", instructions=instructions.strip(), repos=repos
+        )
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, object]) -> SystemPrompt | None:
+        full = state.get("rendered_system_prompt")
+        workspace = state.get("rendered_workspace_prompt")
+        thread = state.get("rendered_thread_prompt")
+        if not all(isinstance(part, str) for part in (full, workspace, thread)):
+            return None
+        assert isinstance(full, str) and isinstance(workspace, str) and isinstance(thread, str)
+        for part in (thread, workspace):
+            if not part:
+                continue
+            if full == part:
+                full = ""
+            elif full.endswith(f"\n\n{part}"):
+                full = full[: -len(part) - 2]
+            else:
+                return None
+        return cls(shared=full, workspace=workspace, thread=thread)
+
+    @classmethod
+    def execution_update(
+        cls,
+        state: Mapping[str, object],
+        rendered: SystemPrompt | None,
+        *,
+        enabled: bool,
+        workspace: str,
+    ) -> dict[str, str | bool]:
+        if not enabled:
+            if state.get("execution_prompt_enabled"):
+                return {
+                    "rendered_system_prompt": str(state["legacy_system_prompt"]),
+                    "rendered_workspace_prompt": str(state.get("legacy_workspace_prompt") or ""),
+                    "rendered_thread_prompt": str(state.get("legacy_thread_prompt") or ""),
+                    "system_prompt_fixed": True,
+                    "execution_prompt_enabled": False,
+                }
+            return rendered.state() if rendered is not None else {}
+        baseline = rendered or cls.from_state(state)
+        shared = state.get("execution_shared_prompt")
+        thread = state.get("execution_thread_prompt")
+        if not isinstance(shared, str) or not isinstance(thread, str):
+            if baseline is None:
+                raise ValueError("An unsegmented legacy prompt must be rendered before activation")
+            shared, thread = baseline.shared, baseline.thread
+        updated = cls(shared=shared, workspace=workspace, thread=thread).state()
+        if state.get("execution_prompt_enabled") and all(
+            state.get(k) == v for k, v in updated.items()
+        ):
+            return {}
+        saved: dict[str, str | bool] = {}
+        if "legacy_system_prompt" not in state:
+            legacy = rendered.state() if rendered is not None else state
+            saved = {
+                "legacy_system_prompt": str(
+                    state.get("rendered_system_prompt")
+                    or legacy.get("rendered_system_prompt")
+                    or ""
+                ),
+                "legacy_workspace_prompt": str(legacy.get("rendered_workspace_prompt") or ""),
+                "legacy_thread_prompt": str(legacy.get("rendered_thread_prompt") or ""),
+            }
+        return {
+            **updated,
+            **saved,
+            "execution_shared_prompt": shared,
+            "execution_thread_prompt": thread,
+            "execution_prompt_enabled": True,
+        }
 
     def state(self) -> dict[str, str | bool]:
         """What the thread's state keeps: the whole prompt, which ends in the workspace's
@@ -128,7 +195,7 @@ def construct_system_prompt(
     continued_from_collaborative: bool = False,
     workspace_repos: list[str] | None = None,
 ) -> SystemPrompt:
-    """Render the agent's system prompt, once for the thread's whole life."""
+    """Render the retained legacy baseline before run-pinned execution guidance is applied."""
     shared = prompt(
         "system/main",
         dashboard_context_section=prompt(

@@ -6,7 +6,7 @@ import type { SidebarFilters } from "./sidebarFilter"
 export const SIDEBAR_PREFS_STORAGE_KEY = "open-swe.agents.sidebar-prefs"
 const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 
-const ORGANIZE_MODES = ["date", "repo", "workspace"] as const
+const ORGANIZE_MODES = ["date", "repo"] as const
 
 export type OrganizeMode = (typeof ORGANIZE_MODES)[number]
 export type ChatSort = "created" | "updated"
@@ -84,6 +84,7 @@ function sanitizeFilters(value: unknown): SidebarFilters {
  */
 const LEGACY_ORGANIZE_MODES: Record<string, OrganizeMode> = {
   project: "repo",
+  workspace: "repo",
   list: "date",
   none: "date",
 }

@@ -39,7 +39,7 @@ test("the new-thread page does not shift while it loads", async ({
       }
     }).observe({ type: "layout-shift", buffered: true });
   });
-  // A second workspace adds the composer's workspace picker, arriving last.
+  // Late legacy routing data must not add a picker or move the composer.
   await page.route("**/dashboard/api/workspaces/options", async (route) => {
     const response = await route.fetch();
     const options = (await response.json()) as {
@@ -66,12 +66,18 @@ test("the new-thread page does not shift while it loads", async ({
   const cdp = await context.newCDPSession(page);
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
 
+  const lateOptions = page.waitForResponse(
+    "**/dashboard/api/workspaces/options",
+  );
   await page.goto("/agents");
   await expect(
     page.getByRole("heading", { name: "What should we work on?" }),
   ).toBeVisible();
   await expect(page.getByTestId("sidebar-threads-skeleton")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Environment" })).toBeVisible();
+  await lateOptions;
+  await expect(page.getByRole("button", { name: "Environment" })).toHaveCount(
+    0,
+  );
   await page.waitForTimeout(1000);
 
   // Under the throttled CPU Chrome paints the server's markup before it has

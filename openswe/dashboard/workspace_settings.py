@@ -2,8 +2,8 @@
 and Fable toggles, and the default repository, stored in PostgreSQL by
 :mod:`openswe.dashboard.settings_records`.
 
-They resolve by tier. The instance record applies to every workspace; a
-workspace's own record holds only the fields an admin overrode there. Per-user
+Robin-wide mode uses the instance record for every workspace. Legacy mode
+also applies the fields an admin overrode for that workspace. Per-user
 profile settings and a thread's ``configurable`` layer on top in the callers
 that honour them. Per-repo style prompts live in :mod:`openswe.review.styles`.
 """
@@ -15,11 +15,11 @@ from collections.abc import Iterator, Mapping
 from typing import Any, Literal, NamedTuple, NotRequired, TypedDict
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from openswe.audit_logs.context import bind_workspace, current_audit_log
+from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.audit_logs.models import SettingsChange
 from openswe.config import ENV
@@ -669,12 +669,21 @@ class WorkspaceSettings(Mapping[str, Any]):
         self._values = dict(values)
 
     @staticmethod
-    async def load_many(slugs: list[str], *, session: AsyncSession) -> dict[str, WorkspaceSettings]:
-        """Resolve workspace settings in bulk using the caller's connection."""
+    async def load_many(
+        slugs: list[str], *, session: AsyncSession, use_defaults: bool | None = None
+    ) -> dict[str, WorkspaceSettings]:
+        """Resolve effective settings using the caller's connection and server-resolved mode."""
         if not slugs:
             return {}
+        from openswe.execution import ExecutionProfile
+
         instance = await instance_record(session=session)
-        overrides = await WORKSPACE_SETTINGS.for_keys(slugs, session=session)
+        enabled = (
+            await ExecutionProfile.use_defaults(session=session)
+            if use_defaults is None
+            else use_defaults
+        )
+        overrides = {} if enabled else await WORKSPACE_SETTINGS.for_keys(slugs, session=session)
         defaults = _default_settings()
         return {
             slug: _finish({**defaults, **instance, **_set_fields(overrides.get(slug))})
@@ -941,19 +950,3 @@ async def api_get_workspace_settings(
 ) -> WorkspaceSettingsView:
     slug = await _existing_workspace(workspace, session=reader.session)
     return await workspace_settings_view(slug, session=reader.session)
-
-
-@router.put("/workspaces/{workspace}/settings")
-@audit_endpoint
-async def api_put_workspace_settings(
-    workspace: str,
-    body: WorkspaceSettingsUpdate,
-    request: Request,
-    _admin: dict[str, Any] = ADMIN_DEP,
-) -> WorkspaceSettingsView:
-    try:
-        slug = await _existing_workspace(workspace)
-        await bind_workspace(request, slug)
-        return await upsert_workspace_overrides(slug, body)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc

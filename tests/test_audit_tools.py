@@ -126,12 +126,7 @@ async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
         ("update_automation", {"automation_id": "secret"}),
         ("trigger_automation", {"automation_id": "secret"}),
         ("delete_automation", {"automation_id": "secret"}),
-        ("snapshotctl", {"action": "rebuild", "workspace": "secret"}),
-        (
-            "snapshotctl",
-            {"action": "edit", "workspace": "secret", "setup_script": "secret"},
-        ),
-        ("delete_workspace", {"name": "secret"}),
+        ("snapshotctl", {"action": "stop", "workspace": "secret"}),
         ("configure_repository", {"workspace": "secret", "repo": "secret"}),
         ("save_organization_skill", {"name": "secret", "description": "secret"}),
         ("delete_organization_skill", {"name": "secret"}),

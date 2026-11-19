@@ -1,24 +1,19 @@
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Select } from "@langchain/macaw-components/Select"
 
-import { SettingsSection } from "@/components/AppShell"
+import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import type { ModelOption } from "@/lib/api"
-import {
-  useScopedSettings,
-  type SettingsScope,
-} from "@/features/settings/lib/settingsScope"
-import { ModelPairControl, TierRow } from "./WorkspaceSettingsSections"
+import { useInstanceSettings } from "@/features/settings/lib/settingsScope"
+import { ModelPairControl } from "./WorkspaceSettingsSections"
 
 const PERCENTS = [0, 1, 2, 5, 10, 25, 50, 100]
 
 export function ShadowReviewSection({
-  scope,
   models,
 }: {
-  scope: SettingsScope
   models: Array<ModelOption>
 }) {
-  const settings = useScopedSettings(scope)
+  const settings = useInstanceSettings()
   const percent = settings.data?.review_shadow_percent ?? 0
   // A share set through the agent tool may be none of the presets.
   const percentOptions = [...new Set([...PERCENTS, percent])]
@@ -40,9 +35,7 @@ export function ShadowReviewSection({
       description="Runs a second reviewer on another model for a sample of pull requests, to compare what each finds. A sampled pull request's shadow follows its every review with the same prompt and context, but never posts to GitHub or Slack; its findings are stored for offline comparison."
     >
       <div className="divide-y divide-default">
-        <TierRow
-          settings={settings}
-          fields={["review_shadow_percent"]}
+        <SettingsRow
           label="Pull requests sampled"
           description="Share of pull requests sampled when their first review starts. Pull requests already sampled keep their shadow."
           control={
@@ -58,9 +51,7 @@ export function ShadowReviewSection({
             />
           }
         />
-        <TierRow
-          settings={settings}
-          fields={["review_shadow_model", "review_shadow_reasoning_effort"]}
+        <SettingsRow
           label="Shadow model"
           description="Model the shadow reviewer runs on. Sampling stays off until it is set; a sampled pull request keeps the model it was sampled with."
           control={
