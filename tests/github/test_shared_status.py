@@ -1,7 +1,7 @@
 """A pull request's dashboard status is read from GitHub once per change."""
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -29,6 +29,24 @@ def shared_cache(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     monkeypatch.setattr("langgraph_api.cache.cache_get", get)
     monkeypatch.setattr("langgraph_api.cache.cache_set", put)
     return store
+
+
+def _statuses(store: dict[str, object]) -> dict[str, object]:
+    """The shared statuses, without the claims replicas leave while reading."""
+    return {key: value for key, value in store.items() if ":claim:" not in key}
+
+
+async def _another_replica_claims(store: dict[str, object], *, ago: timedelta) -> datetime:
+    """Leave a claim as another replica's read, begun ``ago``, would; its start."""
+    _, now = await Topic.last_changed(Topic.PULL_REQUESTS.keyed(_KEY))
+    started_at = now - ago
+    store[_CLAIM] = {"started_at": started_at.isoformat(), "done": False}
+    return started_at
+
+
+_KEY = PullRequestKey.of("lc", "repo", 7)
+_CLAIM = f"openswe:pull-request-status:v2:claim:{_KEY}"
+_STATUS = f"openswe:pull-request-status:v2:{_KEY}"
 
 
 def _pull() -> PullRequestClient:
@@ -99,7 +117,7 @@ async def test_a_read_github_did_not_fully_answer_is_not_shared(
     await SharedPullRequestStatus.read(_pull())
 
     assert load.await_count == 2
-    assert shared_cache == {}
+    assert _statuses(shared_cache) == {}
 
 
 async def test_viewers_waiting_on_a_degraded_read_make_their_own(
@@ -157,3 +175,84 @@ class _OpenClient:
 
     async def __aexit__(self, *_: object) -> None:
         return None
+
+
+async def test_a_replica_waits_on_another_replicas_read_instead_of_its_own(
+    registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    load = AsyncMock(return_value=_read("Mine"))
+    monkeypatch.setattr(PullRequestClient, "load", load)
+    started_at = await _another_replica_claims(shared_cache, ago=timedelta(seconds=1))
+
+    async def the_other_replica_finishes() -> None:
+        await asyncio.sleep(0.3)
+        shared_cache[_STATUS] = {
+            "read_at": started_at.isoformat(),
+            "status": _read("Theirs").model_dump(mode="json"),
+        }
+
+    finishing = asyncio.ensure_future(the_other_replica_finishes())
+    status = await SharedPullRequestStatus.read(_pull())
+    await finishing
+
+    assert status is not None and status.title == "Theirs"
+    load.assert_not_awaited()
+
+
+async def test_a_replica_reads_itself_once_the_one_it_waits_on_shares_nothing(
+    registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    load = AsyncMock(return_value=_read("Mine"))
+    monkeypatch.setattr(PullRequestClient, "load", load)
+    started_at = await _another_replica_claims(shared_cache, ago=timedelta(seconds=1))
+
+    async def the_other_replica_gets_a_partial_read() -> None:
+        await asyncio.sleep(0.3)
+        shared_cache[_CLAIM] = {"started_at": started_at.isoformat(), "done": True}
+
+    finishing = asyncio.ensure_future(the_other_replica_gets_a_partial_read())
+    status = await asyncio.wait_for(SharedPullRequestStatus.read(_pull()), timeout=3)
+    await finishing
+
+    assert status is not None and status.title == "Mine"
+    load.assert_awaited_once()
+
+
+async def test_a_claim_from_before_the_last_change_or_long_ago_is_not_waited_on(
+    registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    load = AsyncMock(return_value=_read())
+    monkeypatch.setattr(PullRequestClient, "load", load)
+
+    await _another_replica_claims(shared_cache, ago=timedelta(seconds=1))
+    await Topic.PULL_REQUESTS.invalidate(key=_KEY)
+    await asyncio.wait_for(SharedPullRequestStatus.read(_pull()), timeout=0.2)
+
+    await Topic.PULL_REQUESTS.invalidate(key=_KEY)
+    await _another_replica_claims(shared_cache, ago=timedelta(minutes=1))
+    await asyncio.wait_for(SharedPullRequestStatus.read(_pull()), timeout=0.2)
+
+    assert load.await_count == 2
+
+
+async def test_a_replicas_own_read_is_claimed_then_released(
+    registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    claimed_while_reading: list[object] = []
+
+    async def load(_: PullRequestClient) -> OpenPullRequest:
+        claimed_while_reading.append(_claim_done(shared_cache))
+        return _read()
+
+    monkeypatch.setattr(PullRequestClient, "load", load)
+
+    await SharedPullRequestStatus.read(_pull())
+
+    assert claimed_while_reading == [False]
+    assert _claim_done(shared_cache) is True
+
+
+def _claim_done(store: dict[str, object]) -> object:
+    claim = store[_CLAIM]
+    assert isinstance(claim, dict)
+    return claim["done"]
