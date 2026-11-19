@@ -4,10 +4,8 @@ import json
 import logging
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.messages.tool import ToolCall
 from pydantic import (
     BaseModel,
@@ -20,6 +18,12 @@ from pydantic import (
     ValidationError,
     ValidatorFunctionWrapHandler,
     WrapValidator,
+)
+
+from openswe.threads.session_messages import (
+    LocalSession,
+    SessionMessages,
+    TranscriptError,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,12 +42,6 @@ _COMMAND = re.compile(
     r"<command-name>(.*?)</command-name>\s*(?:<command-args>(.*?)</command-args>)?", re.DOTALL
 )
 IMAGE_PLACEHOLDER = "[image omitted]"
-MISSING_TOOL_RESULT = "No result was recorded before the session was uploaded."
-MAX_TITLE_CHARS = 80
-
-
-class TranscriptError(ValueError):
-    """The transcript is not a Claude Code session."""
 
 
 class _Model(BaseModel):
@@ -152,6 +150,11 @@ class AssistantRecord(_Record):
     type: Literal["assistant"]
     message: AssistantMessage
 
+    def add_to(self, builder: SessionMessages) -> None:
+        uses = [block for block in self.message.content if isinstance(block, ToolUseBlock)]
+        calls = [ToolCall(id=u.id, name=u.name, args=u.args, type="tool_call") for u in uses]
+        builder.assistant(self.message.id, _parts_text(self.message.content), calls)
+
 
 class QueuedPrompt(_Model):
     """A message the person sent while a turn was running."""
@@ -213,14 +216,6 @@ type Record = Annotated[
 _RECORD: TypeAdapter[Record] = TypeAdapter(Record)
 
 type ConversationRecord = UserRecord | AssistantRecord | AttachmentRecord | LinkRecord
-
-
-@dataclass(frozen=True, kw_only=True)
-class ClaudeSession:
-    title: str | None
-    messages: list[BaseMessage]
-    # Claude Code's id for the session, which its hooks send too.
-    session_id: str | None = None
 
 
 def _parse_record(number: int, line: str) -> Record | LinkRecord | None:
@@ -304,85 +299,6 @@ def _content_text(content: str | Sequence[Block] | None) -> str:
     return _clean(content) if isinstance(content, str) else _parts_text(content)
 
 
-class _Builder:
-    """Folds the branch into messages, keeping every tool call answered before the next human turn."""
-
-    def __init__(self) -> None:
-        self.messages: list[BaseMessage] = []
-        self._ai: dict[str, AIMessage] = {}
-        self._calls: dict[str, str] = {}
-        self._pending: dict[str, None] = {}
-        self._deferred: list[HumanMessage] = []
-
-    def human(self, text: str, message_id: str | None) -> None:
-        if not text:
-            return
-        message = HumanMessage(content=text, id=message_id)
-        if self._pending:
-            self._deferred.append(message)
-        else:
-            self.messages.append(message)
-
-    def assistant(self, record: AssistantRecord) -> None:
-        text = _parts_text(record.message.content)
-        uses = [block for block in record.message.content if isinstance(block, ToolUseBlock)]
-        calls = [
-            ToolCall(id=use.id, name=use.name, args=use.args, type="tool_call") for use in uses
-        ]
-        existing = self._ai.get(record.message.id)
-        if existing is None:
-            if not text and not calls:
-                return
-            self._flush_deferred()
-            message = AIMessage(content=text, tool_calls=calls, id=record.message.id)
-            self._ai[record.message.id] = message
-            self.messages.append(message)
-        else:
-            existing.content = "\n\n".join(part for part in (str(existing.content), text) if part)
-            existing.tool_calls.extend(calls)
-        for use in uses:
-            self._calls[use.id] = use.name
-            self._pending[use.id] = None
-
-    def tool_result(self, block: ToolResultBlock) -> None:
-        name = self._calls.get(block.tool_use_id)
-        if name is None or block.tool_use_id not in self._pending:
-            logger.warning(
-                "Dropped a Claude Code tool result with no open tool call",
-                extra={"tool_use_id": block.tool_use_id},
-            )
-            return
-        del self._pending[block.tool_use_id]
-        self.messages.append(
-            ToolMessage(
-                content=_content_text(block.content),
-                tool_call_id=block.tool_use_id,
-                name=name,
-                status="error" if block.is_error else "success",
-            )
-        )
-        if not self._pending:
-            self._flush_deferred()
-
-    def finish(self) -> list[BaseMessage]:
-        self._flush_deferred()
-        return self.messages
-
-    def _flush_deferred(self) -> None:
-        """Close calls that never got a result, then release the humans held behind them."""
-        for tool_call_id in list(self._pending):
-            self.messages.append(
-                ToolMessage(
-                    content=MISSING_TOOL_RESULT,
-                    tool_call_id=tool_call_id,
-                    name=self._calls[tool_call_id],
-                )
-            )
-        self._pending.clear()
-        self.messages.extend(self._deferred)
-        self._deferred.clear()
-
-
 class ClaudeTranscript:
     """A session's JSONL taken one line at a time, keeping only what the conversation needs."""
 
@@ -394,7 +310,7 @@ class ClaudeTranscript:
         self._parsed = 0
 
     @classmethod
-    def parse(cls, transcript: str) -> ClaudeSession:
+    def parse(cls, transcript: str) -> LocalSession:
         reader = cls()
         for line in transcript.splitlines():
             reader.add(line)
@@ -415,24 +331,24 @@ class ClaudeTranscript:
             # A resumed session keeps writing under its new id, which is the one its hooks send.
             self._session_id = record.session_id or self._session_id
 
-    def session(self) -> ClaudeSession:
+    def session(self) -> LocalSession:
         """Fold the lines into messages; raises ``TranscriptError`` when none was a record."""
         if self._line and not self._parsed:
             raise TranscriptError("no line is a Claude Code transcript record")
-        messages = _messages(self._records)
-        first_human = next((m for m in messages if isinstance(m, HumanMessage)), None)
-        title = self._title
-        if title is None and first_human is not None:
-            title = prompt_text(str(first_human.content))[:MAX_TITLE_CHARS] or None
-        return ClaudeSession(title=title, messages=messages, session_id=self._session_id)
+        builder = _messages(self._records)
+        return LocalSession(
+            title=self._title or builder.title(prompt_text),
+            messages=builder.finish(),
+            session_id=self._session_id,
+        )
 
 
-def _messages(records: Sequence[ConversationRecord]) -> list[BaseMessage]:
-    builder = _Builder()
+def _messages(records: Sequence[ConversationRecord]) -> SessionMessages:
+    builder = SessionMessages()
     for record in _active_branch(records):
         match record:
             case AssistantRecord():
-                builder.assistant(record)
+                record.add_to(builder)
             case UserRecord(is_meta=True, is_compact_summary=False):
                 continue
             case UserRecord(message=UserMessage(content=str() as content)):
@@ -440,7 +356,11 @@ def _messages(records: Sequence[ConversationRecord]) -> list[BaseMessage]:
             case UserRecord(message=UserMessage(content=list() as blocks)):
                 for block in blocks:
                     if isinstance(block, ToolResultBlock):
-                        builder.tool_result(block)
+                        builder.tool_result(
+                            block.tool_use_id,
+                            _content_text(block.content),
+                            error=bool(block.is_error),
+                        )
                 builder.human(
                     _parts_text(
                         [block for block in blocks if not isinstance(block, ToolResultBlock)]
@@ -451,4 +371,4 @@ def _messages(records: Sequence[ConversationRecord]) -> list[BaseMessage]:
                 builder.human(_content_text(queued.prompt), record.uuid)
             case _:
                 continue
-    return builder.finish()
+    return builder

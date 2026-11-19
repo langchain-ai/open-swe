@@ -259,6 +259,7 @@ from openswe.tools import (
     unshare_project,
     update_automation,
     update_project,
+    upload_session,
     web_search,
     write_database_rows,
 )
@@ -760,6 +761,7 @@ AGENT_TOOLS: Final = (
     discover_managed_tools,
     recreate_sandbox,
     report_platform_issue,
+    upload_session,
     schedule_thread_wakeup,
     request_rollout_check,
     listen_events,
@@ -2028,7 +2030,13 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         *(
             ()
             if cfg.local_access_bridge_id
-            else (local_read_file, local_write_file, local_execute, local_import_file)
+            else (
+                local_read_file,
+                local_write_file,
+                local_execute,
+                local_import_file,
+                upload_session,
+            )
         ),
         *(() if _writes_database_rows() else (execute_database_sql, write_database_rows)),
         *(() if sender_preferences.experimental_classify and Jev.configured() else (classify,)),

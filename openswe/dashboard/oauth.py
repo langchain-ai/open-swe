@@ -8,7 +8,7 @@ import re
 import secrets
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, Self
 from urllib.parse import quote, urlparse
 from uuid import UUID
 
@@ -16,7 +16,7 @@ import httpx2
 import jwt
 from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import APIKeyCookie
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from starlette.requests import HTTPConnection
 
 from openswe.config import ENV
@@ -88,16 +88,28 @@ def decode_terminal_ticket(token: str, *, thread_id: str) -> dict[str, Any]:
 
 
 class UploadTicket(BaseModel):
-    """Who may fill which reserved session-upload thread, as its upload URL carries it."""
+    """Who may fill which reserved session-upload thread, or import any number of sessions."""
 
     sub: str = Field(min_length=1)
     email: str | None = None
     user_id: str | None = None
-    thread_id: str = Field(min_length=1)
+    thread_id: str | None = Field(default=None, min_length=1)
+    import_header: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _one_target(self) -> Self:
+        if (self.thread_id is None) == (self.import_header is None):
+            raise ValueError("an upload ticket holds either a thread_id or an import_header")
+        return self
 
 
 def issue_upload_ticket(
-    *, login: str, email: str | None, user_id: str | None, thread_id: str
+    *,
+    login: str,
+    email: str | None,
+    user_id: str | None,
+    thread_id: str | None = None,
+    import_header: dict[str, Any] | None = None,
 ) -> str:
     now = int(time.time())
     payload = {
@@ -106,6 +118,7 @@ def issue_upload_ticket(
         "email": email,
         "user_id": user_id,
         "thread_id": thread_id,
+        "import_header": import_header,
         "iat": now,
         "exp": now + UPLOAD_TICKET_TTL_SECONDS,
     }
@@ -119,7 +132,7 @@ def decode_upload_ticket(token: str) -> UploadTicket:
             _secret(),
             algorithms=[JWT_ALG],
             audience=UPLOAD_TICKET_AUDIENCE,
-            options={"require": ["aud", "sub", "thread_id", "iat", "exp"]},
+            options={"require": ["aud", "sub", "iat", "exp"]},
         )
         return UploadTicket.model_validate(payload)
     except (jwt.PyJWTError, ValidationError) as exc:

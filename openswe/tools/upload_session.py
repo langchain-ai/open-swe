@@ -1,4 +1,4 @@
-"""Reserve the Open SWE thread a local coding session continues in, and the URL its transcript is posted to."""
+"""Reserve the Robin thread a local coding session continues or is imported into, and the URL its transcript is posted to."""
 
 from typing import Literal
 
@@ -9,20 +9,21 @@ from openswe.threads.session_upload import (
     SessionUploadHeader,
     reserve_session_upload,
 )
-from openswe.tools.access import Policy, access, unchanged
+from openswe.tools.access import Policy, access
 from openswe.tools.admin_gate import configurable
 from openswe.tools.mcp_exposure import expose_mcp
 
 
 @expose_mcp()
 @audit_tool()
-@access(Policy(trusted="private", actor="owner", sole=unchanged))
+# Its upload_token is a credential, so it is never offered where others read the thread.
+@access(Policy(trusted="private", actor="owner"))
 async def upload_session(
     type: SessionType = "claude",
     repo: str | None = None,
     branch: str | None = None,
     pr_url: str | None = None,
-    visibility: Literal["workspace", "private"] = "workspace",
+    visibility: Literal["workspace", "private"] | None = None,
 ) -> dict[str, object]:
     """Implement the `upload_session` tool."""
     cfg = configurable()
@@ -39,5 +40,6 @@ async def upload_session(
             "tools/upload-session-next-step",
             upload_url=reservation.upload_url,
             upload_token=reservation.upload_token,
+            batch=reservation.thread_id is None,
         ),
     }

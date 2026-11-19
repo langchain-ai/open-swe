@@ -4,14 +4,15 @@ import codecs
 import logging
 import uuid
 import zlib
-from collections.abc import AsyncIterator, Awaitable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Iterator, Mapping
 from typing import Any, Literal, Self
 
 from fastapi import HTTPException, Request
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
-from openswe.claude_code.transcript import ClaudeTranscript, TranscriptError
+from openswe.claude_code.transcript import ClaudeTranscript
+from openswe.codex.transcript import CodexTranscript
 from openswe.dashboard.oauth import UPLOAD_TICKET_TTL_SECONDS, UploadTicket, issue_upload_ticket
 from openswe.dashboard.profiles import get_profile
 from openswe.dashboard.repo_access import require_repo_access_for_user
@@ -26,6 +27,7 @@ from openswe.threads.runs import (
     _ASSISTANT_ID,
     _resolve_agent_model_choice,
 )
+from openswe.threads.session_messages import LocalSession, Transcript, TranscriptError
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
     SESSION_UPLOAD_PENDING_KEY,
@@ -50,11 +52,17 @@ _UPLOAD_SENDER: SystemIdentity = {
     "platform": "open-swe",
 }
 
-type SessionType = Literal["claude"]
+type SessionType = Literal["claude", "codex"]
+
+_AGENT_NAMES: dict[SessionType, str] = {"claude": "Claude Code", "codex": "Codex"}
+_TRANSCRIPTS: dict[SessionType, type[Transcript]] = {
+    "claude": ClaudeTranscript,
+    "codex": CodexTranscript,
+}
 
 
 class SessionUploadHeader(BaseModel):
-    """The upload's first line: which agent wrote the transcript that follows, and where its work was pushed."""
+    """Which agent wrote the transcript, and where its work was pushed; nowhere imports past history."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -62,16 +70,81 @@ class SessionUploadHeader(BaseModel):
     repo: str | None = None
     branch: str | None = None
     pr_url: str | None = None
-    visibility: Literal["workspace", "private"] = "workspace"
+    visibility: Literal["workspace", "private"] | None = None
 
     @model_validator(mode="after")
     def _one_target(self) -> Self:
-        if self.pr_url is not None:
-            if self.repo is not None or self.branch is not None:
-                raise ValueError("pass either pr_url or repo and branch, not both")
-        elif self.repo is None or self.branch is None:
-            raise ValueError("pass repo and branch, or pr_url")
+        if self.pr_url is not None and (self.repo is not None or self.branch is not None):
+            raise ValueError("pass either pr_url or repo and branch, not both")
+        if (self.repo is None) != (self.branch is None):
+            raise ValueError("pass repo and branch together")
         return self
+
+    @property
+    def is_import(self) -> bool:
+        return self.pr_url is None and self.repo is None
+
+    @property
+    def private(self) -> bool:
+        """Imported history defaults to private, since nobody reviewed what it holds."""
+        return (self.visibility or ("private" if self.is_import else "workspace")) == "private"
+
+    def import_thread_id(self, owner: str, session_key: str) -> str:
+        """The thread an imported session lands in, the same for every repost of it."""
+        return str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"session-import:{owner}:{self.type}:{session_key}")
+        )
+
+    async def thread_metadata(
+        self, target: _Target | None, login: str, email: str | None, owner_user_id: str | None
+    ) -> tuple[str, dict[str, object]]:
+        """The title and metadata of the thread this upload lands in, still waiting for its transcript."""
+        profile = await get_profile(login) or {}
+        resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, None, None)
+        now_ms = _now_ms()
+        title = (
+            f"Uploaded session on {target.branch}"
+            if target
+            else f"Imported {_AGENT_NAMES[self.type]} session"
+        )
+        metadata: dict[str, object] = {
+            "source": DASHBOARD_SOURCE,
+            "origin": DASHBOARD_SOURCE,
+            "owner_type": "user",
+            "owner_login": login.strip(),
+            "owner_user_id": owner_user_id,
+            "visibility": "private" if self.private else "public",
+            "thread_category": "interactive",
+            "trigger_kind": "user",
+            **await participant_metadata({}, login=login, email=email),
+            "title": title,
+            "base_branch": profile.get("base_branch") or "main",
+            "branch_prefix": profile.get("branch_prefix"),
+            "model": "Default",
+            "effort": None,
+            "resolved_model": resolved_model,
+            "resolved_effort": resolved_effort,
+            "uploaded_session_type": self.type,
+            SESSION_UPLOAD_PENDING_KEY: True,
+            "created_at_ms": now_ms,
+            "updated_at_ms": now_ms,
+            # update_state refuses a thread with no graph, and LangGraph only
+            # stamps graph_id once a run has happened.
+            "graph_id": _ASSISTANT_ID,
+        }
+        if target is None:
+            metadata["repo_explicitly_none"] = True
+        else:
+            metadata |= {
+                "repo_owner": target.owner,
+                "repo_name": target.name,
+                "branch_name": target.branch,
+            }
+        if target is not None and target.pr_url is not None:
+            metadata["pr_url"] = target.pr_url
+            metadata["pr_number"] = target.pr_number
+            metadata["source_context"] = {"pr_number": target.pr_number}
+        return title, metadata
 
 
 UPLOAD_REQUEST_BODY: dict[str, object] = {
@@ -228,21 +301,25 @@ async def _branch_target(repo: str, branch: str, login: str) -> _Target:
     return _Target(owner=repo_config["owner"], name=repo_config["name"], branch=safe_branch)
 
 
-async def _target(header: SessionUploadHeader, login: str) -> _Target:
+async def _target(header: SessionUploadHeader, login: str) -> _Target | None:
     if header.pr_url is not None:
         return await _pull_request_target(header.pr_url, login)
     if header.repo is not None and header.branch is not None:
         return await _branch_target(header.repo, header.branch, login)
-    raise HTTPException(422, "pass repo and branch, or pr_url")
+    return None
 
 
-def _upload_note(target: _Target) -> list[HumanMessage]:
-    data: dict[str, str] = {"repository": target.full_name, "branch": target.branch}
-    if target.pr_url is not None:
-        data["pull_request"] = target.pr_url
+def _upload_note(target: _Target | None, session_type: SessionType) -> list[HumanMessage]:
+    data: dict[str, str] = {}
+    if target is not None:
+        data = {"repository": target.full_name, "branch": target.branch}
+        if target.pr_url is not None:
+            data["pull_request"] = target.pr_url
     notes: list[HumanMessage] = []
     for message in build_input_messages(
-        prompt("runs/uploaded-session"),
+        prompt(
+            "runs/uploaded-session", agent=_AGENT_NAMES[session_type], pushed=target is not None
+        ),
         {
             "sender_id": _UPLOAD_SENDER["id"],
             "surface": "automation",
@@ -264,67 +341,48 @@ def _upload_note(target: _Target) -> list[HumanMessage]:
 
 
 class SessionReservation(BaseModel):
-    """A thread waiting for its transcript, and where and with which one-time token to post it."""
+    """Where and with which token to post transcripts; a continued session's thread waits for its own."""
 
-    thread_id: str
+    thread_id: str | None
     url: str | None
     upload_url: str
     upload_token: str
     expires_in_seconds: int
 
 
-async def reserve_session_upload(
-    header: SessionUploadHeader, login: str, *, email: str | None = None
-) -> SessionReservation:
-    """Create the thread an uploaded session continues in, before its transcript arrives."""
-    target = await _target(header, login)
-    profile = await get_profile(login) or {}
-    resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, None, None)
-    now_ms = _now_ms()
-    title = f"Uploaded session on {target.branch}"
-    metadata: dict[str, Any] = {
-        "source": DASHBOARD_SOURCE,
-        "origin": DASHBOARD_SOURCE,
-        "owner_type": "user",
-        "owner_login": login.strip(),
-        "visibility": "private" if header.visibility == "private" else "public",
-        "thread_category": "interactive",
-        "trigger_kind": "user",
-        **await participant_metadata({}, login=login, email=email),
-        "title": title,
-        "repo_owner": target.owner,
-        "repo_name": target.name,
-        "branch_name": target.branch,
-        "base_branch": profile.get("base_branch") or "main",
-        "branch_prefix": profile.get("branch_prefix"),
-        "model": "Default",
-        "effort": None,
-        "resolved_model": resolved_model,
-        "resolved_effort": resolved_effort,
-        "uploaded_session_type": header.type,
-        SESSION_UPLOAD_PENDING_KEY: True,
-        "created_at_ms": now_ms,
-        "updated_at_ms": now_ms,
-        # update_state refuses a thread with no graph, and LangGraph only
-        # stamps graph_id once a run has happened.
-        "graph_id": _ASSISTANT_ID,
-    }
-    if target.pr_url is not None:
-        metadata["pr_url"] = target.pr_url
-        metadata["pr_number"] = target.pr_number
-        metadata["source_context"] = {"pr_number": target.pr_number}
-
-    thread_id = str(uuid.uuid4())
+async def _create_upload_thread(
+    thread_id: str,
+    header: SessionUploadHeader,
+    target: _Target | None,
+    login: str,
+    email: str | None,
+    owner_user_id: str | None,
+) -> None:
+    title, metadata = await header.thread_metadata(target, login, email, owner_user_id)
     await create_thread(
         langgraph_client(), thread_id, title=title, metadata=metadata, if_exists="raise"
     )
+
+
+async def reserve_session_upload(
+    header: SessionUploadHeader, login: str, *, email: str | None = None
+) -> SessionReservation:
+    """Create the thread a continued session lands in, or a token that imports any number of sessions."""
     user = await User.for_login("github", login)
-    code = issue_upload_ticket(
-        login=login, email=email, user_id=str(user.id) if user else None, thread_id=thread_id
-    )
+    user_id = str(user.id) if user else None
+    thread_id: str | None = None
+    if header.is_import:
+        code = issue_upload_ticket(
+            login=login, email=email, user_id=user_id, import_header=header.model_dump()
+        )
+    else:
+        thread_id = str(uuid.uuid4())
+        target = await _target(header, login)
+        await _create_upload_thread(thread_id, header, target, login, email, user_id)
+        code = issue_upload_ticket(login=login, email=email, user_id=user_id, thread_id=thread_id)
     return SessionReservation(
         thread_id=thread_id,
-        url=dashboard_thread_url(thread_id),
+        url=dashboard_thread_url(thread_id) if thread_id else None,
         upload_url=f"{dashboard_api_base_url()}/dashboard/api/threads/uploads",
         upload_token=code,
         expires_in_seconds=UPLOAD_TICKET_TTL_SECONDS,
@@ -335,15 +393,55 @@ class _ReservedThread(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     owner_login: str
-    repo_owner: str
-    repo_name: str
-    branch_name: str
+    owner_user_id: str | None = None
+    uploaded_session_type: SessionType = "claude"
+    repo_owner: str | None = None
+    repo_name: str | None = None
+    branch_name: str | None = None
     pr_url: str | None = None
     pr_number: int | None = None
     session_upload_pending: bool = False
 
+    @classmethod
+    def claimed(cls, metadata: Mapping[str, object], ticket: UploadTicket) -> Self:
+        """The reservation ``ticket`` may fill, or the HTTP error saying why it may not."""
+        try:
+            reserved = cls.model_validate(metadata)
+        except ValidationError as exc:
+            raise HTTPException(409, "this thread was not reserved for a session upload") from exc
+        if reserved.owner_user_id and ticket.user_id:
+            if reserved.owner_user_id != ticket.user_id:
+                raise HTTPException(409, "this upload code is for another person's thread")
+        elif reserved.owner_login.lower() != ticket.sub.lower():
+            raise HTTPException(409, "this upload code is for another person's thread")
+        return reserved
+
+    def seed_messages(self, thread_id: str, session: LocalSession) -> list[BaseMessage]:
+        messages: list[BaseMessage] = [
+            *session.messages,
+            *_upload_note(self.target, self.uploaded_session_type),
+        ]
+        # Stable ids let a retry after a partial seed replace its messages rather than append them.
+        for index, message in enumerate(messages):
+            message.id = message.id or str(
+                uuid.uuid5(uuid.NAMESPACE_URL, f"session-upload:{thread_id}:{index}")
+            )
+        return messages
+
+    def seeded_metadata(self, session: LocalSession, ticket: UploadTicket) -> dict[str, object]:
+        update: dict[str, object] = {
+            SESSION_UPLOAD_PENDING_KEY: False,
+            "updated_at_ms": _now_ms(),
+            "owner_login": ticket.sub.strip(),
+        }
+        if session.title:
+            update["title"] = session.title
+        return update
+
     @property
-    def target(self) -> _Target:
+    def target(self) -> _Target | None:
+        if self.repo_owner is None or self.repo_name is None or self.branch_name is None:
+            return None
         return _Target(
             owner=self.repo_owner,
             name=self.repo_name,
@@ -354,35 +452,35 @@ class _ReservedThread(BaseModel):
 
 
 async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str, Any] | None:
-    """Seed a reserved thread with the session's history once; ``None`` when it already was.
+    """Seed the ticket's thread with the session's history once; ``None`` when it already was.
 
-    No run starts until the person sends one.
+    An import ticket brings any number of sessions, each into a thread keyed by its session id,
+    so a repost is a no-op. No run starts until the person sends one.
     """
     client = langgraph_client()
+    session: LocalSession | None = None
+    thread_id = ticket.thread_id
+    if thread_id is None:
+        header = SessionUploadHeader.model_validate(ticket.import_header)
+        session = await _read_session(stream, header.type)
+        owner = ticket.user_id or ticket.sub.lower()
+        thread_id = header.import_thread_id(owner, session.key)
+        title, metadata = await header.thread_metadata(
+            None, ticket.sub, ticket.email, ticket.user_id
+        )
+        await create_thread(
+            client, thread_id, title=title, metadata=metadata, if_exists="do_nothing"
+        )
     try:
-        thread = await client.threads.get(ticket.thread_id)
+        thread = await client.threads.get(thread_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(404, "the reserved thread no longer exists") from exc
-    try:
-        reserved = _ReservedThread.model_validate(thread_metadata(thread))
-    except ValidationError as exc:
-        raise HTTPException(409, "this thread was not reserved for a session upload") from exc
-    if reserved.owner_login.lower() != ticket.sub.lower():
-        raise HTTPException(409, "this upload code is for another person's thread")
+    reserved = _ReservedThread.claimed(thread_metadata(thread), ticket)
     if not reserved.session_upload_pending:
         return None
-    transcript = ClaudeTranscript()
-    async for line in stream.lines():
-        transcript.add(line)
-    try:
-        session = transcript.session()
-    except TranscriptError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    if not session.messages:
-        raise HTTPException(422, "the transcript has no messages")
-
-    thread_id = ticket.thread_id
-    messages: list[BaseMessage] = [*session.messages, *_upload_note(reserved.target)]
+    if session is None:
+        session = await _read_session(stream, reserved.uploaded_session_type)
+    messages = reserved.seed_messages(thread_id, session)
     try:
         await client.threads.update_state(thread_id, values={"messages": messages})
         # Seeding leaves the graph's first node pending, which reads as a live run.
@@ -394,15 +492,26 @@ async def upload_session(stream: UploadStream, ticket: UploadTicket) -> dict[str
             exc_info=True,
         )
         raise HTTPException(502, "failed to store the session transcript") from exc
-    update: dict[str, Any] = {SESSION_UPLOAD_PENDING_KEY: False, "updated_at_ms": _now_ms()}
-    if session.title:
-        update["title"] = session.title
+    update = reserved.seeded_metadata(session, ticket)
     await client.threads.update(thread_id=thread_id, metadata=update)
     await mirror_thread_metadata(thread_id, update)
     # Linked only once the thread holds the session, so an abandoned reservation stays off the PR.
-    if reserved.pr_number is not None:
+    if reserved.pr_number is not None and reserved.target is not None:
         await _link_pull_request(reserved.target, reserved.pr_number, thread_id)
     return await _thread_summary(await client.threads.get(thread_id))
+
+
+async def _read_session(stream: UploadStream, session_type: SessionType) -> LocalSession:
+    transcript = _TRANSCRIPTS[session_type]()
+    async for line in stream.lines():
+        transcript.add(line)
+    try:
+        session = transcript.session()
+    except TranscriptError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if not session.messages:
+        raise HTTPException(422, "the transcript has no messages")
+    return session
 
 
 async def _link_pull_request(target: _Target, number: int, thread_id: str) -> None:

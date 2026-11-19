@@ -1,4 +1,8 @@
-The conversation above was uploaded from a local Claude Code session and continues here.
+The conversation above was uploaded from a local {{ agent }} session and continues here.
 Its tool calls ran on the uploader's machine, not in this sandbox, and its tools may not exist here.
+{% if pushed -%}
 Before this upload, the uploader committed and pushed the session's whole working directory to the branch named in this message's data.
 Before you continue the work, check out that branch, and push any further commits to it rather than to a new branch.
+{%- else -%}
+It was imported as history, so none of its local changes were pushed; treat anything it says about files on that machine as possibly out of date.
+{%- endif %}

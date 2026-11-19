@@ -3,12 +3,8 @@ import json
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from openswe.claude_code.transcript import (
-    MISSING_TOOL_RESULT,
-    ClaudeTranscript,
-    TranscriptError,
-    prompt_text,
-)
+from openswe.claude_code.transcript import ClaudeTranscript, prompt_text
+from openswe.threads.session_messages import MISSING_TOOL_RESULT, TranscriptError
 
 
 def _jsonl(*records: dict[str, object]) -> str:

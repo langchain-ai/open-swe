@@ -53,6 +53,7 @@ _TOOL_MODULES = {
     "record_human_input": ".record_human_input",
     "recreate_sandbox": ".recreate_sandbox",
     "report_platform_issue": ".report_platform_issue",
+    "upload_session": ".upload_session",
     "request_human_review": ".request_human_review",
     "request_pr_review": "openswe.slack.tools.request_pr_review",
     "request_rollout_check": ".request_rollout_check",
@@ -146,6 +147,7 @@ __all__ = [
     "record_human_input",
     "recreate_sandbox",
     "report_platform_issue",
+    "upload_session",
     "request_human_review",
     "request_pr_review",
     "request_rollout_check",
@@ -301,6 +303,7 @@ if TYPE_CHECKING:
     )
     from openswe.tools.transcribe_audio import transcribe_audio
     from openswe.tools.update_finding import update_finding
+    from openswe.tools.upload_session import upload_session
     from openswe.tools.user_skills import delete_user_skill, save_user_skill
     from openswe.tools.web_search import web_search
 
