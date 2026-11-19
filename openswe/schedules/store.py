@@ -66,6 +66,7 @@ from openswe.threads.creation import create_thread
 from openswe.threads.store import THREADS
 from openswe.users import User
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.time import now_iso, now_ms
 from openswe.webhooks.common import enforce_public_repo_org_gate, repo_private_from_payload
 
@@ -1110,12 +1111,15 @@ async def _agent_run_metadata(
         creator = await User.automation_creator(record)
         if creator is None:
             raise HTTPException(403, "This personal automation no longer has an owner")
+        owner_login = creator.github_login or f"user:{creator.id}"
         metadata.update(
             automation_creator_user_id=str(creator.id),
             owner_user_id=str(creator.id),
-            owner_login=creator.github_login or f"user:{creator.id}",
+            owner_login=owner_login,
             owner_type="user",
             visibility="private",
+            # The sidebar lists threads by participant, so the owner must be one.
+            **await participant_metadata({}, login=owner_login, email=creator.email or None),
         )
     return metadata
 

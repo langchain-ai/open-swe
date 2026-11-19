@@ -1528,6 +1528,8 @@ async def test_personal_automation_runs_privately_as_its_creator(
     assert metadata["owner_login"] == "alice"
     assert metadata["owner_user_id"] == str(alice.id)
     assert metadata["automation_creator_user_id"] == str(alice.id)
+    # The sidebar finds a person's threads by participant.
+    assert metadata["participant_logins"] == {"alice": True}
     assert metadata["schedule_test"] is test_run
     run = fake_client.runs.created[0]
     assert run["metadata"]["origin"] == ("dashboard" if test_run else "schedule")
@@ -1590,6 +1592,7 @@ async def test_personal_automation_without_github_uses_its_stable_user_identity(
     assert metadata["owner_type"] == "user"
     assert metadata["owner_login"] == f"user:{owner.id}"
     assert metadata["owner_user_id"] == metadata["automation_creator_user_id"] == str(owner.id)
+    assert metadata["participant_logins"] == {f"user:{owner.id}": True}
     configurable = fake_client.runs.created[0]["config"]["configurable"]
     assert configurable["user_id"] == str(owner.id)
     assert configurable["github_linked"] is False
