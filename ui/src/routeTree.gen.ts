@@ -31,6 +31,7 @@ import { Route as AdminUsersRouteImport } from './routes/admin_.users'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
 import { Route as AgentsChatRouteImport } from './routes/agents/chat'
+import { Route as AgentsConnectionsRouteImport } from './routes/agents/connections'
 import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
 import { Route as AgentsWorkspacesRouteImport } from './routes/agents_.workspaces'
@@ -164,6 +165,11 @@ const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
 const AgentsChatRoute = AgentsChatRouteImport.update({
   id: '/chat',
   path: '/chat',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const AgentsConnectionsRoute = AgentsConnectionsRouteImport.update({
+  id: '/connections',
+  path: '/connections',
   getParentRoute: () => AgentsRoute,
 } as any)
 const AgentsSkillsRoute = AgentsSkillsRouteImport.update({
@@ -311,6 +317,7 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/chat': typeof AgentsChatRoute
+  '/agents/connections': typeof AgentsConnectionsRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
@@ -357,6 +364,7 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/chat': typeof AgentsChatRoute
+  '/agents/connections': typeof AgentsConnectionsRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
   '/agents/workspaces': typeof AgentsWorkspacesRoute
@@ -406,6 +414,7 @@ export interface FileRoutesById {
   '/admin_/users': typeof AdminUsersRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/chat': typeof AgentsChatRoute
+  '/agents/connections': typeof AgentsConnectionsRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
   '/agents_/workspaces': typeof AgentsWorkspacesRoute
@@ -456,6 +465,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/agents/$threadId'
     | '/agents/chat'
+    | '/agents/connections'
     | '/agents/skills'
     | '/agents/instructions'
     | '/agents/workspaces'
@@ -502,6 +512,7 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/agents/$threadId'
     | '/agents/chat'
+    | '/agents/connections'
     | '/agents/skills'
     | '/agents/instructions'
     | '/agents/workspaces'
@@ -550,6 +561,7 @@ export interface FileRouteTypes {
     | '/admin_/users'
     | '/agents/$threadId'
     | '/agents/chat'
+    | '/agents/connections'
     | '/agents/skills'
     | '/agents_/instructions'
     | '/agents_/workspaces'
@@ -768,6 +780,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsChatRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/agents/connections': {
+      id: '/agents/connections'
+      path: '/connections'
+      fullPath: '/agents/connections'
+      preLoaderRoute: typeof AgentsConnectionsRouteImport
+      parentRoute: typeof AgentsRoute
+    }
     '/agents/skills': {
       id: '/agents/skills'
       path: '/skills'
@@ -942,6 +961,7 @@ declare module '@tanstack/react-router' {
 interface AgentsRouteChildren {
   AgentsThreadIdRoute: typeof AgentsThreadIdRoute
   AgentsChatRoute: typeof AgentsChatRoute
+  AgentsConnectionsRoute: typeof AgentsConnectionsRoute
   AgentsSkillsRoute: typeof AgentsSkillsRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
   AgentsThreadIdPlanRoute: typeof AgentsThreadIdPlanRoute
@@ -957,6 +977,7 @@ interface AgentsRouteChildren {
 const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsThreadIdRoute: AgentsThreadIdRoute,
   AgentsChatRoute: AgentsChatRoute,
+  AgentsConnectionsRoute: AgentsConnectionsRoute,
   AgentsSkillsRoute: AgentsSkillsRoute,
   AgentsIndexRoute: AgentsIndexRoute,
   AgentsThreadIdPlanRoute: AgentsThreadIdPlanRoute,

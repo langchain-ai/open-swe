@@ -156,6 +156,7 @@ describe("initializeDatadogRum", () => {
         { url: "/agents/workspaces" },
         { url: "/agents/instructions" },
         { url: "/agents/sandbox" },
+        { url: "/agents/connections?tab=tools" },
       ],
       urlClasses: [
         { url: "https://github.com/langchain-ai/open-swe/pull/2203?tab=files" },
@@ -191,6 +192,7 @@ describe("initializeDatadogRum", () => {
         { url: "/agents/workspaces" },
         { url: "/agents/instructions" },
         { url: "/agents/sandbox" },
+        { url: "/agents/connections" },
       ],
       urlClasses: [
         { url: "https://github.com/langchain-ai/open-swe/pull/2203" },

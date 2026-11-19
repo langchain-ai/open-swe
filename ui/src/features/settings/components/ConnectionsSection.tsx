@@ -176,23 +176,11 @@ export function SignInWithLangSmithButton({
   )
 }
 
-function LangSmithRow({ user }: { user: SessionUser }) {
-  if (user.auth_provider !== "langsmith") return null
-  return (
-    <SettingsRow
-      label="LangSmith"
-      description={`Your sign-in account${user.email ? `: ${user.email}` : ""}. Robin calls LangSmith as you with it. Sign out to change accounts.`}
-      control={<StatusPill connected />}
-    />
-  )
-}
-
 export function ConnectionsSection({ user }: { user: SessionUser }) {
   return (
     <SettingsSection title="Accounts">
       <GitHubRow user={user} />
       <SlackRow user={user} />
-      <LangSmithRow user={user} />
     </SettingsSection>
   )
 }

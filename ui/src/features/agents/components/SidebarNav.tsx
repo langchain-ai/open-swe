@@ -8,6 +8,7 @@ import { useSession } from "@/lib/session"
 import { SlackLinks } from "@/lib/slack-links"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
+import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
 import { SparkleIcon } from "@phosphor-icons/react/dist/ssr/Sparkle"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { useRef } from "react"
@@ -32,6 +33,7 @@ interface NavItem {
 
 const NAV: ReadonlyArray<NavItem> = [
   { to: "/agents/skills", label: "Skills", icon: SparkleIcon },
+  { to: "/agents/connections", label: "Connections", icon: LinkIcon },
   { to: "/agents/automations", label: "Automations", icon: LightningIcon },
   { to: "/agents/reviews", label: "Pull Requests", icon: GitPullRequestIcon },
 ]

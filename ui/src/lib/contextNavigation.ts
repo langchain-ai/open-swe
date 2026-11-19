@@ -117,7 +117,10 @@ export class ContextNavigation {
     return {
       key,
       index: location.state.__TSR_index,
-      href: location.href,
+      href:
+        sectionOf(location.pathname) === "/agents/connections"
+          ? location.pathname
+          : location.href,
       label: this.label(location.href),
     }
   }

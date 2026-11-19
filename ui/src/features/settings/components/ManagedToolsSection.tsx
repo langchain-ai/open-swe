@@ -3,9 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
+import { Card } from "@langchain/macaw-components/Card"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import { Input } from "@langchain/macaw-components/Input"
 import { Select } from "@langchain/macaw-components/Select"
+import { Text } from "@langchain/macaw-components/Text"
+import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { api, managedToolConnectUrl } from "@/lib/api"
@@ -182,7 +185,7 @@ function useRemoveServer() {
   return (serverId: string) => remove.mutate(serverId)
 }
 
-function ServerRow({
+function ServerTile({
   server,
   connecting,
   onConnect,
@@ -195,68 +198,64 @@ function ServerRow({
   onDisconnect: (serverId: string) => void
   onRemove: (serverId: string) => void
 }) {
-  const status = server.connected
-    ? undefined
-    : server.kind === "secret"
-      ? "Needs your API key"
-      : "Not connected"
   return (
-    <SettingsRow
-      label={server.name}
-      description={
-        server.personal
-          ? ["Added by you", status].filter(Boolean).join(" · ")
-          : status
-      }
-      control={
-        <div className="flex items-center gap-space-2">
-          {server.connected ? (
-            <>
-              <Badge color="primary" size="xs">
-                Connected
-              </Badge>
-              {server.has_credential ? (
-                <Button
-                  size="xs"
-                  color="secondary"
-                  variant="outlined"
-                  aria-label={`Disconnect ${server.name}`}
-                  onClick={() => onDisconnect(server.id)}
-                >
-                  Disconnect
-                </Button>
-              ) : null}
-            </>
-          ) : (
-            <ConnectButton
-              server={server}
-              href={managedToolConnectUrl(server.id)}
-              connecting={connecting}
-              onConnect={onConnect}
-            />
-          )}
-          {server.personal ? (
-            <Button
-              size="xs"
-              color="secondary"
-              variant="outlined"
-              aria-label={`Remove ${server.name}`}
-              onClick={() => onRemove(server.id)}
-            >
-              Remove
-            </Button>
-          ) : null}
-        </div>
-      }
-    />
+    <div className="flex h-full min-w-0 flex-col justify-between gap-space-2 p-space-3">
+      <Text as="span" variant="md" weight="medium" className="break-words">
+        {server.name}
+      </Text>
+      <Text as="span" variant="xs" color="secondary">
+        {AUTH_LABELS[server.kind]}
+      </Text>
+      <div className="flex flex-wrap items-center gap-space-2">
+        <Badge color={server.connected ? "primary" : "secondary"} size="xs">
+          {server.connected ? "Connected" : "Not connected"}
+        </Badge>
+        {server.connected && server.has_credential ? (
+          <Button
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            aria-label={`Disconnect ${server.name}`}
+            onClick={() => onDisconnect(server.id)}
+          >
+            Disconnect
+          </Button>
+        ) : !server.connected && server.kind !== "none" ? (
+          <ConnectButton
+            server={server}
+            href={managedToolConnectUrl(server.id)}
+            label={server.kind === "secret" ? "Add API key" : undefined}
+            connecting={connecting}
+            onConnect={onConnect}
+          />
+        ) : null}
+        {server.personal ? (
+          <Button
+            size="xs"
+            color="secondary"
+            variant="outlined"
+            aria-label={`Remove ${server.name}`}
+            onClick={() => onRemove(server.id)}
+          >
+            Remove
+          </Button>
+        ) : null}
+      </div>
+    </div>
   )
+}
+
+const AUTH_LABELS: Record<ManagedServer["kind"], string> = {
+  oauth: "Sign-in (OAuth)",
+  secret: "API key",
+  none: "No sign-in required",
 }
 
 const SIGN_IN_TYPES: Array<{ value: NewManagedServer["kind"]; label: string }> =
   [
-    { value: "oauth", label: "OAuth (sign in on the service's page)" },
-    { value: "secret", label: "API key in a request header" },
-    { value: "none", label: "None (public server)" },
+    { value: "oauth", label: "OAuth (sign in and approve access)" },
+    { value: "secret", label: "API key (enter a key from the service)" },
+    { value: "none", label: "None (no sign-in or key)" },
   ]
 
 const EMPTY_SERVER: NewManagedServer = {
@@ -368,64 +367,128 @@ export function ManagedToolsSection() {
   const remove = useRemoveServer()
   const [adding, setAdding] = useState(false)
 
-  if (!view.data?.configured && !view.isLoading) return null
-  // Public workspace services work for everyone without connecting, so only list
-  // the person's own servers and those they connected or could.
-  const servers = (view.data?.servers ?? []).filter(
-    (server) =>
-      server.personal || server.has_credential || server.kind !== "none"
-  )
-  return (
-    <SettingsSection
-      title="Managed Tools"
-      description="The LangSmith Managed Tools services you can use, and MCP servers you add yourself. Your private threads use them with your own accounts; provider tokens stay in LangSmith."
-    >
-      {view.isLoading ? (
-        <p className="p-space-4 text-xs text-secondary">Loading…</p>
-      ) : view.isError ? (
-        <p role="alert" className="p-space-4 text-xs text-error-secondary">
-          {view.error.message}
+  if (view.isPending) {
+    return (
+      <SettingsSection title="Managed Tools">
+        <p role="status" className="p-space-4 text-sm text-secondary">
+          Loading tools…
         </p>
-      ) : !view.data?.langsmith_connected ? (
+      </SettingsSection>
+    )
+  }
+  if (view.isError && !view.data) {
+    return (
+      <SettingsSection title="Managed Tools">
         <SettingsRow
-          label="LangSmith"
-          description="Your LangSmith sign-in expired. Sign in again to use your managed tools."
-          control={<SignInWithLangSmithButton />}
-        />
-      ) : (
-        <>
-          {servers.length === 0 ? (
-            <p className="p-space-4 text-xs text-secondary">No services yet.</p>
-          ) : (
-            servers.map((server) => (
-              <ServerRow
-                key={server.id}
-                server={server}
-                connecting={popup.connecting === server.id}
-                onConnect={popup.start}
-                onDisconnect={disconnect}
-                onRemove={remove}
-              />
-            ))
-          )}
-          <div className="flex items-center justify-between gap-space-3 p-space-4">
-            <p className="text-xs text-secondary">
-              Services a LangSmith workspace admin adds show up here too.
-            </p>
+          label="Couldn't load your tools"
+          control={
             <Button
               size="xs"
               color="secondary"
               variant="outlined"
-              className="shrink-0"
-              onClick={() => setAdding(true)}
+              loading={view.isFetching}
+              onClick={() => void view.refetch()}
             >
-              Add MCP server
+              Retry
             </Button>
+          }
+        />
+      </SettingsSection>
+    )
+  }
+  if (!view.data?.configured) return null
+  if (!view.data.langsmith_connected) {
+    return (
+      <SettingsSection title="Managed Tools">
+        <SettingsRow
+          label="LangSmith"
+          description="Your LangSmith sign-in expired. Sign in again to use your tools."
+          control={<SignInWithLangSmithButton />}
+        />
+      </SettingsSection>
+    )
+  }
+
+  const sorted = [...view.data.servers].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  )
+  const catalog = sorted.filter((server) => !server.personal)
+  const custom = sorted.filter((server) => server.personal)
+  const groups = [
+    {
+      id: "available-tools",
+      title: "Available Tools",
+      description: "LangSmith Managed Tools for your private threads.",
+      empty: "No tools are available.",
+      servers: catalog,
+    },
+    {
+      id: "custom-mcp-servers",
+      title: "Custom MCP Servers",
+      description: "Servers you add and only you can use in private threads.",
+      empty: "You haven't added any MCP servers yet.",
+      servers: custom,
+      control: (
+        <Button
+          size="sm"
+          color="secondary"
+          variant="outlined"
+          leftDecorator={PlusIcon}
+          onClick={() => setAdding(true)}
+        >
+          Add MCP server
+        </Button>
+      ),
+    },
+  ]
+
+  return (
+    <div className="flex flex-col gap-space-6">
+      {groups.map(({ id, title, description, control, empty, servers }) => (
+        <section
+          key={id}
+          aria-labelledby={id}
+          className="flex flex-col gap-space-3"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-space-3">
+            <div className="flex flex-col gap-space-1">
+              <Text as="h2" id={id} variant="h5" weight="medium">
+                {title}
+              </Text>
+              <Text as="p" variant="sm" color="secondary">
+                {description}
+              </Text>
+            </div>
+            {control}
           </div>
-          {adding ? <AddServerDialog onClose={() => setAdding(false)} /> : null}
-        </>
-      )}
-    </SettingsSection>
+          {servers.length ? (
+            <Card className="overflow-hidden p-0">
+              <ul className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,13.5rem),1fr))] gap-px">
+                {servers.map((server) => (
+                  <li
+                    key={server.id}
+                    className="min-w-0 outline-1 outline-(--border-muted)"
+                  >
+                    <ServerTile
+                      server={server}
+                      connecting={popup.connecting === server.id}
+                      onConnect={popup.start}
+                      onDisconnect={disconnect}
+                      onRemove={remove}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : (
+            <Text as="p" role="status" variant="sm" color="secondary">
+              {empty}
+            </Text>
+          )}
+        </section>
+      ))}
+      {adding && <AddServerDialog onClose={() => setAdding(false)} />}
+    </div>
   )
 }
 

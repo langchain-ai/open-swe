@@ -37,7 +37,7 @@ it.each([null, "developer"])(
       </QueryClientProvider>
     )
     expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy()
-    expect(screen.getByText("LangSmith")).toBeTruthy()
+    expect(screen.queryByText("LangSmith")).toBeNull()
     expect(screen.queryByRole("button", { name: "Link GitHub" }) !== null).toBe(
       github_login === null
     )
