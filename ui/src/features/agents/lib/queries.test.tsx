@@ -1746,6 +1746,75 @@ describe("thread read state", () => {
       ).toBe(true)
     )
   })
+
+  it("updates unread state across caches without refetching unfiltered sidebar lists", async () => {
+    const unread = {
+      ...optimisticThread("thread-1", { prompt: "Read me" }),
+      status: "finished" as const,
+      viewed: false,
+    }
+    const listPage = vi.spyOn(agentsApi, "listThreadsPage").mockResolvedValue({
+      items: [unread],
+      limit: 25,
+      offset: 0,
+      hasMore: false,
+    })
+    const listPins = vi
+      .spyOn(agentsApi, "listPinnedThreads")
+      .mockResolvedValue([unread])
+    const listFiltered = vi
+      .spyOn(agentsApi, "setThreadViewed")
+      .mockResolvedValue({ viewed: true })
+    const client = testClient()
+    const unreadFilterParams = { limit: 25, offset: 0, viewed: false }
+    const { result, unmount } = renderHook(
+      () => ({
+        shellPins: useSidebarPinnedThreads(),
+        headerPins: useSidebarPinnedThreads({ refetchOnMount: false }),
+        recents: useSidebarRecents({ repoMode: false }),
+        unreadList: useThreadsPage(unreadFilterParams),
+        setViewed: useSetAgentThreadViewed(),
+      }),
+      { wrapper: wrapperFor(client) }
+    )
+    await waitFor(() =>
+      expect(result.current.recents.items[0]?.viewed).toBe(false)
+    )
+    expect(listPins).toHaveBeenCalledTimes(1)
+    expect(listPage).toHaveBeenCalledTimes(2)
+
+    // Remounting a non-refetching header observer across thread clicks does not refetch pins.
+    const secondHeader = renderHook(
+      () => useSidebarPinnedThreads({ refetchOnMount: false }),
+      { wrapper: wrapperFor(client) }
+    )
+    expect(listPins).toHaveBeenCalledTimes(1)
+    secondHeader.unmount()
+
+    listPage.mockResolvedValue({
+      items: [],
+      limit: 25,
+      offset: 0,
+      hasMore: false,
+    })
+    await act(() =>
+      result.current.setViewed.mutateAsync({
+        threadId: unread.id,
+        viewed: true,
+      })
+    )
+    expect(listFiltered).toHaveBeenCalledTimes(1)
+    // Unfiltered recents and pinned lists keep their patched state without network refetches;
+    // the viewed-filtered page query still invalidates and refetches.
+    await waitFor(() => {
+      expect(result.current.recents.items[0]?.viewed).toBe(true)
+      expect(result.current.shellPins.data?.[0]?.viewed).toBe(true)
+      expect(result.current.unreadList.data?.items).toEqual([])
+    })
+    expect(listPins).toHaveBeenCalledTimes(1)
+    expect(listPage).toHaveBeenCalledTimes(3)
+    unmount()
+  })
 })
 
 describe("sidebar activity invalidation", () => {

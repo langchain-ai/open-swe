@@ -4,6 +4,7 @@ import { Textarea } from "@langchain/macaw-components/Textarea"
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useRef,
   useState,
@@ -197,9 +198,15 @@ export function PlanReview({
     }
   }, [embedded, commentsOpen, dismissPopover])
 
+  const shouldPoll = useEffectEvent(
+    () => canComment && (!embedded || commentsOpen)
+  )
+
   useEffect(() => {
+    if (!canComment) return
     let cancelled = false
     const load = async () => {
+      if (document.visibilityState === "hidden") return
       const mutation = commentMutation.current
       try {
         const next = await getPlanComments(plan.threadId)
@@ -214,12 +221,19 @@ export function PlanReview({
       }
     }
     void load()
-    const timer = window.setInterval(load, POLL_MS)
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "hidden") void load()
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    const timer = window.setInterval(() => {
+      if (shouldPoll()) void load()
+    }, POLL_MS)
     return () => {
       cancelled = true
+      document.removeEventListener("visibilitychange", onVisibilityChange)
       window.clearInterval(timer)
     }
-  }, [plan.threadId])
+  }, [canComment, plan.threadId])
 
   const replyParentMissing =
     replyTo !== null && !comments.some((comment) => comment.id === replyTo.id)

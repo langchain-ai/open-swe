@@ -51,6 +51,7 @@ export function useProfile() {
     queryKey: profileQueryKey(login),
     queryFn: api.profile,
     enabled: !!session.data,
+    staleTime: 60_000,
     select: (profile) => pending.reduce(applyProfileWrite, profile),
   })
 }
@@ -64,6 +65,7 @@ export function useOptions(workspace?: string | null) {
   return useQuery({
     queryKey: ["options", slug],
     queryFn: () => api.options(slug),
+    staleTime: 60_000,
     meta: { invalidatedBy: [invalidationTopic("workspaces")] },
   })
 }

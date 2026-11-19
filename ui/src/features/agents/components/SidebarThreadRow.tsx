@@ -63,7 +63,10 @@ import { parsePullRequestReference } from "@/features/reviews/search"
 import { ThreadMenuItems } from "@/features/agents/components/ThreadMenuItems"
 import { useSidebarThreadSelection } from "@/features/agents/components/SidebarThreadSelection"
 import { DropdownMenuItem } from "@/components/MenuItem"
-import { threadStateUrl } from "@/features/agents/lib/apiWarmup"
+import {
+  threadRunningRunUrl,
+  threadStateUrl,
+} from "@/features/agents/lib/apiWarmup"
 import { earlyReads } from "@/lib/earlyReads"
 import { readPreference } from "@/lib/streamPreference"
 import { runsOnAMac, useLocalThread } from "@/features/agents/lib/desktopLocal"
@@ -562,6 +565,9 @@ export function SidebarThreadRow({
     // opens in it only under the setting.
     if (thread.transcript === "v2" && !readPreference()) return
     earlyReads.start(threadStateUrl(item.id))
+    if (thread.status === "running") {
+      earlyReads.start(threadRunningRunUrl(item.id))
+    }
   }
 
   const handleNavigate = (event: React.MouseEvent<HTMLAnchorElement>) => {

@@ -16,7 +16,13 @@ import type { AgentThread } from "@/features/agents/lib/types"
 
 import { toast } from "sonner"
 
-const { shareThread } = vi.hoisted(() => ({ shareThread: vi.fn() }))
+const { shareThread, useSidebarPinnedThreads, useSidebarRepos } = vi.hoisted(
+  () => ({
+    shareThread: vi.fn(),
+    useSidebarPinnedThreads: vi.fn(() => ({ data: [] })),
+    useSidebarRepos: vi.fn(() => ({ data: [] })),
+  })
+)
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock("@/lib/session", () => ({
   useSession: () => ({ data: { login: "owner" } }),
@@ -28,8 +34,8 @@ vi.mock("@/features/agents/lib/sidebarPrefs", () => ({
   useSidebarPrefs: () => ({ prefs: { filters: {} } }),
 }))
 vi.mock("@/features/agents/lib/queries", () => ({
-  useSidebarPinnedThreads: () => ({ data: [] }),
-  useSidebarRepos: () => ({ data: [] }),
+  useSidebarPinnedThreads,
+  useSidebarRepos,
   useSetAgentThreadViewed: () => ({ isPending: false, mutate: vi.fn() }),
   usePinAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
   useResolveAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
@@ -243,5 +249,34 @@ describe("AgentThreadHeader", () => {
     expect(onRename).not.toHaveBeenCalled()
     expect(screen.queryByRole("textbox")).toBeNull()
     expect(screen.getByText(title)).toBeTruthy()
+  })
+
+  it("renders repository indicator from thread metadata without fetching repos or pins on remount", () => {
+    render(
+      <TooltipProvider>
+        <AgentThreadHeader
+          target="Cloud"
+          panelCollapsed={false}
+          thread={
+            {
+              id: "thread-1",
+              title,
+              repo: "langchainplus",
+              repoFullName: "langchain-ai/langchainplus",
+            } as AgentThread
+          }
+        />
+      </TooltipProvider>
+    )
+    expect(
+      screen.getByRole("button", { name: "Repository: langchainplus" })
+    ).toBeTruthy()
+    expect(useSidebarRepos).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false })
+    )
+    expect(useSidebarPinnedThreads).toHaveBeenCalledWith({
+      enabled: true,
+      refetchOnMount: false,
+    })
   })
 })

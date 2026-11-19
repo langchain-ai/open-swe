@@ -5,7 +5,10 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import { createElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { threadStateUrl } from "@/features/agents/lib/apiWarmup"
+import {
+  threadRunningRunUrl,
+  threadStateUrl,
+} from "@/features/agents/lib/apiWarmup"
 import { useAgentThreadStream } from "@/features/agents/lib/stream/useAgentThreadStream"
 import { subscribeRequestTimings } from "@/lib/perf/fetchTiming"
 import { EarlyReads, earlyReads } from "./earlyReads"
@@ -78,6 +81,21 @@ describe("EarlyReads", () => {
     expect(timed, "the open still times its state read").toContain(
       "thread_state"
     )
+  })
+
+  it("hands a running-run lookup started on a press to the thread page's new stream", async () => {
+    const threadId = "5dd69115-f4b9-507f-b4d5-9f355f9f5ba0"
+    const network = stubAgentServer()
+    earlyReads.start(threadStateUrl(threadId))
+    earlyReads.start(threadRunningRunUrl(threadId))
+
+    await loadedThreadStream(threadId, network)
+
+    const runningLookups = network.mock.calls.filter(([input]) =>
+      String(input).includes("status=running")
+    )
+    expect(runningLookups).toHaveLength(2)
+    expect(stateReads(network)).toHaveLength(1)
   })
 
   it("never hands one to a stream reading its thread again", async () => {

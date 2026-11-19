@@ -50,10 +50,9 @@ import { cn } from "@/lib/utils"
 function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
   const [open, setOpen] = useState(false)
   const { prefs } = useSidebarPrefs()
-  const session = useSession()
   const cloudRepos = useSidebarRepos({
     ...prefs.filters,
-    enabled: Boolean(session.data),
+    enabled: false,
   })
   const repo = thread.repoFullName.trim()
   const repoName =
@@ -127,7 +126,10 @@ export function AgentThreadHeader({
   const TargetIcon = TARGET_ICONS[target]
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const pinnedThreads = useSidebarPinnedThreads({ enabled: Boolean(thread) })
+  const pinnedThreads = useSidebarPinnedThreads({
+    enabled: Boolean(thread),
+    refetchOnMount: false,
+  })
   const pinThread = usePinAgentThread()
   const resolveThread = useResolveAgentThread()
   const deleteThread = useDeleteAgentThread()

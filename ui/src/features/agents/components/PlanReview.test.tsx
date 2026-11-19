@@ -586,4 +586,27 @@ describe("PlanReview", () => {
       "comment-1"
     )
   })
+
+  it("loads embedded comments once while closed and polls only when opened", async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.getPlanComments.mockResolvedValue([comment])
+      await act(async () => {
+        render(<PlanReview plan={plan} embedded />)
+      })
+      expect(mocks.getPlanComments).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(12_000)
+      })
+      expect(mocks.getPlanComments).toHaveBeenCalledTimes(1)
+
+      fireEvent.click(screen.getByRole("button", { name: "Comments (1)" }))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000)
+      })
+      expect(mocks.getPlanComments).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

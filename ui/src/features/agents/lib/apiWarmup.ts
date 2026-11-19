@@ -227,7 +227,7 @@ export function threadStateUrl(threadId: string): string {
  * The stream's first lookup for a running run, which it sends with the state
  * read and joins once both have answered.
  */
-function threadRunningRunUrl(threadId: string): string {
+export function threadRunningRunUrl(threadId: string): string {
   const search = new URLSearchParams({
     limit: "1",
     offset: "0",

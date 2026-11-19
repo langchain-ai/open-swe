@@ -415,7 +415,22 @@ export function useSetAgentThreadViewed() {
     onError: (_error, _vars, context) => {
       if (context) restoreAgentThreadQueries(queryClient, context)
     },
-    onSettled: () => invalidateAgentThreadLists(queryClient),
+    onSettled: () => {
+      void queryClient.invalidateQueries({
+        queryKey: agentThreadKeys.lists,
+        predicate: (query) => {
+          const kind = query.queryKey[2]
+          const params = query.queryKey[3]
+          return (
+            (kind === "page" || kind === "infinite-pages") &&
+            typeof params === "object" &&
+            params !== null &&
+            "viewed" in params &&
+            params.viewed != null
+          )
+        },
+      })
+    },
   })
 }
 
@@ -562,6 +577,7 @@ export function usePersonalAgentSkills(enabled = true) {
   return useQuery({
     queryKey: agentSkillKeys.personal,
     queryFn: listPersonalSkills,
+    staleTime: 60_000,
     enabled,
   })
 }
@@ -570,6 +586,7 @@ export function useOrganizationAgentSkills(enabled = true) {
   return useQuery({
     queryKey: agentSkillKeys.organization,
     queryFn: listOrganizationSkills,
+    staleTime: 60_000,
     enabled,
   })
 }
@@ -728,6 +745,11 @@ function sidebarPageParams({
 export function useSidebarPinnedThreads({
   enabled = true,
   measure = false,
+  refetchOnMount = "always",
+}: {
+  enabled?: boolean
+  measure?: boolean
+  refetchOnMount?: boolean | "always"
 } = {}) {
   const queryClient = useQueryClient()
   const query = useQuery({
@@ -737,7 +759,7 @@ export function useSidebarPinnedThreads({
         !queryClient.getQueryState(agentThreadKeys.pinned)?.dataUpdatedAt
       ),
     enabled,
-    refetchOnMount: "always",
+    refetchOnMount,
     refetchOnWindowFocus: "always",
     refetchInterval: (current) => sidebarRefreshInterval(current.state.data),
     meta: {
@@ -1294,6 +1316,13 @@ export function useWorkflowApprovals(
     queryKey: agentThreadKeys.workflowApprovals(threadId),
     queryFn: () => agentsApi.listWorkflowApprovals(threadId),
     enabled: Boolean(threadId),
+    staleTime: (current) =>
+      pollWhileActive ||
+      current.state.data?.approvals.some(
+        (approval) => approval.status === "pending"
+      )
+        ? 0
+        : 60_000,
     refetchInterval: (current) =>
       pollWhileActive
         ? 3000
