@@ -1,0 +1,14 @@
+version = "1.3"
+
+[metadata]
+source = "robin-slow-trajectories"
+failure_mode = "blocking-foreground-long-commands"
+task_type = "extend_existing"
+linear = "RBN-212"
+traces = ["d10", "d12", "d13"]
+
+[agent]
+timeout_sec = 2400
+
+[verifier]
+timeout_sec = 300

@@ -1,0 +1,14 @@
+version = "1.3"
+
+[metadata]
+source = "robin-slow-trajectories"
+failure_mode = "work-before-answer"
+task_type = "qa"
+linear = "RBN-220"
+traces = ["s08", "d04"]
+
+[agent]
+timeout_sec = 900
+
+[verifier]
+timeout_sec = 60
