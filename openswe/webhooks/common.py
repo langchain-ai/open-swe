@@ -163,6 +163,7 @@ from openswe.utils.repo import extract_repo_from_text
 from openswe.utils.thread_ops import queue_message_for_thread  # noqa: F401
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
+from openswe.utils.thread_reads import read_thread
 
 __all__ = [
     "Any",
@@ -728,7 +729,8 @@ async def upsert_agent_thread_metadata(
                 ):
                     return False
         else:
-            await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
+            if await THREADS.update(thread_id, metadata) is None:
+                raise LookupError(f"Thread {thread_id} is not indexed")
             await mirror_thread_metadata(thread_id, metadata)
         return True
     except Exception:  # noqa: BLE001
@@ -769,24 +771,21 @@ async def get_slack_repo_config(
     """
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
-    langgraph_client = get_client(url=LANGGRAPH_URL)
 
     repo_config: dict[str, str] | None = None
     explicit = False
 
     try:
         resolved_thread_id = thread_id or await resolve_slack_thread_id(channel_id, thread_ts)
-        thread = await langgraph_client.threads.get(resolved_thread_id)
+        thread = await read_thread(resolved_thread_id)
         thread_repo_config = _repo_in_thread_metadata(thread_metadata(thread))
         if thread_repo_config:
             repo_config = thread_repo_config
             explicit = True
-    except Exception as exc:  # noqa: BLE001
-        if not is_not_found_error(exc):
-            logger.debug(
-                "Failed to fetch Slack thread %s for repo resolution",
-                thread_id,
-            )
+    except LookupError:
+        pass
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to fetch Slack thread %s for repo resolution", thread_id)
 
     if not repo_config:
         try:
@@ -846,11 +845,9 @@ class ThreadRecord:
     async def read(cls, thread_id: str) -> ThreadRecord:
         """A thread that does not exist yet reads as an empty record; other failures raise."""
         try:
-            thread = await get_client(url=LANGGRAPH_URL).threads.get(thread_id)
-        except Exception as exc:
-            if is_not_found_error(exc):
-                return cls(exists=False, metadata={})
-            raise
+            thread = await read_thread(thread_id)
+        except LookupError:
+            return cls(exists=False, metadata={})
         return cls(exists=True, metadata=thread_metadata(thread))
 
     @property

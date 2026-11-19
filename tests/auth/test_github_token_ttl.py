@@ -21,6 +21,7 @@ from openswe.github import thread_token as github_token
 from openswe.github import webhook as github_webhooks
 from openswe.users import User
 from openswe.webhooks import common as webhook_common
+from tests.conftest import serve_threads_from
 
 
 @pytest.fixture(autouse=True)
@@ -112,6 +113,7 @@ async def test_private_pr_followup_rejected_before_credentials_or_dispatch(monke
         }
     )
     monkeypatch.setattr(webhook_common, "get_client", lambda **kwargs: client)
+    serve_threads_from(monkeypatch, client.threads.get)
     monkeypatch.setattr(
         webhook_common,
         "extract_pr_context",
@@ -221,6 +223,7 @@ def test_process_github_pr_comment_invalidates_and_reauths_on_401(
     client = MagicMock()
     client.threads.get = AsyncMock(return_value={"metadata": {"source": "github"}})
     monkeypatch.setattr(webhook_common, "get_client", lambda **kwargs: client)
+    serve_threads_from(monkeypatch, client.threads.get)
     monkeypatch.setattr(webhook_common, "extract_pr_context", fake_extract_pr_context)
     monkeypatch.setattr(webhook_common, "get_or_resolve_thread_github_token", fake_get_or_resolve)
     monkeypatch.setattr(webhook_common, "invalidate_cached_github_token", fake_invalidate)
