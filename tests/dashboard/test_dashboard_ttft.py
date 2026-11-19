@@ -271,6 +271,8 @@ async def test_run_completion_times_the_send_from_its_replies_and_closes_its_tra
         ("client.request", {"elapsed_ms": 300}),
         ("first_generation", {"elapsed_ms": 7_500}),
         ("first_text", {"elapsed_ms": 21_000}),
+        # The whole wait for the first text, the one span to chart responsiveness by.
+        ("time_to_first_reply", {"elapsed_ms": 30_000}),
     ]
     assert all(str(span["trace_id"]) == trace_id for span in langsmith.runs)
     assert all(
@@ -467,7 +469,13 @@ async def test_a_completion_delivered_again_does_only_what_the_first_did_not(
         []
         if closed
         else [
-            uuid5(trace_id, name) for name in ("client.request", "first_generation", "first_text")
+            uuid5(trace_id, name)
+            for name in (
+                "client.request",
+                "first_generation",
+                "first_text",
+                "time_to_first_reply",
+            )
         ]
     )
 

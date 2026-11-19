@@ -253,11 +253,26 @@ class SlackRunTimeline:
         if timeline.trace is not None and not await timeline.trace.ended():
             try:
                 timeline.trace.record_stages(
-                    timeline.stages(), run_id=timeline.run_id, sandbox=sandbox
+                    [*timeline.stages(), *timeline.first_reply_stage()],
+                    run_id=timeline.run_id,
+                    sandbox=sandbox,
                 )
             except Exception:
                 logger.warning("Failed to trace a Slack message's stages", exc_info=True)
             await timeline.trace.close(run, failed=failed)
+
+    def first_reply_stage(self) -> list[tuple[str, int, int]]:
+        """The span from the message to the first reply the person saw, once there was one."""
+        first_reply = self.marks.get("first_reply")
+        if first_reply is None:
+            return []
+        return [
+            (
+                DashboardSendTrace.FIRST_REPLY,
+                self.posted_at_ms,
+                max(first_reply, self.posted_at_ms),
+            )
+        ]
 
     def stages(self) -> list[tuple[str, int, int]]:
         """Each stage the run went through, as ``(span name, began, ended)`` in epoch ms,

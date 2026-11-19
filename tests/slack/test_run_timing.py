@@ -416,6 +416,8 @@ async def test_run_completion_adds_the_runs_stages_to_the_messages_trace_and_clo
     assert [(span["name"], span["outputs"]) for span in client.runs] == [
         ("first_generation", {"elapsed_ms": 2_123}),
         ("first_reply", {"elapsed_ms": 2_000}),
+        # The person's whole wait, from posting the message, the run's late start included.
+        ("time_to_first_reply", {"elapsed_ms": 185_000}),
     ]
     assert all(str(span["trace_id"]) == trace_id for span in client.runs)
     # In the project MDA opened the trace in, not the one this backend traces runs in.

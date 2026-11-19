@@ -112,6 +112,8 @@ class DashboardSendTrace:
     _NEST_UNDER_PARENT: Final = "ls_nest_under_parent"
     # The trace's root span.
     NAME: ClassVar[str] = "dashboard.send"
+    # The span from a message to the first reply its sender sees, the stages it spans in one.
+    FIRST_REPLY: ClassVar[str] = "time_to_first_reply"
     # The run metadata that names the send's trace, for its completion to close.
     TRACE_ID_KEY: ClassVar[str] = "dashboard_send_trace_id"
     DOTTED_ORDER_KEY: ClassVar[str] = "dashboard_send_dotted_order"
@@ -727,7 +729,10 @@ class DashboardRunTimeline:
         if self.trace is None:
             return
         # The request that started the run traced ``commands`` itself, as it ran.
-        stages = [stage for stage in self.stages() if stage[0] != "commands"]
+        stages = [
+            *(stage for stage in self.stages() if stage[0] != "commands"),
+            *self.first_reply_stage(),
+        ]
         try:
             self.trace.record_stages(stages, run_id=self.run_id, sandbox=sandbox)
         except Exception:
@@ -798,6 +803,19 @@ class DashboardRunTimeline:
         for name, at in points:
             ordered.append((name, max(at, ordered[-1][1]) if ordered else at))
         return ordered
+
+    def first_reply_stage(self) -> list[tuple[str, int, int]]:
+        """The span from the send to the first text its sender saw, once there was some."""
+        first_text = self.marks.get("ttft")
+        if first_text is None:
+            return []
+        return [
+            (
+                DashboardSendTrace.FIRST_REPLY,
+                self.received_at_ms,
+                max(first_text, self.received_at_ms),
+            )
+        ]
 
     def stages(self) -> list[tuple[str, int, int]]:
         """Each stage the send went through, as ``(span name, began, ended)`` in epoch ms."""
