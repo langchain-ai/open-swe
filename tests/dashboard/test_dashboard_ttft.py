@@ -244,6 +244,15 @@ async def test_run_completion_times_the_send_from_its_replies_and_closes_its_tra
             _reply("Done", output_at=SENT_AT + 29_000, text_at=SENT_AT + 30_000),
         ]
     )
+    run["metadata"].update(  # type: ignore[union-attr]
+        {
+            "billing_bucket": "user",
+            "billed_user_email": "ada@example.com",
+            "user_email": "ada@example.com",
+            "kind": "agent",
+            "event_match_ids": ["not-a-root-key"],
+        }
+    )
 
     with caplog.at_level(logging.INFO, logger=ttft.__name__):
         await ttft.DashboardRunTimeline.settle(run, failed=False)
@@ -284,6 +293,17 @@ async def test_run_completion_times_the_send_from_its_replies_and_closes_its_tra
     assert fields["end_time"] == ttft.DashboardSendTrace.at(SENT_AT + 60_000)
     assert fields["outputs"] == {"messages": [run["values"]["messages"][-1]]}  # type: ignore[index]
     assert fields["error"] is None
+    # The root bills and counts the send as the run it started, for charts of root traces.
+    assert fields["extra"] == {
+        "metadata": {
+            "thread_id": "thread-1",
+            "dashboard_client": "web",
+            "billing_bucket": "user",
+            "billed_user_email": "ada@example.com",
+            "user_email": "ada@example.com",
+            "kind": "agent",
+        }
+    }
 
 
 async def test_a_run_that_gave_no_output_traces_only_its_request_stages(

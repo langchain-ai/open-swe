@@ -39,7 +39,7 @@ from runtime_api.loop import FIRST_OUTPUT_AT_KEY, FIRST_TEXT_AT_KEY
 from openswe.bridge.store import Bridge
 from openswe.config import ENV
 from openswe.threads.runtimes import MdaRuntime
-from openswe.trace_metadata import RunOrigin
+from openswe.trace_metadata import BILLING_FIELDS, RunOrigin
 from openswe.utils.datadog_spans import DatadogSpans
 from openswe.utils.langsmith import (
     async_langsmith_client,
@@ -119,6 +119,12 @@ class DashboardSendTrace:
     _ENDED_TIMEOUT_S: Final = 5
     # The root's metadata each stage span repeats, so stages chart by client on their own.
     _SPAN_KEYS: ClassVar[tuple[str, ...]] = ("thread_id", "invocation_id", "dashboard_client")
+    # The run's metadata the root takes on as it closes: whom the run is for and what it
+    # was, so charts of root traces count and bill a send like any other run. The root's
+    # own keys travel too, since a run update replaces its metadata.
+    _CLOSE_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {*_SPAN_KEYS, "origin", "owner_ls_user_id", "kind", "user_email", *BILLING_FIELDS}
+    )
 
     def __init__(
         self, root: RunTree, commands: RunTree | None = None, *, posted: bool = True
@@ -271,6 +277,12 @@ class DashboardSendTrace:
     def trace_id(self) -> str:
         return str(self.root.id)
 
+    @property
+    def root_metadata(self) -> Mapping[str, object]:
+        """The metadata the root was opened or taken up with."""
+        metadata = self.root.extra.get("metadata") if self.root.extra else None
+        return metadata if isinstance(metadata, Mapping) else {}
+
     def run_metadata(self) -> dict[str, str]:
         """What the run's metadata carries so its completion can close this trace."""
         return {self.TRACE_ID_KEY: self.trace_id, self.DOTTED_ORDER_KEY: self.root.dotted_order}
@@ -349,12 +361,23 @@ class DashboardSendTrace:
             values = run.get("values")
             messages = values.get("messages") if isinstance(values, Mapping) else None
             error = run.get("error")
+            metadata = run.get("metadata")
+            closing = (
+                {
+                    key: value
+                    for key, value in {**metadata, **self.root_metadata}.items()
+                    if key in self._CLOSE_KEYS and isinstance(value, str)
+                }
+                if isinstance(metadata, Mapping)
+                else {}
+            )
             # The sync client redacts outputs as configured and sends on its background batch.
             sync_langsmith_client(api_key, ENV.LANGSMITH_ENDPOINT.get()).update_run(
                 self.trace_id,
                 end_time=self.time_of(run.get("run_ended_at")) or datetime.now(UTC),
                 outputs={"messages": messages[-1:]} if isinstance(messages, list) else None,
                 error=(str(error) if error else "The run did not succeed") if failed else None,
+                extra={"metadata": closing} if closing else None,
                 trace_id=self.trace_id,
                 dotted_order=self.root.dotted_order,
                 session_name=self.root.session_name,
@@ -398,10 +421,7 @@ class DashboardSendTrace:
     ) -> None:
         """Post a span per stage, each with an id of its own trace and name, so tracing
         them again rewrites the same spans."""
-        root_metadata = self.root.extra.get("metadata") if self.root.extra else None
-        shared = {
-            key: value for key, value in (root_metadata or {}).items() if key in self._SPAN_KEYS
-        }
+        shared = {key: value for key, value in self.root_metadata.items() if key in self._SPAN_KEYS}
         for name, began, ended in stages:
             self.root.create_child(
                 name,

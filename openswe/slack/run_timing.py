@@ -57,6 +57,9 @@ class SlackSendTrace(DashboardSendTrace):
     TRACE_ID_KEY = SEND_TRACE_ID_KEY
     DOTTED_ORDER_KEY = SEND_DOTTED_ORDER_KEY
     _SPAN_KEYS = ("thread_id", "invocation_id")
+    # The run is a root of its own that carries its attribution, so the message's root
+    # takes none on as it closes; counting both would count the turn twice.
+    _CLOSE_KEYS: ClassVar[frozenset[str]] = frozenset()
 
     @classmethod
     def project_of(cls, metadata: Mapping[str, object]) -> str:

@@ -400,6 +400,8 @@ async def test_run_completion_adds_the_runs_stages_to_the_messages_trace_and_clo
         slack_send_trace_id=trace_id,
         slack_send_dotted_order=f"20260101T000000123456Z{trace_id}",
         slack_send_project="open-swe-mda-preview-production",
+        billing_bucket="user",
+        kind="agent",
         # Created three minutes after the message: one the channel handed its trace to
         # is the message's run however late.
         created_at="2026-01-01T00:03:01+00:00",
@@ -433,6 +435,8 @@ async def test_run_completion_adds_the_runs_stages_to_the_messages_trace_and_clo
     assert fields["end_time"] == ttft.DashboardSendTrace.at(POSTED_MS - 123 + 210_000)
     assert fields["error"] is None
     assert fields["session_name"] == "open-swe-mda-preview-production"
+    # The run is its own attributed root, so the message's root takes none of it on.
+    assert fields["extra"] is None
     retrieve.assert_awaited_once()
 
 
