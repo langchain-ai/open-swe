@@ -1,15 +1,18 @@
 """Recovery delivery reconciles uncertain sends and rejects unbound callers."""
 
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid7
 
 import pytest
 from pydantic import JsonValue
+from tenacity import wait_none
 
 from openswe.merge_queue import diagnosis
 from openswe.merge_queue.configuration import QueueConfiguration
-from openswe.merge_queue.diagnosis import QueueRecovery
+from openswe.merge_queue.diagnosis import QueueBusy, QueueRecovery
+from openswe.merge_queue.models import Lease
 from openswe.merge_queue.recovery import (
     RecoveryDecision,
     RecoveryMember,
@@ -43,6 +46,63 @@ class SlackDelivery:
             }
         )
         raise TimeoutError("Slack accepted the message but the response was lost")
+
+
+class RecoveryTurn:
+    def __init__(self, service, state, history, outcome):
+        self.service, self.state, self.history = service, state, history
+        self.outcome = outcome
+        self.held = False
+        self.active = False
+        self.wakes = 0
+        self.wake_claims: set[tuple[str, str]] = set()
+        self.dispatch_started = asyncio.Event()
+        self.allow_dispatch = asyncio.Event()
+
+    async def claim_wake(self, scope: str, key: str, *, ttl: timedelta) -> bool:
+        if (scope, key) in self.wake_claims:
+            return False
+        self.wake_claims.add((scope, key))
+        return True
+
+    async def release_wake(self, scope: str, key: str) -> None:
+        self.wake_claims.remove((scope, key))
+
+    async def latest(self, thread_id: str) -> Mock:
+        return Mock(active=self.active)
+
+    async def claim(self, owner, ttl, *, config):
+        if self.held:
+            return None
+        self.held = True
+        return Lease(owner=owner, fence=1)
+
+    async def release(self, lease):
+        self.held = False
+
+    async def ensure(self, *args):
+        return self.state
+
+    async def save(self, batch_id, state, lease):
+        assert self.held
+        self.state = state
+
+    async def bound(self):
+        return self.history, self.state
+
+    async def wake(self, *args, **kwargs):
+        self.wakes += 1
+        if self.outcome == "overlap":
+            self.dispatch_started.set()
+            await self.allow_dispatch.wait()
+        if self.outcome == "failed":
+            raise TimeoutError("Dispatch did not start")
+        self.active = True
+        await self.service.notify("notice")
+        await self.service.follow_up(30)
+        if self.outcome == "lost_response":
+            raise TimeoutError("Dispatch accepted but response lost")
+        return self.state.thread_id
 
 
 class TestRecoveryDelivery:
@@ -164,11 +224,19 @@ class TestRecoveryDelivery:
         assert proposal.suggested_fix in message
 
     @pytest.mark.parametrize(
-        "requested,busy,paused",
-        [(False, False, False), (True, False, False), (True, True, False), (False, False, True)],
+        "requested,busy,paused,outcome",
+        [
+            (False, False, False, "ok"),
+            (True, False, False, "ok"),
+            (True, True, False, "ok"),
+            (False, False, True, "ok"),
+            (True, False, False, "failed"),
+            (True, False, False, "lost_response"),
+            (False, False, False, "overlap"),
+        ],
     )
     async def test_followup_during_unchanged_replacement_validation(
-        self, monkeypatch, requested, busy, paused
+        self, monkeypatch, requested, busy, paused, outcome
     ):
         service, state, _ = await self.setup(monkeypatch)
         service.config.repository = "acme/widgets"
@@ -181,11 +249,28 @@ class TestRecoveryDelivery:
             attempts=[Mock(id=uuid7(), state="failed"), Mock(id=uuid7(), state="running")],
             decisions=[Mock(id=pause_id, plan={})] if paused else [],
         )
-        state = state.model_copy(update={"delivered": await service.fingerprint(history)})
-        service.queue.ensure_recovery_thread = AsyncMock(return_value=state)
+        state = state.model_copy(
+            update={
+                "delivered": "previous"
+                if (requested and not busy) or outcome == "overlap"
+                else await service.fingerprint(history)
+            }
+        )
+        turn = RecoveryTurn(service, state, history, outcome)
+        turn.active = busy
+        monkeypatch.setattr(diagnosis.event_claims, "claim", turn.claim_wake)
+        monkeypatch.setattr(diagnosis.event_claims, "release", turn.release_wake)
+        service.queue.ensure_recovery_thread = turn.ensure
         service.queue.history = AsyncMock(return_value=history)
-        service.queue.update_recovery_thread = AsyncMock()
-        service.leased = Mock(return_value=AsyncMock())
+        service.queue.update_recovery_thread = turn.save
+        service.queue.claim, service.queue.release = turn.claim, turn.release
+        service.bound = turn.bound
+        service.notices = AsyncMock(return_value={"notice": "Confirmed result"})
+        service.post_once = AsyncMock(return_value="123.789")
+        monkeypatch.setattr(QueueRecovery.claim.retry, "wait", wait_none())
+        monkeypatch.setattr(MergeQueue, "load", AsyncMock(return_value=service.queue))
+        coalesce = AsyncMock()
+        monkeypatch.setattr(diagnosis.jobs, "coalesce", coalesce)
         service.operator = AsyncMock(
             return_value=Mock(id=state.settings.operator_id, slack_user_id="UOPERATOR")
         )
@@ -202,33 +287,86 @@ class TestRecoveryDelivery:
         monkeypatch.setattr(
             diagnosis,
             "RUNTIMES",
-            Mock(
-                runs_on=Mock(
-                    return_value=Mock(latest_run=AsyncMock(return_value=Mock(active=busy)))
-                )
-            ),
+            Mock(runs_on=Mock(return_value=Mock(latest_run=turn.latest))),
         )
-        wake = AsyncMock()
-        monkeypatch.setattr(diagnosis, "wake_thread_owner", wake)
+        monkeypatch.setattr(diagnosis, "wake_thread_owner", turn.wake)
         job = Mock(
+            key=f"{diagnosis.JOB}:{history.batch.id}" + (":followup" if requested else ""),
             payload={
                 "queue_id": str(service.queue.id),
                 "workspace_id": str(service.queue.workspace_id),
                 "batch_id": str(history.batch.id),
                 "investigate": requested,
-            }
+            },
         )
-        await QueueRecovery.run(job)
-        if requested and not busy:
-            wake.assert_awaited_once()
-        else:
-            wake.assert_not_awaited()
-        if requested and busy:
-            service.schedule.assert_any_await(
-                history.batch.id,
-                minutes=state.followup_minutes,
-                replace=True,
-                investigate=True,
+        if outcome == "overlap":
+            first = asyncio.create_task(QueueRecovery.run(job))
+            followup = Mock(
+                key=f"{diagnosis.JOB}:{history.batch.id}:followup",
+                payload={**job.payload, "investigate": True},
             )
-        elif not requested:
-            service.schedule.assert_not_awaited()
+            try:
+                async with asyncio.timeout(2):
+                    await turn.dispatch_started.wait()
+                    assert not turn.held
+                    with pytest.raises(QueueBusy, match="wake is already in progress"):
+                        await QueueRecovery.run(followup)
+                    assert turn.wakes == 1
+                    turn.allow_dispatch.set()
+                    await first
+                    await QueueRecovery.run(followup)
+                    assert turn.wakes == 1
+            finally:
+                first.cancel()
+                await asyncio.gather(first, return_exceptions=True)
+        elif outcome == "ok":
+            await QueueRecovery.run(job)
+        else:
+            with pytest.raises(TimeoutError):
+                await QueueRecovery.run(job)
+        assert not turn.held
+        assert not turn.wake_claims
+        if (requested and not busy) or outcome == "overlap":
+            assert turn.wakes == 1
+            if outcome != "failed":
+                assert turn.active
+                assert turn.state.notices == {"notice": "123.789"}
+                assert turn.state.followup_minutes == 30
+            if outcome in {"ok", "overlap"}:
+                assert turn.state.delivered == await service.fingerprint(history)
+            else:
+                assert turn.state.delivered == state.delivered
+        else:
+            assert turn.wakes == 0
+        if outcome == "overlap":
+            assert coalesce.await_count == 2
+            assert {call.kwargs["key"] for call in coalesce.await_args_list} == {
+                job.key,
+                followup.key,
+            }
+        elif requested:
+            coalesce.assert_awaited_once()
+            assert coalesce.call_args.kwargs["key"] == job.key
+            assert coalesce.call_args.args[1] == job.payload
+        else:
+            coalesce.assert_not_awaited()
+        if outcome == "lost_response":
+            await QueueRecovery.run(job)
+            assert turn.wakes == 1
+            service.post_once.assert_awaited_once()
+        elif outcome == "failed":
+            turn.outcome = "ok"
+            await QueueRecovery.run(job)
+            assert turn.wakes == 2
+            assert turn.state.notices == {"notice": "123.789"}
+
+    async def test_brief_contention_retries_before_running_a_tool(self, monkeypatch):
+        service, _, _ = await self.setup(monkeypatch)
+        lease = Lease(owner=uuid7(), fence=1)
+        service.queue.claim = AsyncMock(side_effect=[None, lease])
+        service.queue.release = AsyncMock()
+        monkeypatch.setattr(QueueRecovery.claim.retry, "wait", wait_none())
+        monkeypatch.setattr(MergeQueue, "load", AsyncMock(return_value=service.queue))
+        async with service.leased() as claimed:
+            assert claimed == lease
+        service.queue.release.assert_awaited_once_with(lease)

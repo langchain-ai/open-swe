@@ -11,6 +11,7 @@ from openswe.merge_queue import dispatch
 from openswe.merge_queue.admission import QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.dispatch import (
+    DeferralForbidden,
     DispatchEnvelope,
     DispatchGateway,
     DispatchRejected,
@@ -163,7 +164,10 @@ def test_service_suite_policy_requires_new_revision_and_changes_validation_trust
     assert updated.generation != config.generation
 
 
-@pytest.mark.parametrize("outcome", ["ok", "timeout", "gateway", "redirect", "rejected"])
+@pytest.mark.parametrize(
+    "outcome",
+    ["ok", "timeout", "gateway", "redirect", "rejected", "forbidden", "unsigned", "wrong-request"],
+)
 async def test_deferral_uses_gateway_without_replaying_uncertain_removal(monkeypatch, outcome):
     envelope = DispatchEnvelope(
         contract=ValidationRequest(
@@ -195,9 +199,16 @@ async def test_deferral_uses_gateway_without_replaying_uncertain_removal(monkeyp
         }
         if outcome == "timeout":
             raise httpx2.ReadTimeout("Response lost", request=request)
+        headers = {"Location": "https://other.example/"}
+        if outcome in {"forbidden", "wrong-request"}:
+            headers["X-Merge-Queue-Deferral-Signature"] = hmac.digest(
+                b"s" * 32,
+                b"deferral-forbidden:" + (request.content if outcome == "forbidden" else b"other"),
+                "sha256",
+            ).hex()
         return httpx2.Response(
-            {"ok": 204, "gateway": 502, "redirect": 307, "rejected": 409}[outcome],
-            headers={"Location": "https://other.example/"},
+            {"ok": 204, "gateway": 502, "redirect": 307, "rejected": 409}.get(outcome, 403),
+            headers=headers,
         )
 
     monkeypatch.setattr(dispatch, "pooled_transport", lambda: httpx2.MockTransport(respond))
@@ -207,6 +218,9 @@ async def test_deferral_uses_gateway_without_replaying_uncertain_removal(monkeyp
     if outcome == "ok":
         await gateway.defer(envelope, key, member, expires_at=envelope.expires_at)
     else:
-        with pytest.raises((httpx2.HTTPError, ValueError)):
+        with pytest.raises((httpx2.HTTPError, ValueError)) as error:
             await gateway.defer(envelope, key, member, expires_at=envelope.expires_at)
+        assert isinstance(error.value, DeferralForbidden) is (outcome == "forbidden")
+        if outcome == "forbidden":
+            assert "GitHub denied queue removal" in str(error.value)
     assert len(sent) == 1

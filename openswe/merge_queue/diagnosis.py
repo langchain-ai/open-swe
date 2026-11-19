@@ -12,7 +12,9 @@ from uuid import NAMESPACE_URL, UUID, uuid5, uuid7
 
 from pydantic import BaseModel, JsonValue
 from sqlalchemy import select
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
+from openswe import event_claims
 from openswe.config import ENV
 from openswe.database import postgres
 from openswe.github.http import GitHubClient
@@ -43,6 +45,10 @@ class SlackMessage(BaseModel):
     ts: str
     user: str | None = None
     metadata: dict[str, JsonValue] | None = None
+
+
+class QueueBusy(ValueError):
+    """Another queue operation or recovery wake still holds its bounded claim."""
 
 
 class QueueRecovery:
@@ -86,11 +92,21 @@ class QueueRecovery:
             raise PermissionError("Recovery channel is no longer verified and readable")
         return user
 
-    @asynccontextmanager
-    async def leased(self) -> AsyncIterator[Lease]:
+    @retry(
+        retry=retry_if_exception_type(QueueBusy),
+        stop=stop_after_attempt(4),
+        wait=wait_fixed(1),
+        reraise=True,
+    )
+    async def claim(self) -> Lease:
         lease = await self.queue.claim(uuid7(), timedelta(seconds=60), config=self.config)
         if lease is None:
-            raise ValueError("Queue reconciliation is busy; try again shortly")
+            raise QueueBusy("Queue reconciliation is busy; try this recovery tool again shortly")
+        return lease
+
+    @asynccontextmanager
+    async def leased(self) -> AsyncIterator[Lease]:
+        lease = await self.claim()
         try:
             async with asyncio.timeout(45):
                 current = await MergeQueue.load(self.queue.id, self.queue.workspace_id)
@@ -401,25 +417,38 @@ class QueueRecovery:
         ) != job.payload.get("workspace_id"):
             return
         batch_id = UUID(str(job.payload["batch_id"]))
-        settings = service.config.recovery
+        scope = f"{JOB}:wake"
+        key = f"{service.queue.workspace_id}:{service.queue.id}:{batch_id}"
+        if not await event_claims.claim(scope, key, ttl=timedelta(minutes=2)):
+            raise QueueBusy("A recovery wake is already in progress; the job will retry")
+        try:
+            # Both delivery job keys share this claim, while agent tools use only the queue lease.
+            # End delivery before the claim expires so another worker cannot overlap this wake.
+            async with asyncio.timeout(90):
+                await service.deliver(job, batch_id)
+        finally:
+            await event_claims.release(scope, key)
+
+    async def deliver(self, job: Job, batch_id: UUID) -> None:
+        settings = self.config.recovery
         assert settings is not None
-        operator = await service.operator()
-        async with service.leased() as lease:
-            state = await service.queue.ensure_recovery_thread(batch_id, settings, lease)
-            history = await service.queue.history(batch_id)
+        operator = await self.operator()
+        async with self.leased() as lease:
+            state = await self.queue.ensure_recovery_thread(batch_id, settings, lease)
+            history = await self.queue.history(batch_id)
             if state.thread_ts is None:
-                ts = await service.post_once(
+                ts = await self.post_once(
                     state,
                     f"recovery:{batch_id}",
                     f"Robin is investigating merge queue batch `{batch_id}` "
-                    f"in `{service.config.repository}`.",
+                    f"in `{self.config.repository}`.",
                     oldest=history.batch.created_at,
                 )
                 state = state.model_copy(update={"thread_ts": ts})
-                await service.queue.update_recovery_thread(batch_id, state, lease)
+                await self.queue.update_recovery_thread(batch_id, state, lease)
             assert state.thread_ts is not None
             await bind_slack_thread_id(settings.channel_id, state.thread_ts, state.thread_id)
-            owner, repo_name = service.config.repository.split("/", 1)
+            owner, repo_name = self.config.repository.split("/", 1)
             await THREADS.create(
                 state.thread_id,
                 title="Merge queue recovery",
@@ -431,16 +460,16 @@ class QueueRecovery:
                     "visibility": "private",
                     "owner_login": operator.github_login,
                     "repo": {"owner": owner, "name": repo_name},
-                    GITHUB_TOKEN_REPOSITORIES_KEY: [service.config.repository],
+                    GITHUB_TOKEN_REPOSITORIES_KEY: [self.config.repository],
                 },
             )
-            fingerprint = await service.fingerprint(history)
-            pending = await service.pending_keys(history, state)
-            paused = service.queue.paused and service.queue.recovery_pause_id in {
+            fingerprint = await self.fingerprint(history)
+            pending = await self.pending_keys(history, state)
+            paused = self.queue.paused and self.queue.recovery_pause_id in {
                 d.id for d in history.decisions
             }
             if history.batch.state != "active" and not paused and not pending:
-                await service.queue.update_recovery_thread(
+                await self.queue.update_recovery_thread(
                     batch_id, state.model_copy(update={"settled": True}), lease
                 )
                 return
@@ -456,7 +485,13 @@ class QueueRecovery:
                 return
             # Keep a durable follow-up before handing work to the model, including
             # when a previous run is active or a wake response is lost.
-            await service.schedule(batch_id, minutes=state.followup_minutes, replace=True)
+            assert job.key is not None
+            await jobs.coalesce(
+                JOB,
+                job.payload,
+                key=job.key,
+                due_at=datetime.now(UTC) + timedelta(minutes=state.followup_minutes),
+            )
             thread = await THREADS.get(state.thread_id)
             latest = (
                 await RUNTIMES.runs_on(thread.runtime).latest_run(state.thread_id)
@@ -464,20 +499,22 @@ class QueueRecovery:
                 else None
             )
             if latest is not None and latest.active:
-                if requested:
-                    await service.schedule(
-                        batch_id, minutes=state.followup_minutes, replace=True, investigate=True
-                    )
                 return
-            await wake_thread_owner(
-                settings.channel_id,
-                state.thread_ts,
-                operator.slack_user_id,
-                prompt("merge-queue/recovery", batch_id=str(batch_id)),
-            )
-            await service.queue.update_recovery_thread(
-                batch_id, state.model_copy(update={"delivered": fingerprint}), lease
-            )
+
+        # The agent can immediately call tools that need this queue's lease.
+        await wake_thread_owner(
+            settings.channel_id,
+            state.thread_ts,
+            operator.slack_user_id,
+            prompt("merge-queue/recovery", batch_id=str(batch_id)),
+            wait_for_completion=False,
+        )
+        async with self.leased() as lease:
+            current = await self.queue.ensure_recovery_thread(batch_id, settings, lease)
+            if current.thread_id == state.thread_id and current.delivered == state.delivered:
+                await self.queue.update_recovery_thread(
+                    batch_id, current.model_copy(update={"delivered": fingerprint}), lease
+                )
 
     async def act(self, proposal: RecoveryProposal) -> dict[str, JsonValue]:
         from openswe.merge_queue.controller import QueueController

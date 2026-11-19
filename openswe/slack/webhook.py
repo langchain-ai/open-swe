@@ -576,9 +576,14 @@ async def process_slack_mention(
         await notify_slack_processing_error(request, repo.repo if repo else None, exc)
 
 
-async def start_slack_run(request: SlackRequest, repo: common.SlackRepoResolution | None) -> bool:
+async def start_slack_run(
+    request: SlackRequest,
+    repo: common.SlackRepoResolution | None,
+    *,
+    wait_for_completion: bool = True,
+) -> bool:
     """Process ``request`` without the error reply ``process_slack_mention`` posts; whether a run started."""
-    return await _process_slack_mention_impl(request, repo)
+    return await _process_slack_mention_impl(request, repo, wait_for_completion=wait_for_completion)
 
 
 async def notify_slack_processing_error(
@@ -919,6 +924,7 @@ async def _process_slack_mention_impl(
     model_choice: tuple[str, str | None] | None = None,
     status_shown: asyncio.Future[bool] | None = None,
     channel_run: _ChannelRunCapture | None = None,
+    wait_for_completion: bool = True,
 ) -> bool:
     resolution = repo_resolution or common.SlackRepoResolution()
     repo = resolution.repo
@@ -1690,5 +1696,6 @@ async def _process_slack_mention_impl(
             run_id=run_id,
             channel_id=channel_id,
             thread_ts=thread_ts,
+            wait_for_completion=wait_for_completion,
         )
     return bool(isinstance(run_id, str) and run_id)

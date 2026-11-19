@@ -24,7 +24,12 @@ from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.controller import QueueController
 from openswe.merge_queue.diagnosis import JOB as RECOVERY_JOB
 from openswe.merge_queue.diagnosis import QueueRecovery
-from openswe.merge_queue.dispatch import DispatchGateway, DispatchRejected, WorkflowPolicyMismatch
+from openswe.merge_queue.dispatch import (
+    DeferralForbidden,
+    DispatchGateway,
+    DispatchRejected,
+    WorkflowPolicyMismatch,
+)
 from openswe.merge_queue.git import Candidate, CandidateGit, PullHead, candidate_ref
 from openswe.merge_queue.models import (
     Attempt,
@@ -2320,7 +2325,7 @@ class TestNativeRecovery:
         assert "superseded_attempts" not in history.batch.policy
 
     @pytest.mark.parametrize(
-        "outcome", ["removed", "lost_response", "publication_timeout", "rejected"]
+        "outcome", ["removed", "lost_response", "publication_timeout", "rejected", "forbidden"]
     )
     async def test_deferral_through_gateway_requires_fresh_survivor_validation(
         self, queue, outcome
@@ -2369,6 +2374,7 @@ class TestNativeRecovery:
             side_effect={
                 "lost_response": httpx2.ReadTimeout("Response lost"),
                 "publication_timeout": TimeoutError("Publication deadline expired"),
+                "forbidden": DeferralForbidden("GitHub denied queue removal"),
             }.get(outcome)
         )
         if outcome == "rejected":
@@ -2395,9 +2401,11 @@ class TestNativeRecovery:
         assert args[1:] == (proposal.request_key, proposal.member)
         assert kwargs == {"expires_at": work.batch.deadline}
         history = await queue.history(work.batch.id)
-        if outcome == "rejected":
+        if outcome in {"rejected", "forbidden"}:
             assert history.decisions[0].plan["status"] == "escalated"
-            assert "HTTPStatusError" in history.decisions[0].plan["detail"]
+            assert (
+                "HTTPStatusError" if outcome == "rejected" else "GitHub denied queue removal"
+            ) in history.decisions[0].plan["detail"]
             assert (await queue.snapshot(limit=1))[0]
             assert await queue.pending_native_recovery(lease) is None
             return

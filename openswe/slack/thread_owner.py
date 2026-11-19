@@ -25,7 +25,13 @@ class ThreadOwnerWakeError(Exception):
 
 
 async def wake_thread_owner(
-    channel_id: str, thread_ts: str, slack_user_id: str, event: str, *, origin: str = "slack"
+    channel_id: str,
+    thread_ts: str,
+    slack_user_id: str,
+    event: str,
+    *,
+    origin: str = "slack",
+    wait_for_completion: bool = True,
 ) -> str:
     """Start a run for the thread's owning agent, acting for ``slack_user_id``, about ``event``."""
     thread_id = await resolve_slack_thread_id(channel_id, thread_ts)
@@ -60,6 +66,7 @@ async def wake_thread_owner(
             thread_id=thread_id,
         ),
         repo,
+        wait_for_completion=wait_for_completion,
     )
     if not started:
         raise ThreadOwnerWakeError(f"No run started for the agent of Slack thread {thread_ts}")

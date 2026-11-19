@@ -48,6 +48,10 @@ class DispatchRejected(ValueError):
         super().__init__(f"Queue dispatch rejected ({status})")
 
 
+class DeferralForbidden(ValueError):
+    """The gateway confirmed GitHub rejected the queue removal for lack of permission."""
+
+
 class DispatchGateway:
     def __init__(self, url: str, secret: SecretStr):
         if len(secret.get_secret_value()) < 32:
@@ -122,6 +126,14 @@ class DispatchGateway:
                 follow_redirects=False,
             )
             self._check_policy_mismatch(response, body)
+            if response.status_code == 403 and hmac.compare_digest(
+                self._signature(body, b"deferral-forbidden:").encode(),
+                response.headers.get("X-Merge-Queue-Deferral-Signature", "").encode(),
+            ):
+                raise DeferralForbidden(
+                    "GitHub denied queue removal; restore the dispatch gateway App's "
+                    "repository permissions before retrying recovery"
+                )
             response.raise_for_status()
             if response.status_code != 204:
                 raise ValueError("Queue deferral was not acknowledged")

@@ -41,8 +41,23 @@ async def show_slack_thinking_status(
     channel_id: str,
     thread_ts: str,
     run_thread_id: str | None = None,
+    wait_for_completion: bool = True,
 ) -> None:
     """Refresh Slack's status until the run and its task's active runs finish."""
+    if not wait_for_completion:
+        observer = asyncio.create_task(
+            show_slack_thinking_status(
+                client=client,
+                thread_id=thread_id,
+                run_id=run_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                run_thread_id=run_thread_id,
+            )
+        )
+        _STATUS_OBSERVERS.add(observer)
+        observer.add_done_callback(_STATUS_OBSERVERS.discard)
+        return
     if not await restore_slack_thinking_status(channel_id, thread_ts):
         return
 
@@ -247,18 +262,15 @@ async def sync_slack_background_status(
     )
     if run_id is None or refreshed is None or refreshed.thread_id == thread_id:
         return
-    observer = asyncio.create_task(
-        show_slack_thinking_status(
-            client=client,
-            thread_id=refreshed.thread_id,
-            run_id=run_id,
-            channel_id=refreshed.channel_id,
-            thread_ts=refreshed.thread_ts,
-            run_thread_id=thread_id,
-        )
+    await show_slack_thinking_status(
+        client=client,
+        thread_id=refreshed.thread_id,
+        run_id=run_id,
+        channel_id=refreshed.channel_id,
+        thread_ts=refreshed.thread_ts,
+        run_thread_id=thread_id,
+        wait_for_completion=False,
     )
-    _STATUS_OBSERVERS.add(observer)
-    observer.add_done_callback(_STATUS_OBSERVERS.discard)
 
 
 @dataclass(frozen=True)

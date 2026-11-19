@@ -267,3 +267,25 @@ async def test_move_tool_uses_current_or_explicit_channel_without_moving_twice(
     repeated = await move_thread.slack_move_thread("Breakout", "C4")
     assert repeated["channel_id"] == target
     root.assert_awaited_once()
+
+
+async def test_background_status_returns_while_the_run_is_still_active(statuses):
+    client = _LangGraph({"channel_id": "C1", "thread_ts": "1.0"})
+    await slack_move.bind_slack_thread_id("C1", "1.0", "thread-1")
+    async with asyncio.timeout(2):
+        await slack_thinking.show_slack_thinking_status(
+            client=client,
+            thread_id="thread-1",
+            run_id="run-1",
+            channel_id="C1",
+            thread_ts="1.0",
+            wait_for_completion=False,
+        )
+        try:
+            await _ticks()
+            assert not client.runs.finished.is_set()
+            assert ("C1", "1.0", "Thinking...") in statuses
+        finally:
+            client.runs.finished.set()
+            await asyncio.gather(*slack_thinking._STATUS_OBSERVERS)
+    assert statuses[-1] == ("C1", "1.0", "")
