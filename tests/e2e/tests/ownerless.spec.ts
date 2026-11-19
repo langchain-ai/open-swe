@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { typeIntoComposer } from "./helpers/dashboard";
 
 // Threads have no owner: every authenticated user has the same rights on every
 // thread. What differs per user is only which threads their sidebar lists —
@@ -70,13 +71,6 @@ async function sidebarThreadIds(page: Page): Promise<Array<string>> {
     }
   }
   return ids;
-}
-
-async function typeIntoComposer(page: Page, text: string) {
-  const editor = page.getByTestId("composer-editor");
-  await editor.click();
-  await editor.pressSequentially(text);
-  await editor.press("Enter");
 }
 
 async function waitForStateToContain(

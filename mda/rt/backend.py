@@ -17,6 +17,7 @@ its own.
 import asyncio
 import logging
 import os
+import socket
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -70,6 +71,20 @@ TOOL_CALL_SLACK_SECONDS: Final = 300.0
 # backend rollout takes; which calls are sent again is each endpoint's ``delivery``.
 _RETRY_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0, 30.0, 30.0)
 _GATEWAY_STATUSES: Final = frozenset({502, 503, 504})
+# The firewall between the runtime and the backend forgets a connection after about ten
+# idle minutes and drops the reply to a call held open longer, so a probe goes out
+# every minute while one waits.
+_KEEPALIVE_SECONDS: Final = 60
+_KEEPALIVE: Final = (
+    (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1),
+    # macOS names the idle time TCP_KEEPALIVE; Linux has only TCP_KEEPIDLE.
+    (
+        socket.IPPROTO_TCP,
+        socket.TCP_KEEPIDLE if hasattr(socket, "TCP_KEEPIDLE") else socket.TCP_KEEPALIVE,
+        _KEEPALIVE_SECONDS,
+    ),
+    (socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, _KEEPALIVE_SECONDS),
+)
 _json = TypeAdapter(JsonValue)
 _json_object = TypeAdapter(dict[str, JsonValue])
 _json_list = TypeAdapter(list[JsonValue])
@@ -225,7 +240,9 @@ class _Connections:
         loop = asyncio.get_running_loop()
         client = self._clients.get(loop)
         if client is None or client.is_closed:
-            client = httpx2.AsyncClient()
+            client = httpx2.AsyncClient(
+                transport=httpx2.AsyncHTTPTransport(socket_options=_KEEPALIVE)
+            )
             self._clients[loop] = client
         return client
 

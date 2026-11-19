@@ -318,6 +318,30 @@ def _preparing(**update: JsonValue) -> Answer:
     return answer
 
 
+async def test_calls_to_the_backend_keep_their_connection_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A call held open past the firewall's idle limit still gets its reply (RBN-213)."""
+    import socket
+
+    from rt.backend import _Connections
+
+    made: list[list[tuple[int, int, int]]] = []
+    real = httpx2.AsyncHTTPTransport
+
+    def transport(*, socket_options: list[tuple[int, int, int]]) -> httpx2.AsyncHTTPTransport:
+        made.append(list(socket_options))
+        return real(socket_options=socket_options)
+
+    monkeypatch.setattr(httpx2, "AsyncHTTPTransport", transport)
+
+    _Connections().client()
+
+    [options] = made
+    assert (socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1) in options
+    assert all(seconds <= 60 for level, name, seconds in options if level == socket.IPPROTO_TCP)
+
+
 @pytest.mark.parametrize(
     ("failure", "failures", "attempts"),
     [("connect", 10, 11), ("connect", 11, 11), (503, 1, 1), (504, 1, 1)],
