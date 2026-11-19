@@ -11,7 +11,8 @@ of a running thread, or in a run started for it.
 
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, Mapping
+from contextlib import asynccontextmanager
 from typing import Final, Self
 
 from langgraph_sdk.errors import NotFoundError
@@ -30,6 +31,7 @@ from openswe.threads.wake_budget import MONITOR_WAKES
 from openswe.ui_invalidations.topics import Topic
 from openswe.utils.background_task_state import RUNNING_MONITORS_KEY, update_background_task_state
 from openswe.utils.thread_ops import langgraph_client
+from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
 from openswe.webhooks.event_matches import EventMatch
 
 logger = logging.getLogger(__name__)
@@ -147,41 +149,64 @@ class ThreadMonitorDelivery:
         backend = await connect_sandbox(sandbox_id)
         return cls(thread_id, metadata, SandboxMonitors(backend, thread_id))
 
+    @classmethod
+    @asynccontextmanager
+    async def lock(cls, thread_id: str) -> AsyncGenerator[None]:
+        """Serialize monitor start and sync for ``thread_id``."""
+        async with agent_thread_pr_state_lock(f"monitor:{thread_id}"):
+            yield
+
     async def sync(self) -> bool:
         """Record and deliver what the monitors emitted; whether one is still running."""
+        async with self.lock(self._thread_id):
+            return await self._sync()
+
+    async def _sync(self) -> bool:
         pending = await self._monitors.pending()
         running = [monitor.monitor_id for monitor in pending if monitor.status == "running"]
         # Anything tracked that the sandbox no longer runs is done, including a
-        # monitor whose directory went with a recreated sandbox.
-        await update_background_task_state(
+        # monitor whose directory went with a recreated sandbox. It is untracked
+        # only after delivery, so an ended monitor stays tracked until its end
+        # notice reached the thread and a client waiting for the thread to settle
+        # never sees it idle in between. Starting a monitor holds the same lock
+        # across tracking and sandbox launch, so a concurrent sync cannot untrack
+        # one before its sandbox state exists; this only removes, so an earlier
+        # sync never restores what a later one removed.
+        untrack = update_background_task_state(
             langgraph_client(),
             self._thread_id,
-            running=running,
             finished=[item for item in _tracked(self._metadata) if item not in running],
             key=RUNNING_MONITORS_KEY,
         )
         budget = ThreadMonitorBudget(langgraph_client(), self._thread_id)
-        recorded = spent = False
-        owed = _owed(pending)
-        while owed:
-            wanted = sum(len(monitor.events_pending) for monitor in owed)
-            granted = await budget.take_events(wanted)
-            # Events past the allowance are skipped, not saved for later: the
-            # monitors stop, and their end notices say why.
-            spent = spent or granted < wanted
-            await self._record(_within(owed, granted))
-            for monitor in owed:
-                last = monitor.events_pending[-1].seq if monitor.events_pending else 0
-                await self._monitors.ack(monitor.monitor_id, seq=last, end=monitor.end is not None)
-            recorded = True
-            if not any(monitor.behind for monitor in owed):
-                break
-            owed = _owed(await self._monitors.pending())
-        if spent:
-            await self._stop_running(pending, EVENTS_SPENT_REASON)
-        if recorded:
-            await Topic.THREAD_BACKGROUND_WORK.invalidate(key=self._thread_id)
-            await self._wake(pending)
+        try:
+            recorded = spent = False
+            owed = _owed(pending)
+            while owed:
+                wanted = sum(len(monitor.events_pending) for monitor in owed)
+                granted = await budget.take_events(wanted)
+                # Events past the allowance are skipped, not saved for later: the
+                # monitors stop, and their end notices say why.
+                spent = spent or granted < wanted
+                await self._record(_within(owed, granted))
+                for monitor in owed:
+                    last = monitor.events_pending[-1].seq if monitor.events_pending else 0
+                    await self._monitors.ack(
+                        monitor.monitor_id, seq=last, end=monitor.end is not None
+                    )
+                recorded = True
+                if not any(monitor.behind for monitor in owed):
+                    break
+                owed = _owed(await self._monitors.pending())
+            if spent:
+                await self._stop_running(pending, EVENTS_SPENT_REASON)
+            if recorded:
+                await Topic.THREAD_BACKGROUND_WORK.invalidate(key=self._thread_id)
+                await self._wake(pending)
+        except BaseException:
+            untrack.close()
+            raise
+        await untrack
         return bool(running)
 
     async def _record(self, monitors: list[PendingMonitor]) -> None:

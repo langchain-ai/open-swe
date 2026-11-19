@@ -24,6 +24,7 @@ from openswe.utils.thread_participants import PARTICIPANT_IDENTITY_PREFIX, PARTI
 from openswe.webhooks import event_matches
 from openswe.webhooks.event_matches import EventMatch
 from openswe.webhooks.event_subscriptions import EventSubscription
+from tests.conftest import serve_threads_from
 
 MODEL = "openai:gpt-6-astra"
 COORDINATOR = str(uuid4())
@@ -747,6 +748,7 @@ async def test_coordinator_settles_once_every_worker_report_has_reached_it(
     from openswe.tasks.events import worker_finished
 
     monkeypatch.setattr(activity, "langgraph_client", lambda: client)
+    serve_threads_from(monkeypatch, client.threads.get)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     actor = service.Actor(COORDINATOR, OWNER)
     assert (await activity.CoordinatorActivity.of(COORDINATOR)).settled
@@ -804,6 +806,7 @@ async def test_report_held_through_a_long_coordinator_run_is_awaited_once_it_end
     from openswe.tasks.events import worker_finished
 
     monkeypatch.setattr(activity, "langgraph_client", lambda: client)
+    serve_threads_from(monkeypatch, client.threads.get)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     first = str(uuid4())
     coordinating: dict[str, object] = {
@@ -850,6 +853,7 @@ async def test_cancelling_a_coordinators_workers_spares_finished_ones(
     from openswe.tasks.events import finished_delivery_id, worker_finished
 
     monkeypatch.setattr(activity, "langgraph_client", lambda: client)
+    serve_threads_from(monkeypatch, client.threads.get)
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     actor = service.Actor(COORDINATOR, OWNER)
     running = str((await launch(actor, "running", "Implement"))["worker_thread_id"])

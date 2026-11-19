@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -488,3 +489,160 @@ async def test_events_past_the_allowance_stop_the_monitors(
     assert len(owed) == budget.MAX_EVENTS
     assert acked == [60]
     assert stopped == {"mon-noisy": budget.EVENTS_SPENT_REASON}
+
+
+@pytest.mark.usefixtures("registry_db", "memory_event_claims")
+async def test_an_ended_monitor_stays_tracked_until_its_end_notice_is_delivered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = FakeThreads()
+    threads.metadata = {"running_monitors": ["mon-done"]}
+    client = SimpleNamespace(threads=threads)
+    monkeypatch.setattr(delivery, "langgraph_client", lambda: client)
+    tracked_at_delivery: list[object] = []
+
+    async def deliver(thread_id: str, strategy: str) -> bool:
+        tracked_at_delivery.append(threads.metadata.get("running_monitors"))
+        return True
+
+    monkeypatch.setattr(EventMatch, "deliver", deliver)
+    ended = PendingMonitor(
+        monitor_id="mon-done", status="completed", exit_code=0, end=MonitorEnd(tail=[(1, "done")])
+    )
+
+    class Monitors:
+        async def pending(self) -> list[PendingMonitor]:
+            return [ended]
+
+        async def ack(self, monitor_id: str, *, seq: int, end: bool) -> None:
+            return None
+
+    await ThreadMonitorDelivery("thread-1", threads.metadata, Monitors()).sync()
+
+    # A client waiting for the thread to settle never sees it idle before the end run exists.
+    assert tracked_at_delivery == [["mon-done"]]
+    assert threads.metadata["running_monitors"] == []
+
+
+@pytest.mark.usefixtures("registry_db", "memory_event_claims")
+async def test_an_overlapping_sync_never_restores_a_monitor_another_one_untracked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = FakeThreads()
+    threads.metadata = {"running_monitors": ["mon-live"]}
+    client = SimpleNamespace(threads=threads)
+    monkeypatch.setattr(delivery, "langgraph_client", lambda: client)
+
+    async def deliver(thread_id: str, strategy: str) -> bool:
+        # Another sync saw the monitor end, delivered its end notice and untracked it.
+        threads.metadata = {"running_monitors": []}
+        return True
+
+    monkeypatch.setattr(EventMatch, "deliver", deliver)
+    live = PendingMonitor(
+        monitor_id="mon-live",
+        status="running",
+        events_pending=[
+            MonitorEvent.model_validate({"seq": 1, "at_raw_line": 1, "lines": ["ERROR"]})
+        ],
+    )
+
+    class Monitors:
+        async def pending(self) -> list[PendingMonitor]:
+            return [live]
+
+        async def ack(self, monitor_id: str, *, seq: int, end: bool) -> None:
+            return None
+
+    await ThreadMonitorDelivery("thread-1", {"running_monitors": ["mon-live"]}, Monitors()).sync()
+
+    assert threads.metadata["running_monitors"] == []
+
+
+@pytest.mark.usefixtures("memory_event_claims")
+async def test_a_monitor_that_cannot_be_tracked_is_never_started(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor_tool = importlib.import_module("openswe.tools.monitor")
+    start = AsyncMock()
+    monkeypatch.setattr(monitor_tool, "current_backend", lambda: ("thread-1", object()))
+    monkeypatch.setattr(monitor_tool, "langgraph_client", lambda: object())
+    monkeypatch.setattr(
+        monitor_tool,
+        "ThreadMonitorBudget",
+        lambda *_: SimpleNamespace(start=AsyncMock(return_value=60)),
+    )
+    monkeypatch.setattr(
+        monitor_tool,
+        "update_background_task_state",
+        AsyncMock(side_effect=RuntimeError("metadata unavailable")),
+    )
+    monkeypatch.setattr(monitor_tool, "uses_completion_callback", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        monitor_tool.RunConfig, "from_runtime", lambda: SimpleNamespace(origin="dashboard")
+    )
+    monkeypatch.setattr(SandboxMonitors, "start", start)
+
+    result = await monitor_tool.monitor("start", "sleep 60", description="sleep", timeout=60)
+
+    # An untracked monitor would let `robin run` exit while it still needs the sandbox.
+    assert result["success"] is False
+    start.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("memory_event_claims")
+async def test_a_concurrent_sync_cannot_untrack_a_starting_monitor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor_tool = importlib.import_module("openswe.tools.monitor")
+    threads = FakeThreads()
+    client = SimpleNamespace(threads=threads)
+    monkeypatch.setattr(delivery, "langgraph_client", lambda: client)
+    monkeypatch.setattr(monitor_tool, "langgraph_client", lambda: client)
+    monkeypatch.setattr(monitor_tool, "current_backend", lambda: ("thread-1", object()))
+    monkeypatch.setattr(
+        monitor_tool,
+        "ThreadMonitorBudget",
+        lambda *_: SimpleNamespace(start=AsyncMock(return_value=60)),
+    )
+    monkeypatch.setattr(monitor_tool, "uses_completion_callback", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        monitor_tool.RunConfig, "from_runtime", lambda: SimpleNamespace(origin="dashboard")
+    )
+
+    launching = asyncio.Event()
+    release = asyncio.Event()
+    sandbox_monitors: list[PendingMonitor] = []
+
+    async def start(self: SandboxMonitors, monitor_id: str, **_: object) -> PendingMonitor:
+        launching.set()
+        await release.wait()
+        started = PendingMonitor(monitor_id=monitor_id, status="running", callback=True)
+        sandbox_monitors.append(started)
+        return started
+
+    monkeypatch.setattr(SandboxMonitors, "start", start)
+
+    class Monitors:
+        async def pending(self) -> list[PendingMonitor]:
+            return list(sandbox_monitors)
+
+        async def ack(self, monitor_id: str, *, seq: int, end: bool) -> None:
+            return None
+
+    start_task = asyncio.create_task(
+        monitor_tool.monitor("start", "sleep 60", description="sleep", timeout=60)
+    )
+    await launching.wait()
+    # A sync reads metadata after registration but before the monitor exists in the sandbox.
+    sync_task = asyncio.create_task(
+        ThreadMonitorDelivery("thread-1", dict(threads.metadata), Monitors()).sync()
+    )
+    await asyncio.sleep(0.05)
+    release.set()
+
+    result, running = await asyncio.gather(start_task, sync_task)
+
+    assert result["success"] is True
+    assert running is True
+    assert threads.metadata["running_monitors"] == [result["monitor_id"]]

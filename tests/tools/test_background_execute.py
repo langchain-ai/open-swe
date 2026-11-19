@@ -695,6 +695,8 @@ async def test_reconcile_refreshes_task_state_after_completion_dispatch(
         stored.update(metadata)
 
     async def create(*args: object, **kwargs: object) -> dict[str, str]:
+        # Tracked until its completion run exists, so the thread never looks settled between.
+        assert stored["running_background_tasks"] == ["cmd-old"]
         stored["running_background_tasks"] = ["cmd-followup"]
         return {"run_id": "run-followup"}
 
@@ -726,9 +728,8 @@ async def test_reconcile_refreshes_task_state_after_completion_dispatch(
     assert stored["running_background_tasks"] == ["cmd-followup"]
     # Only an idle Slack settlement needs another snapshot after the run was created.
     assert client.threads.get.await_count == (4 if slack and not run_active else 2)
-    client.threads.update.assert_awaited_once_with(
-        "thread-1", metadata={"running_background_tasks": []}
-    )
+    # Untracking the delivered command leaves the follow-up's own command tracked.
+    client.threads.update.assert_not_awaited()
     if slack:
         assert set_status.await_args is not None
         assert set_status.await_args.args == (

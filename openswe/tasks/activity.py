@@ -2,8 +2,8 @@
 
 The ``oswe`` CLI serves its thread's sandbox from the user's machine, and workers
 share that sandbox, so it keeps serving until the coordinator has nothing left
-to run: no live run, no task message on its way, and no worker that may still
-report.
+to run: no live run, no task message on its way, no worker that may still
+report, and no background command or monitor whose completion wakes it.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -17,6 +17,8 @@ from openswe.tasks import store
 from openswe.tasks.events import finished_delivery_id
 from openswe.tasks.messages import TaskMessage
 from openswe.tasks.schemas import Run
+from openswe.threads.store import THREADS
+from openswe.utils.background_task_state import RUNNING_BACKGROUND_TASKS_KEY, RUNNING_MONITORS_KEY
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.thread_ops import langgraph_client
 
@@ -109,6 +111,7 @@ class CoordinatorActivity(BaseModel):
     runs: list[str]
     running: bool
     awaiting_delivery: bool
+    background_work: bool
     workers: list[WorkerActivity]
 
     @computed_field
@@ -118,12 +121,25 @@ class CoordinatorActivity(BaseModel):
         return (
             not self.running
             and not self.awaiting_delivery
+            and not self.background_work
             and not any(worker.active for worker in self.workers)
+        )
+
+    @staticmethod
+    async def has_background_work(thread_id: str) -> bool:
+        """Whether a background command or monitor the thread started will wake it when done."""
+        thread = await THREADS.get(thread_id)
+        metadata = thread.metadata if thread is not None else {}
+        return any(
+            isinstance(tracked := metadata.get(key), list) and bool(tracked)
+            for key in (RUNNING_BACKGROUND_TASKS_KEY, RUNNING_MONITORS_KEY)
         )
 
     @classmethod
     async def of(cls, thread_id: str, *, after: str | None = None) -> Self:
         """The thread's activity; ``runs`` are the ids of those created after ``after``."""
+        # Read before the runs: a finished command stays tracked until its completion run exists.
+        background_work = await cls.has_background_work(thread_id)
         newer, latest = await cls.runs_after(thread_id, after)
         running = latest is not None and latest.live
         lost_before = datetime.now(UTC) - LOST_AFTER
@@ -167,6 +183,7 @@ class CoordinatorActivity(BaseModel):
             runs=[run.run_id for run in reversed(newer)],
             running=running,
             awaiting_delivery=awaiting,
+            background_work=background_work,
             workers=[
                 WorkerActivity.from_runs(
                     delegation,

@@ -443,6 +443,12 @@ async def test_a_machine_reads_the_workers_of_only_the_thread_it_started(
         await api_thread_workers(thread_id, theirs)
     assert refused.value.status_code == 404
 
+    # A background command's completion wakes the thread, so the CLI keeps serving until then.
+    await index.update(thread_id, {"running_background_tasks": ["cmd-1"]})
+    assert not (await api_thread_workers(thread_id, mine)).settled
+    await index.update(thread_id, {"running_background_tasks": []})
+    assert (await api_thread_workers(thread_id, mine)).settled
+
 
 async def test_a_machine_stream_ends_on_a_thread_another_machine_started(
     machine: _FakeClient,

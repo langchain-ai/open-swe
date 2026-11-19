@@ -1,4 +1,8 @@
 import { spawn } from "node:child_process"
+import { createReadStream } from "node:fs"
+import { mkdtemp, open, rm, stat } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { errorCode } from "./json"
 
@@ -123,71 +127,113 @@ export class LocalExecutor {
   ): Promise<ExecuteResult> {
     const seconds =
       timeout !== null && timeout > 0 ? timeout : DEFAULT_TIMEOUT_SECONDS
-    // Detached puts the shell in its own process group, so a timeout can signal
-    // everything it spawned; killing only `sh` leaves children holding the pipes.
-    const proc = spawn("sh", ["-c", command], {
-      cwd: this.cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: this.env,
-      detached: true,
-    })
-    const signalGroup = (signal: NodeJS.Signals): void => {
-      if (proc.pid === undefined) return
-      try {
-        process.kill(-proc.pid, signal)
-      } catch (cause) {
-        if (errorCode(cause) !== "ESRCH") throw cause
-      }
-    }
-
-    const captured = new OutputWindow()
-    let timedOut = false
-    let stopped = false
-    let escalation: ReturnType<typeof setTimeout> | null = null
-    const terminate = () => {
-      signalGroup("SIGTERM")
-      escalation ??= setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS)
-    }
-    const stop = () => {
-      stopped = true
-      terminate()
-    }
-    this.running.add(stop)
-    const deadline = setTimeout(() => {
-      timedOut = true
-      terminate()
-    }, seconds * 1000)
-    proc.stdout.on("data", (chunk: Buffer) => captured.push(chunk))
-    proc.stderr.on("data", (chunk: Buffer) => captured.push(chunk))
-
-    let exitCode: number | null = null
+    // Output goes to a file, not a pipe: a server the command starts
+    // (`postfix start`, `qemu … &`) inherits it, and a pipe would keep the
+    // command from ever finishing, then break the server's writes once this
+    // process exits. The file outlives both.
+    const outputDir = await mkdtemp(join(tmpdir(), "open-swe-command-"))
     try {
-      exitCode = await new Promise<number | null>((done, fail) => {
-        proc.once("error", fail)
-        proc.once("close", (code) => done(code))
-      })
-    } finally {
-      this.running.delete(stop)
-      clearTimeout(deadline)
-      if (escalation !== null) clearTimeout(escalation)
-    }
+      const outputPath = join(outputDir, "output")
+      const file = await open(outputPath, "w", 0o600)
+      let proc: ReturnType<typeof spawn>
+      let exited: Promise<number | null>
+      try {
+        // Detached puts the shell in its own process group, so a timeout can
+        // signal everything it spawned.
+        proc = spawn("sh", ["-c", command], {
+          cwd: this.cwd,
+          stdio: ["ignore", file.fd, file.fd],
+          env: this.env,
+          detached: true,
+        })
+        // Listen before awaiting anything: a fast command exits, and a missing
+        // working directory fails the spawn, while the file is still closing.
+        const child = proc
+        exited = new Promise<number | null>((done, fail) => {
+          child.once("error", fail)
+          child.once("exit", (code) => done(code))
+        })
+        exited.catch(() => {})
+      } finally {
+        await file.close()
+      }
+      const group = proc.pid
+      const signalGroup = (signal: NodeJS.Signals | 0): boolean => {
+        if (group === undefined) return false
+        try {
+          process.kill(-group, signal)
+          return true
+        } catch (cause) {
+          if (errorCode(cause) !== "ESRCH") throw cause
+          return false
+        }
+      }
 
-    const { output, truncated } = captured.finish()
-    if (stopped) {
-      return {
-        output: `${output}\n[command stopped]`,
-        exit_code: TIMEOUT_EXIT_CODE,
-        truncated,
+      let timedOut = false
+      let stopped = false
+      let escalation: ReturnType<typeof setTimeout> | null = null
+      let markKilled = (): void => {}
+      const killed = new Promise<void>((done) => {
+        markKilled = done
+      })
+      const terminate = () => {
+        signalGroup("SIGTERM")
+        escalation ??= setTimeout(() => {
+          signalGroup("SIGKILL")
+          markKilled()
+        }, KILL_GRACE_MS)
       }
-    }
-    if (timedOut) {
-      return {
-        output: `${output}\n[command timed out after ${seconds}s]`,
-        exit_code: TIMEOUT_EXIT_CODE,
-        truncated,
+      const stop = () => {
+        stopped = true
+        terminate()
       }
+      this.running.add(stop)
+      const deadline = setTimeout(() => {
+        timedOut = true
+        terminate()
+      }, seconds * 1000)
+
+      let exitCode: number | null = null
+      try {
+        exitCode = await exited
+        // A terminated command is over only once nothing in its group survives
+        // SIGTERM; what a finished command left running keeps running.
+        if (escalation !== null && signalGroup(0)) await killed
+      } finally {
+        this.running.delete(stop)
+        clearTimeout(deadline)
+        if (escalation !== null) clearTimeout(escalation)
+      }
+
+      const captured = new OutputWindow()
+      // Up to the size at exit: a server the command left running may still be writing.
+      const { size } = await stat(outputPath)
+      if (size > 0) {
+        for await (const chunk of createReadStream(outputPath, {
+          end: size - 1,
+        })) {
+          captured.push(chunk as Buffer)
+        }
+      }
+      const { output, truncated } = captured.finish()
+      if (stopped) {
+        return {
+          output: `${output}\n[command stopped]`,
+          exit_code: TIMEOUT_EXIT_CODE,
+          truncated,
+        }
+      }
+      if (timedOut) {
+        return {
+          output: `${output}\n[command timed out after ${seconds}s]`,
+          exit_code: TIMEOUT_EXIT_CODE,
+          truncated,
+        }
+      }
+      return { output, exit_code: exitCode, truncated }
+    } finally {
+      await rm(outputDir, { recursive: true, force: true })
     }
-    return { output, exit_code: exitCode, truncated }
   }
 
   /** Terminate every running command; each resolves once its process group exits. */

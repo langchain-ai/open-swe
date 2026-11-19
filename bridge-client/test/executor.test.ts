@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -87,6 +87,19 @@ describe("execute", () => {
     expect(result.output).toContain("err")
   })
 
+  test("fails the call, not the process, when the working directory is gone", async () => {
+    const executor = new LocalExecutor(join(await workspace(), "missing"))
+    await expect(executor.execute("pwd", 30)).rejects.toThrow()
+  })
+
+  test("reports a command that exits at once", async () => {
+    const executor = new LocalExecutor(await workspace())
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const result = await executor.execute("exit 7", 30)
+      expect(result.exit_code).toBe(7)
+    }
+  })
+
   test("runs in its working directory", async () => {
     const root = await workspace()
     await writeFile(join(root, "marker.txt"), "x")
@@ -99,6 +112,54 @@ describe("execute", () => {
     const result = await executor.execute("sleep 5", 1)
     expect(result.exit_code).toBe(124)
     expect(result.output).toContain("[command timed out after 1s]")
+  })
+
+  test("returns when the shell exits, though a server it started keeps the pipes open", async () => {
+    const root = await workspace()
+    const executor = new LocalExecutor(root)
+    const started = Date.now()
+    const result = await executor.execute(
+      "echo starting; sleep 30 & echo $! > server.pid",
+      60
+    )
+    expect(Date.now() - started).toBeLessThan(5_000)
+    expect(result.exit_code).toBe(0)
+    expect(result.output).toContain("starting")
+    const server = Number(
+      (await readFile(join(root, "server.pid"), "utf8")).trim()
+    )
+    // The server outlives the command, as a service the agent started must.
+    expect(() => process.kill(server, 0)).not.toThrow()
+    process.kill(server, "SIGKILL")
+  })
+
+  test("a server it started keeps writing after the command returns", async () => {
+    const root = await workspace()
+    const result = await new LocalExecutor(root).execute(
+      "(while :; do echo tick; sleep 0.05; done) & echo $! > server.pid",
+      60
+    )
+    expect(result.exit_code).toBe(0)
+    const server = Number(
+      (await readFile(join(root, "server.pid"), "utf8")).trim()
+    )
+    await new Promise((done) => setTimeout(done, 300))
+    // Its output has nowhere to break: it is not a pipe this process reads.
+    expect(() => process.kill(server, 0)).not.toThrow()
+    process.kill(server, "SIGKILL")
+  })
+
+  test("a timeout kills what ignores SIGTERM, even after the shell exits", async () => {
+    const root = await workspace()
+    const result = await new LocalExecutor(root).execute(
+      "sh -c 'trap \"\" TERM; while :; do sleep 1; done' & echo $! > child.pid; wait",
+      1
+    )
+    expect(result.exit_code).toBe(124)
+    const child = Number(
+      (await readFile(join(root, "child.pid"), "utf8")).trim()
+    )
+    expect(() => process.kill(child, 0)).toThrow()
   })
 
   test("stops a running command on request", async () => {

@@ -2174,6 +2174,10 @@
             "title": "Awaiting Delivery",
             "type": "boolean"
           },
+          "background_work": {
+            "title": "Background Work",
+            "type": "boolean"
+          },
           "running": {
             "title": "Running",
             "type": "boolean"
@@ -2203,6 +2207,7 @@
           "runs",
           "running",
           "awaiting_delivery",
+          "background_work",
           "workers",
           "settled"
         ],

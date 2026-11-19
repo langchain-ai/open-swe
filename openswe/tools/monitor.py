@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import JsonValue
 
 from openswe.monitors.budget import ThreadMonitorBudget
-from openswe.monitors.delivery import ensure_monitor_polling
+from openswe.monitors.delivery import ThreadMonitorDelivery, ensure_monitor_polling
 from openswe.monitors.sandbox import ID_PREFIX, MonitorError, SandboxMonitors
 from openswe.run_config import RunConfig
 from openswe.tools.background_execute import current_backend, uses_completion_callback
@@ -31,7 +31,7 @@ def _error(message: str) -> dict[str, JsonValue]:
 
 async def _track(
     thread_id: str, *, running: Sequence[str] = (), finished: Sequence[str] = ()
-) -> None:
+) -> bool:
     """Note running monitors on the thread, which is what lets the dashboard list them."""
     try:
         await update_background_task_state(
@@ -45,6 +45,8 @@ async def _track(
         logger.warning(
             "Could not track monitors", extra={"agent_thread_id": thread_id}, exc_info=True
         )
+        return False
+    return True
 
 
 async def monitor(
@@ -91,22 +93,31 @@ async def monitor(
         if timeout is None:
             return _error("timeout is required for start")
         window = await ThreadMonitorBudget(langgraph_client(), thread_id).start()
-        state = await monitors.start(
-            f"{ID_PREFIX}-{uuid.uuid4()}",
-            command=command,
-            filter=filter.strip(),
-            description=description.strip(),
-            timeout=min(timeout, window),
-            callback=await uses_completion_callback(),
-            interval=interval,
-            origin=RunConfig.from_runtime().origin,
-        )
+        new_id = f"{ID_PREFIX}-{uuid.uuid4()}"
+        callback = await uses_completion_callback()
+        origin = RunConfig.from_runtime().origin
+        async with ThreadMonitorDelivery.lock(thread_id):
+            if not await _track(thread_id, running=[new_id]):
+                return _error("the monitor could not be tracked, so it was not started; try again")
+            try:
+                state = await monitors.start(
+                    new_id,
+                    command=command,
+                    filter=filter.strip(),
+                    description=description.strip(),
+                    timeout=min(timeout, window),
+                    callback=callback,
+                    interval=interval,
+                    origin=origin,
+                )
+            except BaseException:
+                await _track(thread_id, finished=[new_id])
+                raise
         started = state.model_dump(mode="json")
         if window < timeout:
             started["note"] = (
                 f"timeout clipped to {window}s: monitors may run for 24 hours after a human message"
             )
-        await _track(thread_id, running=[state.monitor_id])
         if not state.callback:
             try:
                 await ensure_monitor_polling(thread_id)
