@@ -1275,21 +1275,35 @@ async def test_open_swe_events_do_not_trigger_automations(
     assert await _plan_github("pull_request", payload, "d-1") == []
 
 
-async def test_launch_scheduled_agent_run_gates_fable_by_global_settings(
-    fake_client, auth, registry_db, monkeypatch
+@pytest.mark.parametrize(
+    ("model_id", "effort", "expected"),
+    [
+        ("anthropic:claude-fable-5-1", "high", fable_disabled_fallback("high")),
+        (
+            "google_genai:gemini-3.8-flash",
+            "medium",
+            ("google_genai:gemini-4-hydrogen", "medium"),
+        ),
+        (
+            "google_genai:gemini-3.8-flash",
+            "minimal",
+            ("google_genai:gemini-4-hydrogen", "high"),
+        ),
+    ],
+)
+async def test_launch_scheduled_agent_run_resolves_saved_models(
+    fake_client, auth, registry_db, monkeypatch, model_id, effort, expected
 ) -> None:  # noqa: ANN001, ARG001
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     await upsert_instance_settings(SettingsUpdate(fable_enabled=False))
     await _seed(
-        _scheduled_record(model="anthropic:claude-fable-5-1", effort="high", system=True),
+        _scheduled_record(model=model_id, effort=effort, system=True),
     )
 
     assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
 
     configurable = fake_client.runs.created[0]["config"]["configurable"]
-    assert (configurable["agent_model_id"], configurable["agent_effort"]) == (
-        fable_disabled_fallback("high")
-    )
+    assert (configurable["agent_model_id"], configurable["agent_effort"]) == expected
 
 
 @pytest.mark.parametrize("creator", [None, "alice"])

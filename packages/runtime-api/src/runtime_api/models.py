@@ -125,10 +125,18 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "context_window": 1_048_576,
     },
     {
-        "id": "google_genai:gemini-3.8-flash",
-        "label": "Gemini 3.8 Flash",
-        "efforts": ["minimal", "low", "medium", "high"],
-        "default_effort": "medium",
+        "id": "google_genai:gemini-4-neon",
+        "label": "Gemini 4 Neon",
+        "efforts": ["low", "medium", "high", "xhigh"],
+        "default_effort": "high",
+        "supports_images": True,
+        "context_window": 1_048_576,
+    },
+    {
+        "id": "google_genai:gemini-4-hydrogen",
+        "label": "Gemini 4 Hydrogen",
+        "efforts": ["low", "medium", "high", "xhigh"],
+        "default_effort": "high",
         "supports_images": True,
         "context_window": 1_048_576,
     },
@@ -183,7 +191,7 @@ OpenAIReasoningSummary = Literal["auto", "concise", "detailed"]
 AnthropicThinkingType = Literal["adaptive"]
 AnthropicThinkingDisplay = Literal["summarized", "omitted"]
 AnthropicEffort = Literal["low", "medium", "high", "xhigh", "max"]
-GoogleThinkingLevel = Literal["minimal", "low", "medium", "high"]
+GoogleThinkingLevel = Literal["minimal", "low", "medium", "high", "xhigh"]
 FireworksReasoningEffort = Literal["none", "low", "medium", "high", "xhigh", "max"]
 
 
@@ -234,15 +242,13 @@ def fallback_model_id_for(primary_model_id: str) -> str | None:
 
 
 def model_request_defaults(model_id: str) -> ModelKwargs:
-    if model_id == "google_genai:gemini-4-carbon":
+    if model_id.startswith("google_genai:gemini-4-"):
         return {"timeout": 900.0, "temperature": None}
     return {}
 
 
 def supports_google_thinking_level(model_id: str) -> bool:
-    return (
-        model_id.startswith("google_genai:gemini-3") or model_id == "google_genai:gemini-4-carbon"
-    )
+    return model_id.startswith(("google_genai:gemini-3", "google_genai:gemini-4-"))
 
 
 def openai_reasoning_for(
@@ -311,8 +317,12 @@ def fireworks_reasoning_effort_for(profile_effort: str | None) -> FireworksReaso
     return None
 
 
-def google_thinking_level_for(profile_effort: str | None) -> GoogleThinkingLevel | None:
-    """Map profile effort to Gemini 3+ ``thinking_level``."""
+def google_thinking_level_for(
+    profile_effort: str | None, *, model_id: str = ""
+) -> GoogleThinkingLevel | None:
+    """Map profile effort to the model's supported Gemini thinking level."""
+    if profile_effort == "xhigh" and model_supports_effort(model_id, "xhigh"):
+        return "xhigh"
     if profile_effort in ("minimal", "none"):
         return "minimal"
     if profile_effort == "low":
@@ -348,7 +358,7 @@ def provider_model_kwargs(
         if effort is not None:
             kwargs["effort"] = effort
     elif supports_google_thinking_level(model_id):
-        thinking_level = google_thinking_level_for(profile_effort)
+        thinking_level = google_thinking_level_for(profile_effort, model_id=model_id)
         if thinking_level is not None:
             kwargs["thinking_level"] = thinking_level
     elif model_id.startswith("fireworks:"):

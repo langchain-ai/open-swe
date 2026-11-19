@@ -16,7 +16,12 @@ from typing import Any, TypedDict
 
 from pydantic import TypeAdapter, ValidationError
 
-from openswe.dashboard.options import SUPPORTED_MODEL_IDS, normalize_model_choice
+from openswe.dashboard.options import (
+    RETIRED_MODEL_REPLACEMENTS,
+    SUPPORTED_MODEL_IDS,
+    normalize_model_choice,
+    provider_fallback_pair,
+)
 from openswe.utils import ttl_cache
 
 logger = logging.getLogger(__name__)
@@ -65,6 +70,21 @@ def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettin
         value = _THREAD_SETTINGS_ADAPTER.validate_python(settings, strict=True)
     except ValidationError:
         return {}, bool(settings)
+    if value.get("model_id") in RETIRED_MODEL_REPLACEMENTS:
+        if pair := provider_fallback_pair(value.get("model_id"), value.get("effort")):
+            value["model_id"], value["effort"] = pair
+    if value.get("subagent_model_id") in RETIRED_MODEL_REPLACEMENTS:
+        if pair := provider_fallback_pair(
+            value.get("subagent_model_id"), value.get("subagent_effort")
+        ):
+            value["subagent_model_id"], value["subagent_effort"] = pair
+    requested_model = value.get("requested_model")
+    if requested_model in RETIRED_MODEL_REPLACEMENTS:
+        value["requested_model"] = RETIRED_MODEL_REPLACEMENTS[requested_model]
+    for route in value.get("routing_models", {}).values():
+        if route["model_id"] in RETIRED_MODEL_REPLACEMENTS:
+            if pair := provider_fallback_pair(route["model_id"], route["effort"]):
+                route["model_id"], route["effort"] = pair
     return value, value != settings
 
 

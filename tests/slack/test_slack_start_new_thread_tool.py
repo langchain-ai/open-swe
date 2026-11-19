@@ -420,10 +420,10 @@ async def test_web_breakout_does_not_post_or_bind_slack(
         (
             "C1",
             "C1",
-            "google_genai:gemini-3.8-flash",
+            "google_genai:gemini-4-hydrogen",
             None,
-            "google_genai:gemini-3.8-flash",
-            "medium",
+            "google_genai:gemini-4-hydrogen",
+            "high",
         ),
         ("C1", "C1", None, "none", "openai:gpt-6.1-sol", "none"),
     ],

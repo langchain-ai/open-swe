@@ -89,17 +89,36 @@ def test_fable_disabled_fallback_is_non_fable_anthropic() -> None:
     assert effort == "high"
 
 
-def test_retired_deployment_default_keeps_its_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LLM_MODEL_ID", "google_genai:gemini-4-argon")
-    assert options.default_model_pair() == ("google_genai:gemini-4-carbon", "medium")
+@pytest.mark.parametrize(
+    ("retired", "successor", "effort"),
+    [
+        ("gemini-4-argon", "gemini-4-carbon", "medium"),
+        ("gemini-3.8-flash", "gemini-4-hydrogen", "high"),
+    ],
+)
+def test_retired_deployment_default_keeps_its_provider(
+    monkeypatch: pytest.MonkeyPatch, retired: str, successor: str, effort: str
+) -> None:
+    monkeypatch.setenv("LLM_MODEL_ID", f"google_genai:{retired}")
+    assert options.default_model_pair() == (f"google_genai:{successor}", effort)
 
 
-def test_global_settings_carry_a_retired_model_to_its_successor() -> None:
+@pytest.mark.parametrize(
+    ("retired", "successor", "effort", "expected_effort"),
+    [
+        ("gemini-4-argon", "gemini-4-carbon", "high", "high"),
+        ("gemini-3.8-flash", "gemini-4-hydrogen", "medium", "medium"),
+        ("gemini-3.8-flash", "gemini-4-hydrogen", "minimal", "high"),
+    ],
+)
+def test_global_settings_carry_a_retired_model_to_its_successor(
+    retired: str, successor: str, effort: str, expected_effort: str
+) -> None:
     update = SettingsUpdate(
-        default_agent_model="google_genai:gemini-4-argon", default_agent_reasoning_effort="high"
+        default_agent_model=f"google_genai:{retired}", default_agent_reasoning_effort=effort
     )
-    assert update.default_agent_model == "google_genai:gemini-4-carbon"
-    assert update.default_agent_reasoning_effort == "high"
+    assert update.default_agent_model == f"google_genai:{successor}"
+    assert update.default_agent_reasoning_effort == expected_effort
 
 
 def test_an_unknown_model_is_rejected_rather_than_remapped(

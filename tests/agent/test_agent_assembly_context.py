@@ -217,7 +217,7 @@ async def _agent_catalog(
             or Settings(
                 {
                     **_MODEL_DEFAULTS,
-                    "default_agent_routing_fast_model": "google_genai:gemini-3.8-flash",
+                    "default_agent_routing_fast_model": "google_genai:gemini-4-hydrogen",
                     "default_agent_routing_fast_reasoning_effort": "low",
                     "default_agent_routing_balanced_model": "openai:gpt-6.1-sol",
                     "default_agent_routing_balanced_reasoning_effort": "medium",
@@ -405,18 +405,18 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
     snapshot = json.loads(json.dumps(store.call_args.args[2]))
     changed_defaults = Settings(
         {
-            "default_agent_model": "google_genai:gemini-3.8-flash",
+            "default_agent_model": "google_genai:gemini-4-hydrogen",
             "default_agent_reasoning_effort": "high",
-            "default_agent_subagent_model": "google_genai:gemini-3.8-flash",
+            "default_agent_subagent_model": "google_genai:gemini-4-hydrogen",
             "default_agent_subagent_reasoning_effort": "high",
-            "default_thread_title_model": "google_genai:gemini-3.8-flash",
+            "default_thread_title_model": "google_genai:gemini-4-hydrogen",
             "default_thread_title_reasoning_effort": "high",
             "model_routing_enabled": True,
             **{
                 f"default_agent_routing_{tier}_{field}": value
                 for tier in ("fast", "balanced", "performance")
                 for field, value in (
-                    ("model", "google_genai:gemini-3.8-flash"),
+                    ("model", "google_genai:gemini-4-hydrogen"),
                     ("reasoning_effort", "high"),
                 )
             },
@@ -438,7 +438,7 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
     assert {
         choice.model_id
         for choice in (fresh_models.main, fresh_models.subagent, *fresh_models.routes.values())
-    } == {"google_genai:gemini-3.8-flash"}
+    } == {"google_genai:gemini-4-hydrogen"}
 
 
 @pytest.mark.parametrize(

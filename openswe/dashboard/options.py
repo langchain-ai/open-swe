@@ -84,6 +84,7 @@ DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = dict.fromkeys(DEPRECATED_MODEL_I
 # unsupported id is still rejected when written or configured.
 RETIRED_MODEL_REPLACEMENTS: dict[str, str] = {
     "google_genai:gemini-4-argon": "google_genai:gemini-4-carbon",
+    "google_genai:gemini-3.8-flash": "google_genai:gemini-4-hydrogen",
 }
 
 

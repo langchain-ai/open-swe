@@ -138,16 +138,21 @@ async def test_fireworks_sdk_uses_allowlisted_gateway_path() -> None:
     assert paths == ["/fireworks/v1/chat/completions"]
 
 
+@pytest.mark.parametrize("model_name", ["gemini-4-carbon", "gemini-4-neon", "gemini-4-hydrogen"])
+@pytest.mark.parametrize("effort", ["low", "medium", "high", "xhigh"])
 async def test_gemini_sdk_uses_allowlisted_gateway_path(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, model_name: str, effort: str
 ) -> None:
     paths: list[str] = []
     services: list[str | None] = []
     routes: list[str | None] = []
-    expected_path = "/gemini/v1beta/models/gemini-4-carbon:streamGenerateContent"
+    expected_path = f"/gemini/v1beta/models/{model_name}:streamGenerateContent"
+    thinking_levels: list[str] = []
 
     async def handler(request: web.Request) -> web.Response:
         paths.append(request.path)
+        body = await request.json()
+        thinking_levels.append(body["generationConfig"]["thinkingConfig"]["thinking_level"])
         services.append(request.headers.get(model.GATEWAY_SERVICE_HEADER))
         routes.append(request.headers.get(model.GATEWAY_MODEL_ROUTE_HEADER))
         if request.path != expected_path:
@@ -161,14 +166,15 @@ async def test_gemini_sdk_uses_allowlisted_gateway_path(
     monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "dummy")
     async with _http_server(handler) as base_url:
         monkeypatch.setenv("LANGSMITH_GATEWAY_BASE_URL", base_url)
-        chat_model = model.build_chat_model(
-            "google_genai:gemini-4-carbon",
-            {"max_retries": 1, "max_output_tokens": 64000, "reasoning_effort": "medium"},
-        )
+        model_id = f"google_genai:{model_name}"
+        kwargs = model.provider_model_kwargs(model_id, effort, max_tokens=64_000)
+        chat_model = model.build_chat_model(model_id, {**kwargs, "max_retries": 1})
         chunks = [chunk async for chunk in chat_model.astream("hi")]
 
     assert "".join(str(chunk.content) for chunk in chunks) == "ok"
     assert paths == [expected_path]
+    expected_effort = "high" if model_name == "gemini-4-carbon" and effort == "xhigh" else effort
+    assert [level.lower() for level in thinking_levels] == [expected_effort]
     assert services == ["robin"]
     assert routes == ["default"]
 
