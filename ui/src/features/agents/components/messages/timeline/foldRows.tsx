@@ -48,8 +48,9 @@ export function TurnFoldRow({
       >
         {active ? (
           <ChatState
+            className="min-w-0"
             status="streaming"
-            label={label}
+            label={<span className="truncate">{label}</span>}
             showElapsed
             startedAt={since}
             announce={false}
