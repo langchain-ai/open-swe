@@ -144,8 +144,12 @@ class FileToolsMiddleware(AgentMiddleware):
             "- You MUST avoid using search commands like find and grep. Instead use the grep, glob tools to search. Use read_file rather than cat/head/tail.\n"
             "    - execute(command=\"find . -name '*.py'\")  # Use glob tool instead\n"
             "    - execute(command=\"grep -r 'pattern' .\")  # Use grep tool instead",
-            "- Search repository contents through execute with `git grep -n` or `grep -rn`; "
-            "search file names with shell commands. There are no separate grep/glob tools. "
+            "- Search repository contents through execute with `git grep -n`, which reads only "
+            "tracked files and skips dependency trees; list file names with `git ls-files`. "
+            "Use `grep -rn` only on specific source directories, never on the repository root "
+            "or a directory holding `node_modules`, `.venv` or other installed dependencies: "
+            "it walks every untracked file there (`--include` and `| grep -v` do not prevent "
+            "the walk) and can take minutes. There are no separate grep/glob tools. "
             "Follow repository-specific search instructions, including restrictions on ripgrep. "
             "Use read_file rather than cat/head/tail.",
         )
