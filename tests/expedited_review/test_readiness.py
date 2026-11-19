@@ -132,6 +132,7 @@ async def test_assess_classifies_required_failures_on_a_pr_waiting_for_approval(
                                 "nodes": [
                                     {
                                         "databaseId": 1,
+                                        "app": {"databaseId": 15368, "slug": "github-actions"},
                                         "checkRuns": {
                                             "pageInfo": {"hasNextPage": False},
                                             "nodes": [

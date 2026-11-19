@@ -152,7 +152,7 @@ class _CICheckRun(GraphqlNode):
 
 class _CICheckRuns(GraphqlNode):
     page_info: GraphqlPageInfo
-    nodes: list[_CICheckRun]
+    nodes: list[_CICheckRun | None]
 
 
 class GraphqlCheckApp(GraphqlNode):
@@ -177,12 +177,25 @@ class _CICheckSuite(GraphqlNode):
     database_id: int
     app: GraphqlCheckApp | None = None
     workflow_run: _CIWorkflowRun | None = None
-    check_runs: _CICheckRuns
+    check_runs: _CICheckRuns | None
 
 
 class _CICheckSuites(GraphqlNode):
     page_info: GraphqlPageInfo
-    nodes: list[_CICheckSuite]
+    nodes: list[_CICheckSuite | None]
+
+    @property
+    def complete(self) -> bool:
+        """Whether this one page holds every suite and run, none of them or their app
+        withheld: a required check can be pinned to the app that reports it."""
+        return not self.page_info.has_next_page and all(
+            suite is not None
+            and suite.app is not None
+            and suite.check_runs is not None
+            and not suite.check_runs.page_info.has_next_page
+            and None not in suite.check_runs.nodes
+            for suite in self.nodes
+        )
 
 
 class _CIStatusContext(GraphqlNode):
@@ -199,7 +212,7 @@ class _CIStatus(GraphqlNode):
 class _CICommit(GraphqlNode):
     oid: str
     status: _CIStatus | None = None
-    check_suites: _CICheckSuites
+    check_suites: _CICheckSuites | None
 
 
 _THREAD_PARTICIPANT_MAX_REQUESTS = 100
@@ -799,16 +812,15 @@ class CommitCI:
 
     @classmethod
     def from_graphql(cls, commit: object) -> Self | None:
-        """``COMMIT_CI_FRAGMENT``'s answer; ``None`` when it held more than one page."""
+        """``COMMIT_CI_FRAGMENT``'s answer; ``None`` when it held more than one page or
+        GitHub withheld a suite or run whole, which only REST can then list."""
         parsed = _CICommit.model_validate(commit)
         suites = parsed.check_suites
-        if suites.page_info.has_next_page or any(
-            suite.check_runs.page_info.has_next_page for suite in suites.nodes
-        ):
+        if suites is None or not suites.complete:
             return None
         runs: list[dict[str, Any]] = []
         workflows: dict[int, tuple[int, str]] = {}
-        for suite in suites.nodes:
+        for suite in filter(None, suites.nodes):
             app = suite.app or GraphqlCheckApp()
             if suite.workflow_run is not None:
                 workflows[suite.database_id] = (
@@ -828,7 +840,7 @@ class CommitCI:
                     "app": app.rest(),
                     "check_suite": {"id": suite.database_id},
                 }
-                for run in suite.check_runs.nodes
+                for run in filter(None, suite.check_runs.nodes if suite.check_runs else [])
             )
         statuses = [
             {
@@ -974,15 +986,22 @@ class RepoClient:
         self, query: str, variables: Mapping[str, object] | None = None
     ) -> Mapping[str, object]:
         """``graphql`` for a query of check suites, keeping the answer when GitHub withheld
-        only their ``workflowRun``s, which leaves those suites' workflows unknown."""
+        only fields inside them: a withheld ``workflowRun`` reads as unknown, and a suite
+        missing more is read over REST by ``CommitCI.from_graphql``'s callers."""
         try:
             return await self.graphql(query, variables)
         except GraphQLError as exc:
-            if exc.data is None or not exc.only_at_workflow_runs:
+            if exc.data is None or not exc.only_under_check_suites:
                 raise
             logger.warning(
-                "GitHub withheld check suites' workflows; reading them as unknown",
-                extra={"repo_full_name": self.full_name, "graphql_errors": str(exc)},
+                "GitHub withheld fields of check suites; reading them as unknown",
+                extra={
+                    "repo_full_name": self.full_name,
+                    "pr_number": (variables or {}).get("number"),
+                    "sha": (variables or {}).get("oid"),
+                    "graphql_error_paths": exc.paths,
+                    "graphql_error_types": sorted(exc.types),
+                },
             )
             return exc.data
 
@@ -2005,10 +2024,19 @@ class GraphQLError(ValueError):
         return isinstance(path, list) and "workflowRun" in path
 
     @property
-    def only_at_workflow_runs(self) -> bool:
-        """Whether every error is ``at_workflow_run``, so the rest of ``data`` holds."""
+    def paths(self) -> list[object]:
+        """Where each error is in the answer; ``None`` for one about the whole query."""
         errors = self.errors if isinstance(self.errors, list) else [self.errors]
-        return bool(errors) and all(self.at_workflow_run(error) for error in errors)
+        return [error.get("path") if isinstance(error, Mapping) else None for error in errors]
+
+    @property
+    def only_under_check_suites(self) -> bool:
+        """Whether every error is inside a commit's ``checkSuites``, so the rest of
+        ``data`` holds."""
+        paths = self.paths
+        return bool(paths) and all(
+            isinstance(path, list) and "checkSuites" in path[:-1] for path in paths
+        )
 
     @property
     def types(self) -> set[str]:

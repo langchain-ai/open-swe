@@ -13,7 +13,15 @@ from urllib.parse import quote
 
 import httpx2
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import (
+    AliasPath,
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+)
 from pydantic.alias_generators import to_camel
 
 from openswe.github.branch_config import BranchConfig
@@ -26,6 +34,7 @@ from openswe.github.http import (
     GITHUB_GRAPHQL,
     CommitCI,
     GitHubClient,
+    GitHubError,
     GraphqlCheckApp,
     GraphQLError,
     GraphqlNode,
@@ -673,6 +682,16 @@ class _CIPull(GraphqlNode):
     commits: _CIPullCommits
 
 
+class _RestPullCI(BaseModel):
+    """The fields of a REST pull request that ``PullRequestCI`` holds."""
+
+    state: str
+    merged: bool = False
+    head_sha: str = Field(validation_alias=AliasPath("head", "sha"))
+    head_ref: str = Field("", validation_alias=AliasPath("head", "ref"))
+    base_ref: str = Field("", validation_alias=AliasPath("base", "ref"))
+
+
 @dataclass(frozen=True, slots=True)
 class PullRequestCI:
     """A pull request's state and branches, and the CI on its head commit."""
@@ -1039,7 +1058,41 @@ class PullRequestClient:
         return sha
 
     async def ci(self) -> PullRequestCI:
-        """The pull's state, branches and head commit CI, in one GraphQL query when they fit."""
+        """The pull's state, branches and head commit CI, in one GraphQL query when they fit.
+
+        GraphQL can deny a token what REST grants it, so a denied read is retried over REST.
+        """
+        try:
+            return await self._ci_over_graphql()
+        except (GraphQLError, httpx2.HTTPStatusError) as exc:
+            if not self._denied(exc):
+                raise
+            logger.warning(
+                "GitHub denied the pull request's CI over GraphQL; reading it over REST",
+                extra={
+                    **self._log_extra,
+                    "graphql_error_paths": exc.paths if isinstance(exc, GraphQLError) else None,
+                },
+            )
+        pull = _RestPullCI.model_validate(await self.pull())
+        return PullRequestCI(
+            state="open" if pull.state == "open" else "closed",
+            merged=pull.merged,
+            head_sha=pull.head_sha,
+            head_ref=pull.head_ref,
+            base_ref=pull.base_ref,
+            checks=await self.repo.commit_ci_over_rest(pull.head_sha),
+        )
+
+    @staticmethod
+    def _denied(exc: GraphQLError | httpx2.HTTPStatusError) -> bool:
+        """Whether GitHub refused ``exc``'s read for access, not for its rate limit."""
+        if isinstance(exc, GraphQLError):
+            return "FORBIDDEN" in exc.types
+        response = exc.response
+        return response.status_code in {401, 403} and not GitHubError(response).rate_limited
+
+    async def _ci_over_graphql(self) -> PullRequestCI:
         pull = _graphql_pull(await self.repo.ci_graphql(_PULL_CI_QUERY, {"number": self.number}))
         if pull is None:
             raise ValueError("GitHub answered without the pull request")

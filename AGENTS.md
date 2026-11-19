@@ -127,6 +127,11 @@ The GitHub channel's switchboard (`mda/rt/github_routes.py`, standard library an
 The backend still checks anything that grants access, such as a run's repository, before it signs the run.
 Change the backend's envelope and the copy together.
 
+Check that a change works on production data, not just on the fixtures you wrote for it.
+Before changing how Robin reads or writes an external system (GitHub, Slack, LangSmith, a database), find out what it really answers in production, through its docs, production logs or traces, or a read with the same credentials Robin runs with, and build fixtures from that.
+Include the answers production actually gives: partial data, permission-limited fields, rate limits and missing resources, not only the complete happy path.
+Tell whoever asked what you could not check against production.
+
 Tests are maintenance cost.
 Add one only when you can name a concrete regression existing coverage would miss.
 

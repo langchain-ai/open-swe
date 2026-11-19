@@ -231,25 +231,25 @@ def test_commit_ci_reads_graphql_in_rest_terms_without_superseded_reruns() -> No
     assert github_http.CommitCI.from_graphql(commit) is None
 
 
-def _withheld_workflows(path: list[object]) -> list[dict[str, object]]:
-    """GitHub's errors for a token that reads Checks but not Actions."""
+def _withheld_workflows(path: list[object], field: str = "workflowRun") -> list[dict[str, object]]:
+    """GitHub's errors for a token that reads Checks but not ``field`` of each suite."""
     return [
         {
             "type": "FORBIDDEN",
             "message": "Resource not accessible by integration",
-            "path": [*path, "checkSuites", "nodes", index, "workflowRun"],
+            "path": [*path, "checkSuites", "nodes", index, field],
         }
         for index in (0, 1)
     ]
 
 
-def _withheld_commit(sha: str) -> dict[str, object]:
+def _withheld_commit(sha: str, field: str = "workflowRun") -> dict[str, object]:
     suites = [
         _suite(1, [_graphql_run(10, "COMPLETED", "FAILURE")]),
         _suite(2, [_graphql_run(20, "COMPLETED", "SUCCESS")]),
     ]
     for suite in suites:
-        suite["workflowRun"] = None
+        suite[field] = None
     return {
         "oid": sha,
         "status": {"contexts": [{"context": "deploy", "state": "SUCCESS", "targetUrl": None}]},
@@ -257,15 +257,16 @@ def _withheld_commit(sha: str) -> dict[str, object]:
     }
 
 
-async def test_ci_reads_keep_checks_when_github_withholds_workflow_runs(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("field", ["workflowRun", "app"])
+async def test_ci_reads_keep_checks_when_github_withholds_suite_fields(
+    monkeypatch: pytest.MonkeyPatch, field: str
 ) -> None:
     sha = "a" * 40
-    commit = _withheld_commit(sha)
+    commit = _withheld_commit(sha, field)
     answers = {
         "query CommitCI(": {
             "data": {"repository": {"object": commit}},
-            "errors": _withheld_workflows(["repository", "object"]),
+            "errors": _withheld_workflows(["repository", "object"], field),
         },
         "query PullRequestCI(": {
             "data": {
@@ -280,16 +281,30 @@ async def test_ci_reads_keep_checks_when_github_withholds_workflow_runs(
                 }
             },
             "errors": _withheld_workflows(
-                ["repository", "pullRequest", "commits", "nodes", 0, "commit"]
+                ["repository", "pullRequest", "commits", "nodes", 0, "commit"], field
             ),
         },
+    }
+    actions = {"id": 15368, "slug": "github-actions"}
+    rest = {
+        "/check-runs": {
+            "total_count": 2,
+            "check_runs": [
+                {"id": 10, "name": "tests", "conclusion": "failure", "app": actions},
+                {"id": 20, "name": "tests", "conclusion": "success", "app": actions},
+            ],
+        },
+        "/status": {"total_count": 1, "statuses": [{"context": "deploy", "state": "success"}]},
+        "/actions/runs": {"total_count": 0, "workflow_runs": []},
     }
     urls: list[str] = []
 
     async def request(
-        _client: object, _method: str, url: str, json: dict[str, str], **_: object
+        _client: object, _method: str, url: str, json: dict[str, str] | None = None, **_: object
     ) -> httpx2.Response:
         urls.append(url)
+        if json is None:
+            return _response(url, next(body for end, body in rest.items() if url.endswith(end)))
         answer = next(body for name, body in answers.items() if name in json["query"])
         return _response(url, answer)
 
@@ -299,13 +314,16 @@ async def test_ci_reads_keep_checks_when_github_withholds_workflow_runs(
     commit_ci = await repo.commit_ci(sha)
     pull_ci = await repo.pull_request(1).ci()
 
+    pinned = github_ci.RequiredCheck("tests", 15368)
     for ci in (commit_ci, pull_ci.checks):
         assert [(run["id"], run["conclusion"]) for run in ci.runs] == [
             (10, "failure"),
             (20, "success"),
         ]
         assert [status["context"] for status in ci.statuses] == ["deploy"]
-    assert urls == [github_http.GITHUB_GRAPHQL] * 2
+        assert pinned.reported_by(ci.runs, ci.statuses)
+    graphql_reads = urls.count(github_http.GITHUB_GRAPHQL)
+    assert graphql_reads == 2 and (len(urls) > graphql_reads) == (field == "app")
 
 
 async def test_commit_ci_raises_graphql_errors_outside_workflow_runs(
@@ -327,3 +345,48 @@ async def test_commit_ci_raises_graphql_errors_outside_workflow_runs(
     with pytest.raises(github_http.GraphQLError) as raised:
         await _repo().commit_ci(sha)
     assert raised.value.errors == errors
+
+
+@pytest.mark.parametrize("graphql_denial", ["FORBIDDEN", 403])
+@pytest.mark.parametrize("rest_status", [200, 403])
+async def test_pull_ci_reads_over_rest_when_graphql_is_denied(
+    monkeypatch: pytest.MonkeyPatch, graphql_denial: str | int, rest_status: int
+) -> None:
+    sha = "a" * 40
+    rest = {
+        "/pulls/1": {
+            "state": "open",
+            "merged": False,
+            "head": {"sha": sha, "ref": "feature"},
+            "base": {"ref": "main"},
+        },
+        "/check-runs": {
+            "total_count": 1,
+            "check_runs": [
+                {"id": 10, "name": "tests", "status": "completed", "conclusion": "failure"}
+            ],
+        },
+        "/status": {"total_count": 0, "statuses": []},
+    }
+
+    async def request(_client: object, _method: str, url: str, **_: object) -> httpx2.Response:
+        if url == github_http.GITHUB_GRAPHQL:
+            if isinstance(graphql_denial, int):
+                return _response(url, {"message": "Resource not accessible"}, graphql_denial)
+            denied = {"type": graphql_denial, "message": "denied", "path": ["repository"]}
+            return _response(url, {"data": {"repository": None}, "errors": [denied]})
+        if rest_status != 200:
+            return _response(url, {"message": "Resource not accessible"}, rest_status)
+        return _response(url, next(body for end, body in rest.items() if url.endswith(end)))
+
+    monkeypatch.setattr(github_http, "github_request", request)
+
+    result = await github_http.read_result(_repo().pull_request(1).ci())
+
+    if rest_status != 200:
+        assert (result.value, result.status) == (None, "forbidden")
+        return
+    ci = result.value
+    assert ci is not None
+    assert (ci.state, ci.head_sha, ci.head_ref, ci.base_ref) == ("open", sha, "feature", "main")
+    assert github_ci.CommitChecks.of(ci.checks).state == "failure"

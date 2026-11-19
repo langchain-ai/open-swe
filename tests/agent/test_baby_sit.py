@@ -10,7 +10,7 @@ import pytest
 from openswe import baby_sit
 from openswe.github import app as github_app
 from openswe.github.ci import CheckFailure, RequiredCheck
-from openswe.github.http import CommitCI, GitHubError, GraphQLError
+from openswe.github.http import CommitCI, GitHubError, GraphQLError, RepoClient
 from openswe.github.pull_request_status import PullRequestCI, PullRequestClient
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.slack.client import GitHubPrRef
@@ -180,6 +180,42 @@ async def test_github_read_failures_only_end_watches_when_persistent(
             if status_code == 404 or body == "NOT_FOUND"
             else "denied access"
         ) in message
+
+
+async def test_a_watch_reads_ci_over_rest_when_graphql_is_denied(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    watch = await _start_watch()
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="t")
+    )
+    monkeypatch.setattr(
+        PullRequestClient,
+        "_ci_over_graphql",
+        AsyncMock(side_effect=GraphQLError([{"type": "FORBIDDEN", "message": "denied"}])),
+    )
+    monkeypatch.setattr(
+        PullRequestClient,
+        "pull",
+        AsyncMock(
+            return_value={
+                "state": "open",
+                "head": {"sha": "head-1", "ref": "feature"},
+                "base": {"ref": "main"},
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        RepoClient,
+        "commit_ci_over_rest",
+        AsyncMock(return_value=CommitCI([_check_run(1, "tests", None)], [])),
+    )
+
+    for _ in range(3):
+        assert await baby_sit.evaluate_watch(watch.key) == "pending"
+    stored = await baby_sit.WATCHES.get(watch.key)
+    assert stored is not None and stored.active
+    assert stored.evaluation_errors == 0
 
 
 async def test_a_dispatch_error_is_retried_with_only_unsent_failures(
