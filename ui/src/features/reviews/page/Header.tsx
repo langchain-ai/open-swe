@@ -69,11 +69,9 @@ function pillState(
 export function Header({
   pr,
   leftInset,
-  compactRail,
 }: {
   pr: PullRequestRef
   leftInset: string
-  compactRail: boolean
 }) {
   const refresh = useRefreshPullRequest(pr)
   const detailQuery = useQuery(reviewQueries.detail(pr))
@@ -327,18 +325,16 @@ export function Header({
           </Button>
         )}
         {queue && <ReviewQueueControls queue={queue} />}
-        {compactRail && (
-          <Button
-            size="sm"
-            color="secondary"
-            variant="outlined"
-            leftDecorator={ChatsCircleIcon}
-            aria-label="Chat"
-            onClick={() => setRailTab("chat")}
-          >
-            <span className="max-sm:hidden">Chat</span>
-          </Button>
-        )}
+        <Button
+          size="sm"
+          color="secondary"
+          variant="outlined"
+          leftDecorator={ChatsCircleIcon}
+          aria-label="Chat"
+          onClick={() => setRailTab("chat")}
+        >
+          <span className="max-sm:hidden">Chat</span>
+        </Button>
         {detail && !isLive(detail) && queue && (
           <Button size="sm" onClick={queue.advance}>
             {queue.next ? "Next" : "Finish"}

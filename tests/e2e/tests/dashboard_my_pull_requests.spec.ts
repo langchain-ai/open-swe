@@ -159,7 +159,7 @@ test.describe("my pull requests", () => {
     await expect(page.getByText("Someone else's change")).toHaveCount(0);
   });
 
-  test("keeps the PR list and full review workspace together, including old links", async ({
+  test("switches PR list and files in one pane and preserves the review route", async ({
     page,
   }) => {
     const mine = await seedOpenPullRequest(page, {
@@ -185,7 +185,12 @@ test.describe("my pull requests", () => {
       files: { "other.py": "VALUE = 2\n" },
       ...approved,
     });
-    await openMine(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/agents");
+    const sidebar = page.locator("[data-sidebar-frame]");
+    const pullRequests = sidebar.getByRole("link", { name: "Pull Requests" });
+    await pullRequests.click();
+    await expect(sidebar).toHaveCount(0);
     await page
       .getByRole("textbox", { name: "Search pull requests" })
       .fill("authored");
@@ -198,6 +203,7 @@ test.describe("my pull requests", () => {
     await expect(
       workspace.getByRole("heading", { name: "Changes", exact: true }),
     ).toBeVisible();
+    await expect(sidebar).toHaveCount(0);
     await expect(workspace).toContainText(
       "The complete review workspace stays beside the list.",
     );
@@ -207,23 +213,25 @@ test.describe("my pull requests", () => {
     await expect(page.getByRole("group", { name: "Review queue" })).toHaveCount(
       0,
     );
-    await page.getByRole("button", { name: "Show files", exact: true }).click();
-    await expect(page.getByRole("dialog", { name: "Files" })).toContainText(
-      "change.py",
-    );
-    await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await expect(page.getByRole("tab", { name: /^Discussion/ })).toBeVisible();
-    await page.keyboard.press("Escape");
-    await page
-      .getByRole("button", { name: "Hide PR list", exact: true })
-      .click();
+    const navigator = page.getByRole("navigation", {
+      name: "Files & Walkthrough",
+    });
+    const prList = page.getByRole("button", { name: "PR list", exact: true });
+    const rail = page.getByRole("complementary", {
+      name: "Chat and discussion",
+    });
+    await expect(navigator).toContainText("change.py");
+    await expect(rail.getByRole("tab", { name: /^Discussion/ })).toBeVisible();
+    await rail.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(rail).toBeHidden();
     await expect(
       page.getByRole("textbox", { name: "Search pull requests" }),
     ).toBeHidden();
-    await page
-      .getByRole("button", { name: "Show PR list", exact: true })
-      .click();
+    await prList.click();
+    await expect(navigator).toBeHidden();
+    await expect(
+      workspace.getByRole("heading", { name: "Changes", exact: true }),
+    ).toBeVisible();
     await expect(
       page.getByRole("textbox", { name: "Search pull requests" }),
     ).toHaveValue("authored");
@@ -236,12 +244,16 @@ test.describe("my pull requests", () => {
     await expect(
       workspace.getByRole("heading", { name: /Another authored change/ }),
     ).toBeVisible();
+    await expect(rail).toBeHidden();
+    await expect(navigator).toContainText("another.py");
+    await prList.click();
     await expect
       .poll(async () => {
         const rows = await page
           .getByRole("region", { name: "My open pull requests", exact: true })
           .getByRole("listitem")
           .all();
+        if (rows.length < 2) return false;
         const first = await rows[0]!.boundingBox();
         const second = await rows[1]!.boundingBox();
         return (
@@ -265,13 +277,18 @@ test.describe("my pull requests", () => {
         url.hash === "#discussion",
     );
     await page.setViewportSize({ width: 640, height: 900 });
-    await page
-      .getByRole("button", { name: "Show PR list", exact: true })
-      .click();
+    await expect(workspace).toBeVisible();
+    await expect(navigator).toBeHidden();
+    await prList.click();
     await expect(workspace).toBeHidden();
     await page
-      .getByRole("button", { name: "Back to selected PR", exact: true })
+      .getByRole("button", { name: "Files & Walkthrough", exact: true })
       .click();
+    await expect(navigator).toContainText("other.py");
+    await expect(
+      page.getByRole("dialog", { name: "Files & Walkthrough" }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Review", exact: true }).click();
     await expect(workspace).toBeVisible();
     await page
       .getByRole("button", { name: "Close PR details", exact: true })
@@ -280,6 +297,10 @@ test.describe("my pull requests", () => {
       page.getByRole("textbox", { name: "Search pull requests" }),
     ).toHaveValue("no-matches");
     await expect(page).toHaveURL((url) => !url.searchParams.has("pr"));
+    await page.getByRole("link", { name: "Back to threads" }).click();
+    await expect(page).toHaveURL(/\/agents$/);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(pullRequests).toBeVisible();
   });
 
   test("queues requested reviews before own drafts and keeps marked-ready PRs open", async ({

@@ -158,6 +158,7 @@ interface SidebarFrameProps {
   toggle: () => void
   className?: string
   historyControls?: boolean
+  hidden?: boolean
   children: React.ReactNode
 }
 
@@ -168,6 +169,7 @@ export function SidebarFrame({
   toggle,
   className,
   historyControls = true,
+  hidden = false,
   children,
 }: SidebarFrameProps) {
   const isDesktop =
@@ -184,11 +186,13 @@ export function SidebarFrame({
     createPortal(
       <WindowControls
         collapsed={collapsed}
-        toggle={toggle}
+        toggle={hidden ? undefined : toggle}
         historyControls={historyControls}
       />,
       controlsHost
     )
+
+  if (hidden) return windowControls
 
   if (collapsed) {
     if (isDesktop) return windowControls
@@ -238,7 +242,7 @@ function WindowControls({
   historyControls,
 }: {
   collapsed: boolean
-  toggle: () => void
+  toggle?: () => void
   historyControls: boolean
 }) {
   const subscribe = (onChange: () => void) => {
@@ -287,20 +291,24 @@ function WindowControls({
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [])
 
+  if (!toggle && !historyControls) return null
+
   return (
     <div
       data-no-drag=""
       className="fixed top-2 left-[90px] z-sidebar flex items-center gap-0.5 [.desktop-fullscreen_&]:left-[12px]"
     >
-      <IconButton
-        icon={SidebarSimpleIcon}
-        label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        color="secondary"
-        variant="plain"
-        size="sm"
-        onClick={toggle}
-        className="size-7"
-      />
+      {toggle && (
+        <IconButton
+          icon={SidebarSimpleIcon}
+          label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          color="secondary"
+          variant="plain"
+          size="sm"
+          onClick={toggle}
+          className="size-7"
+        />
+      )}
       {historyControls && (
         <>
           <IconButton

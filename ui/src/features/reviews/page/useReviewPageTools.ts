@@ -302,14 +302,13 @@ export function useReviewPageTools(pr: PullRequestRef) {
       const state = useReviewPage.getState()
       if (order) state.setOrder(order)
       if (diff_style) state.setDiffStyle(diff_style)
-      const fileListShown = (current: typeof state) => current.navigatorOverlay
-      if (file_list !== undefined && file_list !== fileListShown(state))
-        state.toggleNavigator()
+      if (file_list !== undefined && file_list !== state.isNavigatorOpen())
+        state.setNavigatorOpen(file_list)
       const now = useReviewPage.getState()
       return {
         order: now.order,
         diff_style: now.diffStyle,
-        file_list: fileListShown(now),
+        file_list: now.isNavigatorOpen(),
       }
     },
   })

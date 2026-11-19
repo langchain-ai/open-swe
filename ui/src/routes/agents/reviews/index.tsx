@@ -1,9 +1,9 @@
 import { Button } from "@langchain/macaw-components/Button"
+import { ArrowLeftIcon } from "@langchain/macaw-components/icons"
 import { Text } from "@langchain/macaw-components/Text"
-import { createFileRoute, redirect } from "@tanstack/react-router"
+import { createFileRoute, Link, redirect } from "@tanstack/react-router"
 import { useEffect } from "react"
 
-import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -74,11 +74,8 @@ function ReviewsPage() {
   const filters = Route.useSearch()
   const navigate = Route.useNavigate()
   const tab = filters.tab ?? "mine"
-  const sidebarCollapsed = useSidebarCollapsed()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
-  const clearTrafficLights = sidebarCollapsed && isDesktop
-  const clearSidebarToggle = sidebarCollapsed && !isDesktop
   const changeFilters = (changes: Partial<ReviewsSearch>, replace = false) => {
     if ("repo" in changes) storeRepos(changes.repo)
     void navigate({
@@ -101,7 +98,12 @@ function ReviewsPage() {
   const selection = parsePullRequestSelection(filters.pr)
 
   return (
-    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <main
+      className={cn(
+        "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+        isDesktop && "pt-11"
+      )}
+    >
       <div
         className={cn(
           "flex min-h-0 w-full flex-1 flex-col",
@@ -117,14 +119,19 @@ function ReviewsPage() {
           <div
             className={cn(
               "flex flex-wrap items-center gap-space-3",
-              selection && "border-b border-muted px-space-3 py-space-2",
-              clearTrafficLights && !selection && "relative -top-4",
-              clearTrafficLights &&
-                (selection ? "pl-44" : "pl-[clamp(0px,772px-50vw,176px)]"),
-              clearSidebarToggle &&
-                (selection ? "pl-11" : "pl-[clamp(0px,620px-50vw,24px)]")
+              selection && "border-b border-muted px-space-3 py-space-2"
             )}
           >
+            <Button
+              as={<Link to="/agents" />}
+              size="sm"
+              color="secondary"
+              variant="plain"
+              leftDecorator={ArrowLeftIcon}
+              className="border-0"
+            >
+              Back to threads
+            </Button>
             <Text as="h1" variant="h3" weight="medium" color="primary">
               Pull Requests
             </Text>

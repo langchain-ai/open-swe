@@ -16,6 +16,9 @@ import {
 import type { PullRequestRef } from "@/features/reviews/lib/reviewKeys"
 import { findEntry, isRenderable, type DiffEntry } from "./diffEntries"
 
+export const INLINE_NAVIGATOR_QUERY = "(min-width: 1000px)"
+export const INLINE_CHAT_QUERY = "(min-width: 1360px)"
+
 export type RailTab = "chat" | "discussion"
 export type DiffOrder = "files" | "guide"
 export type NavigatorLayout = "tabs" | "stacked"
@@ -80,10 +83,6 @@ interface PullRequestState {
 /** One visit to the page: where the reader is and what's open. Leaving the page drops it. */
 interface VisitState {
   railTab: RailTab
-  /** Below the wide breakpoint the rail is an overlay. */
-  railOpen: boolean
-  /** The file list over the page, where there is no room beside the diff. */
-  navigatorOverlay: boolean
   reviewOpen: boolean
   reviewVerdict: PullRequestReviewEvent
   /** The file, and its diff entry, under the top of the diff viewport. */
@@ -116,7 +115,16 @@ interface VisitState {
   lastStop: string | null
 }
 
-type ReviewPageState = Preferences & HeadState & PullRequestState & VisitState
+type ReviewPageState = Preferences &
+  HeadState &
+  PullRequestState &
+  VisitState & {
+    railOpen: boolean
+    narrowRailOpen: boolean
+    navigatorOpen: boolean
+    narrowNavigatorOpen: boolean
+    prListOpen: boolean
+  }
 
 interface ReviewPageActions {
   /** Shows a pull request at a head; drafts survive only on the same pull request, marks only on the same head. */
@@ -126,7 +134,9 @@ interface ReviewPageActions {
   setRailTab: (tab: RailTab) => void
   setRailOpen: (open: boolean) => void
   toggleNavigator: () => void
-  setNavigatorOverlay: (open: boolean) => void
+  setNavigatorOpen: (open: boolean) => void
+  isNavigatorOpen: (inline?: boolean) => boolean
+  setPrListOpen: (open: boolean) => void
   toggleNavigatorLayout: () => void
   openReview: (verdict?: PullRequestReviewEvent) => void
   setReviewOpen: (open: boolean) => void
@@ -296,8 +306,6 @@ function freshPullRequest(pr: PullRequestRef | null): PullRequestState {
 function freshVisit(): VisitState {
   return {
     railTab: "chat",
-    railOpen: false,
-    navigatorOverlay: false,
     reviewOpen: false,
     reviewVerdict: "COMMENT",
     activePath: null,
@@ -382,6 +390,11 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     navigatorLayout: "tabs",
     order: "files",
     diffStyle: "unified",
+    railOpen: true,
+    narrowRailOpen: false,
+    navigatorOpen: true,
+    narrowNavigatorOpen: false,
+    prListOpen: false,
     ...freshHead(null, null),
     ...freshPullRequest(null),
     ...freshVisit(),
@@ -401,10 +414,30 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       })
     },
     leave: () => set(freshVisit()),
-    setRailTab: (railTab) => set({ railTab, railOpen: true }),
-    setRailOpen: (railOpen) => set({ railOpen }),
-    toggleNavigator: () => set({ navigatorOverlay: !get().navigatorOverlay }),
-    setNavigatorOverlay: (navigatorOverlay) => set({ navigatorOverlay }),
+    setRailTab: (railTab) => {
+      set({ railTab })
+      get().setRailOpen(true)
+    },
+    setRailOpen: (open) =>
+      set(
+        window.matchMedia?.(INLINE_CHAT_QUERY)?.matches
+          ? { railOpen: open }
+          : { narrowRailOpen: open }
+      ),
+    toggleNavigator: () => get().setNavigatorOpen(!get().isNavigatorOpen()),
+    setNavigatorOpen: (open) =>
+      set({
+        ...(window.matchMedia?.(INLINE_NAVIGATOR_QUERY)?.matches
+          ? { navigatorOpen: open }
+          : { narrowNavigatorOpen: open }),
+        prListOpen: false,
+      }),
+    isNavigatorOpen: (
+      inline = window.matchMedia?.(INLINE_NAVIGATOR_QUERY)?.matches ?? false
+    ) =>
+      !get().prListOpen &&
+      (inline ? get().navigatorOpen : get().narrowNavigatorOpen),
+    setPrListOpen: (prListOpen) => set({ prListOpen }),
     toggleNavigatorLayout: () => {
       const navigatorLayout =
         get().navigatorLayout === "stacked" ? "tabs" : "stacked"
@@ -450,7 +483,8 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
         isCollapsed(get(), landing)
       set({
         jump: { key: (get().jump?.key ?? 0) + 1, target },
-        navigatorOverlay: false,
+        narrowNavigatorOpen: false,
+        narrowRailOpen: false,
         ...(landing
           ? { activeEntry: landing.id, activePath: landing.file.path }
           : {}),
@@ -488,7 +522,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     setThreadOpen: (threadId, open) =>
       set({ threadsOpen: withKey(get().threadsOpen, threadId, open) }),
     showOpenConversations: () => {
-      set({ railTab: "discussion", railOpen: true })
+      get().setRailTab("discussion")
       emit("showOpenConversations")
     },
     showFindings: () => {
@@ -503,7 +537,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       return true
     },
     focusChat: () => {
-      set({ railTab: "chat", railOpen: true })
+      get().setRailTab("chat")
       focusChatComposer()
     },
     askInChat: (text) => {

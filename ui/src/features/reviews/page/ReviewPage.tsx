@@ -6,21 +6,19 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { pageTitle } from "@/lib/pageTitle"
-import { SideSheet } from "@/components/SideSheet"
-import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
+import { cn } from "@/lib/utils"
 import { markReviewViewed } from "@/features/agents/lib/queries"
 import { ChatDraftsProvider } from "@/features/reviews/lib/chatDrafts"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
 import { Changes } from "./Changes"
 import { Header } from "./Header"
-import { Navigator, NavigatorToggle } from "./Navigator"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { Rail } from "./Rail"
-import { useReviewPage } from "./store"
+import { INLINE_CHAT_QUERY, useReviewPage } from "./store"
 import { useReviewPageTools } from "./useReviewPageTools"
 
-/** The selected PR, with files and chat available on demand. */
+/** The selected PR, with changes and chat. */
 export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
@@ -29,13 +27,11 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const chatThreadId = useReviewChat(pr).data?.thread_id
   const open = useReviewPage((state) => state.open)
   const leave = useReviewPage((state) => state.leave)
-  const navigatorOverlay = useReviewPage((state) => state.navigatorOverlay)
-  const setNavigatorOverlay = useReviewPage(
-    (state) => state.setNavigatorOverlay
+  const wide = useMediaQuery(INLINE_CHAT_QUERY)
+  const railOpen = useReviewPage((state) =>
+    wide ? state.railOpen : state.narrowRailOpen
   )
-  const railOpen = useReviewPage((state) => state.railOpen)
   const setRailOpen = useReviewPage((state) => state.setRailOpen)
-  const wide = useMediaQuery("(min-width: 1360px)")
   const headSha = detail.data?.head_sha ?? null
 
   useLayoutEffect(() => open(pr, headSha), [open, pr, headSha])
@@ -79,7 +75,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   return (
     <ChatDraftsProvider>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary">
-        <Header pr={pr} leftInset="pl-space-3" compactRail />
+        <Header pr={pr} leftInset="pl-space-3" />
         {errorMessage !== null ? (
           <PullRequestUnavailable
             pr={pr}
@@ -94,57 +90,25 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
           <div className="flex min-h-0 flex-1">
             <section
               aria-label="Changes"
-              className="flex min-h-0 min-w-0 flex-1 flex-col"
+              className={cn(
+                "min-h-0 min-w-0 flex-1 flex-col",
+                !wide && railOpen ? "hidden" : "flex"
+              )}
             >
-              <div className="flex h-11 shrink-0 items-center px-space-3">
-                <NavigatorToggle shown={false} />
-              </div>
               <div className="min-h-0 flex-1">
                 <Changes pr={pr} />
               </div>
             </section>
-            {wide && (
-              <div className={railOpen ? "contents" : "hidden"}>
-                <RightPanelShell
-                  mode="inline"
-                  widthStorageKey="open-swe.review-panel.width"
-                  defaultWidth={420}
-                >
-                  <Rail pr={pr} onClose={() => setRailOpen(false)} />
-                </RightPanelShell>
-              </div>
-            )}
+            <RightPanelShell
+              mode={wide ? "inline" : "embedded"}
+              hidden={!railOpen}
+              widthStorageKey="open-swe.review-panel.width"
+              defaultWidth={420}
+            >
+              <Rail pr={pr} onClose={() => setRailOpen(false)} />
+            </RightPanelShell>
           </div>
         )}
-        {!wide && (
-          <SideSheet
-            side="right"
-            title="Chat and discussion"
-            open={railOpen}
-            onClose={() => setRailOpen(false)}
-            className={RIGHT_PANEL_SHEET_CLASS_NAME}
-          >
-            <Rail pr={pr} onClose={() => setRailOpen(false)} />
-          </SideSheet>
-        )}
-        <SideSheet
-          side="left"
-          title="Files"
-          open={navigatorOverlay}
-          onClose={() => {
-            setNavigatorOverlay(false)
-            requestAnimationFrame(() =>
-              document
-                .querySelector<HTMLElement>(
-                  '[data-navigator-toggle][aria-pressed="false"]'
-                )
-                ?.focus()
-            )
-          }}
-          className="w-[min(88vw,300px)] pt-space-7"
-        >
-          <Navigator pr={pr} />
-        </SideSheet>
       </div>
     </ChatDraftsProvider>
   )

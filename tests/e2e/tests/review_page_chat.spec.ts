@@ -994,7 +994,9 @@ test.describe("review page", () => {
     );
     await page.reload();
     await openChatTab(page);
-    await expect(page.getByText("0/2 viewed")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "0 / 2 viewed", exact: true }),
+    ).toBeVisible();
 
     await sendChat(page, "E2E_REVIEW_PAGE_STEPS walk me through it");
     await expect(
@@ -1002,13 +1004,15 @@ test.describe("review page", () => {
     ).toBeVisible({ timeout: 60_000 });
 
     // The whole step was marked viewed, then alpha.py handed back unviewed.
-    await expect(page.getByText("1/2 viewed")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "1 / 2 viewed", exact: true }),
+    ).toBeVisible();
     await expect(
       diffColumn(page).getByText("Both constant modules").first(),
     ).toBeVisible();
   });
 
-  test("opens the chat as a sheet on a narrow window", async ({ page }) => {
+  test("opens the chat in place on a narrow window", async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 800 });
     await openReview(page, pr);
     const open = page.getByRole("button", { name: "Chat", exact: true });
@@ -1016,26 +1020,27 @@ test.describe("review page", () => {
     await expect(page.getByTestId("composer-editor")).toBeHidden();
 
     await open.click();
-    const sheet = page.getByRole("dialog");
-    await expect(sheet).toBeVisible();
+    const chat = chatPanel(page);
+    await expect(diffColumn(page)).toBeHidden();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await openChatTab(page);
     await sendChat(page, "E2E_REVIEW_CHAT_PLAIN what does this add?");
     await expect(
-      sheet.getByText("The pull request adds two constant modules."),
+      chat.getByText("The pull request adds two constant modules."),
     ).toBeVisible({ timeout: 30_000 });
 
     await page.reload();
     await expect(open).toBeVisible();
     await open.click();
-    await expect(sheet).toBeVisible();
+    await expect(chat).toBeVisible();
     await openChatTab(page);
     await expect(
-      sheet.getByText("The pull request adds two constant modules."),
+      chat.getByText("The pull request adds two constant modules."),
     ).toBeVisible();
-    await expect(sheet).toBeVisible();
-    const input = sheet.getByTestId("composer-editor");
+    await expect(chat).toBeVisible();
+    const input = chat.getByTestId("composer-editor");
     await input.pressSequentially("follow-up question");
     await expect(input).toHaveText("follow-up question");
-    await expect(sheet).toBeVisible();
+    await expect(chat).toBeVisible();
   });
 });

@@ -65,6 +65,7 @@ function AgentsLayout() {
     <AgentsShell
       user={session.data}
       activeThreadId={activeThreadId ?? activeReviewThreadId}
+      hideThreadSidebar={Boolean(reviewMatch)}
     >
       {/* Keyed by user, so a new sign-in starts with nothing another user read. */}
       <ThreadCacheProvider key={session.data.user_id}>

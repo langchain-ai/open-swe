@@ -21,7 +21,6 @@ import {
 } from "react"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { FolderSimpleIcon } from "@phosphor-icons/react/dist/ssr/FolderSimple"
-import { ListBulletsIcon } from "@phosphor-icons/react/dist/ssr/ListBullets"
 import { SquareSplitVerticalIcon } from "@phosphor-icons/react/dist/ssr/SquareSplitVertical"
 
 import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
@@ -127,10 +126,10 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
   const steps = walkthrough?.steps.length ?? 0
 
   return (
-    <nav aria-label="Files" className="flex h-full min-h-0 flex-col">
-      <div className="flex h-11 shrink-0 items-center px-space-3">
-        <NavigatorToggle shown />
-      </div>
+    <nav
+      aria-label="Files & Walkthrough"
+      className="flex h-full min-h-0 flex-col"
+    >
       <div className="flex flex-col gap-space-2 px-space-3 pt-space-3 pb-space-2">
         {steps > 0 && (
           <div className="flex items-center gap-space-2">
@@ -209,34 +208,6 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
         <FileTree files={files} markers={markers} />
       )}
     </nav>
-  )
-}
-
-export function NavigatorToggle({ shown }: { shown: boolean }) {
-  const toggleNavigator = useReviewPage((state) => state.toggleNavigator)
-  return (
-    <Button
-      leftDecorator={ListBulletsIcon}
-      aria-label={shown ? "Hide files" : "Show files"}
-      aria-pressed={shown}
-      title={`${shown ? "Hide" : "Show"} files (F)`}
-      size="md"
-      color="secondary"
-      variant="outlined"
-      data-navigator-toggle
-      onClick={() => {
-        toggleNavigator()
-        requestAnimationFrame(() =>
-          document
-            .querySelector<HTMLElement>(
-              `[data-navigator-toggle][aria-pressed="${!shown}"]`
-            )
-            ?.focus()
-        )
-      }}
-    >
-      Files
-    </Button>
   )
 }
 

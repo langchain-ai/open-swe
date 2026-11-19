@@ -135,6 +135,7 @@ interface AgentsSidebarProps {
   user: SessionUser
   activeThreadId?: string
   layout: SidebarLayout
+  sidebarHidden?: boolean
 }
 
 interface SidebarRowOptions {
@@ -184,6 +185,7 @@ export function AgentsSidebar({
   user,
   activeThreadId,
   layout,
+  sidebarHidden,
 }: AgentsSidebarProps) {
   const pendingState = usePendingThreadStarts()
   const pendingStarts = pendingState.entries.filter(
@@ -886,6 +888,7 @@ export function AgentsSidebar({
     <SidebarFrame
       {...layout}
       historyControls={historyControls}
+      hidden={sidebarHidden}
       className="border-r border-muted bg-surface-level-2"
     >
       {creatingProject && (
@@ -1602,10 +1605,12 @@ function LoadMoreThreadsOnScroll({
 export function AgentsShell({
   user,
   activeThreadId,
+  hideThreadSidebar = false,
   children,
 }: {
   user: SessionUser
   activeThreadId?: string
+  hideThreadSidebar?: boolean
   children: React.ReactNode
 }) {
   const layout = useSidebarLayout()
@@ -1626,19 +1631,21 @@ export function AgentsShell({
     startingActiveThread ? undefined : activeThreadId
   )
   const sidebarCommands = useMemo(() => {
-    const commands = [
-      {
-        id: "toggle-sidebar",
-        label: "Toggle sidebar",
-        aliases: ["show sidebar", "hide sidebar"],
-        shortcuts: ["mod+b"],
-        group: "Workspace",
-        run: layout.toggle,
-        desktopId: "toggle-sidebar" as const,
-        desktopShortcuts: ["mod+b"],
-        enableInFormFields: true,
-      },
-    ]
+    const commands = hideThreadSidebar
+      ? []
+      : [
+          {
+            id: "toggle-sidebar",
+            label: "Toggle sidebar",
+            aliases: ["show sidebar", "hide sidebar"],
+            shortcuts: ["mod+b"],
+            group: "Workspace",
+            run: layout.toggle,
+            desktopId: "toggle-sidebar" as const,
+            desktopShortcuts: ["mod+b"],
+            enableInFormFields: true,
+          },
+        ]
     if (!activeThread) return commands
     const reference =
       activeThread.pullRequests?.at(-1)?.url ??
@@ -1688,6 +1695,7 @@ export function AgentsShell({
     ]
   }, [
     activeThread,
+    hideThreadSidebar,
     layout.toggle,
     pinThread,
     pinnedThreads.data,
@@ -1704,6 +1712,7 @@ export function AgentsShell({
               user={user}
               activeThreadId={activeThreadId}
               layout={layout}
+              sidebarHidden={hideThreadSidebar}
             />
             <main className="relative flex min-w-0 flex-1 overflow-hidden bg-surface-level-1">
               {children}
