@@ -3110,7 +3110,9 @@ async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_
         "langsmith-trace": launch.dotted_order,
         "langsmith-metadata": {async_subagents._NEST_UNDER_PARENT: True},
     }
-    traced: dict[str, list[tuple[bool, object]]] = {}
+    # Whom the run bills to, once the worker adopted its run token.
+    billing = {"billing_bucket": "user", "billed_user_email": "human@example.com"}
+    traced: dict[str, list[tuple[bool, object, object]]] = {}
     for run, headers, metadata in [
         ("dashboard", nested, {}),
         ("launched", {**nested, "deepagents_parent": {"thread_id": "lead"}}, {}),
@@ -3127,7 +3129,11 @@ async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_
                 AIMessage(content="done"),
             ],
         )
-        graph = create_agent(model=model, tools=[look], middleware=[RootAgentTraceMiddleware()])
+        graph = create_agent(
+            model=model,
+            tools=[look],
+            middleware=[RootAgentTraceMiddleware(lambda: {**billing, "origin": "dashboard"})],
+        )
         config: RunnableConfig = {
             "configurable": {"thread_id": "worker", **headers},
             "metadata": metadata,
@@ -3139,17 +3145,20 @@ async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_
             (
                 str(created.kwargs["trace_id"]) == str(launch.trace_id),
                 _run_metadata(created.kwargs).get("ls_agent_type"),
+                _run_metadata(created.kwargs).get("billed_user_email"),
             )
             for created in client.create_run.call_args_list
             if created.kwargs["run_type"] == "llm"
         ]
 
+    # Only a nested worker's calls take the billing its run's own metadata lacks.
+    worker = "human@example.com"
     assert traced == {
-        "dashboard": [(True, "root")] * 2,
-        "launched": [(True, "subagent")] * 2,
-        "forwarded context": [(True, "subagent")] * 2,
-        "resumed worker": [(False, "root")] * 2,
-        "own": [(False, "root")] * 2,
+        "dashboard": [(True, "root", None)] * 2,
+        "launched": [(True, "subagent", worker)] * 2,
+        "forwarded context": [(True, "subagent", worker)] * 2,
+        "resumed worker": [(False, "root", None)] * 2,
+        "own": [(False, "root", None)] * 2,
     }
     # The worker's type stays on its model calls; a run-wide tag splits the trace by node.
     assert in_tool == [None] * 5

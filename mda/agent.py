@@ -291,7 +291,7 @@ def _parts(graph: Graph) -> _Parts:
             RunModelCallLimit(backend, _MODEL_CALL_LIMIT),
             *model_call_guards(),
             # Innermost, so only the agent's own model calls are its thread's main conversation.
-            RootAgentTraceMiddleware(),
+            RootAgentTraceMiddleware(lambda: backend.run.catalog.trace_metadata),
         ],
     )
     timing.lap("middleware")

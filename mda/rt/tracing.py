@@ -273,7 +273,22 @@ class RootAgentTraceMiddleware(AgentMiddleware):
     are tagged ``subagent`` while its run is nested in the coordinator's trace, so they
     stay out of the coordinator's conversation; a run on a worker thread that has its own
     trace is that trace's root agent.
+
+    A nested worker's calls also carry whom the worker bills to, from ``attribution``:
+    deepagents starts its run with none, and the backend settles it only as the worker
+    adopts its run token, after its run's metadata is fixed.
     """
+
+    # Whom a call bills to, as the backend names it in a run's trace metadata.
+    _BILLING_KEYS: Final = (
+        "billing_bucket",
+        "billed_user_email",
+        "billed_robin_user_id",
+        "user_id",
+    )
+
+    def __init__(self, attribution: Callable[[], Mapping[str, JsonValue]] | None = None) -> None:
+        self._attribution = attribution
 
     async def awrap_model_call(
         self,
@@ -284,10 +299,22 @@ class RootAgentTraceMiddleware(AgentMiddleware):
         metadata = tracing["metadata"] or {}
         if "ls_agent_type" in metadata:
             return await handler(request)
-        agent_type = "subagent" if self.is_nested_worker(ensure_config()) else "root"
-        tracing["metadata"] = {**metadata, "ls_agent_type": agent_type}
+        if self.is_nested_worker(ensure_config()):
+            tracing["metadata"] = {**metadata, **self._billing(), "ls_agent_type": "subagent"}
+        else:
+            tracing["metadata"] = {**metadata, "ls_agent_type": "root"}
         with tracing_context(**tracing):
             return await handler(request)
+
+    def _billing(self) -> dict[str, JsonValue]:
+        if self._attribution is None:
+            return {}
+        try:
+            attribution = self._attribution()
+        except Exception:
+            logger.warning("Could not read a worker's billing for its model call", exc_info=True)
+            return {}
+        return {key: attribution[key] for key in self._BILLING_KEYS if key in attribution}
 
     @staticmethod
     def is_nested_worker(config: Mapping[str, object]) -> bool:
