@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   classifyDashboardRequest,
   parseServerTiming,
+  subscribeRequestTimings,
   withRequestTiming,
 } from "./fetchTiming"
+import type { RequestTiming } from "./fetchTiming"
 import { clearPerfSpans, getPerfSpans, subscribePerfSpans } from "./trace"
 
 afterEach(() => clearPerfSpans())
@@ -50,6 +52,19 @@ describe("classifyDashboardRequest", () => {
       classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/commands/`)
         ?.kind
     ).toBe("command")
+    expect(
+      classifyDashboardRequest(
+        `/dashboard/api/threads/${THREAD}/runs?limit=1&status=running`
+      )?.kind
+    ).toBe("running_lookup")
+    expect(
+      classifyDashboardRequest(
+        `/dashboard/api/threads/${THREAD}/runs?status=pending&limit=100&select=run_id`
+      )?.kind
+    ).toBe("pending_lookup")
+    expect(
+      classifyDashboardRequest(`/dashboard/api/threads/${THREAD}/runs`)
+    ).toBe(null)
     expect(
       classifyDashboardRequest("/dashboard/api/threads/page?limit=10")
     ).toBe(null)
@@ -110,6 +125,47 @@ describe("withRequestTiming", () => {
       { endpoint: "page", status: 503, outcome: "error" },
       { endpoint: "repos", outcome: "error" },
     ])
+  })
+
+  it("reports a state read again with its body's download and parse", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "performance"] })
+    const timings: Array<RequestTiming> = []
+    const unsubscribe = subscribeRequestTimings((timing) =>
+      timings.push(timing)
+    )
+    try {
+      const timedFetch = withRequestTiming(
+        () =>
+          new Promise<Response>((resolve) =>
+            setTimeout(() => {
+              const body = new ReadableStream<Uint8Array>({
+                start(controller) {
+                  setTimeout(() => {
+                    controller.enqueue(
+                      new TextEncoder().encode('{"values":{}}')
+                    )
+                    controller.close()
+                  }, 30)
+                },
+              })
+              resolve(new Response(body))
+            }, 20)
+          )
+      )
+      const responding = timedFetch(`/dashboard/api/threads/${THREAD}/state`)
+      await vi.advanceTimersByTimeAsync(20)
+      const parsing = (await responding).json()
+      await vi.advanceTimersByTimeAsync(30)
+
+      expect(await parsing).toEqual({ values: {} })
+      expect(timings).toEqual([
+        expect.objectContaining({ kind: "thread_state", ttfbMs: 20 }),
+        expect.objectContaining({ ttfbMs: 20, bodyMs: 30, parseMs: 0 }),
+      ])
+    } finally {
+      unsubscribe()
+      vi.useRealTimers()
+    }
   })
 
   it("does not fail a request if a perf listener throws", async () => {

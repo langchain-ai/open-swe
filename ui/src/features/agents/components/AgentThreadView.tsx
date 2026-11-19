@@ -846,8 +846,7 @@ export function AgentThreadView({
   useThreadTranscriptPaint(
     thread.id,
     isHydrating ? null : shownMessages,
-    source.kind,
-    source.hasOlder
+    source
   )
 
   return (

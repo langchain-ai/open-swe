@@ -246,7 +246,7 @@ function AgentThreadAwaitingSummary({ threadId }: { threadId: string }) {
   useEffect(() => {
     if (!source.isHydrating) threadHydrated(threadId)
   }, [source.isHydrating, threadId])
-  useThreadTranscriptPaint(threadId, shown, source.kind, source.hasOlder)
+  useThreadTranscriptPaint(threadId, shown, source)
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">

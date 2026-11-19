@@ -69,6 +69,7 @@ vi.mock("@/features/agents/lib/threadSource/ThreadSourceProvider", async () => {
       shownFrom: stream.shownFrom,
       isHydrating: false,
       isRunning: false,
+      hydration: Promise.resolve(),
     }),
   }
 })

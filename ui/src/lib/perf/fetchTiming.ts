@@ -1,7 +1,8 @@
 /**
  * Request-level timing for the handful of dashboard calls that gate a thread:
- * time to response headers plus the backend's `Server-Timing` phase breakdown.
- * Only header metadata is recorded; never bodies, cookies, or tokens.
+ * time to response headers (for a state read, then its body and its parse) plus
+ * the backend's `Server-Timing` phase breakdown. Only timings and header
+ * metadata are recorded, never bodies, cookies, or tokens.
  */
 
 import { startSpan } from "./trace"
@@ -19,6 +20,9 @@ export type TimedRequestKind =
   | "thread_transcript"
   | "stream_events"
   | "command"
+  /** The SDK's lookups for a run to join or queue when it opens a thread. */
+  | "running_lookup"
+  | "pending_lookup"
 
 export interface ClassifiedRequest {
   kind: TimedRequestKind
@@ -31,6 +35,9 @@ export interface RequestTiming extends ClassifiedRequest {
   /** Milliseconds from request start to response headers. */
   ttfbMs: number
   serverTiming: Array<ServerTimingEntry>
+  /** A state read reports again once parsed: its body's download after the headers. */
+  bodyMs?: number
+  parseMs?: number
 }
 
 type RequestTimingListener = (timing: RequestTiming) => void
@@ -50,6 +57,11 @@ const KINDS_BY_SUFFIX: Record<string, TimedRequestKind> = {
   "/runs/stream": "command",
 }
 
+const LOOKUPS_BY_STATUS: Record<string, TimedRequestKind> = {
+  running: "running_lookup",
+  pending: "pending_lookup",
+}
+
 export function classifyDashboardRequest(
   url: string
 ): ClassifiedRequest | null {
@@ -57,7 +69,12 @@ export function classifyDashboardRequest(
   const match = THREAD_REQUEST_RE.exec(pathname)
   if (!match?.[1]) return null
   const suffix = (match[2] ?? "").replace(/\/$/, "")
-  const kind = KINDS_BY_SUFFIX[suffix]
+  const kind =
+    suffix === "/runs"
+      ? LOOKUPS_BY_STATUS[
+          new URL(url, "http://localhost").searchParams.get("status") ?? ""
+        ]
+      : KINDS_BY_SUFFIX[suffix]
   return kind ? { kind, threadId: match[1].toLowerCase() } : null
 }
 
@@ -159,12 +176,26 @@ export function withRequestTiming(
       )
     } catch {}
     if (classified) {
-      recordRequestTiming({
+      const timing: RequestTiming = {
         ...classified,
         status: response.status,
         ttfbMs: performance.now() - started,
         serverTiming: parseServerTiming(response.headers.get("server-timing")),
-      })
+      }
+      recordRequestTiming(timing)
+      // `json()` would time the download and the parse as one.
+      if (classified.kind === "thread_state")
+        response.json = async () => {
+          const text = await response.text()
+          const bodyAt = performance.now()
+          const parsed: unknown = JSON.parse(text)
+          recordRequestTiming({
+            ...timing,
+            bodyMs: bodyAt - started - timing.ttfbMs,
+            parseMs: performance.now() - bodyAt,
+          })
+          return parsed
+        }
     }
     return response
   }
