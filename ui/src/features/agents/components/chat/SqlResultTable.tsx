@@ -1,3 +1,4 @@
+import { Card } from "@langchain/macaw-components/Card"
 import { cn } from "@/lib/utils"
 import { TableScroll } from "./TableScroll"
 
@@ -52,8 +53,8 @@ export function SqlResultTable({ output }: { output: string | undefined }) {
   if (!result) return null
 
   return (
-    <div className="my-space-2 overflow-hidden rounded-lg border border-subtle bg-surface-level-2 text-xs">
-      <div className="flex items-center justify-between gap-space-3 border-b border-subtle px-space-3 py-space-2 text-secondary">
+    <Card intent="neutral" className="my-space-2 overflow-hidden p-0 text-xs">
+      <div className="flex items-center justify-between gap-space-3 border-b border-subtle px-space-3 py-space-1 text-secondary">
         <span>
           {result.row_count.toLocaleString()} row
           {result.row_count === 1 ? "" : "s"}
@@ -61,7 +62,7 @@ export function SqlResultTable({ output }: { output: string | undefined }) {
         {result.truncated && <span>Results truncated</span>}
       </div>
       <TableScroll viewportClassName="max-h-[28rem]">
-        <table className="min-w-max border-collapse text-left">
+        <table className="w-full min-w-max border-collapse text-left">
           <thead className="sticky top-0 z-sticky-header bg-surface-level-3">
             <tr>
               {result.columns.map((column, index) => (
@@ -104,6 +105,6 @@ export function SqlResultTable({ output }: { output: string | undefined }) {
           </div>
         )}
       </TableScroll>
-    </div>
+    </Card>
   )
 }
