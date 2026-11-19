@@ -1867,6 +1867,8 @@ async def test_a_system_automation_needs_no_public_repository_confirmation(
     await _seed({**_ISSUE_RESPONDER, "allow_public_repo": False, "system": True})
     [run] = await _plan_github("issues", _issue_opened(private=False), "delivery-1")
     assert "github_login" not in _configurable(run)
+    # Robin's own work, though it runs on the GitHub channel's thread.
+    assert run.metadata["billing_bucket"] == "system"
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     monkeypatch.setattr(schedules, "repo_is_private", AsyncMock(return_value=False))

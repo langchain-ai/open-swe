@@ -505,7 +505,12 @@ async def prepare_durable_run(
         for key in BILLING_USER_FIELDS:
             run_metadata.pop(key, None)
         run_metadata.update(billing)
-    elif channel_of(run_metadata) is not None and run_metadata["billing_bucket"] != "user":
+    elif (
+        channel_of(run_metadata) is not None
+        and run_metadata["billing_bucket"] != "user"
+        # An automation's run is its creator's or Robin's own, whichever thread it is on.
+        and source != "schedule"
+    ):
         run_metadata["billing_bucket"] = "channel"
     conversation_type = _slack_conversation_type(source, config)
     if conversation_type is not None:
