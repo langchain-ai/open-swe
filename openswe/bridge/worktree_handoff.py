@@ -6,9 +6,15 @@ from pydantic import JsonValue
 
 from openswe.bridge.backend import BridgeSandboxBackend
 from openswe.bridge.protocol import WorktreeHandoffParams
+from openswe.bridge.store import Bridge
 from openswe.run_config import RunConfig
 from openswe.sandboxes.paths import forget_work_dir
-from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxUnreachableError
+from openswe.sandboxes.state import (
+    SANDBOX_BACKENDS,
+    SandboxUnreachableError,
+    get_sandbox_backend,
+    get_sandbox_id_from_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +33,10 @@ async def worktree_handoff(
     """Implement the `worktree_handoff` tool."""
     thread_id = RunConfig.from_runtime().thread_id
     proxy = SANDBOX_BACKENDS.get(thread_id) if thread_id else None
-    backend = proxy.current if proxy is not None else None
+    if thread_id and (proxy is None or not proxy.has_backend):
+        if Bridge.bridge_id_of(await get_sandbox_id_from_metadata(thread_id)) is not None:
+            proxy = await get_sandbox_backend(thread_id)
+    backend = proxy.current if proxy is not None and proxy.has_backend else None
     if not isinstance(backend, BridgeSandboxBackend):
         return {"success": False, "error": "This thread is not running on the desktop app."}
     params = WorktreeHandoffParams(

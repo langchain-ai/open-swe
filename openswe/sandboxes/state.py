@@ -2,8 +2,10 @@
 
 import asyncio
 import logging
+import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Generator, Sequence
+from contextlib import contextmanager
 from typing import Any
 
 from deepagents.backends.protocol import (
@@ -84,6 +86,33 @@ class SandboxBackendProxy(BaseSandbox):
         self._reconnect = reconnect
         self._startup_task: asyncio.Task[SandboxBackendProtocol] | None = None
         self._lock: asyncio.Lock | None = None
+        self._active_calls = 0
+        self.last_used_at = time.monotonic()
+
+    def touch(self) -> None:
+        self.last_used_at = time.monotonic()
+
+    @property
+    def busy(self) -> bool:
+        return (
+            self._active_calls > 0
+            or (self._startup_task is not None and not self._startup_task.done())
+            or (self._lock is not None and self._lock.locked())
+        )
+
+    @property
+    def backend_id(self) -> str | None:
+        return self._backend.id if self._backend is not None else None
+
+    @contextmanager
+    def _use(self) -> Generator[None]:
+        self._active_calls += 1
+        self.touch()
+        try:
+            yield
+        finally:
+            self._active_calls -= 1
+            self.touch()
 
     @property
     def current(self) -> SandboxBackendProtocol:
@@ -152,7 +181,8 @@ class SandboxBackendProxy(BaseSandbox):
             )
 
     async def ready(self) -> SandboxBackendProtocol:
-        return await self._aget_backend()
+        with self._use():
+            return await self._aget_backend()
 
     def _get_backend(self) -> SandboxBackendProtocol:
         if self._backend is None:
@@ -213,7 +243,7 @@ class SandboxBackendProxy(BaseSandbox):
                 self._backend = unwrap_sandbox_backend(sandbox_backend)
                 remember_connection(self._backend)
                 self._startup_task = None
-                SANDBOX_BACKENDS[self._thread_id] = self
+                _SANDBOX_CACHE.put_proxy(self._thread_id, self)
             backend = self._backend
             if backend is None:
                 raise RuntimeError(f"No sandbox backend cached for thread {self._thread_id}")
@@ -223,13 +253,15 @@ class SandboxBackendProxy(BaseSandbox):
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def als(self, path: str) -> LsResult:
-        return await (await self._aget_backend()).als(path)
+        with self._use():
+            return await (await self._aget_backend()).als(path)
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        return await (await self._aget_backend()).aread(file_path, offset, limit)
+        with self._use():
+            return await (await self._aget_backend()).aread(file_path, offset, limit)
 
     def grep(
         self,
@@ -249,19 +281,24 @@ class SandboxBackendProxy(BaseSandbox):
         *,
         max_count: int | None = None,
     ) -> GrepResult:
-        return await (await self._aget_backend()).agrep(pattern, path, glob, max_count=max_count)
+        with self._use():
+            return await (await self._aget_backend()).agrep(
+                pattern, path, glob, max_count=max_count
+            )
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
-        return await (await self._aget_backend()).aglob(pattern, path)
+        with self._use():
+            return await (await self._aget_backend()).aglob(pattern, path)
 
     def write(self, file_path: str, content: str) -> WriteResult:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
-        return await (await self._aget_backend()).awrite(file_path, content)
+        with self._use():
+            return await (await self._aget_backend()).awrite(file_path, content)
 
     def edit(
         self,
@@ -279,34 +316,39 @@ class SandboxBackendProxy(BaseSandbox):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        return await (await self._aget_backend()).aedit(
-            file_path, old_string, new_string, replace_all
-        )
+        with self._use():
+            return await (await self._aget_backend()).aedit(
+                file_path, old_string, new_string, replace_all
+            )
 
     def delete(self, file_path: str) -> DeleteResult:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def adelete(self, file_path: str) -> DeleteResult:
-        return await (await self._aget_backend()).adelete(file_path)
+        with self._use():
+            return await (await self._aget_backend()).adelete(file_path)
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        return await (await self._aget_backend()).aupload_files(files)
+        with self._use():
+            return await (await self._aget_backend()).aupload_files(files)
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        return await (await self._aget_backend()).adownload_files(paths)
+        with self._use():
+            return await (await self._aget_backend()).adownload_files(paths)
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
         raise NotImplementedError(_SYNC_UNSUPPORTED)
 
     async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
-        return await (await self._aget_backend()).aexecute(command, timeout=effective_timeout)
+        with self._use():
+            effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
+            return await (await self._aget_backend()).aexecute(command, timeout=effective_timeout)
 
     def execute_with_offload(
         self,
@@ -328,21 +370,22 @@ class SandboxBackendProxy(BaseSandbox):
         max_capture_bytes: int | None = None,
         timeout: int | None = None,  # noqa: ASYNC109 - forwarded to backend, not an asyncio contract
     ) -> ExecuteOffloadResult:
-        backend = await self._aget_backend()
-        effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
-        offload = getattr(backend, "aexecute_with_offload", None)
-        if offload is None:
-            return ExecuteOffloadResult(
-                offloaded=False,
-                response=await self._aplain(backend, command, effective_timeout),
+        with self._use():
+            backend = await self._aget_backend()
+            effective_timeout = timeout if timeout is not None else _DEFAULT_EXECUTE_TIMEOUT_SECONDS
+            offload = getattr(backend, "aexecute_with_offload", None)
+            if offload is None:
+                return ExecuteOffloadResult(
+                    offloaded=False,
+                    response=await self._aplain(backend, command, effective_timeout),
+                )
+            return await offload(
+                command,
+                capture_path,
+                max_inline_bytes=max_inline_bytes,
+                max_capture_bytes=max_capture_bytes,
+                timeout=effective_timeout,
             )
-        return await offload(
-            command,
-            capture_path,
-            max_inline_bytes=max_inline_bytes,
-            max_capture_bytes=max_capture_bytes,
-            timeout=effective_timeout,
-        )
 
     @staticmethod
     async def _aplain(
@@ -353,16 +396,96 @@ class SandboxBackendProxy(BaseSandbox):
         return await backend.aexecute(command)
 
 
+_SANDBOX_CACHE_LIMIT = 512
+_SANDBOX_IDLE_TTL_SECONDS = 1800.0
+
+
+class _SandboxCache:
+    def __init__(
+        self,
+        backends: dict[str, SandboxBackendProxy],
+        connections: OrderedDict[str, SandboxBackendProtocol],
+        *,
+        limit: int = _SANDBOX_CACHE_LIMIT,
+        idle_ttl_seconds: float = _SANDBOX_IDLE_TTL_SECONDS,
+    ) -> None:
+        self.backends = backends
+        self.connections = connections
+        self.limit = limit
+        self.idle_ttl_seconds = idle_ttl_seconds
+
+    def remember_connection(self, sandbox_backend: SandboxBackendProtocol) -> None:
+        self.connections[sandbox_backend.id] = sandbox_backend
+        self.connections.move_to_end(sandbox_backend.id)
+
+    def put_proxy(self, thread_id: str, proxy: SandboxBackendProxy) -> SandboxBackendProxy:
+        proxy.touch()
+        self.backends[thread_id] = proxy
+        if proxy.backend_id is not None and proxy.backend_id in self.connections:
+            self.connections.move_to_end(proxy.backend_id)
+        self.evict()
+        return proxy
+
+    def touch_thread(self, thread_id: str) -> SandboxBackendProxy | None:
+        proxy = self.backends.get(thread_id)
+        if proxy is None:
+            return None
+        proxy.touch()
+        if proxy.backend_id is not None and proxy.backend_id in self.connections:
+            self.connections.move_to_end(proxy.backend_id)
+        self.evict()
+        return proxy
+
+    def drop_unreferenced_connection(self, sandbox_id: str | None) -> None:
+        if sandbox_id is None:
+            return
+        if any(proxy.backend_id == sandbox_id for proxy in self.backends.values()):
+            return
+        self.connections.pop(sandbox_id, None)
+
+    def evict(self) -> None:
+        now = time.monotonic()
+        expired = [
+            thread_id
+            for thread_id, proxy in self.backends.items()
+            if not proxy.busy and now - proxy.last_used_at >= self.idle_ttl_seconds
+        ]
+        for thread_id in expired:
+            removed = self.backends.pop(thread_id, None)
+            if removed is not None:
+                self.drop_unreferenced_connection(removed.backend_id)
+
+        idle = sorted(
+            (item for item in self.backends.items() if not item[1].busy),
+            key=lambda item: item[1].last_used_at,
+        )
+        for thread_id, _ in idle[: max(0, len(idle) - self.limit)]:
+            removed = self.backends.pop(thread_id)
+            self.drop_unreferenced_connection(removed.backend_id)
+
+        if len(self.connections) > self.limit:
+            referenced = {
+                proxy.backend_id for proxy in self.backends.values() if proxy.backend_id is not None
+            }
+            for sandbox_id in list(self.connections):
+                if len(self.connections) <= self.limit:
+                    break
+                if sandbox_id not in referenced:
+                    self.connections.pop(sandbox_id, None)
+
+
 # Thread ID -> stable SandboxBackendProxy, shared between server.py and middleware.
 SANDBOX_BACKENDS: dict[str, SandboxBackendProxy] = {}
 
 # Sandbox ID -> live connection to it. Keyed by sandbox rather than thread so a
 # thread rebound on another worker can never be handed the sandbox it left.
-SANDBOX_CONNECTIONS: dict[str, SandboxBackendProtocol] = {}
+SANDBOX_CONNECTIONS: OrderedDict[str, SandboxBackendProtocol] = OrderedDict()
+
+_SANDBOX_CACHE = _SandboxCache(SANDBOX_BACKENDS, SANDBOX_CONNECTIONS)
 
 
 def remember_connection(sandbox_backend: SandboxBackendProtocol) -> None:
-    SANDBOX_CONNECTIONS[sandbox_backend.id] = sandbox_backend
+    _SANDBOX_CACHE.remember_connection(sandbox_backend)
 
 
 def unwrap_sandbox_backend(sandbox_backend: SandboxBackendProtocol) -> SandboxBackendProtocol:
@@ -376,21 +499,19 @@ def set_sandbox_backend(
     sandbox_backend: SandboxBackendProtocol,
 ) -> SandboxBackendProxy:
     if isinstance(sandbox_backend, SandboxBackendProxy):
-        SANDBOX_BACKENDS[thread_id] = sandbox_backend
-        return sandbox_backend
+        return _SANDBOX_CACHE.put_proxy(thread_id, sandbox_backend)
 
     existing = SANDBOX_BACKENDS.get(thread_id)
-    previous = existing.current if existing is not None and existing.has_backend else None
-    if previous is not None and previous.id != sandbox_backend.id:
-        SANDBOX_CONNECTIONS.pop(previous.id, None)
+    previous_id = existing.backend_id if existing is not None else None
     remember_connection(sandbox_backend)
     if isinstance(existing, SandboxBackendProxy):
         existing.replace_backend(sandbox_backend)
-        return existing
+        if previous_id is not None and previous_id != sandbox_backend.id:
+            _SANDBOX_CACHE.drop_unreferenced_connection(previous_id)
+        return _SANDBOX_CACHE.put_proxy(thread_id, existing)
 
     proxy = SandboxBackendProxy(sandbox_backend, thread_id=thread_id)
-    SANDBOX_BACKENDS[thread_id] = proxy
-    return proxy
+    return _SANDBOX_CACHE.put_proxy(thread_id, proxy)
 
 
 def get_or_create_sandbox_backend_proxy(
@@ -398,7 +519,7 @@ def get_or_create_sandbox_backend_proxy(
     *,
     reconnect: Callable[[], Awaitable[SandboxBackendProtocol]] | None = None,
 ) -> SandboxBackendProxy:
-    sandbox_backend = SANDBOX_BACKENDS.get(thread_id)
+    sandbox_backend = _SANDBOX_CACHE.touch_thread(thread_id)
     if sandbox_backend:
         # Callers that only want the handle pass no callback; keep the one the
         # run registered rather than dropping it to the metadata fallback.
@@ -407,8 +528,7 @@ def get_or_create_sandbox_backend_proxy(
         return sandbox_backend
 
     sandbox_backend = SandboxBackendProxy(thread_id=thread_id, reconnect=reconnect)
-    SANDBOX_BACKENDS[thread_id] = sandbox_backend
-    return sandbox_backend
+    return _SANDBOX_CACHE.put_proxy(thread_id, sandbox_backend)
 
 
 async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:

@@ -168,3 +168,94 @@ def test_a_cached_sandbox_the_thread_left_is_forgotten(bound: str | None, kept: 
     proxy.follow(bound)
 
     assert proxy.has_backend is kept
+
+
+@pytest.mark.asyncio
+async def test_evicts_idle_sandboxes_while_preserving_live_work_and_shared_connections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.sandboxes import state
+
+    state.SANDBOX_BACKENDS.clear()
+    state.SANDBOX_CONNECTIONS.clear()
+    clock = 1000.0
+    monkeypatch.setattr(state.time, "monotonic", lambda: clock)
+    monkeypatch.setattr(state._SANDBOX_CACHE, "limit", 2)
+    monkeypatch.setattr(state._SANDBOX_CACHE, "idle_ttl_seconds", 60.0)
+
+    gate = asyncio.Event()
+
+    class _Box(_FakeSandboxBackend):
+        def __init__(self, box_id: str, *, wait: bool = False) -> None:
+            self.id = box_id
+            self._wait = wait
+
+        async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+            if self._wait:
+                await gate.wait()
+            return ExecuteResponse(output=f"{self.id}: {command}", exit_code=0)
+
+    busy_proxy = state.set_sandbox_backend(
+        "t-busy", cast("SandboxBackendProtocol", _Box("sb-busy", wait=True))
+    )
+    running = asyncio.create_task(busy_proxy.aexecute("long"))
+    await asyncio.sleep(0)
+
+    clock += 10.0
+    shared = cast("SandboxBackendProtocol", _Box("sb-shared"))
+    state.set_sandbox_backend("t-shared-old", shared)
+
+    clock += 70.0
+    # Past TTL: t-busy has an in-flight call so it stays; t-shared-old is idle so it evicts,
+    # unless another active thread still holds sb-shared.
+    state.set_sandbox_backend("t-shared-live", shared)
+    assert "t-busy" in state.SANDBOX_BACKENDS
+    assert "t-shared-old" not in state.SANDBOX_BACKENDS
+    assert "sb-shared" in state.SANDBOX_CONNECTIONS
+    assert "sb-busy" in state.SANDBOX_CONNECTIONS
+
+    # Exceeding the LRU limit (2) skips t-busy and evicts the oldest idle entry (t-shared-live),
+    # releasing sb-shared now that no remaining thread holds it.
+    clock += 1.0
+    state.set_sandbox_backend("t-new-1", cast("SandboxBackendProtocol", _Box("sb-1")))
+    clock += 1.0
+    state.set_sandbox_backend("t-new-2", cast("SandboxBackendProtocol", _Box("sb-2")))
+
+    assert set(state.SANDBOX_BACKENDS) == {"t-busy", "t-new-1", "t-new-2"}
+    assert "sb-shared" not in state.SANDBOX_CONNECTIONS
+    assert "sb-busy" in state.SANDBOX_CONNECTIONS
+
+    gate.set()
+    await running
+    state.SANDBOX_BACKENDS.clear()
+    state.SANDBOX_CONNECTIONS.clear()
+
+
+@pytest.mark.asyncio
+async def test_over_cap_eviction_drops_the_sandbox_used_least_recently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.sandboxes import state
+
+    state.SANDBOX_BACKENDS.clear()
+    state.SANDBOX_CONNECTIONS.clear()
+    clock = 1000.0
+    monkeypatch.setattr(state.time, "monotonic", lambda: clock)
+    monkeypatch.setattr(state._SANDBOX_CACHE, "limit", 2)
+
+    class _Box(_FakeSandboxBackend):
+        def __init__(self, box_id: str) -> None:
+            self.id = box_id
+
+    first = state.set_sandbox_backend("t-first", cast("SandboxBackendProtocol", _Box("sb-first")))
+    clock += 1.0
+    state.set_sandbox_backend("t-second", cast("SandboxBackendProtocol", _Box("sb-second")))
+    clock += 1.0
+    await first.aexecute("ls")
+    clock += 1.0
+    state.set_sandbox_backend("t-third", cast("SandboxBackendProtocol", _Box("sb-third")))
+
+    assert set(state.SANDBOX_BACKENDS) == {"t-first", "t-third"}
+    assert set(state.SANDBOX_CONNECTIONS) == {"sb-first", "sb-third"}
+    state.SANDBOX_BACKENDS.clear()
+    state.SANDBOX_CONNECTIONS.clear()
