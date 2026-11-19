@@ -56,7 +56,7 @@ Cloud coding follow-ups reuse the thread’s context and sandbox; independent th
 Robin adds engineering tools, integrations, authorization, and user interfaces.
 The graph entrypoints are declared in [`langgraph.json`](langgraph.json), with an [architecture inventory](AGENTS.md#architecture).
 
-Cloud coding runs in persistent, per-thread Linux sandboxes with tooling supplied by workspace scripts or snapshots.
+Cloud coding runs in persistent, per-thread Linux sandboxes with tooling supplied by global setup scripts and sandbox images.
 An unreachable coding sandbox is not silently replaced.
 [LangSmith](https://smith.langchain.com/) is the default sandbox and tracing provider; [other providers and local execution](docs/CUSTOMIZATION.md#1-sandbox) are configurable.
 PR chat does not need a sandbox.
@@ -64,8 +64,8 @@ PR chat does not need a sandbox.
 ## Control and safety
 
 - **GitHub access:** Coding sandboxes normally receive installation-wide GitHub App access; selected workflows use narrower repository scopes.
-  Workspace repository bindings control routing and preloaded checkouts, not a separate credential boundary.
-  See [GitHub access](docs/reference/workspaces.md#github-access-and-the-sandbox-image).
+  Repository bindings control integrations, not credentials or image preloads.
+  See [GitHub access](docs/reference/execution.md#github-access-and-the-sandbox-image).
 - **Integrations:** Runs get MCP tools from LangSmith Managed Tools kits: the owner's personal kit in private threads and Robin's bot kit otherwise.
   Add other servers to a kit in LangSmith; see the [customization guide](docs/CUSTOMIZATION.md#mcp-servers).
 - **Approvals:** Workflow-file approval prompts guard detected Git pushes, not every possible shell or API write.
@@ -80,7 +80,7 @@ Local execution does not provide cloud sandbox isolation.
 - [Robin rollout checklist](docs/ROBIN_ROLLOUT.md) — External integration updates, desktop upgrade checks, and compatibility boundaries
 - [Customization guide](docs/CUSTOMIZATION.md) — Models, sandboxes, tools, skills, prompts, triggers, and middleware
 - [Plugin guide](docs/PLUGINS.md) — Build web apps: sandboxed single-file plugins people add to their sidebar
-- [Workspaces reference](docs/reference/workspaces.md) — Routing, settings, images, and access
+- [Defaults, routing, and sandbox images](docs/reference/execution.md) — Routing, settings, images, and access
 - [Human review in Slack](docs/reference/human-review.md) — Review requests in a repository's Slack channel, merged once reviewers approve
 - [Expedited Slack review](docs/reference/expedited-slack-review.md) — Human approval for small pull requests
 - [Backend API documentation](docs/DEVELOPMENT.md#backend-api-documentation) — Live API docs and the generated [OpenAPI schema](swagger.json)

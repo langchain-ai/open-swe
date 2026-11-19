@@ -19,14 +19,20 @@ from openswe.baby_sit import adopt_agent_server_cron as adopt_watch
 from openswe.background_tasks import CRON_KIND as BACKGROUND_TASKS
 from openswe.background_tasks import ensure_background_task_polling
 from openswe.schedules.store import adopt_agent_server_cron as adopt_trigger
-from openswe.workspaces.refresh import LEGACY_REFRESH_TASK, REFRESH_TASK
-from openswe.workspaces.refresh import adopt_agent_server_cron as adopt_refresh
 
 logger = logging.getLogger(__name__)
 
 _PAGE: Final = 100
 # Kinds whose crons nothing needs: retired features and one-time cleanups.
-_RETIRED: Final = frozenset({"expedited_review", "analyzer_continual", "thread_feedback"})
+_RETIRED: Final = frozenset(
+    {
+        "expedited_review",
+        "analyzer_continual",
+        "thread_feedback",
+        "workspace_refresh",
+        "environment_refresh",
+    }
+)
 
 
 class _AgentServerCron(BaseModel):
@@ -46,12 +52,6 @@ class _AgentServerCron(BaseModel):
         return value if isinstance(value, str) and value else None
 
     @property
-    def workspace_slug(self) -> str | None:
-        """The workspace a refresh cron rebuilds; crons from before the rename say environment."""
-        names = ("workspace_slug", "environment_slug", "workspace", "environment")
-        return next((value for name in names if (value := self.field(name))), None)
-
-    @property
     def kind(self) -> str | None:
         return self.field("task") or self.field("kind")
 
@@ -65,8 +65,6 @@ class _AgentServerCron(BaseModel):
         if kind == BACKGROUND_TASKS and (thread_id := self.field("thread_id")):
             await ensure_background_task_polling(thread_id)
             return True
-        if kind in {REFRESH_TASK, LEGACY_REFRESH_TASK} and (slug := self.workspace_slug):
-            return await adopt_refresh(slug, self.cron_id)
         if automation_id := self.field("schedule_id"):
             return await adopt_trigger(
                 self.cron_id,

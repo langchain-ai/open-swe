@@ -296,7 +296,7 @@ def apply() -> None:
     # LangSmith's sandbox service: another external boundary. MDA creates every
     # thread's sandbox (mda_entrypoint.py) and the backend reconnects to it by id, both
     # through the stand-in, which has no proxy to configure. Snapshots are recorded
-    # in the fake store; the workspace tools, store writes, name/tag scheme and
+    # in the fake store; the global image lifecycle, store writes, name/tag scheme and
     # status transitions all still run for real.
     import sandbox_service
 
@@ -313,15 +313,15 @@ def apply() -> None:
         # The token a sandbox's GitHub proxy carries is minted from the App, like the
         # other App tokens stubbed above; the stand-in has no proxy to carry it.
         for module in (sandbox_lifecycle, github_proxy):
-            module.__dict__["workspace_token"] = _sandbox_github_access
+            module.__dict__["sandbox_token"] = _sandbox_github_access
 
     # A refresh boots its own builder to run the scripts in: a stand-in sandbox, of
     # which nothing is reclaimed afterwards; the scripts, the capture and the
     # record all run for real.
-    from openswe.workspaces import refresh as workspace_refresh
+    from openswe.sandboxes.image_build import SnapshotBuild
 
-    workspace_refresh._create_builder_sandbox = _fake_builder_sandbox
-    workspace_refresh.release_builder_sandbox = _release_nothing
+    SnapshotBuild.create_builder_sandbox = staticmethod(_fake_builder_sandbox)
+    SnapshotBuild.release_builder_sandbox = staticmethod(_release_nothing)
 
     # Every MDA run names its thread's browser, so sharing a thread deletes it.
     # No browser exists without LangSmith, so deleting one finds nothing.

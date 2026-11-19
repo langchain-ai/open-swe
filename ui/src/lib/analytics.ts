@@ -315,7 +315,7 @@ export class ProductAnalytics {
         ["DELETE", /^\/projects\/[^/]+\/members\/[^/]+$/, "project_unshare"],
         ["PUT", /^\/projects\/[^/]+\/threads\/[^/]+$/, "project_move_thread"],
         ["DELETE", /^\/projects\/threads\/[^/]+$/, "project_move_thread"],
-        ["POST", /^\/threads\/[^/]+\/share-to-workspace$/, "thread_share"],
+        ["POST", /^\/threads\/[^/]+\/share$/, "thread_share"],
         ["POST", /^\/(?:admin\/)?threads\/[^/]+\/cancel$/, "cancel"],
         ["POST", /^\/schedules$/, "automation_create"],
         ["PATCH", /^\/schedules\/[^/]+$/, "automation_update"],

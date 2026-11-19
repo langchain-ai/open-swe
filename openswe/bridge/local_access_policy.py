@@ -13,8 +13,7 @@ from fastapi import HTTPException
 from runtime_api.operations import LocalReview
 
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
-from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.dispatch import thread_workspace
+from openswe.dashboard.settings import get_settings
 from openswe.users import User
 
 logger = logging.getLogger(__name__)
@@ -52,10 +51,10 @@ class LocalAccess:
 
     @staticmethod
     async def enabled_for(metadata: Mapping[str, object], person: User | None) -> bool:
-        """Cloud-first desktop is on for the thread's workspace or by this person's opt-in."""
+        """Cloud-first desktop is on globally or by this person's opt-in."""
         if person is not None and person.typed_preferences.experimental_cloud_first_desktop:
             return True
-        settings = await get_workspace_settings(thread_workspace(metadata))
+        settings = await get_settings()
         return settings.get("cloud_first_desktop_enabled") is True
 
     @classmethod
@@ -81,7 +80,7 @@ class LocalAccess:
         if bridge.local_access_only:
             raise HTTPException(409, "An approved-actions bridge cannot be a thread sandbox")
         if bridge.client == "desktop":
-            settings = await get_workspace_settings(thread_workspace(metadata))
+            settings = await get_settings()
             if settings.get("cloud_first_desktop_enabled") is True:
                 raise HTTPException(
                     409, "Cloud-first mode does not create or move This Mac threads"

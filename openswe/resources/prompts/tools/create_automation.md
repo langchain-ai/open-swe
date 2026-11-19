@@ -2,16 +2,14 @@ Create an automation: personal by default, or a system one for admins.
 
 A personal automation belongs to its creator, admin or not: it runs as them on Auto model routing and is billed to them, with no cap on how many they keep or how much each spends.
 Only its creator or an admin may edit, test, or delete it.
-A system automation belongs to the environment rather than a person: only admins create or manage it, and it may pick its model.
+A system automation belongs to the deployment rather than a person: only admins create or manage it, and it may pick its model.
 Its spend is credited to no person.
 
 Args:
 - prompt: Complete instructions for every run.
   Runs post nowhere on their own; say in the prompt if a run should report to a Slack channel.
-  Runs act as the automation, not as you: they can read public threads, including their own earlier runs, but cannot message or start other agent conversations or see private conversations.
+  System runs act as the automation, not as you: they can read public threads, including their own earlier runs, but cannot message or start other agent conversations or see private conversations.
   For anything they report, name a channel, or say to send it to you: a run can DM its result to the automation's creator, and only to them.
-- workspace: Slug of the workspace every run launches in, with its settings and sandbox image.
-  Required; ask which workspace when it is not clear.
 - triggers: Everything that fires the automation, each with its own filters; any one of them starts a run:
   - ``{"kind": "schedule", "cron": "0 9 * * 1", "timezone": "America/New_York"}`` runs on a five-field cron in an IANA time zone.
     Omitted ``cron`` defaults to weekly, Mondays at 09:00 (``0 9 * * 1``).

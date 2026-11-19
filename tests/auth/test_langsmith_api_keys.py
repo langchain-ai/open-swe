@@ -209,7 +209,6 @@ def _app() -> FastAPI:
             "kind": principal.kind,
             "login": principal.login,
             "email": principal.email,
-            "workspace": principal.workspace,
             "started_by_id": principal.started_by_id,
         }
 
@@ -227,7 +226,7 @@ async def _get(path: str, headers: dict[str, str]) -> httpx.Response:
         return await client.get(path, headers=headers)
 
 
-async def test_a_service_key_is_the_workspace_bot(langsmith: _LangSmith) -> None:
+async def test_a_service_key_is_the_deployments_bot(langsmith: _LangSmith) -> None:
     response = await _get(
         "/dashboard/api/threads/whoami", {"Authorization": f"Bearer {SERVICE_KEY}"}
     )
@@ -237,7 +236,6 @@ async def test_a_service_key_is_the_workspace_bot(langsmith: _LangSmith) -> None
         "kind": "bot",
         "login": None,
         "email": None,
-        "workspace": "default",
         "started_by_id": f"bot:{WORKSPACE}",
     }
 

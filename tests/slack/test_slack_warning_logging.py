@@ -6,11 +6,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from openswe import event_claims
-from openswe.middleware.stale_workspace import StaleWorkspaceReporter
+from openswe.execution import ExecutionProfile
+from openswe.middleware.stale_execution import StaleExecutionReporter
+from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
 from openswe.slack import client as slack_utils
 from openswe.slack.alerts import SlackAlertLogger
 from openswe.utils.user_messages import warning
-from openswe.workspaces.store import Workspace
 
 
 @pytest.mark.asyncio
@@ -62,7 +63,7 @@ async def test_operational_alerts_share_a_channel_cooldown(
     slack_api.respond({"ok": True, "ts": "2.0"})
     results = await asyncio.gather(
         *(
-            SlackAlertLogger("C1").warning("Image stale", details={"workspace": str(i)})
+            SlackAlertLogger("C1").warning("Image stale", details={"snapshot": str(i)})
             for i in range(5)
         )
     )
@@ -100,53 +101,56 @@ async def test_operational_alert_failure_does_not_break_the_run(
         (None, "unknown (capture timestamp missing or invalid)"),
     ],
 )
-async def test_stale_workspace_alerts_skip_fresh_images(
+async def test_stale_execution_alerts_skip_fresh_images(
     slack_api, memory_event_claims, monkeypatch, caplog, image_age, expected_age
 ) -> None:
     monkeypatch.delenv("SLACK_ALERTS_CHANNEL_ID", raising=False)
     slack_api.respond({"ok": True, "ts": "2.0"})
-    workspace = Workspace(
-        slug="default",
-        last_captured_at=datetime.now(UTC).isoformat(),
-        update_script="git pull",
-        snapshot_status="ready",
-        snapshot_id="snapshot-1",
+    profile = ExecutionProfile(
+        uses_defaults=True,
+        create=LangSmithCreateOptions.resolve(snapshot_id="snapshot-1", create_params={}),
+        captured_at=datetime.now(UTC).isoformat(),
+        refresh_enabled=True,
     )
-    await StaleWorkspaceReporter.report("thread-1", workspace)
-    workspace.last_captured_at = (datetime.now(UTC) - timedelta(hours=7, minutes=59)).isoformat()
-    await StaleWorkspaceReporter.report("thread-1", workspace)
+    await StaleExecutionReporter.report("thread-1", profile)
+    profile = profile.model_copy(
+        update={"captured_at": (datetime.now(UTC) - timedelta(hours=7, minutes=59)).isoformat()}
+    )
+    await StaleExecutionReporter.report("thread-1", profile)
     assert not slack_api.calls
     assert not [r for r in caplog.records if r.name == "openswe.slack.alerts"]
-    workspace.last_captured_at = (
-        (datetime.now(UTC) - image_age).isoformat() if image_age is not None else None
+    profile = profile.model_copy(
+        update={"captured_at": (datetime.now(UTC) - image_age).isoformat() if image_age else None}
     )
-    await StaleWorkspaceReporter.report("thread-1", workspace)
+    await StaleExecutionReporter.report("thread-1", profile)
     assert not slack_api.calls
     [record] = [r for r in caplog.records if r.name == "openswe.slack.alerts"]
-    assert record.getMessage() == "Run booted a stale workspace image"
+    assert record.getMessage() == "Run booted a stale Robin-wide execution image"
     assert record.__dict__["Image age"] == expected_age
     monkeypatch.setenv("SLACK_ALERTS_CHANNEL_ID", "C_DEPLOYMENT_ALERTS")
     claim = AsyncMock(wraps=event_claims.claim)
     monkeypatch.setattr(event_claims, "claim", claim)
-    await asyncio.gather(
-        *(StaleWorkspaceReporter.report(f"thread-{i}", workspace) for i in range(5))
-    )
+    await asyncio.gather(*(StaleExecutionReporter.report(f"thread-{i}", profile) for i in range(5)))
     [(_, params)] = slack_api.calls
     assert params["channel"] == "C_DEPLOYMENT_ALERTS"
-    assert params["text"] == f"⚠️ *Run booted a stale workspace image (age: {expected_age})*"
+    assert (
+        params["text"] == f"⚠️ *Run booted a stale Robin-wide execution image (age: {expected_age})*"
+    )
     assert params["blocks"][0]["text"]["text"] == params["text"]
     assert "Workspace" not in params["text"]
     details = params["blocks"][1]
     assert details["type"] == "context"
     detail_text = details["elements"][0]["text"]
-    assert "*Workspace:* default" in detail_text
+    assert "*Snapshot:* snapshot-1" in detail_text
     assert "*Run:*" in detail_text
     assert "thread-0" in detail_text
     assert "None" not in detail_text
     claim.assert_awaited_with("slack-alert", "C_DEPLOYMENT_ALERTS", ttl=timedelta(hours=8))
-    workspace.slug = "another-workspace"
-    await StaleWorkspaceReporter.report("thread-other", workspace)
+    another = profile.model_copy(
+        update={"create": profile.create.model_copy(update={"snapshot_id": "snapshot-2"})}
+    )
+    await StaleExecutionReporter.report("thread-other", another)
     assert len(slack_api.calls) == 1
     memory_event_claims.held.clear()
-    await StaleWorkspaceReporter.report("thread-later", workspace)
+    await StaleExecutionReporter.report("thread-later", profile)
     assert len(slack_api.calls) == 2

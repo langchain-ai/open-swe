@@ -98,8 +98,6 @@ from openswe.threads.status import RECONCILE_JOB as THREAD_STATUS_RECONCILE
 from openswe.threads.status import RECONCILE_SCHEDULE, reconcile_busy_threads
 from openswe.tools.schedule_thread_wakeup import WAKE_THREAD_JOB, run_thread_wakeup
 from openswe.webhooks.event_subscriptions import EventSubscription
-from openswe.workspaces.refresh import REFRESH_TASK as WORKSPACE_REFRESH
-from openswe.workspaces.refresh import run_workspace_refresh_tick
 
 logger = logging.getLogger(__name__)
 
@@ -184,14 +182,6 @@ async def _baby_sit(job: Job) -> str | None:
 @_sandbox_work(EXECUTION_IMAGES.JOB)
 async def _execution_image_refresh(job: Job) -> object:
     return await EXECUTION_IMAGES.refresh(job)
-
-
-@_sandbox_work(WORKSPACE_REFRESH)
-async def _workspace_refresh(job: Job) -> object:
-    kind = "update" if job.payload.get("refresh_kind") == "update" else "full"
-    # A cron's id outlives each of its runs, so only a one-shot job names one refresh.
-    run_id = None if job.cron else str(job.id)
-    return await run_workspace_refresh_tick(_text(job, "workspace_slug"), kind, run_id=run_id)
 
 
 @WORKER.register(AGENT_SCHEDULE_JOB_KIND)

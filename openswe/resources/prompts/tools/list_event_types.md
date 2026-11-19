@@ -1,8 +1,12 @@
-List every distinct inbound event type Robin received in the last 14 days, across GitHub, Slack, and Linear.
+List distinct inbound event types Robin received in the last 14 days, within the thread's authorized scope.
 
-Event visibility is enforced per item: public by default, private only in its user’s private thread, and admin-only only in an admin thread for its workspace.
+Non-admin threads are restricted to their saved repository after a verified GitHub read-access check; without a saved repository, discovery is refused.
+Only authorized admin threads can discover events globally across repositories and services.
+Counts and the newest payload shapes use the same repository and visibility scope.
+Event visibility is enforced per item: public by default, private only in its user’s private thread, and admin-only only in an authorized admin thread.
 
-Admin threads also see `workspace` events: Robin's own workspace activity, such as `refresh.success` and `refresh.failed` when a workspace snapshot refresh settles, whose payload carries the refresh's steps, error, and log tail.
+Admin threads also see `robin` events for Robin-generated activity, such as `task.suggested`.
+Track global image builds with `background_task`; use the observed event catalog rather than assuming a refresh event is published.
 
 Admin threads also see `reviewer` events: `run.started`, `run.completed`, `run.failed`, `run.canceled`, `finding.created`, `finding.updated`, `review.published`, and `review.publish_failed`.
 Findings include their stored content, status, location, publication identities, and changed fields.

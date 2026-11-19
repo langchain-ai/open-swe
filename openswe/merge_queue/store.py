@@ -1,7 +1,7 @@
-"""Transactional queue storage; callers supply an already authorized workspace.
+"""Transactional queue storage; callers supply an authorized repository binding.
 
-Every operation rechecks the repository binding. Fenced work first shares the
-workspace lock, then locks the binding and queue. Status reads do not take these locks.
+Every operation rechecks the repository binding. Fenced writes lock the binding
+before the queue. Status reads do not take these locks.
 No GitHub calls, admission decisions or job registration live here.
 """
 
@@ -52,7 +52,7 @@ from openswe.merge_queue.validation_contract import (
     ValidationDispatch,
     ValidationRequest,
 )
-from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
+from openswe.routing.store import RepositoryBinding
 
 
 class LeaseLost(ValueError):
@@ -145,7 +145,11 @@ class NativeCheckUpdate:
 class MergeQueue(Record):
     __tablename__ = "merge_queue"
 
-    workspace_id: Mapped[UUID] = mapped_column(ForeignKey(WorkspaceRow.id, ondelete="CASCADE"))
+    routing_id: Mapped[UUID | None] = mapped_column(
+        "routing_repository_id",
+        ForeignKey(RepositoryBinding.id, ondelete="SET NULL"),
+        nullable=True,
+    )
     repository_id: Mapped[UUID] = mapped_column(ForeignKey(Repository.id))
     target_branch: Mapped[str]
     mode: Mapped[Literal["custom", "native"]] = mapped_column(Text, default="custom")
@@ -161,19 +165,25 @@ class MergeQueue(Record):
     lease_until: Mapped[datetime | None] = mapped_column(default=None)
     configuration_generation: Mapped[str | None] = mapped_column(default=None)
 
+    @property
+    def bound_routing_id(self) -> UUID:
+        if self.routing_id is None:
+            raise ValueError("Queue no longer has a repository binding")
+        return self.routing_id
+
     @classmethod
     async def load(
-        cls, queue_id: UUID, workspace_id: UUID, *, session: AsyncSession | None = None
+        cls, queue_id: UUID, routing_id: UUID, *, session: AsyncSession | None = None
     ) -> Self | None:
         async with postgres.session(session) as session:
             return await session.scalar(
-                select(cls).where(cls.id == queue_id, cls.workspace_id == workspace_id)
+                select(cls).where(cls.id == queue_id, cls.routing_id == routing_id)
             )
 
     @classmethod
     async def register(
         cls,
-        workspace_id: UUID,
+        routing_id: UUID,
         repository_id: UUID,
         target_branch: str,
         *,
@@ -187,20 +197,20 @@ class MergeQueue(Record):
         ):
             raise ValueError("Expected a branch name")
         async with postgres.session() as session:
-            await cls._binding(session, workspace_id, repository_id)
+            await cls._binding(session, routing_id, repository_id)
             existing = await session.scalar(
                 select(cls).where(
                     cls.repository_id == repository_id, cls.target_branch == target_branch
                 )
             )
             if existing is not None:
-                if existing.workspace_id != workspace_id:
+                if existing.routing_id != routing_id:
                     raise ValueError(
-                        "Queue belongs to another workspace; explicit handoff required"
+                        "Queue belongs to another repository binding; explicit handoff required"
                     )
                 return existing
             queue = cls(
-                workspace_id=workspace_id,
+                routing_id=routing_id,
                 repository_id=repository_id,
                 target_branch=target_branch,
                 created_by=actor,
@@ -211,17 +221,20 @@ class MergeQueue(Record):
             return queue
 
     @staticmethod
-    async def _binding(session: AsyncSession, workspace_id: UUID, repository_id: UUID) -> None:
+    async def _binding(
+        session: AsyncSession, routing_id: UUID, repository_id: UUID
+    ) -> RepositoryBinding:
         binding = await session.scalar(
-            select(WorkspaceRepositoryRow)
+            select(RepositoryBinding)
             .where(
-                WorkspaceRepositoryRow.workspace_id == workspace_id,
-                WorkspaceRepositoryRow.repository_id == repository_id,
+                RepositoryBinding.id == routing_id,
+                RepositoryBinding.repository_id == repository_id,
             )
             .with_for_update()
         )
         if binding is None:
-            raise ValueError("Repository is not bound to this workspace")
+            raise ValueError("Repository is not bound to this repository binding")
+        return binding
 
     @asynccontextmanager
     async def _locked(
@@ -230,39 +243,34 @@ class MergeQueue(Record):
         *,
         generation: str | None = None,
         check_configuration: bool = True,
-        update_configuration: bool = False,
     ) -> AsyncIterator[tuple[AsyncSession, Self, datetime]]:
         async with postgres.session() as session:
+            binding = await self._binding(session, self.bound_routing_id, self.repository_id)
             expected = generation or (
                 lease.configuration_generation
                 if lease is not None and check_configuration
                 else None
             )
             if expected is not None:
-                configured = await session.scalar(
-                    select(WorkspaceRow.merge_queue_config)
-                    .where(WorkspaceRow.id == self.workspace_id)
-                    .with_for_update(read=not update_configuration)
-                )
+                configured = binding.merge_queue_config
                 try:
                     if not isinstance(configured, dict):
                         raise ValueError("Queue configuration must be an object")
                     current = QueueConfiguration.model_validate(
                         {
                             **configured,
-                            "workspace_id": self.workspace_id,
+                            "routing_id": self.routing_id,
                         }
                     )
                 except ValueError as exc:
                     raise LeaseLost("Queue configuration is disabled or invalid") from exc
                 if current.generation != expected:
                     raise LeaseLost("Queue configuration changed")
-            await self._binding(session, self.workspace_id, self.repository_id)
             queue = await session.scalar(
                 select(type(self))
                 .where(
                     type(self).id == self.id,
-                    type(self).workspace_id == self.workspace_id,
+                    type(self).routing_id == self.routing_id,
                     type(self).repository_id == self.repository_id,
                 )
                 .with_for_update()
@@ -291,7 +299,7 @@ class MergeQueue(Record):
         self, config: QueueConfiguration, approved: WorkflowPolicy
     ) -> QueueConfiguration:
         updated = config.with_workflow_policy(approved)
-        async with self._locked(generation=config.generation, update_configuration=True) as (
+        async with self._locked(generation=config.generation) as (
             session,
             queue,
             now,
@@ -325,10 +333,12 @@ class MergeQueue(Record):
                     "workflow_policy_refresh": True,
                 }
             await session.execute(
-                update(WorkspaceRow)
-                .where(WorkspaceRow.id == self.workspace_id)
+                update(RepositoryBinding)
+                .where(RepositoryBinding.id == self.routing_id)
                 .values(
-                    merge_queue_config=updated.model_dump(mode="json", exclude={"workspace_id"})
+                    merge_queue_config=updated.model_dump(mode="json", exclude={"routing_id"}),
+                    updated_at=func.clock_timestamp(),
+                    updated_by=None,
                 )
             )
             return updated
@@ -336,7 +346,7 @@ class MergeQueue(Record):
     @asynccontextmanager
     async def native_publication(self, lease: Lease) -> AsyncIterator[None]:
         """Serialize check publication with configuration changes and queue pauses."""
-        # Bound lock waits and network I/O so a slow gateway cannot stall workspace writes.
+        # Bound lock waits and network I/O so a slow gateway cannot stall routing writes.
         async with asyncio.timeout(5), self._locked(lease) as (_, queue, _):
             if queue.paused or queue.mode != "native":
                 raise LeaseLost("Native queue is paused or disabled")
@@ -739,13 +749,13 @@ class MergeQueue(Record):
             queue = await session.scalar(
                 select(type(self))
                 .join(
-                    WorkspaceRepositoryRow,
-                    (WorkspaceRepositoryRow.workspace_id == type(self).workspace_id)
-                    & (WorkspaceRepositoryRow.repository_id == type(self).repository_id),
+                    RepositoryBinding,
+                    (RepositoryBinding.id == type(self).routing_id)
+                    & (RepositoryBinding.repository_id == type(self).repository_id),
                 )
                 .where(
                     type(self).id == self.id,
-                    type(self).workspace_id == self.workspace_id,
+                    type(self).routing_id == self.routing_id,
                     type(self).repository_id == self.repository_id,
                 )
             )

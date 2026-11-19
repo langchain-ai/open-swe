@@ -18,6 +18,7 @@ from pydantic import (
     JsonValue,
     SerializerFunctionWrapHandler,
     TypeAdapter,
+    field_validator,
     model_serializer,
     model_validator,
 )
@@ -30,7 +31,7 @@ type ActorKind = Literal["user", "agent", "system"]
 type ThreadStatus = Literal["idle", "running", "error"]
 type MessageRole = Literal["human", "ai"]
 type ToolOutcome = Literal["completed", "error"]
-type NoticeKind = Literal["model_routed", "conversation_offloading", "workspace_stale"]
+type NoticeKind = Literal["model_routed", "conversation_offloading", "execution_stale"]
 type CheckpointStatus = Literal["ready", "missing", "error"]
 type FileChangeKind = Literal["added", "removed", "modified"]
 type JsonObject = dict[str, JsonValue]
@@ -325,6 +326,11 @@ class RunNotice(_Body):
     turn_id: UUID
     kind: NoticeKind
     data: JsonObject = Field(default_factory=dict)
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _legacy_kind(cls, kind: object) -> object:
+        return "execution_stale" if kind == "workspace_stale" else kind
 
 
 type TranscriptEvent = Annotated[

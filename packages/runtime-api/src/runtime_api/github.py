@@ -6,7 +6,7 @@ only what starts an agent run, and asks the backend for what needs its data, its
 GitHub App or its signing key:
 
 - ``github_delivery_facts``: for a delivery that may start an agent run, whether
-  a workspace owns its repository, whether the allowlist takes it, whether the
+  the repository is routable, whether the allowlist takes it, whether the
   public-repo gate turned the sender away, and the handles that mention Open SWE.
   The backend gets every delivery itself, forwarded as GitHub sent it
   (``forward_to``, served at ``/mda/github/deliveries``), and logs it and runs its
@@ -17,7 +17,7 @@ GitHub App or its signing key:
   and writes each match's prompt.
 - ``github_issue_facts``: for an ``@openswe`` mention on an issue, which of the
   people its prompt quotes are Open SWE users, whether the sender's email is known,
-  whether a run already took the issue in, and the thread's workspace; the channel
+  and whether a run already took the issue in; the channel
   writes the run's input.
 - ``act_on_github_delivery``: claims and signs the runs of the automations the
   channel matched, each on a thread of its own;
@@ -71,7 +71,7 @@ class GitHubDelivery(BaseModel):
 class GitHubDeliveryFacts(BaseModel):
     """What Open SWE knows about a delivery's repository, for the channel to route it."""
 
-    # A workspace owns the repository, or the delivery names none.
+    # Whether this delivery may start agent work.
     routable: bool
     # The repository allowlist takes it; a delivery it doesn't take starts nothing.
     allowed: bool
@@ -205,8 +205,6 @@ class GitHubIssueFacts(BaseModel):
     # Those of ``logins`` who are Open SWE users, lowercased: anyone else's words are
     # fenced as untrusted.
     trusted: list[str]
-    # The workspace the thread started in, which a follow-up stays in.
-    thread_workspace: str | None = None
 
 
 class GitHubIssueRunRequest(BaseModel):
@@ -218,8 +216,6 @@ class GitHubIssueRunRequest(BaseModel):
     waiting: bool = False
     # The run's input, which the channel wrote; none while the thread waits.
     input: dict[str, JsonValue] | None = None
-    # The workspace the run works in; ``None`` for the one that owns the repository.
-    workspace: str | None = None
 
     @model_validator(mode="after")
     def _written(self) -> Self:

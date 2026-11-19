@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from openswe.database import postgres
 from openswe.human_review import offer as review_offer
+from openswe.routing import store as routing
 from openswe.slack import events as slack_events
 from openswe.slack import failures as slack_failures
 from openswe.slack import routes as slack_routes
@@ -22,7 +23,6 @@ from openswe.slack.records import SlackMessage
 from openswe.slack.request import SlackRequest
 from openswe.users import User, UserIdentity
 from openswe.webhooks import common as webhook_common
-from openswe.workspaces import routing
 from tests.support.slack_api import SlackAPI
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -597,7 +597,7 @@ async def test_personal_kitchen_only_handles_the_selected_users_messages(
         preferences={"personal_kitchen_channel_id": "C1"},
         identities=[UserIdentity(provider="slack", external_id="U1")],
     )
-    monkeypatch.setattr(routing.WORKSPACES, "is_kitchen_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(routing.INTEGRATIONS, "is_kitchen_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(
         User,
         "for_identity",

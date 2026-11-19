@@ -393,10 +393,12 @@ def _search(query: str) -> str:
     return query
 
 
+@pytest.mark.parametrize("execution_key", ["execution_prompt", "workspace_prompt"])
 async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     monkeypatch: pytest.MonkeyPatch,
+    execution_key: str,
 ) -> None:
-    """The run's shared prompt and the workspace's each end in an Anthropic cache
+    """The shared and execution prompts each end in an Anthropic cache
     breakpoint ahead of the skills and the thread's own part, keeping a request within
     four, the tools take none, and a fallback to OpenAI carries OpenAI's breakpoints."""
     built: dict[str, BaseChatModel] = {"anthropic:opus": _ANTHROPIC, "openai:gpt": _OPENAI}
@@ -430,12 +432,14 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
         model_call_guards()[-1],
     ]
     for thread in ("First thread's part", "Next thread's part"):
-        call = ModelCall(
-            system_prompt="Every thread's prompt",
-            workspace_prompt="The workspace's prompt",
-            thread_prompt=thread,
-            model=ModelSpec(model_id="anthropic:opus", kwargs={}),
-            fallback=ModelSpec(model_id="openai:gpt", kwargs={}),
+        call = ModelCall.model_validate(
+            {
+                "system_prompt": "Every thread's prompt",
+                execution_key: "Robin-wide execution instructions",
+                "thread_prompt": thread,
+                "model": ModelSpec(model_id="anthropic:opus", kwargs={}),
+                "fallback": ModelSpec(model_id="openai:gpt", kwargs={}),
+            }
         )
         messages: list[AnyMessage] = [HumanMessage(content="go")]
         request = ModelRequest(
@@ -452,7 +456,7 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     assert cast(SystemMessage, first.system_message).content == [
         {"type": "text", "text": "The graph's own instructions"},
         {"type": "text", "text": "Every thread's prompt", "cache_control": cached},
-        {"type": "text", "text": "The workspace's prompt", "cache_control": cached},
+        {"type": "text", "text": "Robin-wide execution instructions", "cache_control": cached},
         {"type": "text", "text": "\n\nSkills"},
         {"type": "text", "text": "First thread's part", "cache_control": cached},
     ]
@@ -469,7 +473,11 @@ async def test_the_system_prompt_is_cached_up_to_what_only_the_thread_says(
     assert cast(SystemMessage, first_fallback.system_message).content == [
         {"type": "text", "text": "The graph's own instructions"},
         {"type": "text", "text": "Every thread's prompt", "prompt_cache_breakpoint": explicit},
-        {"type": "text", "text": "The workspace's prompt", "prompt_cache_breakpoint": explicit},
+        {
+            "type": "text",
+            "text": "Robin-wide execution instructions",
+            "prompt_cache_breakpoint": explicit,
+        },
         {"type": "text", "text": "\n\nSkills"},
         {"type": "text", "text": "First thread's part"},
     ]

@@ -20,6 +20,6 @@ async def read_execution_defaults() -> dict[str, object]:
 @audit_tool()
 @access(_WRITE)
 async def configure_execution_defaults(update: ExecutionDefaults) -> dict[str, object]:
-    """Save supplied Robin-wide defaults; enabled switches future work without recreating sandboxes."""
+    """Save supplied Robin-wide defaults for future work without recreating sandboxes."""
     saved = await EXECUTION_DEFAULTS.update(update)
     return {"scope": "execution", "settings": saved.model_dump(mode="json")}

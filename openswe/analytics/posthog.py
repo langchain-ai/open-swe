@@ -197,7 +197,6 @@ async def record_webhook(event: LoggedEvent) -> None:
             "action": action if isinstance(action, str) else "",
             "surface": "webhook",
             "visibility": event.visibility,
-            "workspace_id": str(event.workspace_id) if event.workspace_id else None,
             **(
                 {}
                 if private

@@ -16,7 +16,7 @@ Human-review activity is retained for 14 days in `event_log` under the admin-onl
 Admin threads can discover it with `list_event_types` and subscribe with `listen_events(sources=["human_review"], ...)`; wildcard subscriptions and non-admin threads cannot see it.
 
 Events cover request creation and committed state changes (including expedited votes, reviewer picks, acceptance, expiry, release, card delivery and supplementary review progress), request outcomes, assignment decisions and agent wakes, GitHub review request outcomes, pick/reminder delivery, snoozes and declines, and deadline scheduling and execution.
-Payloads carry the request ID and PR URL, with repository/workspace/PR links resolved on insert.
+Payloads carry the request ID and PR URL, with repository/PR links resolved on insert.
 Run configuration and DM bodies are not logged.
 Only successful transactions emit state-change events; event-log failures do not prevent review operations.
 
@@ -120,8 +120,7 @@ Supplementary reviews never replace the engineering request's owning thread or s
 Agents can also ask for one with `request_human_review`'s `supplementary_review` and `supplementary_review_reason`.
 Settings use the default branch's cached configuration; changes can take 30 minutes to refresh.
 
-Workspace admins can override the two-hour auto-assignment wait through `PUT /dashboard/api/workspaces/{workspace}/settings` with `human_review_auto_assign_minutes` (a positive integer; `null` inherits the instance setting).
-The instance default can be set through `PUT /dashboard/api/settings`.
+Admins can set the shared two-hour auto-assignment wait through `PUT /dashboard/api/settings` with `human_review_auto_assign_minutes` (a positive integer; `null` restores the deployment default).
 This affects reviewer assignment, not the two-hour auto-merge deadline.
 
 ## Requesting
@@ -149,7 +148,7 @@ This affects reviewer assignment, not the two-hour auto-merge deadline.
 - **I'll review** adds the clicker as a reviewer and requests their review on GitHub.
   Any number of people may sign up; they need write access and cannot be the author.
 - **Dismiss** closes the card; anyone may click it.
-- If nobody signs up within 2 hours (or the workspace’s configured timeout), the agent that asked is woken (for a dashboard request, the requester's pull request thread) to pick one from CODEOWNERS and the review history of the changed files.
+- If nobody signs up within 2 hours (or the configured shared timeout), the agent that asked is woken (for a dashboard request, the requester's pull request thread) to pick one from CODEOWNERS and the review history of the changed files.
   It calls `assign_human_reviewer`, which adds the person to the card, tags them in the card's thread, and DMs them.
   In concierge mode the DM is recorded in their concierge conversation.
 

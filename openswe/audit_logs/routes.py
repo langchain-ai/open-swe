@@ -23,7 +23,6 @@ async def api_list_audit_logs(
     operation_name: Annotated[str | None, Query(max_length=128)] = None,
     user_id: UUID | None = None,
     api_key_id: str | None = None,
-    workspace_id: UUID | None = None,
 ) -> AuditLogsPage:
     if start_time > end_time or end_time - start_time > timedelta(days=31):
         raise HTTPException(400, "Choose an ordered time range of at most 31 days")
@@ -39,5 +38,4 @@ async def api_list_audit_logs(
         operation_name=operation_name,
         user_id=user_id,
         api_key_id=api_key_id,
-        workspace_id=workspace_id,
     )

@@ -2,21 +2,16 @@ import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@langchain/macaw-components/Button"
 import { Input } from "@langchain/macaw-components/Input"
-import { Switch } from "@langchain/macaw-components/Switch"
 import { Text } from "@langchain/macaw-components/Text"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 
 import { invalidationTopic } from "@/lib/invalidations/topics"
-import {
-  SettingsPanel,
-  SettingsRow,
-  SettingsSection,
-} from "@/components/AppShell"
+import { SettingsPanel, SettingsSection } from "@/components/AppShell"
 import { api, type ExecutionDefaults, type JsonValue } from "@/lib/api"
 
 import { RepoSelector } from "./RepoSelector"
-import { SandboxProxySection } from "./WorkspaceProxySection"
-import { WorkspaceScriptEditor } from "./WorkspaceScriptEditor"
+import { SandboxProxySection } from "./SandboxProxySection"
+import { SandboxScriptEditor } from "./SandboxScriptEditor"
 
 type SaveExecutionDefaults = (
   changes: Partial<ExecutionDefaults>
@@ -363,7 +358,7 @@ function ExecutionScriptsSection({ defaults, onSave }: ExecutionDefaultsProps) {
               <Text as="span" variant="sm" weight="medium">
                 {label}
               </Text>
-              <WorkspaceScriptEditor
+              <SandboxScriptEditor
                 label={label}
                 repos={defaults.repos}
                 repositoryLabel="Preloaded repositories"
@@ -521,7 +516,7 @@ export function ExecutionDefaultsSettings({
   const settings = useQuery({
     queryKey,
     queryFn: api.getExecutionDefaults,
-    meta: { invalidatedBy: [invalidationTopic("workspaces")] },
+    meta: { invalidatedBy: [invalidationTopic("settings")] },
   })
   const save = useMutation({
     mutationKey: [...queryKey, "save"],
@@ -554,15 +549,8 @@ export function ExecutionDefaultsSettings({
     onMutate: async () => {
       await qc.cancelQueries({ queryKey })
     },
-    onSuccess: async (saved, { changes }) => {
+    onSuccess: (saved) => {
       qc.setQueryData(queryKey, saved)
-      if (changes.enabled !== undefined) {
-        await Promise.all([
-          qc.invalidateQueries({ queryKey: ["workspace-options"] }),
-          qc.invalidateQueries({ queryKey: ["options"] }),
-          qc.invalidateQueries({ queryKey: ["workspaceSettings"] }),
-        ])
-      }
     },
   })
 
@@ -602,32 +590,6 @@ export function ExecutionDefaultsSettings({
 
   return (
     <>
-      <SettingsSection title="Execution Defaults">
-        <SettingsRow
-          label="Use Robin-wide Defaults"
-          description="Use these instructions, sandbox settings, models, and review defaults for all runs. Turning this off restores the saved legacy configuration."
-          control={
-            <Switch
-              aria-label="Use Robin-wide Defaults"
-              checked={settings.data.enabled === true}
-              disabled={save.isPending}
-              onChange={(enabled) =>
-                save.mutate({
-                  changes: { enabled },
-                  baseCreateParams: settings.data.create_params,
-                })
-              }
-            />
-          }
-        />
-        {save.error && save.variables?.changes.enabled !== undefined && (
-          <SettingsPanel>
-            <p role="alert" className="text-sm text-error-secondary">
-              Couldn’t save execution defaults: {save.error.message}
-            </p>
-          </SettingsPanel>
-        )}
-      </SettingsSection>
       <ExecutionInstructionsSection
         defaults={settings.data}
         repositories={repositories}

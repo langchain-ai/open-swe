@@ -196,7 +196,7 @@ async def start_turn(
     facts_began = datetime.now(UTC)
     facts = await ask_backend(
         SLACK_MESSAGE_FACTS,
-        SlackMessageFactsRequest(**message.model_dump(), workspace_tag=parsed.workspace or ""),
+        SlackMessageFactsRequest(**message.model_dump()),
         msg_id=f"facts_{event.delivery_id}",
     )
     facts_ended = datetime.now(UTC)
@@ -362,7 +362,6 @@ def _decide(
         kitchen_channel=kitchen_channel,
         treat_all_messages_as_mentions=direct_message or kitchen or facts.solo_followup,
         performance_command=performance_command,
-        workspace_tag=parsed.workspace or "",
         move_channel_id=breakout.channel_id if kind == "move" else "",
     )
     return kind, turn
@@ -482,11 +481,7 @@ async def _start_turn(
         )
         image_urls = slack_prompt.image_urls(context, link_images)
     performance = turn.performance_command
-    # A known workspace tag is taken out of a new thread's first message.
-    tagged = bool(parsed.workspace) and facts.workspace_known
-    turn.clean_text = _clean_text(
-        parsed, bot, names, channel_names, performance=performance, workspace=tagged
-    )
+    turn.clean_text = _clean_text(parsed, bot, names, channel_names, performance=performance)
     turn.context_user_ids = context_user_ids
     turn.participant_user_ids = sorted(slack_prompt.participant_ids(context))
     turn.has_images = bool(image_urls)
@@ -511,11 +506,6 @@ async def _start_turn(
         return None
     with send.step("build_prompt"):
         prompt = start.prompt
-        if not prompt.first_turn and tagged:
-            # Only the opening message picks the workspace: a later tag stays in the text.
-            turn.clean_text = _clean_text(
-                parsed, bot, names, channel_names, performance=performance, workspace=False
-            )
         if prompt.sender_name and message.user_id not in names:
             names[message.user_id] = prompt.sender_name
         if prompt.promptable_user_ids is not None:
@@ -656,13 +646,12 @@ def _clean_text(
     channel_names: dict[str, str],
     *,
     performance: bool,
-    workspace: bool,
 ) -> str:
     """The request as the prompt has it: options taken out, mentions named."""
     bot_user_id, bot_username = bot
     text = (
         slack_prompt.replace_bot_mention_with_username(
-            parsed.without(performance_model=performance, workspace=workspace),
+            parsed.without(performance_model=performance),
             bot_user_id,
             bot_username,
         ).strip()

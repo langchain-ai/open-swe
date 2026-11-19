@@ -41,7 +41,7 @@ class RunKind:
 
     async def catalog(self, config: RunnableConfig, surface: ToolSurface) -> None:
         """Resolve a starting run's tools, models, subagents and loop rules into ``surface``,
-        from what only the backend holds: the thread's settings, the workspace's defaults,
+        from what only the backend holds: the thread's settings, the global defaults,
         the sender's access, and the integrations their credentials reach."""
         raise NotImplementedError
 

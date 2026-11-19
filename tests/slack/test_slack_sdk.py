@@ -254,7 +254,7 @@ async def test_breakout_uses_fresh_channel_cache(
     if stale:
         slack_api.respond({"ok": False, "error": "channel_not_found"})
 
-    error = await BreakoutDestination("C2", "engineering").channel_error("C1")
+    error = await BreakoutDestination("C2").channel_error("C1")
 
     if stale:
         assert error is not None and "Could not find or access" in error
@@ -284,7 +284,7 @@ async def test_breakout_distinguishes_unavailable_channel_verification(
         slack_api.respond(_PUBLIC_CHANNEL)
     slack_api.respond({"ok": False, "error": code}, status=status, headers=headers)
 
-    error = await BreakoutDestination("C2", "engineering").channel_error("C1")
+    error = await BreakoutDestination("C2").channel_error("C1")
 
     assert error is not None
     assert f"<#{failed_channel}>" in error

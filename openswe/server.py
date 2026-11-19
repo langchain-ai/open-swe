@@ -89,8 +89,8 @@ from openswe.dashboard.options import (
     model_supports_images,
 )
 from openswe.dashboard.profiles import PROFILES
-from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.dashboard.settings import Settings, get_settings
+from openswe.dashboard.settings_cache import cached_settings
 from openswe.github.token import resolve_github_token
 from openswe.input_messages import (
     dynamic_context_hash,
@@ -118,7 +118,7 @@ from openswe.middleware.require_user_reply import (
     reply_nudge,
 )
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
-from openswe.middleware.stale_workspace import StaleWorkspaceReporter
+from openswe.middleware.stale_execution import StaleExecutionReporter
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.model_request import (
     ModelSelectionDecision,
@@ -128,6 +128,13 @@ from openswe.model_request import (
 from openswe.model_routing import RoutingArm
 from openswe.prompt import SystemPrompt, TurnContext, construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
+from openswe.routing.tools import (
+    bind_repository,
+    bind_slack_channel,
+    list_integration_bindings,
+    unbind_repository,
+    unbind_slack_channel,
+)
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import (
     DEFAULT_LLM_MODEL_ID as DEFAULT_LLM_MODEL_ID,
@@ -179,8 +186,6 @@ from openswe.tools import (
     background_execute,
     background_task,
     classify,
-    configure_repository,
-    configure_workspace,
     connect_managed_tools,
     create_automation,
     create_project,
@@ -202,7 +207,6 @@ from openswe.tools import (
     list_event_types,
     list_projects,
     list_threads,
-    list_workspaces,
     listen_events,
     manage_baby_sit,
     manage_thread,
@@ -283,16 +287,16 @@ from openswe.tools.page_commands import PageTools
 from openswe.tools.propose_pr_review import propose_pr_review
 from openswe.tools.propose_review_comment import propose_review_comment
 from openswe.tools.slack_bots import allow_slack_bot, list_slack_bots, remove_slack_bot
+from openswe.tools.snapshotctl import (
+    publish_execution_image,
+    read_execution_image,
+    rebuild_execution_image,
+)
 from openswe.tools.submit_review_assessment_feedback import submit_review_assessment_feedback
 from openswe.tools.task_threads import (
     control_worker,
     message_task_thread,
     task_status,
-)
-from openswe.tools.workspaces import (
-    publish_execution_image,
-    read_execution_image,
-    rebuild_execution_image,
 )
 from openswe.users import User
 from openswe.utils import ttl_cache
@@ -316,9 +320,6 @@ from openswe.utils.thread_settings import (
     load_thread_settings,
     normalize_thread_settings,
     store_thread_settings,
-)
-from openswe.workspaces.store import (
-    load_workspace,
 )
 
 client = get_client()
@@ -399,10 +400,10 @@ async def _resolve_prompt_default_repo(cfg: RunConfig) -> dict[str, str] | None:
             if email
             else None
         )
-        personal = await user.default_repo(workspace_slug(cfg)) if user else None
-        return personal or (await get_workspace_settings(workspace_slug(cfg))).default_repo
+        personal = await user.default_repo() if user else None
+        return personal or (await get_settings()).default_repo
     except Exception:
-        logger.debug("Failed to load the workspace default repo for prompt", exc_info=True)
+        logger.debug("Failed to load the Robin default repo for prompt", exc_info=True)
         return None
 
 
@@ -603,8 +604,10 @@ INCIDENT_KICKOFF_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "update_automation",
         "trigger_automation",
         "delete_automation",
-        "configure_repository",
-        "configure_workspace",
+        "bind_repository",
+        "unbind_repository",
+        "bind_slack_channel",
+        "unbind_slack_channel",
         "configure_execution_defaults",
         "publish_execution_image",
         "rebuild_execution_image",
@@ -670,18 +673,20 @@ def _general_purpose_description() -> str:
 
 # Workspace-admin tools; each declares where it may run with `@access`.
 ADMIN_TOOLS = (
+    list_integration_bindings,
+    bind_repository,
+    unbind_repository,
+    bind_slack_channel,
+    unbind_slack_channel,
     list_automations,
     create_automation,
     update_automation,
     trigger_automation,
     delete_automation,
-    list_workspaces,
     publish_execution_image,
     read_execution_image,
     rebuild_execution_image,
     snapshotctl,
-    configure_repository,
-    configure_workspace,
     read_execution_defaults,
     configure_execution_defaults,
     save_organization_skill,
@@ -813,13 +818,8 @@ ALWAYS_OFFERED_TOOLS: Final = (
 )
 
 
-def workspace_slug(cfg: RunConfig) -> str | None:
-    """The workspace this thread selected, if any."""
-    return cfg.workspace_slug
-
-
 async def _admin_thread(config: RunnableConfig, profile_login: str | None) -> bool:
-    """Whether this run may manage workspaces and organization skills."""
+    """Whether this run may manage Robin defaults and organization skills."""
     return await actor_has_admin_context(RunConfig.from_config(config), login=profile_login)
 
 
@@ -891,8 +891,8 @@ async def integration_tools(
     return by_name
 
 
-async def _reconnect_agent_sandbox(thread_id: str, workspace: str | None) -> SandboxBackendProtocol:
-    return await ensure_sandbox_for_thread(thread_id, workspace_slug=workspace)
+async def _reconnect_agent_sandbox(thread_id: str) -> SandboxBackendProtocol:
+    return await ensure_sandbox_for_thread(thread_id)
 
 
 class ThreadFiles:
@@ -916,7 +916,7 @@ class ThreadFiles:
             ),
         }
         cached = get_cached_sandbox_backend(
-            thread_id, reconnect=partial(_reconnect_agent_sandbox, thread_id, workspace_slug(cfg))
+            thread_id, reconnect=partial(_reconnect_agent_sandbox, thread_id)
         )
         self.backend = CompositeBackend(
             default=cached, routes=self.routes, artifacts_root=self.artifacts_root
@@ -1186,7 +1186,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         self._source = cfg.source or "dashboard"
         self._user_email = cfg.user_email or ""
         self._draft_prs = cfg.draft_prs
-        self._admin_workspaces = turn.admin_workspaces
+        self._admin = turn.admin
         self._sole_writer = turn.sole_writer
         self._routing_defaults = dict(turn.route_models)
         self._tool_catalog_note = catalog_note(
@@ -1493,14 +1493,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         configurable["draft_prs"] = self._draft_prs
         cfg = RunConfig.parse(configurable)
         execution = ExecutionProfile.current()
-        global_prompt = execution is not None and execution.uses_defaults
-        render_prompt = not (
-            state.get("system_prompt_fixed") and state.get("rendered_system_prompt")
-        ) or (
-            global_prompt
-            and SystemPrompt.from_state(state) is None
-            and not isinstance(state.get("execution_shared_prompt"), str)
-        )
+        render_prompt = SystemPrompt.from_state(state) is None
         github_token = await resolving_token
         triggering_user_identity_task = asyncio.create_task(
             resolve_triggering_user_identity(as_json_object(self._config), github_token)
@@ -1534,14 +1527,14 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     model=self._title_model,
                 )
         del github_token
-        if stale_workspace := take_stale_boot(self._thread_id):
-            await StaleWorkspaceReporter.report(self._thread_id, stale_workspace)
+        if stale_execution := take_stale_boot(self._thread_id):
+            await StaleExecutionReporter.report(self._thread_id, stale_execution)
         rendered_prompt = (
             asyncio.create_task(self._render_system_prompt(cfg)) if render_prompt else None
         )
         # Reads only who the run is for, so it runs alongside participants.
         recent_threads = asyncio.create_task(self._recent_threads(cfg))
-        workspace_settings = asyncio.create_task(cached_workspace_settings(workspace_slug(cfg)))
+        defaults_task = asyncio.create_task(cached_settings())
         # A dashboard switched back to Auto drops the route the thread kept.
         reroute = (
             not requested_model
@@ -1582,7 +1575,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                     ),
                 )
                 sender_messages = self._participants_messages(state, participants)
-        defaults = await workspace_settings
+        defaults = await defaults_task
         turn = TurnContext(
             working_dir=work_dir,
             working_folder=cfg.repo_explicitly_none is True,
@@ -1608,10 +1601,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         system_prompt = SystemPrompt.execution_update(
             state,
             await rendered_prompt if rendered_prompt is not None else None,
-            enabled=global_prompt,
-            workspace=execution.workspace_prompt()
-            if global_prompt and execution is not None
-            else "",
+            execution=execution.prompt() if execution is not None else "",
         )
         return {
             "work_dir": work_dir,
@@ -1665,19 +1655,15 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
 
     async def _render_system_prompt(self, cfg: RunConfig) -> SystemPrompt:
         """The thread's system prompt, from what holds for it as its first run starts."""
-        default_repo, workspace = await asyncio.gather(
-            _timed(self._thread_id, "prepare.default_repo", _resolve_prompt_default_repo(cfg)),
-            _timed(self._thread_id, "prepare.workspace", load_workspace(workspace_slug(cfg))),
+        default_repo = await _timed(
+            self._thread_id, "prepare.default_repo", _resolve_prompt_default_repo(cfg)
         )
         return construct_system_prompt(
             dashboard_base_url=dashboard_base_url(),
             artifact_url=dashboard_plan_url(self._thread_id),
             default_repo=default_repo,
             repo_custom_instructions=self._repo_instructions,
-            workspace_name=workspace.name if workspace else None,
-            workspace_instructions=workspace.instructions if workspace else None,
-            workspace_repos=workspace.repos if workspace else None,
-            admin_workspaces=self._admin_workspaces,
+            admin=self._admin,
             sole_writer=self._sole_writer,
             continued_from_collaborative=bool(cfg.continued_from_thread_id),
         )
@@ -1838,19 +1824,16 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     reset_model_selection = (
         cfg.source == "dashboard" and cfg.model_selection == "auto" and cfg.model_selection_changed
     )
-    # Every settings read below is keyed by this slug. A factory runs outside the
-    # graph's own context, so the settings module cannot recover it on its own.
-    settings_workspace = workspace_slug(cfg)
-    # Workspace/profile settings are accepted stale for a short TTL so graph factories
+    # Defaults/profile settings are accepted stale for a short TTL so graph factories
     # stay off the critical path during worker load and retry storms.
-    settings: WorkspaceSettings | None = None
+    settings: Settings | None = None
     routing_defaults: dict[str, tuple[str, str | None]]
     (settings, profile), admin_thread, tool_access, sender_preferences = await asyncio.gather(
         _timed(
             thread_id,
             "factory.settings_defaults",
             asyncio.gather(
-                cached_workspace_settings(settings_workspace),
+                cached_settings(),
                 _cached_profile(
                     profile_login
                     if reset_model_selection or not thread_settings.get("model_id")
@@ -1874,7 +1857,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         if route in routing_defaults:
             routing_defaults[route] = (stored_route["model_id"], stored_route["effort"])
     title_model_id, title_effort = title_defaults
-    logger.info("Using workspace default agent model: model=%s effort=%s", model_id, profile_effort)
+    logger.info("Using Robin default agent model: model=%s effort=%s", model_id, profile_effort)
 
     adaptive_model_routing = settings.model_routing_enabled if settings else False
     # A thread a person runs on Auto is routed: by the classifier, or with routing v2 on
@@ -1887,7 +1870,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         bool(cfg.schedule_id) and (await AutomationPolicy.for_schedule(cfg.schedule_id)).personal
     )
     automated = RoutingArm.automated(cfg) and not personal_automation
-    workspace_routes = adaptive_model_routing and cfg.source != "incidents_agent" and not automated
+    routes_enabled = adaptive_model_routing and cfg.source != "incidents_agent" and not automated
     user_model_choice = (
         (cfg.agent_model_id, cfg.agent_effort)
         if cfg.model_selection == "explicit" and cfg.agent_model_id
@@ -1926,7 +1909,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             model_id, profile_effort = routing_defaults["performance"]
             subagent_model_id, subagent_effort = routing_defaults["performance"]
 
-    routed = workspace_routes and adaptive_model_routing
+    routed = routes_enabled and adaptive_model_routing
     model_tier = (
         RoutingArm.tier(thread_id) if routed and settings and settings.model_routing_split else None
     )
@@ -1987,7 +1970,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             await Task.for_thread(
                 thread_id,
                 title=title if isinstance(title, str) and title.strip() else "Untitled",
-                workspace=cfg.workspace_slug or "default",
             )
     except Exception:
         logger.exception("Could not ready the thread's task", extra={"agent_thread_id": thread_id})
@@ -2219,7 +2201,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     turn = AgentTurnSettings(
         profile_login=profile_login,
         credential_login=credential_login,
-        admin_workspaces=admin_thread,
+        admin=admin_thread,
         sole_writer=tool_access.sole,
         title_model_id=title_model_id,
         title_effort=title_effort,

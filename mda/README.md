@@ -4,13 +4,13 @@ Robin's coding agent, pull request reviewer and review scout, packaged as one [M
 Each run's context names the kind of run it is (`agent`, `reviewer` or `review-scout`); the factory in `agent.py` builds the deep agent for that kind from it.
 
 The model loop, its checkpoints, every tool call and the middleware around them run here.
-The backend resolves each run's catalog as it starts the run, from the thread's settings, the workspace's defaults, the sender's access and the integrations their credentials reach (`openswe/agent_api/run_catalog.py`): its operations, its models and the rules of its middleware.
+The backend resolves each run's catalog as it starts the run, from the thread's settings, global defaults, the sender's access and the integrations their credentials reach (`openswe/agent_api/run_catalog.py`): its operations, its models and the rules of its middleware.
 Every call MDA makes on the backend, the loop's and the tools', is a named endpoint of the typed API in `packages/runtime-api` (`runtime_api`), under `POST /agent-api/{endpoint}`, which both sides import, answered from the run token and the request on whichever backend replica it lands.
 Each endpoint declares how long it may take and when it is sent again after a failed delivery.
 Every call is authenticated with the run token.
 
 - **Sandbox:** MDA names, creates, adopts, restarts and replaces each thread's LangSmith sandbox, one per thread.
-  The catalog gives the options it is created with (the workspace snapshot, VM size, TTLs, `preserve_memory_on_stop`), which apply only when MDA creates it, so a refreshed snapshot never strands a thread's work.
+  The catalog gives the options it is created with (the global execution image, VM size, TTLs, `preserve_memory_on_stop`), which apply only when MDA creates it, so a refreshed snapshot never strands a thread's work.
   Before `prepare`, the run opens the sandbox (`open_sandbox`), alongside reading its tool specs and sending what its outbox holds, and reports its name; the backend binds the thread to it (`sandbox_owner: mda`).
   Where preparing the run reaches no sandbox (`SandboxSpec.bind_after_prepare`, which the backend sets unless `MDA_BIND_SANDBOX_AFTER_PREPARE` is false), the run prepares and makes its first model call while the sandbox is opened, and reports it once it is open (`bind_sandbox`, `rt/sandbox_binding.py`): the backend binds the thread and puts the GitHub token that is due on the sandbox.
   The run's first tool call, whichever tool it is, waits for that, as does the run's end; a model call never does.
@@ -23,7 +23,7 @@ Every call is authenticated with the run token.
   The backend writes it with a GitHub token it mints for the thread, fresh again when the run's loop asks (`refresh_github_proxy`), and MDA leaves it alone (`_openswe_no_manage_proxy=True`), unless the catalog names the connection the sandbox's GitHub rules carry (`SandboxSpec.github_proxy`, `runtime_api.sandbox_proxy`).
   The catalog names one where the backend's `MDA_GITHUB_PROXY_CONNECTION` does and the thread reaches the whole GitHub App installation, as that connection's token does.
   Reviewer and review scout threads, and threads an event or automation on a public repository started, are narrowed, so the backend keeps writing theirs.
-  Where the catalog names one, MDA writes the config before each command it runs in the sandbox: the two GitHub rules with the token it reads from `mda/github-token`, which Agent Auth renews, and the backend's own rules for the sandbox, which it asks for once the sandbox is open (`sandbox_proxy`): its tool channel's capability, and the workspace's own proxy rules, its cloud identity rules among them.
+  Where the catalog names one, MDA writes the config before each command it runs in the sandbox: the two GitHub rules with the token it reads from `mda/github-token`, which Agent Auth renews, and the backend's own rules for the sandbox, which it asks for once the sandbox is open (`sandbox_proxy`): its tool channel's capability, and the global proxy rules, its cloud identity rules among them.
   The first write waits for a new sandbox to boot and is retried for up to three minutes, as long as the host takes to suspend an idle sandbox, while the sandbox API takes no proxy config.
   The run prepares and makes its first model call meanwhile, and its first tool call, whichever tool it is, waits for the write; a run that still cannot write it there ends at that call, since the backend never writes it on that sandbox.
   Where preparing may use GitHub in the sandbox, as carrying over the checkout of a thread that moved does (`SandboxSpec.prepare_uses_github`), the run writes it before `prepare` instead, as it does for a backend that does not say.
@@ -111,7 +111,7 @@ Every call is authenticated with the run token.
   Structured logs and `model_retry` custom events report retry counts and waits without including provider error text.
   An agent's call that still fails transiently (a timeout, a dropped connection, 429, 5xx, an overload) goes again, alternating between its model and the fallback model with waits of 0, 5, 15, 30 and 45 seconds, all within 45 minutes; once every attempt failed, the run ends with a message saying so.
   Each retry or failover marks the failed attempt's streamed message ids superseded, so the dashboard discards its partial text and unexecuted tool calls; failed attempts never enter graph history, and completed tools are never replayed.
-  An error another attempt would repeat ends the run at once, after telling the backend why (`model_failed`), so the failure reply names it; a model the workspace may not use answers with that instead.
+  An error another attempt would repeat ends the run at once, after telling the backend why (`model_failed`), so the failure reply names it; a model the deployment may not use answers with that instead.
   A subagent has no fallback: its timed-out call becomes its answer, which its `task` call hands back to the agent that delegated it.
   A call to a model that reads no images (`reads_images` in the catalog's `RunModels`) goes to the catalog's vision model once the conversation holds an image.
 
@@ -256,7 +256,7 @@ The first call for a delivery carries it, so each event takes at most two calls;
 **Agent sessions** (`rt/linear.py`):
 
 1. `linear_session_facts`, which also logs the delivery: whether the turn's author has signed in to Open SWE with the email Linear knows them by; what the session's thread already works in; the author's and the instance's default repositories; and which repositories Open SWE may work in.
-1. The handler picks the repository (the turn's, the thread's, the issue's, then the defaults) and workspace, and checks the allowlist.
+1. The handler picks the repository (the turn's, the thread's, the issue's, then the defaults), and checks the allowlist.
    When nothing can start, it tells the session why: the author must sign in first, no repository is named, or the one named is outside the allowlist.
 1. `plan_linear_session`: the backend checks the author and the repository again, since the channel's choice grants nothing, indexes the thread and signs its run context.
 1. The handler writes the run's input: the `linear-issue` prompt (`prompts/`) and the backend's input message envelope, copied in `rt/input_messages.py`, with the images the issue and the turn show, fetched only over HTTPS from public addresses (`rt/images.py`).
@@ -291,12 +291,12 @@ MDA answers GitHub only once the backend has answered, so a delivery the backend
 
 The channel's handler (`rt/github.py`) takes only the events that may start an agent run (`rt/github_routes.py`), and asks the backend's typed channel API (`runtime_api.github`) only for what needs Robin's data:
 
-- `github_delivery_facts` answers whether a workspace owns the delivery's repository, whether the allowlist takes it, whether the public-repository gate turned its sender away, and the handles that mention Robin; it logs and runs nothing.
+- `github_delivery_facts` answers whether the delivery's repository has an integration binding, whether the allowlist takes it, whether the public-repository gate turned its sender away, and the handles that mention Robin; it logs and runs nothing.
 - An issue opened, or a pull request opened, closed or merged, fires the repository's automations (`rt/github_automations.py`): `github_automation_rules` answers the repository's enabled automations, the events each fires on, and whether the issue's or pull request's author is a Robin user; the handler matches them and writes each run's prompt (`prompts/github-automation-event.md.jinja`), fencing the issue or pull request as untrusted unless its author is a user.
   `act_on_github_delivery` checks each automation fires on the delivery's event in its repository, applies the public-repository gate to pull requests, claims each once per delivery and signs its run on a thread of its own.
   An automation that fails fires nothing and stops nothing else.
 - A `@robin-agent` mention (or a legacy handle) on an issue, in its title or body or in a comment, starts the coding agent's run on the issue's conversation, the channel's own thread (`rt/github_issues.py`).
-  `github_issue_facts` answers which of the people the prompt quotes are Robin users, whether the sender's email is known, whether a run already took the issue in, and the thread's workspace; the handler writes the run's input: on a new conversation the issue (`prompts/github-issue.md.jinja`) and every comment, read with the App's token (`mda/github-token`), on a later one the person's own message, anyone who isn't a user fenced as untrusted.
+  `github_issue_facts` answers which of the people the prompt quotes are Robin users, whether the sender's email is known, whether a run already took the issue in; the handler writes the run's input: on a new conversation the issue (`prompts/github-issue.md.jinja`) and every comment, read with the App's token (`mda/github-token`), on a later one the person's own message, anyone who isn't a user fenced as untrusted.
   `act_on_github_delivery` checks the commenter and the public-repository gate again, indexes the thread and answers with the run context with a run token signed for the thread, the run metadata and the run-complete webhook; the handler then reacts 👀 to the comment, as the App.
   A new mention interrupts the run in progress, as before; while the thread waits on an interrupt it only answers whether Robin acts, so the channel points the issue to the decision.
 - A pull request comment, review or review comment goes to `act_on_github_delivery` to route; its run the backend still writes: it reads the pull request's comments with the person's own token and keeps a private thread's to the comments of its owner.
@@ -325,7 +325,7 @@ Robin's Slack app delivers its events and clicks to LangSmith Trigger Server, wh
 The backend forwards nothing: an environment whose Slack app still points at the backend's `/webhooks/slack` (local development, the e2e suite) is answered by the backend alone.
 The channel decides what a message starts from the message itself.
 Later messages in that Slack thread, and Slack's Stop, reach it the same way.
-A kitchen channel's untagged messages start conversations too, each Slack thread its own; the backend routes the run to the channel's workspace when it builds it.
+A kitchen channel's untagged messages start conversations too, each Slack thread its own; the channel's integration binding sets its conversation mode.
 A concierge DM is one conversation for the whole DM: a DM no thread holds yet goes to MDA as a whole, bound for Slack's `0` timestamp to the DM's thread (`uuid5` of `slack:v1:{app}:{team}:{channel}:0`), and each Slack thread a message opens in it is bound to that thread too, so Slack's Stop there and the handler's question find it.
 The handler starts each of the DM's runs on that thread (`thread: {"mode": "persistent", "id": ...}`), so Stop in a Slack thread cancels only the runs that thread started; the run context names the Slack thread the agent answers in.
 Trigger Server verifies the request as if Slack had sent it and hands the message to the channel, whose handler (`rt/slack.py`) decides what it starts, as `/webhooks/slack` decides for the backend's own conversations, and builds the turn's prompt from the Slack thread, read with the deployment's bot token (`rt/slack_prompt.py`, a copy of the backend's builder; `rt/slack_message.py`, of its message parser).
@@ -379,7 +379,7 @@ Which conversations go where (`_decide` in `mda/rt/slack.py`):
 |---|---|
 | An @mention of Robin in a channel, by a person or a bot on Robin's allow-list, as a new message or in a thread Robin isn't in yet |  |
 | A person's DM to Robin (a thread per message) | Breakouts, `/btw`, slash commands |
-| A kitchen channel's untagged messages, each Slack thread its own conversation, routed to the channel's workspace | Every conversation the backend already holds, a concierge DM included: one never moves. MDA's channel hands their messages back (`act_on_slack_message`) |
+| A kitchen channel's untagged messages, each Slack thread its own conversation, using the channel's integration mode | Every conversation the backend already holds, a concierge DM included: one never moves. MDA's channel hands their messages back (`act_on_slack_message`) |
 | A new concierge DM, as one conversation on one thread | Option lists the backend loads (`block_suggestion`) |
 | Every later message in those conversations, and Slack's Stop | Reactions (`:x:` stop, feedback), edits and `thread_broadcast` replies: Trigger Server doesn't take them. In MDA's conversations these do nothing yet; Slack's Stop works |
 | Every click: the agent's options, workflow push approvals and Retry in those conversations start their run in MDA; the backend acts on every other one (`act_on_slack_click`) | Modals the backend opened itself, before their cards opened them through Trigger Server |

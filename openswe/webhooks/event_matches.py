@@ -14,7 +14,8 @@ from datetime import datetime, timedelta
 from typing import Literal, Self
 from uuid import UUID, uuid7
 
-from pydantic import BaseModel, JsonValue
+from fastapi import HTTPException
+from pydantic import BaseModel, JsonValue, ValidationError
 from sqlalchemy import Text, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,14 +31,20 @@ from openswe.input_messages import (
     SystemIdentity,
     build_input_messages,
 )
+from openswe.run_config import RunConfig
 from openswe.threads.wake_budget import MONITOR_WAKES
-from openswe.webhooks.event_log import RETAINED_DAYS, WebhookSource
+from openswe.webhooks.event_log import (
+    ADMIN_ONLY_SOURCES,
+    RETAINED_DAYS,
+    EventVisibility,
+    WebhookSource,
+)
 
 logger = logging.getLogger(__name__)
 
 type MultitaskStrategy = Literal["enqueue", "interrupt"]
 # ``sandbox`` is output a monitor the thread started in its sandbox emitted.
-type EventSource = WebhookSource | Literal["sandbox"]
+type EventSource = WebhookSource | Literal["sandbox", "subscription_timeout"]
 
 _SYSTEM: SystemIdentity = {
     "id": "system:event-subscription",
@@ -56,6 +63,37 @@ _MAX_ATTEMPTS = 3
 
 class _Thread(BaseModel):
     status: str = ""
+
+
+class EventAudience(BaseModel):
+    repository: str | None
+    visibility: EventVisibility
+    visible_to_user_id: UUID | None
+    slack_channel_id: str | None = None
+
+    async def allows(self, cfg: RunConfig) -> bool:
+        from openswe.threads.identity import ThreadIdentity
+        from openswe.tools.access import resolve_access
+        from openswe.webhooks.event_subscriptions import EventSubscription
+
+        await EventSubscription.require_access(cfg, self.repository)
+        if self.slack_channel_id:
+            from openswe.slack.channels import SlackChannel
+
+            channel = await SlackChannel.load(self.slack_channel_id, use_cache=False)
+            if channel is None or not channel.details.publishes_events:
+                return False
+        access = await resolve_access(cfg)
+        if self.visibility == "admin":
+            return access.admin_thread
+        if self.visibility == "private":
+            if not access.private or not access.owner:
+                return False
+            user = await ThreadIdentity(
+                f"user:{cfg.user_id}" if cfg.user_id else cfg.github_login or ""
+            ).user()
+            return user is not None and user.id == self.visible_to_user_id
+        return True
 
 
 class EventMatch(Base):
@@ -98,8 +136,7 @@ class EventMatch(Base):
         return recorded is not None
 
     @classmethod
-    async def owed(cls, thread_id: str) -> list[Self]:
-        """Matches no run of the thread has received yet, oldest first."""
+    async def _pending(cls, thread_id: str) -> list[Self]:
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls)
@@ -110,7 +147,32 @@ class EventMatch(Base):
                 )
                 .order_by(cls.matched_at, cls.id)
             )
-            return list(rows)
+            matches = list(rows)
+        return matches
+
+    @classmethod
+    async def owed(cls, thread_id: str) -> list[Self]:
+        """Readable matches no run has received yet, oldest first."""
+        return [match for match in await cls._pending(thread_id) if await match.readable()]
+
+    async def readable(self) -> bool:
+        from openswe.tools.access import resolve_access
+
+        if self.source == "sandbox":
+            return True
+        cfg = RunConfig.from_config({"configurable": self.run_config})
+        if cfg.thread_id != self.thread_id:
+            return False
+        if self.source == "subscription_timeout":
+            return True
+        try:
+            audience = EventAudience.model_validate(self.run_config.get("_event_audience"))
+            if self.source in ADMIN_ONLY_SOURCES and not (await resolve_access(cfg)).admin_thread:
+                return False
+            return await audience.allows(cfg)
+        except HTTPException, PermissionError, RuntimeError, ValidationError:
+            logger.info("Event match access refused", extra={"event_match_id": str(self.id)})
+            return False
 
     @classmethod
     async def received(cls, thread_id: str, match_ids: Collection[UUID]) -> None:
@@ -154,7 +216,7 @@ class EventMatch(Base):
     def sender(self) -> tuple[SystemIdentity, Surface]:
         if self.source == "sandbox":
             return _MONITOR_SYSTEM, "automation"
-        if self.source in ("workspace", "human_review", "reviewer"):
+        if self.source in ("robin", "human_review", "reviewer", "subscription_timeout"):
             return _SYSTEM, "automation"
         return _SYSTEM, self.source
 
@@ -168,6 +230,7 @@ class EventMatch(Base):
         thread whose runs keep failing is not retried forever.
         Raises ``NotFoundError`` when the thread is gone.
         """
+        readable = {match.id for match in await cls.owed(thread_id)}
         client = dispatch_client()
         async with postgres.transaction() as lock:
             await lock.execute(
@@ -178,7 +241,7 @@ class EventMatch(Base):
                 thread = _Thread.model_validate(await client.threads.get(thread_id))
                 if thread.status == "busy":
                     return False
-            owed = await cls.owed(thread_id)
+            owed = [match for match in await cls._pending(thread_id) if match.id in readable]
             if all(match.delivery_attempts >= _MAX_ATTEMPTS for match in owed):
                 return False
             # Monitor output alone may start only so many runs between human

@@ -16,7 +16,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from openswe.dashboard.workspace_settings_cache import cached_instance_settings
+from openswe.dashboard.settings_cache import cached_instance_settings
 from openswe.database import postgres
 from openswe.github.http import GitHubError, GitHubSignInRequired
 from openswe.plugins.records import AppVersion, Installation, PluginApps, PluginInstallations

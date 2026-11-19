@@ -10,6 +10,7 @@ from rt.slack_message import Breakout, ParsedSlackMessage, SlackAction
         ("/breakout fix it", SlackAction.BREAKOUT, "fix it", ""),
         ("@openswe /breakout:web explain", SlackAction.BREAKOUT_WEB, "explain", ""),
         ("<@U0BOT> /model:perf /breakout fix it", SlackAction.BREAKOUT, "fix it", ""),
+        ("<@U0BOT> /workspace:infra /btw why?", None, "<@U0BOT> /workspace:infra /btw why?", ""),
         ("details <@U0BOT> please /btw why?", None, "details <@U0BOT> please /btw why?", ""),
         ("details /btw why? <@U0BOT>", None, "details /btw why? <@U0BOT>", ""),
         ("<@OTHER> /btw why?", None, "<@OTHER> /btw why?", ""),
@@ -27,39 +28,45 @@ def test_commands_only_lead_the_message_or_follow_this_bots_mention(
 
 
 @pytest.mark.parametrize(
-    ("text", "performance_model", "workspace", "without"),
+    ("text", "performance_model", "without"),
     [
-        ("<@U0BOT> /model:perf /workspace:Infra fix it", True, "infra", "<@U0BOT> fix it"),
-        ("<@U0BOT> /model:performance fix it", True, None, "<@U0BOT> fix it"),
-        ("<@U0BOT> /MODEL:PERFORM fix it", True, None, "<@U0BOT> fix it"),
-        ("research <https://x.y/p> /model:perf\n", True, None, "research <https://x.y/p>"),
-        ("<@U0BOT> fix /workspace:infra it /MODEL:PERF", True, "infra", "<@U0BOT> fix it"),
+        ("<@U0BOT> /model:perf /workspace:Infra fix it", True, "<@U0BOT> /workspace:Infra fix it"),
+        ("<@U0BOT> /model:performance fix it", True, "<@U0BOT> fix it"),
+        ("<@U0BOT> /MODEL:PERFORM fix it", True, "<@U0BOT> fix it"),
+        ("research <https://x.y/p> /model:perf\n", True, "research <https://x.y/p>"),
+        (
+            "<@U0BOT> fix /workspace:infra it /MODEL:PERF",
+            True,
+            "<@U0BOT> fix /workspace:infra it",
+        ),
         (
             "<@U0BOT> why did `/model:perf` fire?",
             False,
-            None,
             "<@U0BOT> why did `/model:perf` fire?",
         ),
         (
             '<@U0BOT> why did "/model:perf" fire?',
             False,
-            None,
             '<@U0BOT> why did "/model:perf" fire?',
         ),
-        ("<@U0BOT> fix it workspace:infra", False, "infra", "<@U0BOT> fix it"),
-        ("env:infra <@U0BOT> fix it", False, "infra", "<@U0BOT> fix it"),
-        ("<@U0BOT> fix it Workspace:Infra", False, "infra", "<@U0BOT> fix it"),
-        ("@OpenSWE /Model:Perf /WORKSPACE:infra fix it", True, "infra", "@OpenSWE fix it"),
-        ("<@U0BOT> fix `workspace:infra`", False, None, "<@U0BOT> fix `workspace:infra`"),
+        ("<@U0BOT> fix it workspace:infra", False, "<@U0BOT> fix it workspace:infra"),
+        ("env:infra <@U0BOT> fix it", False, "env:infra <@U0BOT> fix it"),
+        ("<@U0BOT> fix it Workspace:Infra", False, "<@U0BOT> fix it Workspace:Infra"),
+        (
+            "@OpenSWE /Model:Perf /WORKSPACE:infra fix it",
+            True,
+            "@OpenSWE /WORKSPACE:infra fix it",
+        ),
+        ("<@U0BOT> fix `workspace:infra`", False, "<@U0BOT> fix `workspace:infra`"),
     ],
 )
 def test_options_parse_and_strip_the_same_way(
-    text: str, performance_model: bool, workspace: str | None, without: str
+    text: str, performance_model: bool, without: str
 ) -> None:
     parsed = ParsedSlackMessage.parse(text, "U0BOT", "openswe")
 
-    assert (parsed.performance_model, parsed.workspace) == (performance_model, workspace)
-    assert parsed.without(performance_model=True, workspace=True) == without
+    assert parsed.performance_model is performance_model
+    assert parsed.without(performance_model=True) == without
 
 
 @pytest.mark.parametrize(

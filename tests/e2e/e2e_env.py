@@ -55,7 +55,7 @@ _DEFAULTS = {
     # Sandboxes: the stand-in for LangSmith's sandbox service (sandbox_service.py)
     # roots every sandbox MDA or the backend opens in this throwaway temp dir.
     "E2E_SANDBOX_ROOT": str(_WORK_DIR),
-    # Workspace scripts write themselves and their logs here. The default,
+    # Sandbox scripts write themselves and their logs here. The default,
     # /open-swe/environment, assumes a sandbox where the agent is root; the
     # stand-in runs on the developer's own machine, whose root is not writable.
     "OPENSWE_SCRIPT_ROOT": str(TMP / "open-swe" / "environment"),
@@ -135,7 +135,7 @@ TEST_USERS = [
     },
 ]
 
-# Alice is the workspace admin (so admin threads + the workspaces dashboard are
+# Alice is the instance admin (so admin threads + the Defaults dashboard are
 # reachable); Bob is a plain member, which is what the deny-side assertions use.
 ADMIN_USER = TEST_USERS[0]
 _DEFAULTS["ALLOWED_GITHUB_USERS"] = ",".join(

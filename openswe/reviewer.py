@@ -48,7 +48,7 @@ from runtime_api.provenance import Provenance
 
 from openswe.analytics.usage import record_agent_invocation_usage
 from openswe.dashboard.options import gate_fable_model
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.dashboard.settings_cache import cached_settings
 from openswe.execution import ExecutionProfile
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.http import GitHubClient
@@ -167,7 +167,7 @@ def _reviewer_system_prompt(
             reviewer_eval=reviewer_eval,
             approval_assessment=bool(approval_policy),
         ),
-        workspace=prompt(
+        execution=prompt(
             "reviewer/repository",
             org_guidelines=org_guidelines or "",
             repo_style_prompt=repo_style_prompt or "",
@@ -485,8 +485,8 @@ class PrepareReviewerRunState(PrepareRunState):
     review_earlier_finding_ids: NotRequired[list[str] | None]
 
 
-async def _cached_org_guidelines(workspace: str | None) -> str | None:
-    return (await cached_workspace_settings(workspace)).org_review_guidelines
+async def _cached_org_guidelines() -> str | None:
+    return (await cached_settings()).org_review_guidelines
 
 
 async def ensure_reviewer_github_token(thread_id: str, cfg: RunConfig) -> str | None:
@@ -518,7 +518,6 @@ async def ensure_reviewer_sandbox_for_thread(
 ) -> SandboxBackendProtocol:
     return await ensure_sandbox_for_thread(
         thread_id,
-        workspace_slug=cfg.workspace_slug,
         github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
         github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
@@ -783,7 +782,7 @@ async def prepare_reviewer_run(
     # Benchmark runs score the stock reviewer, without our workspace's
     # guidelines, per-repo style prompts, or API standards.
     async def _fetch_org_guidelines() -> str | None:
-        return None if reviewer_eval else await _cached_org_guidelines(cfg.workspace_slug)
+        return None if reviewer_eval else await _cached_org_guidelines()
 
     async def _fetch_api_standards_skill() -> str | None:
         return None if reviewer_eval else await _cached_api_standards_skill()
@@ -963,11 +962,11 @@ async def prepare_reviewer_run(
         and await PullRequest.concise_for_repo(repo_owner, repo_name),
     )
     execution = ExecutionProfile.current()
-    if execution is not None and execution.uses_defaults:
+    if execution is not None:
         system_prompt = SystemPrompt(
             shared=system_prompt.shared,
-            workspace="\n\n".join(
-                part for part in (execution.workspace_prompt(), system_prompt.workspace) if part
+            execution="\n\n".join(
+                part for part in (execution.prompt(), system_prompt.execution) if part
             ),
             thread=system_prompt.thread,
         )
@@ -1023,7 +1022,7 @@ class ReviewerModels(NamedTuple):
 
 
 async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
-    """Pick the reviewer and subagent models for a run, per run config then workspace defaults."""
+    """Pick the reviewer and subagent models for a run, per run config then global defaults."""
     if cfg.reviewer_model_id:
         model_id = cfg.reviewer_model_id
         reasoning_effort = cfg.reviewer_reasoning_effort
@@ -1033,21 +1032,21 @@ async def resolve_reviewer_models(cfg: RunConfig) -> ReviewerModels:
         (
             (model_id, reasoning_effort),
             (subagent_model_id, subagent_effort),
-        ) = (await cached_workspace_settings(cfg.workspace_slug)).default_model_pair("reviewer")
+        ) = (await cached_settings()).default_model_pair("reviewer")
         logger.info(
-            "Using workspace default reviewer model: model=%s effort=%s",
+            "Using global default reviewer model: model=%s effort=%s",
             model_id,
             reasoning_effort,
         )
         logger.info(
-            "Using workspace default reviewer subagent model: model=%s effort=%s",
+            "Using global default reviewer subagent model: model=%s effort=%s",
             subagent_model_id,
             subagent_effort,
         )
     if cfg.reviewer_subagent_model_id:
         subagent_model_id = cfg.reviewer_subagent_model_id
         subagent_effort = cfg.reviewer_subagent_reasoning_effort
-    settings = await cached_workspace_settings(cfg.workspace_slug)
+    settings = await cached_settings()
     fable_enabled = settings.fable_enabled
     model_id, reasoning_effort = gate_fable_model(
         model_id, reasoning_effort, fable_enabled=fable_enabled

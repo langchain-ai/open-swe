@@ -46,8 +46,6 @@ export interface SidebarRepoGroup extends SidebarRepoOption {
   threads: Array<SidebarThreadItem>
 }
 
-export const DEFAULT_SIDEBAR_WORKSPACE_SLUG = "default"
-
 /**
  * Identity, not display name: `owner/repo` for cloud and the checkout path for
  * local. Keying on the short label instead would merge `acme/api` with

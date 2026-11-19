@@ -310,9 +310,10 @@ export function fromSnapshot(snapshot: TranscriptSnapshot): TranscriptState {
   const turns = turnStates(snapshot.turns, messages, toolCalls)
   const notices: Partial<Record<NoticeKind, TranscriptNoticeState>> = {}
   for (const row of snapshot.notices) {
-    notices[row.kind] = {
+    const kind = row.kind === "workspace_stale" ? "execution_stale" : row.kind
+    notices[kind] = {
       turnId: row.turn_id,
-      kind: row.kind,
+      kind,
       data: row.data,
     }
   }
@@ -816,13 +817,15 @@ export function applyEvent(
     }
     case "run.notice": {
       const payload = event.payload
+      const kind =
+        payload.kind === "workspace_stale" ? "execution_stale" : payload.kind
       draft.state = {
         ...draft.state,
         notices: {
           ...draft.state.notices,
-          [payload.kind]: {
+          [kind]: {
             turnId: payload.turn_id,
-            kind: payload.kind,
+            kind,
             data: payload.data,
           },
         },
@@ -845,24 +848,6 @@ export function routedNotice(
   return {
     ...(typeof route === "string" ? { route } : {}),
     modelId: typeof modelId === "string" ? modelId : null,
-  }
-}
-
-export interface StaleWorkspace {
-  workspaceName: string
-  capturedAt: string | null
-}
-
-export function staleWorkspaceNotice(
-  state: TranscriptState
-): StaleWorkspace | null {
-  const notice = state.notices["workspace_stale"]
-  if (!notice) return null
-  const name = notice.data["workspace_name"]
-  const capturedAt = notice.data["captured_at"]
-  return {
-    workspaceName: typeof name === "string" ? name : "workspace",
-    capturedAt: typeof capturedAt === "string" ? capturedAt : null,
   }
 }
 

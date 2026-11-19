@@ -134,7 +134,6 @@ async def test_personal_automation_owner_can_reply_after_automation_is_deleted(
         "source": "schedule",
         "thread_category": "automation",
         "schedule_id": str(uuid7()),
-        "workspace": "default",
         "owner_type": "user",
         "visibility": "private",
         "owner_login": login,
@@ -156,7 +155,6 @@ async def test_personal_automation_owner_can_reply_after_automation_is_deleted(
         ("legacy", True),
         ("snapshot", True),
         ("deleted", False),
-        ("workspace_mismatch", False),
         ("creator_mismatch", False),
         ("malformed_snapshot", False),
         ("deleted_owner", False),
@@ -174,12 +172,10 @@ async def test_automation_replies_resolve_ownership_without_reassigning_orphans(
         "source": "schedule",
         "thread_category": "automation",
         "schedule_id": str(uuid7()),
-        "workspace": "default",
         "created_by": "alice",
         "visibility": "public",
     }
     record: dict[str, object] | None = {
-        "workspace": "default",
         "created_by": "alice",
         "created_by_user_id": str(owner.id),
     }
@@ -188,8 +184,6 @@ async def test_automation_replies_resolve_ownership_without_reassigning_orphans(
         record = None
     elif case == "deleted":
         record = None
-    elif case == "workspace_mismatch":
-        record["workspace"] = "other-workspace"
     elif case == "creator_mismatch":
         record["created_by_user_id"] = str(other.id)
     elif case == "malformed_snapshot":
@@ -443,7 +437,7 @@ async def test_owner_can_publish_thread_without_retaining_admin_capabilities(
     thread["metadata"].update(admin_thread=True, unlisted=True, sandbox_id="sbx")
     mirror = AsyncMock()
     monkeypatch.setattr(handlers, "mirror_thread_metadata", mirror)
-    shared = await handlers.share_thread_with_workspace("private-thread", "ALICE")
+    shared = await handlers.share_thread("private-thread", "ALICE")
     assert summary.thread_is_readable(shared, "bob")
     assert summary.thread_is_promptable(shared, "bob")
     assert shared["visibility"] == "public"
@@ -468,7 +462,7 @@ async def test_sharing_deletes_the_threads_browser(private_thread, monkeypatch):
     monkeypatch.setattr(handlers, "mirror_thread_metadata", AsyncMock())
     monkeypatch.setattr(Topic.THREAD_BROWSERS, "invalidate", AsyncMock())
 
-    await handlers.share_thread_with_workspace("private-thread", "alice")
+    await handlers.share_thread("private-thread", "alice")
 
     assert deleted == ["browser-1"]
     # MDA keeps the name, so the panel can still open a fresh browser.
@@ -500,7 +494,7 @@ async def test_sharing_waits_for_the_threads_browser_to_go(private_thread, monke
     )
 
     with pytest.raises(HTTPException) as exc:
-        await handlers.share_thread_with_workspace("private-thread", "alice")
+        await handlers.share_thread("private-thread", "alice")
 
     assert exc.value.status_code == 502
     client.threads.update.assert_not_awaited()
@@ -517,7 +511,7 @@ async def test_a_thread_on_its_owners_machine_stays_theirs(private_thread, bindi
     thread, client = private_thread
     thread["metadata"].update(binding)
     with pytest.raises(HTTPException) as exc:
-        await handlers.share_thread_with_workspace("private-thread", "alice")
+        await handlers.share_thread("private-thread", "alice")
     assert exc.value.status_code == 409
     client.threads.update.assert_not_awaited()
     # Shared before such threads were kept private.
@@ -531,7 +525,7 @@ async def test_a_thread_on_its_owners_machine_stays_theirs(private_thread, bindi
 async def test_only_owner_can_publish_even_when_admin_can_read(private_thread, login):
     _, client = private_thread
     with pytest.raises(HTTPException):
-        await handlers.share_thread_with_workspace("private-thread", login)
+        await handlers.share_thread("private-thread", login)
     client.threads.update.assert_not_awaited()
 
 
@@ -545,7 +539,7 @@ async def test_publish_refuses_live_runs(private_thread, status):
             [{"run_id": "r"}] if kw["status"] == status else []
         )
     with pytest.raises(HTTPException) as exc:
-        await handlers.share_thread_with_workspace("private-thread", "alice")
+        await handlers.share_thread("private-thread", "alice")
     assert exc.value.status_code == 409
     client.threads.update.assert_not_awaited()
 
@@ -638,26 +632,6 @@ async def test_continue_privately_rolls_back_when_blob_copy_fails(private_thread
     assert exc.value.status_code == 502
     client.threads.update_state.assert_not_awaited()
     client.threads.delete.assert_awaited_once()
-
-
-async def test_continue_privately_carries_new_workspace_key(private_thread):
-    thread, client = private_thread
-    thread["metadata"] = {"source": "slack", "workspace": "oss"}
-    client.threads.get_state.return_value = {"values": {"messages": []}}
-    await handlers.continue_thread_privately("private-thread", "bob")
-    metadata = client.threads.create.call_args.kwargs["metadata"]
-    assert metadata["workspace"] == "oss"
-    assert "environment" not in metadata
-
-
-async def test_continue_privately_falls_back_to_legacy_environment_key(private_thread):
-    thread, client = private_thread
-    thread["metadata"] = {"source": "slack", "environment": "old"}
-    client.threads.get_state.return_value = {"values": {"messages": []}}
-    await handlers.continue_thread_privately("private-thread", "bob")
-    metadata = client.threads.create.call_args.kwargs["metadata"]
-    assert metadata["workspace"] == "old"
-    assert "environment" not in metadata
 
 
 async def test_continue_privately_rolls_back_when_copy_fails(private_thread):

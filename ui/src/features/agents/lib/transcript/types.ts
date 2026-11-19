@@ -33,7 +33,9 @@ export type ToolCallStatus = "in_progress" | "completed" | "error"
 export type NoticeKind =
   | "model_routed"
   | "conversation_offloading"
-  | "workspace_stale"
+  | "execution_stale"
+
+type IncomingNoticeKind = NoticeKind | "workspace_stale"
 
 /**
  * A file attached to a message. The log stores metadata only — never base64
@@ -113,7 +115,7 @@ export interface TranscriptToolCallRow {
 
 export interface TranscriptNoticeRow {
   turn_id: string
-  kind: NoticeKind
+  kind: IncomingNoticeKind
   data: JsonObject
 }
 
@@ -218,7 +220,7 @@ export interface ToolCompletedPayload {
 
 export interface RunNoticePayload {
   turn_id: string
-  kind: NoticeKind
+  kind: IncomingNoticeKind
   data: JsonObject
 }
 

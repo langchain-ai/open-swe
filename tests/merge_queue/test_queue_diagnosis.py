@@ -240,7 +240,7 @@ class TestRecoveryDelivery:
     ):
         service, state, _ = await self.setup(monkeypatch)
         service.config.repository = "acme/widgets"
-        service.queue.id, service.queue.workspace_id = uuid7(), uuid7()
+        service.queue.id, service.queue.routing_id = uuid7(), uuid7()
         pause_id = uuid7()
         service.queue.paused = paused
         service.queue.recovery_pause_id = pause_id if paused else None
@@ -294,7 +294,7 @@ class TestRecoveryDelivery:
             key=f"{diagnosis.JOB}:{history.batch.id}" + (":followup" if requested else ""),
             payload={
                 "queue_id": str(service.queue.id),
-                "workspace_id": str(service.queue.workspace_id),
+                "routing_id": str(service.queue.routing_id),
                 "batch_id": str(history.batch.id),
                 "investigate": requested,
             },

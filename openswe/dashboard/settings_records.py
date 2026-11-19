@@ -1,4 +1,4 @@
-"""PostgreSQL settings records: global records under ``""`` and workspace overrides under their slug."""
+"""PostgreSQL records for global settings and execution profiles."""
 
 from datetime import datetime
 from typing import Literal
@@ -26,7 +26,7 @@ class SettingsRecord(Base):
 class SettingsRecords:
     """Every settings record of one tier."""
 
-    def __init__(self, tier: Literal["instance", "workspace", "execution"]) -> None:
+    def __init__(self, tier: Literal["instance", "execution"]) -> None:
         self.tier = tier
 
     def _where(self, key: str) -> ColumnElement[bool]:
@@ -94,8 +94,7 @@ class SettingsRecords:
 
     @staticmethod
     async def pinned_releases(session: AsyncSession) -> frozenset[UUID]:
-        """Every app release a record at either tier pins, in Apps in reviews or Apps for
-        everyone, so cleanup keeps it."""
+        """Every app release pinned by a current or historical record, retained for cleanup."""
         found: set[UUID] = set()
         for value in await session.scalars(select(SettingsRecord.value)):
             for field in ("review_apps", "featured_apps"):
@@ -109,4 +108,3 @@ class SettingsRecords:
 
 
 INSTANCE_SETTINGS = SettingsRecords("instance")
-WORKSPACE_SETTINGS = SettingsRecords("workspace")

@@ -7,7 +7,6 @@ from openswe.middleware import task_coordination
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.tasks.store import Task, TaskContext, TaskDelegation, TaskMembership
 from openswe.utils import thread_reads
-from openswe.workspaces.rows import WorkspaceRow
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -16,9 +15,7 @@ async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LANGSMITH_TRACING", "false")
-    workspace = WorkspaceRow(slug="default", name="Default")
-    task = Task(coordinator_thread_id="host", title="Fix login", workspace_id=workspace.id)
-    task.workspace = workspace
+    task = Task(coordinator_thread_id="host", title="Fix login")
     context = TaskContext(task, TaskMembership(thread_id="worker", task_id=task.id, role="worker"))
     delegation = TaskDelegation(
         worker_thread_id="worker",

@@ -13,7 +13,7 @@ Cloud-first desktop is on by default for users who have not saved a choice; save
 With it on, new threads run in the cloud, and optional actions on your Mac each require native approval in a desktop app that supports them.
 Turn off **Cloud-first desktop** in **Settings → Experiments** to choose **This Mac** in the new-task composer and run an agent over a selected local project.
 Existing This Mac threads keep working regardless of the personal experiment.
-Admins can still require cloud-first mode for a workspace with `cloud_first_desktop_enabled`.
+Admins can still require cloud-first mode globally with `cloud_first_desktop_enabled`.
 A This Mac thread is an ordinary cloud thread on the connected backend — same transcript, models, settings, MCPs and skills — whose sandbox is the project on this Mac instead of a hosted sandbox.
 The app serves it through a sandbox bridge: it long-polls the backend for the agent's `execute`, `upload_files` and `download_files` requests, runs them in the checkout, and posts the results back.
 This is the same bridge `robin run` uses, from the shared `bridge-client` package.
@@ -34,14 +34,14 @@ Git branch and worktree controls appear only for Git folders.
 Every chat lives in one list, whatever it works on.
 A chat started without a repository gets the general-purpose prompt; branch and worktree controls appear once a Git folder is chosen.
 
-The composer's workspace selector chooses where a local thread runs.
+The composer's local checkout selector chooses where a local thread runs.
 **Current checkout** (the default) runs the agent in the project directory itself, on whichever branch the branch picker selects.
 **New worktree** gives the thread its own git worktree, checked out from the selected base branch on a placeholder `open-swe/local-<id>` branch that the agent renames after it reads the request — so your own checkout is never touched and several local threads can run at once without contending for a working tree.
 Deleting a thread removes its worktree along with anything uncommitted in it.
 Only one agent may work in a given tree at a time, so starting a thread in a checkout another agent is running in, or switching that checkout's branch under it, is refused.
 
 The side panel's **Changes** tab diffs the project against a git snapshot taken when the session started, so it shows what the agent changed and not the working tree's prior state.
-It also shows the workspace's branch and discovers its pull request when the GitHub CLI is installed and authenticated.
+It also shows the local checkout's branch and discovers its pull request when the GitHub CLI is installed and authenticated.
 The **Terminal** and file browser open in the same checkout, on this Mac.
 
 ## How it connects

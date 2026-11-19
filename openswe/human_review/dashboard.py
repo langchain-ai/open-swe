@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from uuid import UUID
 
-from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.dashboard.settings import get_settings
 from openswe.expedited_review.nomination import ExpeditedReviewIneligible, ExpeditedReviewNomination
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
@@ -70,7 +70,7 @@ class DashboardReviewRequest:
                 permalink=await approval.permalink(self.origin.requester),
                 auto_merge=approval.auto_merge,
             )
-        if active is None and (await get_workspace_settings()).expedited_review_enabled:
+        if active is None and (await get_settings()).expedited_review_enabled:
             try:
                 async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
                     with apm_span("human_review.read_pull_request", span_tags):

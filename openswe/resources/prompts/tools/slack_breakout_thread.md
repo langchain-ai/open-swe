@@ -7,7 +7,7 @@ Invalid selections return `available_models` with valid IDs and efforts without 
 This is only for requested breakouts, not a general mechanism for creating Slack threads.
 Same-channel breakouts also work in private channels.
 Changing channels requires a public source channel and destination.
-Choose the destination from the user's request and applicable channel descriptions and workspace instructions before calling this tool; those instructions can designate a channel other than the source.
+Choose the destination from the user's request and applicable channel descriptions and shared instructions before calling this tool; those instructions can designate a channel other than the source.
 The current conversation remains active; to move the current conversation and stop listening to the original thread, use `slack_move_thread` instead.
 
 Choose the breakout's model deliberately rather than automatically inheriting the parent's.

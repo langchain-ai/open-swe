@@ -42,6 +42,7 @@ from openswe import event_claims
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import RunInput
 from openswe.mda_channels.api import ChannelCall
+from openswe.routing.store import is_kitchen_channel
 from openswe.schedules.store import slack_channel_watched
 from openswe.slack import forks, mda_forwarding
 from openswe.slack import webhook as service
@@ -65,8 +66,6 @@ from openswe.threads.router import channel_run_metadata, channel_run_starting
 from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
 from openswe.webhooks import common
-from openswe.workspaces.routing import is_kitchen_channel
-from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -171,8 +170,6 @@ async def slack_message_facts(
         bot_name=(allowed_bot.name.strip() or "Bot") if allowed_bot is not None else "",
         solo_followup=solo_followup,
         conversation=await _conversation(message, CONCIERGE_TS if concierge else message.thread_ts),
-        workspace_known=bool(message.workspace_tag)
-        and await WORKSPACES.get(message.workspace_tag) is not None,
     )
 
 

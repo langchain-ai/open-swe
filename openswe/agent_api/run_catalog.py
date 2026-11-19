@@ -110,8 +110,7 @@ class RunCatalog:
     async def of(cls, kind: RunKind, run: RemoteRun) -> RunCatalog:
         # Resolved from the run as dispatch stamped it, never from the settings it decides.
         config = run_config(run, settled=False)
-        cfg = RunConfig.from_config(config)
-        execution = await ExecutionProfile.resolve(cfg.workspace_slug, thread_id=run.thread_id)
+        execution = await ExecutionProfile.resolve(thread_id=run.thread_id)
         config["configurable"] = {
             **(config.get("configurable") or {}),
             "execution": await execution.keep(),

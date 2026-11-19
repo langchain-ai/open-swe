@@ -37,8 +37,6 @@ class ThreadMetadata(BaseModel):
     owner_type: Literal["user", "system"] | None = None
     owner_user_id: UUID | None = None
     owner_login: str | None = None
-    workspace: str | None = None
-    environment: str | None = None
     task_id: UUID | None = None
     sandbox_host_thread_id: str | None = None
     sandbox_id: str | None = None

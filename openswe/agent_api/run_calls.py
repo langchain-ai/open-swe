@@ -180,7 +180,7 @@ from openswe.middleware.notify_step_limit import notify_step_limit
 from openswe.middleware.plugin_chat import PluginChatTools
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
 from openswe.middleware.settle_review_check import settle_review_check
-from openswe.middleware.stale_workspace import StaleWorkspaceReporter
+from openswe.middleware.stale_execution import StaleExecutionReporter
 from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 from openswe.middleware.transcript import TranscriptMiddleware, queue_run_notice, within_namespace
 from openswe.review_scout.graph import finish_scout_plan
@@ -502,7 +502,7 @@ class TokenRun:
         if request.in_sandbox and not bind_later:
             # MDA opened the sandbox before preparing; the thread is bound to it from here on.
             await self._sandbox.bind_or_tell(request.sandbox_id, open_error=request.sandbox_error)
-        await self._report_stale_workspace()
+        await self._report_stale_execution()
         if events := _carried_events(self.config):
             # The events this run was started to carry are its input: it holds them now.
             await ThreadInbox(self.run.thread_id).receive(events=events)
@@ -583,15 +583,15 @@ class TokenRun:
                 exc_info=True,
             )
             return SandboxBound(unreachable=exc.reason or str(exc))
-        await self._report_stale_workspace()
+        await self._report_stale_execution()
         if request.sandbox_id is None:
             # The thread keeps the sandbox it was bound to before, which the run opens again.
             return SandboxBound()
         return SandboxBound(github_proxy=await self._refreshed_ahead(request))
 
-    async def _report_stale_workspace(self) -> None:
+    async def _report_stale_execution(self) -> None:
         if stale := take_stale_boot(self.run.thread_id):
-            await StaleWorkspaceReporter.report(self.run.thread_id, stale)
+            await StaleExecutionReporter.report(self.run.thread_id, stale)
 
     def _as_invocation(self, invocation_id: str | None) -> None:
         """Record as the invocation a report names, which need not be this token's."""
@@ -783,7 +783,6 @@ class TokenRun:
             # coordinator's own scope.
             expires_at = await refresh_thread_github_proxy(
                 turn.coordinator_thread_id,
-                workspace_slug=cfg.workspace_slug,
                 force_refresh=request.force_refresh,
             )
             return GitHubProxyRefreshed(expires_at=expires_at)
@@ -801,7 +800,6 @@ class TokenRun:
 
     async def sandbox_proxy(self, request: SandboxProxyRequest) -> SandboxProxy:
         """The backend's part of the proxy config MDA writes on the run's sandbox."""
-        cfg = RunConfig.from_config(self.config)
         managed = await self._sandbox.managed()
         if managed is None or managed.github_proxy is None:
             # The sandbox's capability goes only to a run that writes its proxy config.
@@ -809,7 +807,6 @@ class TokenRun:
         config = await mda_proxy_config(
             managed.thread_id or self.run.thread_id,
             request.sandbox_id,
-            workspace_slug=cfg.workspace_slug,
         )
         return SandboxProxy(config=config)
 

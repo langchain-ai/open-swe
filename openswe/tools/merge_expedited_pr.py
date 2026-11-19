@@ -5,7 +5,7 @@ from typing import Any
 from langgraph.config import get_config
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.dashboard.settings import get_settings
 from openswe.expedited_review.merge import merge_approved
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.run_config import RunConfig
@@ -21,7 +21,7 @@ async def merge_expedited_pr(pr_url: str, keep_approval_reason: str = "") -> dic
     thread_id = RunConfig.from_config(get_config()).thread_id
     if not thread_id:
         return {"success": False, "error": "No executable agent thread is available"}
-    if not (await get_workspace_settings()).expedited_review_enabled:
+    if not (await get_settings()).expedited_review_enabled:
         return {"success": False, "error": "Expedited review is disabled for this instance."}
     approval = await HumanReviewRequest.active_for(pr_ref.owner, pr_ref.repo, pr_ref.number)
     if approval is None or approval.kind != "expedited":

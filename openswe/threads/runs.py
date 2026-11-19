@@ -29,13 +29,13 @@ from openswe.dashboard.options import (
 )
 from openswe.dashboard.profiles import get_profile
 from openswe.dashboard.repo_access import (
+    require_repo_access_for_system,
     require_repo_access_for_user,
-    require_repo_access_for_workspace,
+)
+from openswe.dashboard.settings import (
+    get_settings,
 )
 from openswe.dashboard.user_preferences import get_user_preferences
-from openswe.dashboard.workspace_settings import (
-    get_workspace_settings,
-)
 from openswe.dispatch import (
     FOLLOW_UP_PICKUP_KIND,
     SERVER_STREAM,
@@ -122,7 +122,6 @@ from openswe.utils.json_types import as_thread_dict, thread_metadata
 from openswe.utils.thread_ops import langgraph_client, queue_message_for_thread
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_settings import thread_model_choice
-from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -233,9 +232,8 @@ async def _resolve_agent_model_choice(
     profile: dict[str, Any],
     model_id: str | None,
     effort: str | None,
-    workspace: str | None,
 ) -> tuple[str, str]:
-    settings = await get_workspace_settings(workspace)
+    settings = await get_settings()
     resolved_model, resolved_effort = settings.default_model("agent")
     if model_id not in DEPRECATED_MODEL_IDS:
         chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
@@ -247,7 +245,7 @@ async def _resolve_agent_model_choice(
         fable_enabled=settings.fable_enabled,
     )
     if not isinstance(resolved_effort, str):
-        raise ValueError("workspace default model must include a reasoning effort")
+        raise ValueError("global default model must include a reasoning effort")
     return resolved_model, resolved_effort
 
 
@@ -310,24 +308,6 @@ def _user_message_content(
     ]
 
 
-async def _resolve_requested_workspace(
-    requested: object, repo_config: dict[str, str] | None, *, login: str | None
-) -> str:
-    """The workspace a new dashboard thread lands in.
-
-    An explicit pick from the composer wins when it names a real workspace;
-    otherwise the repository's owner, then the signed-in user's default,
-    else the instance default.
-    """
-    tag = requested if isinstance(requested, str) and requested.strip() else None
-    repo = (
-        (repo_config["owner"], repo_config["name"])
-        if repo_config and repo_config.get("owner") and repo_config.get("name")
-        else None
-    )
-    return (await resolve_workspace(tag=tag, repo=repo, login=login)).slug
-
-
 async def create_dashboard_thread_record(
     thread_id: str,
     *,
@@ -342,7 +322,6 @@ async def create_dashboard_thread_record(
     effort: str | None = None,
     model_selection: str = "auto",
     visibility: Literal["public", "private"] = "public",
-    workspace: str | None = None,
     extra_metadata: Mapping[str, Any] | None = None,
     profile: dict[str, Any] | None = None,
     if_exists: Literal["raise", "do_nothing"] = "raise",
@@ -358,9 +337,7 @@ async def create_dashboard_thread_record(
         raise ValueError("a thread opened without a message needs a title")
     profile = profile if profile is not None else await get_profile(login) or {}
     now_ms = _now_ms()
-    resolved_model, resolved_effort = await _resolve_agent_model_choice(
-        profile, model_id, effort, workspace
-    )
+    resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, model_id, effort)
     resolved_model, resolved_effort = _with_vision_fallback(
         resolved_model,
         resolved_effort,
@@ -406,8 +383,6 @@ async def create_dashboard_thread_record(
     }
     if visibility == "private" and ThreadIdentity(login).is_admin(email):
         metadata["admin_thread"] = True
-    if workspace:
-        metadata["workspace"] = workspace
     if not title:
         metadata["title_seed"] = initial_title
     if has_repo:
@@ -517,18 +492,12 @@ async def _build_dashboard_configurable(
     if model_selection in {"auto", "explicit"}:
         configurable["model_selection"] = model_selection
     # The agent re-checks the requesting user against CONFIGURED_ADMINS before it
-    # hands out the workspace tools, so this only marks intent.
+    # hands out the admin tools, so this only marks intent.
     if metadata.get("admin_thread") is True:
         configurable["admin_thread"] = True
     continued_from = metadata.get("continued_from_thread_id")
     if isinstance(continued_from, str) and continued_from:
         configurable["continued_from_thread_id"] = continued_from
-    workspace = metadata.get("workspace") or metadata.get("environment")
-    if isinstance(workspace, str) and workspace:
-        # ``environment`` is kept for one release so older graph code paths
-        # that still read it from the run config keep working.
-        configurable["workspace"] = workspace
-        configurable["environment"] = workspace
     if plugin_tools and chats_beside_plugin(metadata):
         user = await User.for_person(ThreadIdentity(login).person)
         chat = await PluginChat.run_config(thread_id, user.id) if user else None
@@ -547,7 +516,6 @@ async def _build_dashboard_configurable(
 class SessionCreateBody(BaseModel):
     prompt: str = Field(min_length=1)
     repo: str | None = Field(default=None, pattern=r"^[^/\s]+/[^/\s]+$")
-    workspace: str | None = None
     visibility: Literal["public", "private"] | None = None
     start: bool = True
 
@@ -556,7 +524,7 @@ class ThreadCreateBody(BaseModel):
     """The SDK's ``threads.create``, which never creates a thread here.
 
     A dashboard thread starts with its first message, whose run config carries what
-    the composer chose for it: its repository, workspace, visibility, project and
+    the composer chose for it: its repository, visibility, project and
     machine. A create carries none of that, so this answers only for a thread that
     exists, as the Agent Server does for ``if_exists``.
     """
@@ -600,15 +568,6 @@ async def create_dashboard_session(
         if identity.user_id is not None
         else (body.repo if body.repo is not None else profile.repository())
     )
-    workspace = await _resolve_requested_workspace(body.workspace, _parse_repo(repo), login=login)
-    if body.repo is None and identity.user_id is None:
-        from openswe.execution import ExecutionProfile
-
-        preferred_workspace = await _resolve_requested_workspace(body.workspace, None, login=login)
-        if not await ExecutionProfile.use_defaults():
-            if profile.workspace_default_repos.get(preferred_workspace):
-                workspace = preferred_workspace
-            repo = profile.repository(workspace)
     if body.repo is None and identity.github_login:
         from openswe.webhooks.common import account_link_reason
 
@@ -630,7 +589,6 @@ async def create_dashboard_session(
         if identity.user_id is not None
         else await _requested_visibility({"visibility": body.visibility}, login=login),
         repo_explicitly_none=identity.user_id is not None,
-        workspace=workspace,
     )
     return str(thread["thread_id"])
 
@@ -667,7 +625,6 @@ async def start_dashboard_thread(
         title=title,
         visibility="private" if identity.user_id is not None else visibility,
         repo_explicitly_none=identity.user_id is not None,
-        workspace=await _resolve_requested_workspace(None, primary, login=login),
         extra_metadata={"unlisted": True} if unlisted else None,
     )
     thread_id = str(thread["thread_id"])
@@ -1203,16 +1160,9 @@ async def _enrich_run_start_command(
                 )
             except ProjectError as exc:
                 raise HTTPException(exc.status_code, str(exc)) from exc
-            workspace = await _resolve_requested_workspace(
-                client_configurable.get("workspace")
-                or client_configurable.get("environment")
-                or (project.workspace if project is not None else None),
-                repo_config,
-                login=login,
-            )
             if sandbox_bridge is not None:
                 # Refuse a This Mac thread before its record exists.
-                await LocalAccess.allow_binding(sandbox_bridge, {"workspace": workspace})
+                await LocalAccess.allow_binding(sandbox_bridge, {})
             thread = await create_dashboard_thread_record(
                 thread_id,
                 login=login,
@@ -1227,7 +1177,6 @@ async def _enrich_run_start_command(
                 model_id=client_configurable.get("agent_model_id"),
                 effort=client_configurable.get("agent_effort"),
                 model_selection=model_selection or "auto",
-                workspace=workspace,
                 extra_metadata={PROJECT_ID_KEY: str(project.id)} if project is not None else None,
                 profile=await profile_read or {},
             )
@@ -1420,6 +1369,7 @@ async def _enrich_run_start_command(
                     "created_by",
                     "admin_thread",
                     "workspace",
+                    "environment",
                 }
             },
             **agent_version_metadata(),
@@ -1902,7 +1852,7 @@ async def _create_system_thread_record(
     title: str | None,
     repo_config: dict[str, str],
 ) -> dict[str, Any]:
-    """Stamp a thread that belongs to a workspace rather than to a person.
+    """Stamp a system-owned thread rather than a person-owned one.
 
     Deliberately not built from :func:`create_dashboard_thread_record`: there is
     no profile to read defaults from, no owner to record, and no participant to
@@ -1914,11 +1864,9 @@ async def _create_system_thread_record(
         "origin": API_SOURCE,
         "thread_category": "automation",
         "trigger_kind": "api",
-        "automation_scope": "workspace",
+        "automation_scope": "system",
         "owner_type": "system",
         "visibility": "public",
-        "workspace": principal.workspace,
-        "environment": principal.workspace,
         STARTED_BY_ID: principal.started_by_id,
         STARTED_BY_NAME: principal.started_by_name,
         "created_by": principal.created_by,
@@ -1946,7 +1894,7 @@ async def _system_repo_config(
     """The repository a machine's thread works in.
 
     Any repository the GitHub App can reach will do, not only ones its
-    workspace prefers. A federated workflow that names none gets its own repository, which is the
+    global defaults prefer. A federated workflow that names none gets its own repository, which is the
     only one it could have been talking about.
     """
     requested = configurable.get("repo")
@@ -1957,7 +1905,7 @@ async def _system_repo_config(
     repo_config = _parse_repo(requested)
     if not repo_config:
         raise HTTPException(422, "repo must be owner/name")
-    await require_repo_access_for_workspace(f"{repo_config['owner']}/{repo_config['name']}")
+    await require_repo_access_for_system(f"{repo_config['owner']}/{repo_config['name']}")
     return repo_config
 
 
@@ -1973,10 +1921,10 @@ async def _enrich_system_run_start_command(
 
     The person's path resolves a profile, a model, participants and a GitHub
     token for whoever sent the message. None of that exists here, so this stamps
-    the workspace's own thread and run config and leaves the rest of the command
+    the system-owned thread and run config and leaves the rest of the command
     pipeline — forwarding, streaming, run bookkeeping — shared. The one choice a
     caller makes is the model: a supported model and effort it names runs instead
-    of the workspace default.
+    of the global default.
     """
     if command.get("method") != "run.start":
         raise HTTPException(403, "a machine principal may only start runs")
@@ -2019,7 +1967,7 @@ async def _enrich_system_run_start_command(
     repo_config = await _system_repo_config(client_configurable, principal)
     if creating:
         if sandbox_bridge is not None:
-            await LocalAccess.allow_binding(sandbox_bridge, {"workspace": principal.workspace})
+            await LocalAccess.allow_binding(sandbox_bridge, {})
         title = client_configurable.get("title")
         metadata = thread_metadata(
             await _create_system_thread_record(
@@ -2065,8 +2013,6 @@ async def _enrich_system_run_start_command(
             "thread_id": thread_id,
             "source": API_SOURCE,
             "origin": API_SOURCE,
-            "workspace": principal.workspace,
-            "environment": principal.workspace,
             STARTED_BY_ID: principal.started_by_id,
             "background_task_completion": False,
         },

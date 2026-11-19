@@ -4,8 +4,7 @@ A workflow with ``id-token: write`` asks GitHub for a short-lived JWT naming the
 repository, ref and workflow that requested it, and presents that instead of a
 stored secret. GitHub signs it, so verification is a signature check against
 GitHub's published keys plus a look at the claims; nothing here decides what the
-caller may do, only who it is. The trust policy lives with the workspace that
-granted the repository its thread-starting rights.
+caller may do, only who it is. The repository's routing binding holds its explicit thread-starting grant.
 """
 
 import asyncio

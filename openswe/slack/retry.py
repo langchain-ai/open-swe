@@ -10,6 +10,7 @@ from pydantic import BaseModel, ValidationError
 
 from openswe import event_claims
 from openswe.prompts import prompt
+from openswe.routing.store import is_kitchen_channel
 from openswe.slack.blocks import actions, block_payload, button, section
 from openswe.slack.client import (
     fetch_slack_message_by_ts,
@@ -22,7 +23,6 @@ from openswe.slack.payloads import SlackChannelContext, SlackInteraction, SlackM
 from openswe.slack.responses import WebhookResponse, accepted, ignored
 from openswe.utils.json_types import JsonObject
 from openswe.webhooks import common
-from openswe.workspaces.routing import is_kitchen_channel
 
 if TYPE_CHECKING:
     from openswe.slack.request import SlackRequest

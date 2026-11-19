@@ -13,7 +13,7 @@ export const Route = createFileRoute("/admin_/operations")({
     <SettingsPage
       adminOnly
       title="Operations"
-      description="Intervene in running agents and reviews across every workspace."
+      description="Intervene in running agents and reviews across Robin."
     >
       <RunningAgentsSection />
       <TriggerReviewSection />

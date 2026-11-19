@@ -25,7 +25,6 @@ async def append(entry: AuditLog) -> None:
                 operation_succeeded=entry.operation_succeeded,
                 api_key_id=entry.api_key_id,
                 user_id=entry.user_id,
-                workspace_id=entry.workspace_id,
                 enrichments=entry.enrichments.model_dump(mode="json", exclude_none=True),
             )
             .on_conflict_do_nothing(index_elements=[AuditLogRow.id])
@@ -49,7 +48,6 @@ async def list_logs(
     operation_name: str | None = None,
     user_id: UUID | None = None,
     api_key_id: str | None = None,
-    workspace_id: UUID | None = None,
 ) -> AuditLogsPage:
     query = select(AuditLogRow).where(
         AuditLogRow.request_time >= start_time, AuditLogRow.request_time <= end_time
@@ -60,8 +58,6 @@ async def list_logs(
         query = query.where(AuditLogRow.user_id == user_id)
     if api_key_id is not None:
         query = query.where(AuditLogRow.api_key_id == api_key_id)
-    if workspace_id is not None:
-        query = query.where(AuditLogRow.workspace_id == workspace_id)
     if cursor is not None:
         query = query.where(
             tuple_(AuditLogRow.request_time, AuditLogRow.id) < (cursor.request_time, cursor.id)

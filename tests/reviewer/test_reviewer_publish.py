@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.dashboard.settings import Settings
 from openswe.review.approval_withdrawal import ApprovalWithdrawal
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.findings import Finding, new_finding
@@ -140,8 +140,8 @@ def _f(**overrides: Any) -> Finding:
 def _isolate_publish_review_pr_state() -> Iterator[None]:
     with (
         patch(
-            "openswe.tools.publish_review.get_workspace_settings",
-            AsyncMock(return_value=WorkspaceSettings({})),
+            "openswe.tools.publish_review.get_settings",
+            AsyncMock(return_value=Settings({})),
         ),
         patch("openswe.tools.publish_review.PullRequest.link_review", AsyncMock()),
         patch("openswe.tools.publish_review.fetch_pr_review_threads", AsyncMock(return_value=[])),

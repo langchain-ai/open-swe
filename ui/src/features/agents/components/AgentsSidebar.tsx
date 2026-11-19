@@ -106,7 +106,6 @@ import { useDesktopProjects } from "@/features/agents/lib/desktopProjects"
 import { useLocalThreads } from "@/features/agents/lib/desktopLocal"
 import {
   cloudSidebarThread,
-  DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupSidebarThreadsByRecency,
   sidebarRepoKey,
   sortSidebarThreads,
@@ -411,7 +410,6 @@ export function AgentsSidebar({
                 repoFullName: thread.repoFullName,
                 name: thread.repo,
                 updatedAt: thread.updatedAt,
-                workspace: DEFAULT_SIDEBAR_WORKSPACE_SLUG,
               },
             ]
           : []

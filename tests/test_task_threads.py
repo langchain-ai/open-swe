@@ -11,7 +11,7 @@ from runtime_api.catalog import InboxSpec
 from sqlalchemy import func, select, update
 
 from openswe.bridge.store import BridgeStore
-from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.dashboard.settings import Settings
 from openswe.database import postgres
 from openswe.jobs import queue
 from openswe.tasks import messages as task_messages
@@ -26,7 +26,6 @@ from openswe.utils.thread_participants import PARTICIPANT_IDENTITY_PREFIX, PARTI
 from openswe.webhooks import event_matches
 from openswe.webhooks.event_matches import EventMatch
 from openswe.webhooks.event_subscriptions import EventSubscription
-from openswe.workspaces.rows import WorkspaceRow
 from tests.conftest import serve_threads_from
 
 MODEL = "openai:gpt-6-astra"
@@ -72,32 +71,32 @@ Launch = Callable[[service.Actor, str, str], Awaitable[dict[str, object]]]
 async def test_worker_inherits_coordinator_model_and_effort(
     monkeypatch: pytest.MonkeyPatch, metadata: dict[str, object]
 ) -> None:
-    settings = WorkspaceSettings(
+    settings = Settings(
         {"default_agent_model": WORKSPACE_MODEL, "default_agent_reasoning_effort": "low"}
     )
-    monkeypatch.setattr(service, "get_workspace_settings", AsyncMock(return_value=settings))
+    monkeypatch.setattr(service, "get_settings", AsyncMock(return_value=settings))
 
-    assert await service.model_choice("default", metadata, None, None) == (MODEL, "high")
+    assert await service.model_choice(metadata, None, None) == (MODEL, "high")
 
 
 async def test_worker_model_overrides_and_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = WorkspaceSettings(
+    settings = Settings(
         {"default_agent_model": WORKSPACE_MODEL, "default_agent_reasoning_effort": "low"}
     )
-    monkeypatch.setattr(service, "get_workspace_settings", AsyncMock(return_value=settings))
+    monkeypatch.setattr(service, "get_settings", AsyncMock(return_value=settings))
     metadata: dict[str, object] = {"model": MODEL, "effort": "high"}
 
-    assert await service.model_choice("default", metadata, None, "max") == (MODEL, "max")
-    assert await service.model_choice("default", metadata, WORKSPACE_MODEL, None) == (
+    assert await service.model_choice(metadata, None, "max") == (MODEL, "max")
+    assert await service.model_choice(metadata, WORKSPACE_MODEL, None) == (
         WORKSPACE_MODEL,
         "low",
     )
-    assert await service.model_choice("default", {}, None, None) == (WORKSPACE_MODEL, "low")
+    assert await service.model_choice({}, None, None) == (WORKSPACE_MODEL, "low")
     assert await service.model_choice(
-        "default", {"model": "anthropic:claude-fable-5-1", "effort": "high"}, None, None
+        {"model": "anthropic:claude-fable-5-1", "effort": "high"}, None, None
     ) == (WORKSPACE_MODEL, "low")
     with pytest.raises(ValueError, match="not supported"):
-        await service.model_choice("default", metadata, None, "none")
+        await service.model_choice(metadata, None, "none")
 
 
 @pytest.mark.parametrize(
@@ -136,13 +135,10 @@ def test_a_channel_conversations_worker_belongs_to_its_channel(
 
 
 def task() -> store.Task:
-    workspace = WorkspaceRow(slug="default", name="Default")
     task = store.Task(
         coordinator_thread_id=COORDINATOR,
         title="Fix login",
-        workspace_id=workspace.id,
     )
-    task.workspace = workspace
     return task
 
 
@@ -155,7 +151,6 @@ def client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
             "owner_login": OWNER,
             "visibility": "public",
             "source": "dashboard",
-            "workspace": "default",
             "sandbox_id": "shared-sandbox",
             "resolved_model": MODEL,
             "resolved_effort": "low",
@@ -422,7 +417,6 @@ async def test_system_thread_delegates_to_system_owned_workers(
         "visibility": "public",
         "source": "schedule",
         "schedule_id": "nightly",
-        "workspace": "default",
         "sandbox_id": "shared-sandbox",
     }
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
@@ -514,7 +508,7 @@ async def test_desktop_worker_cannot_be_shared(
     )
 
     with pytest.raises(HTTPException, match="owner's machine") as error:
-        await handlers.share_thread_with_workspace(delegation.worker_thread_id, OWNER)
+        await handlers.share_thread(delegation.worker_thread_id, OWNER)
     assert error.value.status_code == 409
     client.threads.update.assert_not_called()
 
@@ -604,12 +598,8 @@ async def test_a_threads_own_task_shows_as_one_only_once_it_delegates(
     client: MagicMock, monkeypatch: pytest.MonkeyPatch, launch: Launch
 ) -> None:
     """Every agent thread coordinates a task from its first run; working alone, it is
-    not a task family to the model or the sidebar, and its first delegation reuses it,
-    settling the workspace it took by default."""
-    elsewhere = WorkspaceRow(slug="before-delegation", name="Before delegation")
-    async with postgres.session() as session:
-        session.add(elsewhere)
-    own = await store.Task.for_thread(COORDINATOR, title="Fix login", workspace=elsewhere.slug)
+    not a task family to the model or the sidebar, and its first delegation reuses it."""
+    own = await store.Task.for_thread(COORDINATOR, title="Fix login")
 
     assert await store.TaskMembership.delegation_for_thread(COORDINATOR) is None
     assert await store.sidebar_memberships([COORDINATOR]) == {}
@@ -621,7 +611,6 @@ async def test_a_threads_own_task_shows_as_one_only_once_it_delegates(
     assert result["success"] and result["task_id"] == str(own.id)
     delegating = await store.TaskMembership.delegation_for_thread(COORDINATOR)
     assert delegating is not None
-    assert delegating.task.workspace.slug != elsewhere.slug
     assert (await store.sidebar_memberships([COORDINATOR]))[COORDINATOR].role == "coordinator"
 
 
@@ -633,12 +622,8 @@ async def test_cancel_discards_owed_events_without_reviving_worker(
     monkeypatch.setattr(service, "model_choice", AsyncMock(return_value=(MODEL, "low")))
     result = await launch(actor, "call", "Implement")
     worker_id = str(result["worker_thread_id"])
-    workspace = WorkspaceRow(slug="task-cancellation", name="Task cancellation")
-    async with postgres.session() as session:
-        session.add(workspace)
     subscription = EventSubscription(
         thread_id=worker_id,
-        workspace_id=workspace.id,
         multitask_strategy="enqueue",
         run_config={"thread_id": worker_id},
         expires_at=datetime.now(UTC) + timedelta(hours=1),

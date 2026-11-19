@@ -37,7 +37,7 @@ async def test_nomination_requires_outstanding_review(
     monkeypatch.setattr(expedite, "get_config", lambda: {"configurable": {"thread_id": "thread-1"}})
     monkeypatch.setattr(
         expedite,
-        "get_workspace_settings",
+        "get_settings",
         AsyncMock(return_value=SimpleNamespace(expedited_review_enabled=True)),
     )
     monkeypatch.setattr(expedite, "run_slack_location", AsyncMock(return_value=("C1", "1.0")))

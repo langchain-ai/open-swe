@@ -58,4 +58,4 @@ async def require_admin(action: str) -> str | None:
     """Recheck either the triggering admin or the saved system authorization."""
     if await actor_is_admin(configurable()):
         return None
-    return f"Only workspace admins can {action}."
+    return f"Only Robin admins can {action}."

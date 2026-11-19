@@ -7,7 +7,7 @@ A custom smoke pass is not permission to merge either.
 
 ## Native observation
 
-Configure the owning workspace's `merge_queue_config` with:
+Configure the repository binding's `merge_queue_config` with:
 
 ```json
 {
@@ -20,7 +20,7 @@ Configure the owning workspace's `merge_queue_config` with:
 
 The existing App needs only Contents, Metadata, and Pull requests read for this observer.
 No dispatch URL, signing secret, workflow digest, or check-write access is used.
-The repository must already be assigned to this workspace.
+The repository must already have an integration binding.
 Configure the App's `merge_group` subscription in addition to PR/review/push events.
 Signed webhooks schedule coalesced durable wakeups; the recurring minute job recovers missed deliveries.
 Event payloads never supply candidate state: every wakeup reads the current GitHub queue through the configured App.
@@ -50,9 +50,9 @@ The eventual gate issuer must be isolated from general agent credentials and can
 
 The following settings describe **custom mode** (`mode` defaults to `custom`).
 
-Configuration lives in PostgreSQL, in the nullable `workspace.merge_queue_config` JSONB column.
-All workspaces default to NULL, which disables both the API and controller.
-An operator can configure one canary workspace with this object; its workspace ID comes from the row:
+Configuration lives in PostgreSQL, in the nullable `integration_repository.merge_queue_config` JSONB column.
+Bindings default to NULL, which disables both the API and controller.
+An operator can configure one canary repository binding with this object; its routing ID comes from the row:
 
 ```json
 {
@@ -78,12 +78,16 @@ An operator can configure one canary workspace with this object; its workspace I
 
 These are illustrative identifiers.
 Use the repository's numeric GitHub ID, the actual required-check sources, and the gateway's GitHub App bot **user ID** for `dispatch_actor_id`.
-The repository must already be bound to that workspace.
-Startup refuses multiple configured workspaces.
+The repository must already have an integration binding.
+Startup refuses multiple configured canary repositories.
 Apply the additive migration before deploying this runtime; set the column back to SQL NULL to disable it.
 Configuration is read at startup, so restart all backend replicas after changes.
-Only operators with database access can edit it; the workspace API and agent tools do not expose this field.
+Only operators with database access can edit it; the routing API and agent tools do not expose this field.
 Jobs and HTTP callers cannot supply policy, GitHub credentials, or target repositories.
+
+Repository unbinding is refused while its binding has queue configuration or any queue row references it, including paused queues and retained history.
+Disable queue processing while retaining the repository binding; clearing configuration alone does not permit unbinding a retained queue.
+Queue ownership changes require an explicit operator handoff, not unbind/rebind: a new binding never automatically adopts retained queues, evidence, or leases.
 
 The existing Robin App supplies repository-scoped tokens with Contents write and Actions, Checks, Metadata, Pull requests and Statuses read.
 It needs no Actions write or queue-specific branch-rule bypass.
@@ -117,7 +121,7 @@ Failed delivery can consume an attempt without starting a run; discovery and the
 
 ### Automatic diagnosis and recovery
 
-Native validation can opt into a continuing Robin investigation by adding `recovery` to the workspace's existing `merge_queue_config`:
+Native validation can opt into a continuing Robin investigation by adding `recovery` to the repository binding's existing `merge_queue_config`:
 
 ```json
 {
@@ -176,9 +180,9 @@ Existing pause/resume controls remain available.
 
 All endpoints use dashboard session cookies and the dashboard mutation-origin check.
 Bearer/API-key credentials do not authenticate these endpoints.
-Access is limited to the configured workspace and current GitHub repository access.
+Access is limited to the configured repository binding and current GitHub repository access.
 
-Under `/dashboard/api/merge-queue/{workspace_id}`:
+Under `/dashboard/api/merge-queue/{routing_id}`:
 
 - `GET` lists active requests in `items`, pause state and the active batch ID.
   Use `page_size` (default 20, maximum 100) and the returned `next_cursor` as `cursor` to continue; `next_cursor: null` ends the list.
@@ -206,6 +210,22 @@ Startup registers a keyed minute job, retaining existing requests, pause state, 
 GitHub failures are retried by subsequent reconciliation; there is no one-time GitHub availability requirement during startup.
 
 ## Ownership handoff
+
+### Integration-routing cutover
+
+Treat migration from environment-owned routing to flat integration bindings as a coordinated cutover, not a rolling queue-runner upgrade.
+Old and new routing edits are not dual-written.
+
+1. Quiesce admin routing writes through the dashboard, API, and agent tools before applying the routing migration.
+1. Pause queue admission, then stop and drain old schedulers and workers on every replica.
+   Reconcile in-flight dispatches and external check/result publication before migrating or starting the new runtime; pausing alone does not stop that work.
+1. Apply the migration and verify repository bindings, workflow-start grants, Slack modes, and the queue's new routing binding before resuming writes or queue processing.
+
+Binding-qualified job keys, configuration-generation checks, and native provenance checks fence work handled by the new runtime only.
+They do not fence an older binary or an external publisher already in flight.
+Never run old and new queue runners concurrently.
+
+### Queue-owner changes
 
 Enable only after inventorying and stopping the previous queue owner and reconciling its in-flight work.
 Import remaining human intent with provenance and fresh admission; never import passing evidence or leases.

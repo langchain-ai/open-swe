@@ -39,36 +39,19 @@ test("the new-thread page does not shift while it loads", async ({
       }
     }).observe({ type: "layout-shift", buffered: true });
   });
-  // Late legacy routing data must not add a picker or move the composer.
-  await page.route("**/dashboard/api/workspaces/options", async (route) => {
-    const response = await route.fetch();
-    const options = (await response.json()) as {
-      workspaces: Array<Record<string, unknown>>;
-    };
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    await route.fulfill({
-      response,
-      json: {
-        ...options,
-        workspaces: [
-          ...options.workspaces,
-          {
-            ...options.workspaces[0],
-            slug: "layout-shift-second",
-            name: "Second workspace",
-            is_default: false,
-            repos: [],
-          },
-        ],
-      },
-    });
-  });
+  await page.route(
+    "**/dashboard/api/options",
+    async (route) => {
+      const response = await route.fetch();
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.fulfill({ response });
+    },
+    { times: 1 },
+  );
   const cdp = await context.newCDPSession(page);
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
 
-  const lateOptions = page.waitForResponse(
-    "**/dashboard/api/workspaces/options",
-  );
+  const lateOptions = page.waitForResponse("**/dashboard/api/options");
   await page.goto("/agents");
   await expect(
     page.getByRole("heading", { name: "What should we work on?" }),

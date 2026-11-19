@@ -63,8 +63,13 @@ def test_a_langsmith_only_session_can_play_trace_flight_but_not_reach_github_fea
     principal.authorize_path("/dashboard/api/trace-flight/runs", "POST")
     for method in ("GET", "HEAD"):
         principal.authorize_path("/dashboard/api/analytics/gateway-spend", method)
+        principal.authorize_path("/dashboard/api/routing", method)
+        principal.authorize_path("/dashboard/api/settings", method)
+        principal.authorize_path("/dashboard/api/options", method)
     for path, method in (
-        ("workspaces", "POST"),
+        ("routing/repositories/acme/repo", "PUT"),
+        ("routing/slack-channels/C1", "DELETE"),
+        ("settings", "PUT"),
         ("analytics/gateway-spend", "POST"),
         ("analytics/gateway-spend/other", "GET"),
         ("analytics/pr-merge-rate-by-model", "GET"),

@@ -52,7 +52,7 @@ export interface PluginManifest {
   description: string
   sidebar: { label: string; icon: SidebarIcon }
   permissions: Array<PluginPermission>
-  /** What reviews do for the app in workspaces that add it to them. */
+  /** What reviews do when the app is added to them. */
   review?: ReviewStep | null
 }
 

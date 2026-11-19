@@ -35,7 +35,7 @@ class QueueController:
     @asynccontextmanager
     async def open_repo(self, queue: MergeQueue) -> AsyncIterator[RepoClient]:
         if (
-            queue.workspace_id != self.config.workspace_id
+            queue.routing_id != self.config.routing_id
             or queue.target_branch != "main"
             or queue.mode != self.config.mode
         ):
@@ -73,10 +73,10 @@ class QueueController:
             yield repo
 
     async def reconcile(self, payload: runtime.QueueJob) -> None:
-        if payload.queue_id != self.queue.id or payload.workspace_id != self.config.workspace_id:
+        if payload.queue_id != self.queue.id or payload.routing_id != self.config.routing_id:
             return
         try:
-            config = await QueueConfiguration.load(payload.workspace_id)
+            config = await QueueConfiguration.load(payload.routing_id)
         except ValueError:
             logger.exception(
                 "Merge queue configuration is invalid", extra={"queue_id": str(self.queue.id)}
@@ -116,8 +116,8 @@ class QueueController:
     async def start(self) -> None:
         repository = await Repository.get(self.config.repository)
         if repository is None:
-            raise ValueError("Onboard the queue repository into its workspace first")
-        queue = await MergeQueue.register(self.config.workspace_id, repository.id, "main")
+            raise ValueError("Onboard the queue repository into integration routing first")
+        queue = await MergeQueue.register(self.config.routing_id, repository.id, "main")
         self.queue = queue
         if self.config.mode == "native":
             await queue.enable_native_observation()
@@ -134,11 +134,11 @@ class QueueController:
             )
         await jobs.schedule(
             runtime.JOB_KIND,
-            runtime.QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id).model_dump(
+            runtime.QueueJob(queue_id=queue.id, routing_id=queue.bound_routing_id).model_dump(
                 mode="json"
             ),
             cron="* * * * *",
-            key=f"merge-queue:{queue.id}",
+            key=f"merge-queue:{queue.id}:{queue.bound_routing_id}",
             replace=False,
         )
         runtime.RUNTIME = controller
@@ -151,7 +151,7 @@ async def wake_native_queue(payload: Mapping[str, object]) -> bool:
     controller = CONTROLLER
     if controller is None or controller.config.mode != "native":
         return False
-    config = await QueueConfiguration.load(controller.config.workspace_id)
+    config = await QueueConfiguration.load(controller.config.routing_id)
     if config is None or config.mode != "native":
         return False
     repository = payload.get("repository")
@@ -168,10 +168,10 @@ async def wake_native_queue(payload: Mapping[str, object]) -> bool:
     # Events only wake a live read; old payloads never overwrite the observed queue.
     await jobs.schedule(
         runtime.JOB_KIND,
-        runtime.QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id).model_dump(
+        runtime.QueueJob(queue_id=queue.id, routing_id=queue.bound_routing_id).model_dump(
             mode="json"
         ),
-        key=f"merge-queue-native-wakeup:{queue.id}",
+        key=f"merge-queue-native-wakeup:{queue.id}:{queue.bound_routing_id}",
         replace=False,
     )
     return True

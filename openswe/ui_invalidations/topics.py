@@ -111,8 +111,11 @@ class BaseTopic(ABC):
 class Topic(BaseTopic):
     """Data any signed-in session may read, invalidated as a whole."""
 
-    WORKSPACES: ClassVar[Topic]
-    """Any workspace's definition, bindings, settings, snapshot or refresh state."""
+    SETTINGS: ClassVar[Topic]
+    """Global defaults and execution image state."""
+
+    ROUTING: ClassVar[Topic]
+    """Repository and Slack channel integration bindings."""
 
     REVIEW_STYLES: ClassVar[KeyedTopic[RepoFullName]]
     """Any repository's review style, including its analysis status."""
@@ -322,7 +325,8 @@ async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
     }
 
 
-Topic.WORKSPACES = Topic("workspaces")
+Topic.SETTINGS = Topic("settings")
+Topic.ROUTING = Topic("routing")
 Topic.REVIEW_STYLES = KeyedTopic("review-styles")
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.REQUIRED_CHECKS = KeyedTopic("required-checks", authorize_keys=_readable_required_checks)

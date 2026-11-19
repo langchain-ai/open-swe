@@ -1,4 +1,4 @@
-"""Append-only log of verified GitHub, Slack, Linear, and deployment deliveries, and Open SWE's own workspace events.
+"""Append-only log of verified GitHub, Slack, Linear, and deployment deliveries, and Robin's own events.
 
 Sources in ``ADMIN_ONLY_SOURCES`` are listed and subscribable only from admin threads.
 """
@@ -14,7 +14,7 @@ from urllib.parse import parse_qs
 from uuid import UUID
 
 from fastapi import Request
-from pydantic import BaseModel, JsonValue, ValidationError
+from pydantic import BaseModel, JsonValue, ValidationError, field_validator
 from sqlalchemy import text
 
 from openswe import event_claims
@@ -28,10 +28,10 @@ logger = logging.getLogger(__name__)
 type EventVisibility = Literal["public", "private", "admin"]
 
 type WebhookSource = Literal[
-    "github", "slack", "linear", "deployment", "workspace", "human_review", "reviewer"
+    "github", "slack", "linear", "deployment", "robin", "human_review", "reviewer"
 ]
 
-ADMIN_ONLY_SOURCES: frozenset[WebhookSource] = frozenset({"workspace", "human_review", "reviewer"})
+ADMIN_ONLY_SOURCES: frozenset[WebhookSource] = frozenset({"robin", "human_review", "reviewer"})
 
 RETAINED_DAYS = 14
 _TABLE = "event_log"
@@ -59,7 +59,7 @@ _INSERT = text(
     f"""
     INSERT INTO {_TABLE} (
         source, endpoint, event_type, delivery_id, payload,
-        user_id, workspace_id, repository_id, pull_request_id, visibility, visible_to_user_id
+        user_id, repository_id, pull_request_id, visibility, visible_to_user_id
     )
     SELECT
         :source, :endpoint, :event_type, :delivery_id, CAST(:payload AS jsonb),
@@ -71,36 +71,32 @@ _INSERT = text(
             (SELECT user_id FROM user_identity
              WHERE email <> '' AND lower(email) = lower(CAST(:email AS text)) LIMIT 1)
         ),
-        COALESCE(
-            CAST(:workspace_id AS uuid),
-            workspace_repository.workspace_id,
-            (SELECT workspace_id FROM workspace_slack_channel
-             WHERE channel_id = :slack_channel_id)
-        ),
         repository.id,
         (SELECT id FROM pull_request
          WHERE repository_id = repository.id AND number = :pull_request_number),
         :visibility, CAST(:visible_to_user_id AS uuid)
     FROM (SELECT 1) AS delivery
     LEFT JOIN repository ON repository.key = lower(CAST(:github_repository AS text))
-    LEFT JOIN workspace_repository ON workspace_repository.repository_id = repository.id
     RETURNING source, event_type, delivery_id, received_at,
-        user_id, workspace_id, repository_id, pull_request_id, visibility, visible_to_user_id
+        user_id, repository_id, pull_request_id, visibility, visible_to_user_id
     """
 )
 
 _VISIBLE = """
     (visibility = 'public'
      OR (visibility = 'private' AND visible_to_user_id = CAST(:viewer_id AS uuid))
-     OR (visibility = 'admin' AND :admin AND workspace_id = CAST(:workspace_id AS uuid)))
+     OR (visibility = 'admin' AND :admin))
 """
 
 _EVENT_KINDS = text(
     f"""
-    SELECT source, event_type, count(*) AS count, max(received_at) AS last_received_at
+    SELECT CASE WHEN source = 'workspace' THEN 'robin' ELSE source END AS source,
+        event_type, count(*) AS count, max(received_at) AS last_received_at
     FROM {_TABLE}
     WHERE {_VISIBLE} AND received_at >= :since
-      AND (CAST(:source AS text) IS NULL OR source = :source)
+      AND (CAST(:source AS text) IS NULL OR source = :source
+           OR (:source = 'robin' AND source = 'workspace'))
+      AND (CAST(:repository_id AS uuid) IS NULL OR repository_id = :repository_id)
       AND NOT (source = ANY(CAST(:hidden_sources AS text[])))
       AND (CAST(:event_type AS text) = ''
            OR event_type = :event_type
@@ -114,7 +110,9 @@ _LATEST_PAYLOAD = text(
     f"""
     SELECT payload
     FROM {_TABLE}
-    WHERE {_VISIBLE} AND source = :source AND event_type = :event_type AND received_at >= :since
+    WHERE {_VISIBLE} AND (source = :source OR (:source = 'robin' AND source = 'workspace'))
+      AND event_type = :event_type AND received_at >= :since
+      AND (CAST(:repository_id AS uuid) IS NULL OR repository_id = :repository_id)
     ORDER BY received_at DESC
     LIMIT 1
     """
@@ -122,7 +120,16 @@ _LATEST_PAYLOAD = text(
 _SHAPE_DEPTH = 6
 
 
-class LoggedEvent(BaseModel):
+class EventSourceRecord(BaseModel):
+    source: WebhookSource
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def stored_source(cls, source: object) -> object:
+        return "robin" if source == "workspace" else source
+
+
+class LoggedEvent(EventSourceRecord):
     """A row as written, with the links resolved on insert."""
 
     source: WebhookSource
@@ -130,7 +137,6 @@ class LoggedEvent(BaseModel):
     delivery_id: str
     received_at: datetime
     user_id: UUID | None
-    workspace_id: UUID | None
     repository_id: UUID | None
     pull_request_id: UUID | None
     payload: JsonValue
@@ -143,7 +149,7 @@ class LoggedEvent(BaseModel):
         return self.event_type.partition(".")[0]
 
 
-class EventKind(BaseModel):
+class EventKind(EventSourceRecord):
     source: WebhookSource
     event_type: str
     count: int
@@ -161,7 +167,6 @@ class EventLogQuery(BaseModel):
     event_type_prefix: str = ""
     delivery_id: str = ""
     user_id: UUID | None = None
-    workspace_id: UUID | None = None
     repository_id: UUID | None = None
     pull_request_id: UUID | None = None
     limit: int = 50
@@ -173,7 +178,6 @@ class SearchedEvent(LoggedEvent):
     """A logged row with the names of the rows it links to."""
 
     user_name: str | None = None
-    workspace_name: str | None = None
     repository_name: str | None = None
     pull_request_name: str | None = None
     pull_request_title: str | None = None
@@ -214,7 +218,6 @@ class EventRefs(BaseModel):
     slack_user_id: str = ""
     slack_channel_id: str = ""
     email: str = ""
-    workspace_id: UUID | None = None
 
     @property
     def pull_request(self) -> PullRequestKey | None:
@@ -550,7 +553,7 @@ class EventLog:
         event_type: str = "",
         admin: bool = False,
         viewer_id: UUID | None = None,
-        workspace_id: UUID | None = None,
+        repository_id: UUID | None = None,
     ) -> list[EventKind]:
         """Every distinct source and event type received since ``since``.
 
@@ -561,12 +564,12 @@ class EventLog:
         await cls.ensure_partitions()
         params = {
             "viewer_id": viewer_id,
-            "workspace_id": workspace_id,
+            "repository_id": repository_id,
             "admin": admin,
             "since": since,
             "source": source,
             "event_type": event_type,
-            "hidden_sources": [] if admin else sorted(ADMIN_ONLY_SOURCES),
+            "hidden_sources": [] if admin else [*sorted(ADMIN_ONLY_SOURCES), "workspace"],
         }
         async with transaction() as conn:
             rows = await conn.execute(_EVENT_KINDS, params)
@@ -597,6 +600,9 @@ class EventLog:
             for column, value in filters.items()
             if value is not None and value != ""
         ]
+        if query.source == "robin":
+            clauses.remove("e.source = :source")
+            clauses.append("e.source IN ('robin', 'workspace')")
         if prefix:
             params["event_type_prefix"] = prefix
             clauses.append(
@@ -613,14 +619,13 @@ class EventLog:
         sql = text(
             f"""
             SELECT e.ctid::text AS row_ctid, e.source, e.event_type, e.delivery_id, e.received_at, e.user_id,
-                e.workspace_id, e.repository_id, e.pull_request_id, e.payload, e.visibility,
-                e.visible_to_user_id, u.display_name AS user_name, w.name AS workspace_name,
+                e.repository_id, e.pull_request_id, e.payload, e.visibility,
+                e.visible_to_user_id, u.display_name AS user_name,
                 r.full_name AS repository_name,
                 pr.owner || '/' || pr.repo || '#' || pr.number AS pull_request_name,
                 pr.title AS pull_request_title
             FROM {_TABLE} e
             LEFT JOIN users u ON u.id = e.user_id
-            LEFT JOIN workspace w ON w.id = e.workspace_id
             LEFT JOIN repository r ON r.id = e.repository_id
             LEFT JOIN pull_request pr ON pr.id = e.pull_request_id
             WHERE e.received_at >= :start_time AND e.received_at <= :end_time{"".join(f" AND {c}" for c in clauses)}

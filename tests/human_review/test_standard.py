@@ -521,7 +521,7 @@ def test_requests_are_refused_while_the_pull_request_is_not_reviewable(
 
 
 @pytest.mark.parametrize("minutes,expected", [(120, "waiting"), (15, "woken")])
-async def test_unclaimed_deadline_honors_workspace_timeout(minutes: int, expected: str) -> None:
+async def test_unclaimed_deadline_honors_global_timeout(minutes: int, expected: str) -> None:
     from openswe.human_review.standard import AutoAssignResult, run_deadline
 
     pr = PullRequest(owner="lc", repo="repo", number=7, author="ada")
@@ -1230,7 +1230,7 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
     override: bool | None,
     expected: bool,
 ) -> None:
-    from openswe.dashboard.workspace_settings import WorkspaceSettings
+    from openswe.dashboard.settings import Settings
     from openswe.human_review import standard
     from openswe.human_review.standard import Origin
     from openswe.slack.channels import SlackChannel
@@ -1247,8 +1247,8 @@ async def test_review_request_snapshots_merge_mode_and_preserves_it_on_reuse(
         patch.object(standard, "record_pull_request", AsyncMock(return_value=(pr, details))),
         patch.object(
             standard,
-            "_workspace_settings",
-            AsyncMock(return_value=WorkspaceSettings({"human_review_auto_merge_enabled": default})),
+            "get_settings",
+            AsyncMock(return_value=Settings({"human_review_auto_merge_enabled": default})),
         ),
         patch.object(standard, "_assignment_minutes", AsyncMock(return_value=120)),
         patch.object(standard, "_schedule", AsyncMock(return_value=True)) as schedule,

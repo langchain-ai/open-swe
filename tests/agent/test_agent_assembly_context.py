@@ -9,7 +9,7 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from openswe.agent_api.tokens import AGENT_TURN_KEY, AgentTurnSettings
-from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.dashboard.settings import Settings
 from openswe.mcp.runtime import MCPTools
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ModelChoice, SurfaceModels, ToolSurface
@@ -190,19 +190,15 @@ async def test_existing_task_keeps_controls_without_delegation(
     saved_thread_scope, role: Literal["coordinator", "worker"]
 ):
     from openswe.tasks.store import Task, TaskContext, TaskMembership
-    from openswe.workspaces.rows import WorkspaceRow
 
     saved_thread_scope.update(
         owner_type="user", owner_login="owner", sandbox_id="bridge:cli", sandbox_bridge_client="cli"
     )
-    workspace = WorkspaceRow(slug="default", name="Default")
     task = Task(
         coordinator_thread_id="coordinator",
         title="Existing task",
-        workspace_id=workspace.id,
         delegated=True,
     )
-    task.workspace = workspace
     context = TaskContext(task, TaskMembership(thread_id="thread-ctx", task_id=task.id, role=role))
     with patch(
         "openswe.middleware.task_coordination.TaskMembership.context_for_thread",
@@ -241,7 +237,7 @@ async def _agent_catalog(
     *,
     profile: dict[str, object] | None = None,
     thread_settings: dict[str, object] | None = None,
-    workspace_settings: WorkspaceSettings | None = None,
+    settings: Settings | None = None,
 ) -> dict[str, object]:
     """The run ``config`` plans, with the parts tests read pulled out of its surface."""
 
@@ -269,10 +265,10 @@ async def _agent_catalog(
             return_value="/workspace",
         ),
         patch(
-            "openswe.server.cached_workspace_settings",
+            "openswe.server.cached_settings",
             new_callable=AsyncMock,
-            return_value=workspace_settings
-            or WorkspaceSettings(
+            return_value=settings
+            or Settings(
                 {
                     **_MODEL_DEFAULTS,
                     "default_agent_routing_fast_model": "google_genai:gemini-3.8-flash",
@@ -387,7 +383,7 @@ async def test_adaptive_routing_sends_every_auto_thread_through_the_classifier()
     config["configurable"].update(source="dashboard", model_selection="auto")
     agent = await _agent_catalog(
         config,
-        workspace_settings=WorkspaceSettings({**_MODEL_DEFAULTS, "model_routing_split": False}),
+        settings=Settings({**_MODEL_DEFAULTS, "model_routing_split": False}),
     )
 
     loop = cast(ToolSurface, agent["surface"]).loop
@@ -408,7 +404,7 @@ async def test_a_personal_automation_runs_on_auto_without_limits(
     with patch("openswe.server.store_thread_settings", new_callable=AsyncMock):
         agent = await _agent_catalog(
             config,
-            workspace_settings=WorkspaceSettings({**_MODEL_DEFAULTS, "model_routing_split": False}),
+            settings=Settings({**_MODEL_DEFAULTS, "model_routing_split": False}),
         )
 
     surface = cast(ToolSurface, agent["surface"])
@@ -431,7 +427,7 @@ async def test_an_automated_thread_is_left_out_of_the_experiment(
     configurable: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("openswe.server.RoutingArm.tier", lambda _: "performance")
-    # A system automation keeps the workspace default; a personal one runs on Auto.
+    # A system automation keeps the global default; a personal one runs on Auto.
     monkeypatch.setattr(
         AutomationPolicy, "for_schedule", AsyncMock(return_value=AutomationPolicy(None, True))
     )
@@ -461,7 +457,7 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
             profile={"model_routing_enabled": True}, thread_settings=initial_settings
         )
     snapshot = json.loads(json.dumps(store.call_args.args[2]))
-    changed_defaults = WorkspaceSettings(
+    changed_defaults = Settings(
         {
             "default_agent_model": "google_genai:gemini-3.8-flash",
             "default_agent_reasoning_effort": "high",
@@ -480,17 +476,17 @@ async def test_admin_model_changes_only_affect_new_threads(legacy_thread: bool) 
             },
         }
     )
-    existing = await _agent_catalog(thread_settings=snapshot, workspace_settings=changed_defaults)
+    existing = await _agent_catalog(thread_settings=snapshot, settings=changed_defaults)
     fresh_config = _base_config()
     fresh_config["configurable"]["thread_id"] = "new-thread"
-    fresh = await _agent_catalog(fresh_config, workspace_settings=changed_defaults)
+    fresh = await _agent_catalog(fresh_config, settings=changed_defaults)
 
     original_models, existing_models, fresh_models = (
         _models(agent) for agent in (original, existing, fresh)
     )
     titles = [cast(AgentTurnSettings, agent["turn"]) for agent in (original, existing, fresh)]
     assert existing_models == original_models
-    # The title model is no thread setting: it follows the workspace's default.
+    # The title model is no thread setting: it follows the instance default.
     assert titles[1].title_model_id == titles[2].title_model_id != titles[0].title_model_id
     assert fresh_models != original_models
     assert {
@@ -991,7 +987,7 @@ async def test_queued_images_reach_vision_fallback_for_text_only_main_model(
 
 
 @pytest.mark.asyncio
-async def test_historical_personal_models_and_routing_do_not_override_workspace(
+async def test_historical_personal_models_and_routing_do_not_override_global_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("openswe.server.RoutingArm.tier", lambda _: "balanced")
@@ -1011,7 +1007,7 @@ async def test_historical_personal_models_and_routing_do_not_override_workspace(
 
 async def test_anthropic_title_model_omits_thinking_without_affecting_agent() -> None:
     captured = await _agent_catalog(
-        workspace_settings=WorkspaceSettings(
+        settings=Settings(
             {
                 **_MODEL_DEFAULTS,
                 "default_agent_model": "anthropic:claude-opus-5-5",

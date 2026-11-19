@@ -69,7 +69,6 @@ from openswe.ui_invalidations import Topic
 from openswe.users import User
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
-from openswe.workspaces.routing import repo_is_routable
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +128,7 @@ async def _repository_facts(delivery: GitHubDelivery) -> GitHubDeliveryFacts:
         delivery.event == "pull_request" and payload.get("action") in _GATED_PULL_REQUEST_ACTIONS
     )
     return GitHubDeliveryFacts(
-        routable=not named or await repo_is_routable(repo["owner"], repo["name"]),
+        routable=True,
         allowed=True,
         gated=gates and not await _gated(payload, "pull_request"),
         auto_review=reviews and await common.is_repo_auto_review_enabled(repo),
@@ -367,7 +366,6 @@ async def _prepare_run(
     configurable = await service.prepare_github_issue_run(
         cast(_Payload, plan.payload),
         thread_id,
-        workspace=request.workspace,
         adopt=lambda thread: adopt_channel_run(thread, CHANNEL),
     )
     if configurable is None:
@@ -447,7 +445,6 @@ async def github_issue_facts(
         conversation_started=started,
         sender_email_known=bool(await User.email_for_login(request.sender)),
         trusted=sorted(await User.known_logins(request.logins)),
-        thread_workspace=await common.get_thread_workspace(thread_id) if started else None,
     )
 
 

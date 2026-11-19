@@ -24,7 +24,7 @@ Shape new behavior to fit:
 - State kept between calls lives in MDA's run state or PostgreSQL, never in backend memory.
 
 Robin starts three kinds of run (`agent`, `reviewer`, `review-scout`), each a `RunKind` (`openswe/agent_api/run_kinds.py`); MDA plays all of them with its one graph.
-As a run starts, its kind resolves the run's catalog from what only the backend holds, such as thread settings, workspace defaults, the sender's access and credentialed integrations (`agent_catalog`, `reviewer_catalog`, `review_scout_catalog`, `openswe/agent_api/run_catalog.py`); after that, every call is answered from the token (`openswe/agent_api/run_calls.py`).
+As a run starts, its kind resolves the run's catalog from what only the backend holds, such as thread settings, global defaults, the sender's access and credentialed integrations (`agent_catalog`, `reviewer_catalog`, `review_scout_catalog`, `openswe/agent_api/run_catalog.py`); after that, every call is answered from the token (`openswe/agent_api/run_calls.py`).
 The backend never runs middleware around a model call; the only middleware objects it keeps are the preparation and the reporters a named endpoint calls.
 
 ## Conventions

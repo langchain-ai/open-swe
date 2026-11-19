@@ -19,7 +19,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.graph.message import add_messages
 from langgraph.runtime import Runtime
 from runtime_api.catalog import InboxSpec
-from sqlalchemy import func, select, text, update
+from sqlalchemy import text, update
 
 from openswe import completion
 from openswe.database import postgres
@@ -325,7 +325,6 @@ async def test_duplicate_completion_delivers_one_durable_result_to_idle_or_busy_
         _COORDINATOR,
         _WORKER,
         title="Repair login",
-        workspace="default",
         instructions="Fix login",
         model="openai:gpt-5.5",
         effort="high",
@@ -444,7 +443,6 @@ async def test_failed_task_message_retries_settle_without_abandoning_later_messa
         _COORDINATOR,
         _WORKER,
         title="Repair login",
-        workspace="default",
         instructions="Fix login",
         model="openai:gpt-5.5",
         effort="high",
@@ -500,7 +498,6 @@ async def test_task_message_retention_preserves_owed_work_and_deduplicates_prune
         _COORDINATOR,
         _WORKER,
         title="Repair login",
-        workspace="default",
         instructions="Fix login",
         model="openai:gpt-5.5",
         effort="high",
@@ -554,7 +551,6 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
         _COORDINATOR,
         _WORKER,
         title="Repair login",
-        workspace="default",
         instructions="Fix login",
         model="openai:gpt-5.5",
         effort="high",
@@ -605,7 +601,6 @@ async def test_task_context_is_checkpointed_once_without_changing_request_prefix
 
     task = store.Task(
         title="Repair login",
-        workspace_id=uuid4(),
         coordinator_thread_id=_COORDINATOR,
         delegated=True,
     )
@@ -660,9 +655,7 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
 ) -> None:
     from openswe.middleware import task_coordination
 
-    task = store.Task(
-        title="Repair login", workspace_id=uuid4(), coordinator_thread_id=_COORDINATOR
-    )
+    task = store.Task(title="Repair login", coordinator_thread_id=_COORDINATOR)
     context = store.TaskContext(
         task,
         store.TaskMembership(thread_id=_COORDINATOR, task_id=task.id, role="coordinator"),
@@ -705,40 +698,6 @@ async def test_task_context_returns_after_summarization_without_replacing_histor
         assert await middleware.abefore_model(state, Runtime()) is None
 
 
-async def test_workspace_deletion_cascades_through_tasks_and_messages(registry_db: None) -> None:
-    from openswe.workspaces.rows import WorkspaceRow
-    from openswe.workspaces.store import WORKSPACES
-
-    workspace = WorkspaceRow(slug="task-cascade", name="Task cascade")
-    async with postgres.session() as session:
-        session.add(workspace)
-    task, _ = await store.Task.reserve_worker(
-        _COORDINATOR,
-        _WORKER,
-        title="Repair login",
-        workspace=workspace.slug,
-        instructions="Fix login",
-        model="openai:gpt-5.5",
-        effort="high",
-    )
-    async with postgres.session() as session:
-        await TaskMessage(
-            task_id=task.id,
-            thread_id=_WORKER,
-            delivery_id="assignment",
-            content="Fix login",
-            run_config={},
-        ).record(session)
-    await TaskMessage._schedule_retry(_WORKER, "enqueue")
-    assert len(await queue.find({"kind": task_messages.RETRY_JOB_KIND})) == 1
-    await WORKSPACES.delete(workspace.slug)
-    await WORKSPACES.delete(workspace.slug)
-    async with postgres.session() as session:
-        for model in (store.Task, store.TaskMembership, store.TaskDelegation, TaskMessage):
-            assert await session.scalar(select(func.count()).select_from(model)) == 0
-    assert await queue.find({"kind": task_messages.RETRY_JOB_KIND}) == []
-
-
 @pytest.mark.parametrize("strategy", ["enqueue", "interrupt"])
 async def test_subscription_delivery_waiting_on_worker_cancel_cannot_launch(
     registry_db: None, monkeypatch: pytest.MonkeyPatch, strategy: Literal["enqueue", "interrupt"]
@@ -753,14 +712,12 @@ async def test_subscription_delivery_waiting_on_worker_cancel_cannot_launch(
         _COORDINATOR,
         _WORKER,
         title="Repair login",
-        workspace="default",
         instructions="Fix login",
         model="openai:gpt-5.5",
         effort="high",
     )
     subscription = await EventSubscription(
         thread_id=_WORKER,
-        workspace_id=task.workspace_id,
         multitask_strategy=strategy,
         run_config={"thread_id": _WORKER},
         expires_at=datetime.now(UTC) + timedelta(hours=1),
@@ -771,7 +728,6 @@ async def test_subscription_delivery_waiting_on_worker_cancel_cannot_launch(
         delivery_id="finished-ci",
         received_at=datetime.now(UTC),
         user_id=None,
-        workspace_id=task.workspace_id,
         repository_id=None,
         pull_request_id=None,
         payload={"check_suite": {"conclusion": "success"}},
@@ -793,6 +749,7 @@ async def test_subscription_delivery_waiting_on_worker_cancel_cannot_launch(
         return []
 
     dispatch = AsyncMock()
+    monkeypatch.setattr(event_matches.EventAudience, "allows", AsyncMock(return_value=True))
     monkeypatch.setattr(event_matches, "dispatch_client", dispatch_client)
     monkeypatch.setattr(event_matches, "create_durable_run", dispatch)
     monkeypatch.setattr(service, "owned_worker", AsyncMock(return_value=(task, delegation)))

@@ -690,7 +690,7 @@ def repo_private() -> bool:
 
 
 # --- LangSmith snapshots ---------------------------------------------------
-# Captures the workspace tools asked for: {"snapshot_id", "name", "sandbox_id"}.
+# Captures the global image lifecycle asked for: {"snapshot_id", "name", "sandbox_id"}.
 # The E2E's sandboxes are stand-ins (sandbox_service.py), so there is no real snapshot service —
 # this store stands in for it and is what the specs assert on.
 SNAPSHOTS: list[dict[str, Any]] = []

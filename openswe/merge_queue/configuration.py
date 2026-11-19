@@ -1,4 +1,4 @@
-"""Operator-managed canary configuration stored on its owning workspace."""
+"""Operator-managed canary configuration stored on its repository binding."""
 
 from typing import Literal, Self
 from uuid import UUID
@@ -11,13 +11,13 @@ from openswe.database import postgres
 from openswe.merge_queue.admission import QueuePolicy, digest
 from openswe.merge_queue.dispatch import WorkflowPolicy
 from openswe.merge_queue.recovery import RecoverySettings
-from openswe.workspaces.rows import WorkspaceRow
+from openswe.routing.store import RepositoryBinding
 
 
 class QueueConfiguration(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    workspace_id: UUID
+    routing_id: UUID
     repository: str = Field(pattern=r"^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+$")
     repository_id: int = Field(gt=0, strict=True)
     mode: Literal["custom", "native"] = "custom"
@@ -33,23 +33,23 @@ class QueueConfiguration(BaseModel):
 
     @classmethod
     async def load(
-        cls, workspace_id: UUID | None = None, *, session: AsyncSession | None = None
+        cls, routing_id: UUID | None = None, *, session: AsyncSession | None = None
     ) -> Self | None:
         async with postgres.session(session) as session:
-            query = select(WorkspaceRow.id, WorkspaceRow.merge_queue_config).where(
-                WorkspaceRow.merge_queue_config.is_not(None)
+            query = select(RepositoryBinding.id, RepositoryBinding.merge_queue_config).where(
+                RepositoryBinding.merge_queue_config.is_not(None)
             )
-            if workspace_id is not None:
-                query = query.where(WorkspaceRow.id == workspace_id)
+            if routing_id is not None:
+                query = query.where(RepositoryBinding.id == routing_id)
             rows = (await session.execute(query.limit(2))).all()
         if not rows:
             return None
         if len(rows) != 1:
-            raise ValueError("Only one canary workspace may configure a merge queue")
-        workspace_id, config = rows[0]
+            raise ValueError("Only one canary repository may configure a merge queue")
+        routing_id, config = rows[0]
         if not isinstance(config, dict):
             raise ValueError("Queue configuration must be a JSON object")
-        return cls.model_validate({**config, "workspace_id": workspace_id})
+        return cls.model_validate({**config, "routing_id": routing_id})
 
     @property
     def generation(self) -> str:
@@ -69,7 +69,7 @@ class QueueConfiguration(BaseModel):
                 **self.model_dump(
                     mode="json",
                     include={
-                        "workspace_id",
+                        "routing_id",
                         "repository",
                         "repository_id",
                         "mode",

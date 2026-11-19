@@ -21,11 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.bridge.store import BridgeStore
 from openswe.dashboard import deps, oauth, profiles
-from openswe.dashboard.workspace_settings import (
-    WorkspaceSettings,
-    WorkspaceSettingsUpdate,
+from openswe.dashboard.settings import (
+    Settings,
+    SettingsUpdate,
     upsert_instance_settings,
-    upsert_workspace_overrides,
 )
 from openswe.dispatch import dispatch_agent_run
 from openswe.input_messages import dynamic_context_hash, person_introduction
@@ -49,7 +48,6 @@ from openswe.transcript.engine import AppendResult
 from openswe.transcript.turns import OpenTurn
 from openswe.users import User
 from openswe.users.models import UserIdentity
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import LangSmithUsers, ThreadStoreOverClient, patch_thread_module
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -171,9 +169,6 @@ async def test_langsmith_cloud_session_is_private_and_has_no_repository(monkeypa
     monkeypatch.setattr(
         thread_runs, "get_profile", AsyncMock(return_value={"default_repo": "acme/private"})
     )
-    monkeypatch.setattr(
-        thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
-    )
     monkeypatch.setattr(thread_runs, "_ensure_dashboard_github_token", AsyncMock())
     create = AsyncMock(return_value={"thread_id": "cloud-thread"})
     monkeypatch.setattr(thread_runs, "create_dashboard_thread_record", create)
@@ -198,7 +193,6 @@ async def test_create_session_uses_saved_defaults(monkeypatch, registry_db) -> N
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
     access = AsyncMock()
     monkeypatch.setattr(thread_runs, "require_repo_access_for_user", access)
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
     thread_id = await thread_runs.create_dashboard_session(
         thread_runs.SessionCreateBody(prompt="Fix login", start=False), "octocat"
     )
@@ -208,12 +202,11 @@ async def test_create_session_uses_saved_defaults(monkeypatch, registry_db) -> N
     assert metadata["owner_login"] == "octocat"
     assert metadata["repo_owner"] == "acme"
     assert metadata["repo_name"] == "oss"
-    assert metadata["workspace"] == "oss"
     access.assert_awaited_once_with("octocat", "acme/oss")
 
 
 @pytest.mark.parametrize("explicit_repo", [None, "acme/explicit"])
-async def test_create_session_uses_selected_workspace_personal_default(
+async def test_create_session_ignores_historical_scoped_personal_default(
     monkeypatch, registry_db, explicit_repo: str | None
 ) -> None:
     created: dict[str, object] = {}
@@ -226,18 +219,13 @@ async def test_create_session_uses_selected_workspace_personal_default(
     )
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
     monkeypatch.setattr(thread_runs, "require_repo_access_for_user", AsyncMock())
-    await WORKSPACES.create(
-        WorkspaceCreate(name="OSS", repos=["acme/oss", "acme/scoped"]), "octocat"
-    )
-    await WORKSPACES.create(WorkspaceCreate(name="Selected"), "octocat")
     await thread_runs.create_dashboard_session(
-        thread_runs.SessionCreateBody(prompt="Fix login", repo=explicit_repo, workspace="selected"),
+        thread_runs.SessionCreateBody(prompt="Fix login", repo=explicit_repo),
         "octocat",
     )
     metadata = created["metadata"]
     assert isinstance(metadata, dict)
-    assert metadata["repo_name"] == ("explicit" if explicit_repo else "scoped")
-    assert metadata["workspace"] == "selected"
+    assert metadata["repo_name"] == ("explicit" if explicit_repo else "oss")
 
 
 def _image() -> thread_runs.DashboardImageBody:
@@ -273,8 +261,8 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
     async def fake_profile(login: str) -> dict[str, object]:
         return dict(profile)
 
-    async def fake_team_default(workspace: str | None = None) -> WorkspaceSettings:
-        return WorkspaceSettings(
+    async def fake_team_default() -> Settings:
+        return Settings(
             {"default_agent_model": _VISION_MODEL, "default_agent_reasoning_effort": "medium"}
         )
 
@@ -285,7 +273,7 @@ def _patch_new_thread_deps(monkeypatch, *, profile: dict[str, object]) -> None:
         return f"{login}@example.com"
 
     patch_thread_module(monkeypatch, "get_profile", fake_profile)
-    patch_thread_module(monkeypatch, "get_workspace_settings", fake_team_default)
+    patch_thread_module(monkeypatch, "get_settings", fake_team_default)
     monkeypatch.setattr("openswe.webhooks.common.account_link_reason", AsyncMock(return_value=None))
     patch_thread_module(monkeypatch, "_ensure_dashboard_github_token", fake_ensure_token)
     monkeypatch.setattr(
@@ -351,9 +339,6 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
     local: bool,
     langsmith_users,
 ) -> None:
-    monkeypatch.setattr(
-        thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
-    )
     monkeypatch.setattr(thread_runs, "_requested_visibility", AsyncMock(return_value="public"))
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={"default_repo": "acme/default"})
@@ -430,13 +415,10 @@ async def test_desktop_thread_keeps_authenticated_identity_on_resume(
         assert "github_linked" not in resumed
 
 
-async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
-    monkeypatch, registry_db
-) -> None:
+async def test_enrich_run_start_command_keeps_explicit_repository(monkeypatch, registry_db) -> None:
     created: dict[str, object] = {}
     _patch_new_thread_deps(monkeypatch, profile={})
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
 
     command = {
         "method": "run.start",
@@ -456,7 +438,8 @@ async def test_enrich_run_start_command_stamps_workspace_from_repo_owner(
 
     created_metadata = created["metadata"]
     assert isinstance(created_metadata, dict)
-    assert created_metadata["workspace"] == "oss"
+    assert created_metadata["repo_owner"] == "acme"
+    assert created_metadata["repo_name"] == "oss"
 
 
 async def test_a_thread_on_the_creators_machine_is_created_private(
@@ -493,10 +476,9 @@ async def test_a_thread_on_the_creators_machine_is_created_private(
     assert created_metadata["visibility"] == "private"
 
 
-async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
+async def test_enrich_run_start_command_resolves_global_default_model(
     monkeypatch, registry_db
 ) -> None:
-    """A new thread's model default is the repo's workspace override, not the instance record."""
     created: dict[str, object] = {}
 
     async def fake_profile(login: str) -> dict[str, object]:
@@ -516,19 +498,11 @@ async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
     patch_thread_module(monkeypatch, "resolve_run_email", fake_resolve_email)
     patch_thread_module(monkeypatch, "langgraph_client", lambda: _new_thread_client(created))
 
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["acme/oss"]), "octocat")
     await upsert_instance_settings(
-        WorkspaceSettingsUpdate(
+        SettingsUpdate(
             default_agent_model="anthropic:claude-opus-5-5",
             default_agent_reasoning_effort="high",
         )
-    )
-    await upsert_workspace_overrides(
-        "oss",
-        WorkspaceSettingsUpdate(
-            default_agent_model="openai:gpt-6-astra",
-            default_agent_reasoning_effort="low",
-        ),
     )
 
     command = {
@@ -549,9 +523,10 @@ async def test_enrich_run_start_command_resolves_model_from_repos_workspace(
 
     created_metadata = created["metadata"]
     assert isinstance(created_metadata, dict)
-    assert created_metadata["workspace"] == "oss"
-    assert created_metadata["resolved_model"] == "openai:gpt-6-astra"
-    assert created_metadata["resolved_effort"] == "low"
+    assert created_metadata["repo_owner"] == "acme"
+    assert created_metadata["repo_name"] == "oss"
+    assert created_metadata["resolved_model"] == "anthropic:claude-opus-5-5"
+    assert created_metadata["resolved_effort"] == "high"
 
 
 @pytest.mark.parametrize(
@@ -1028,6 +1003,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
                 "created_by": "attacker",
                 "admin_thread": True,
                 "workspace": "another-workspace",
+                "environment": "another-environment",
                 "owner_type": "system",
                 "visibility": "private",
                 "system_authorization": {
@@ -1083,6 +1059,7 @@ async def test_enrich_run_start_command_allowlists_client_configurable(monkeypat
             "created_by",
             "admin_thread",
             "workspace",
+            "environment",
         }
         & enriched["params"]["metadata"].keys()
     )
@@ -1661,7 +1638,7 @@ async def test_a_machine_reads_the_state_of_only_the_threads_it_started(
             "visibility": "public",
             STARTED_BY_ID: "bot:ws-1",
         },
-        reader=Principal(kind="bot", workspace="core", started_by_id=started_by_id),
+        reader=Principal(kind="bot", started_by_id=started_by_id),
     )
 
     assert response.status_code == status_code

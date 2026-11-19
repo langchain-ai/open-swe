@@ -1,7 +1,7 @@
 """Supported models and reasoning efforts surfaced in the profile editor.
 
 The table itself is shared with the MDA runtime (``runtime_api.models``); what the
-deployment and workspace choose from it is the backend's.
+deployment and global settings choose from it is the backend's.
 """
 
 from runtime_api.models import (
@@ -90,7 +90,7 @@ RETIRED_MODEL_REPLACEMENTS: dict[str, str] = {
 def fable_disabled_fallback(effort: object = None) -> tuple[str, str]:
     """Newest supported non-Fable Anthropic model (keeps the Claude family),
     else the global default. Substitutes a Fable selection when Fable is
-    disabled workspace-wide, preserving ``effort`` when the fallback supports it."""
+    disabled instance-wide, preserving ``effort`` when the fallback supports it."""
     for m in SUPPORTED_MODELS:
         if m["id"].startswith("anthropic:") and m["id"] not in FABLE_MODEL_IDS:
             return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
@@ -164,7 +164,7 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
     no supported model shares the provider.
 
     A retired id moves to its successor in ``RETIRED_MODEL_REPLACEMENTS``.
-    Explicitly deprecated ids inherit the workspace default instead.
+    Explicitly deprecated ids inherit the global default instead.
     """
     if not isinstance(model_id, str) or model_id in DEPRECATED_MODEL_IDS:
         return None
@@ -187,7 +187,7 @@ def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str
 
 
 def default_model_pair() -> tuple[str, str]:
-    """Deployment fallback used when neither the workspace nor the instance sets a default."""
+    """Deployment fallback used when the global settings do not set a default."""
     model_id = ENV.LLM_MODEL_ID.get(DEFAULT_MODEL_ID)
     effort = ENV.LLM_REASONING_EFFORT.get()
     if model_id in RETIRED_MODEL_REPLACEMENTS and (

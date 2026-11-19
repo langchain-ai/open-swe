@@ -4,13 +4,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
-from sqlalchemy import text
 
-from openswe.database import postgres, transaction
+from openswe.database import postgres
 from openswe.monitors import budget, delivery, sandbox
 from openswe.monitors.delivery import ThreadMonitorDelivery
 from openswe.monitors.sandbox import (
@@ -329,15 +327,8 @@ async def test_dashboard_lists_event_listeners_without_waking_an_idle_sandbox(
     from openswe.threads import background_work
     from openswe.webhooks.event_subscriptions import EventSubscription
 
-    workspace_id = uuid4()
-    async with transaction() as conn:
-        await conn.execute(
-            text("INSERT INTO workspace (id, slug, name) VALUES (:id, 'acme', 'Acme')"),
-            {"id": workspace_id},
-        )
     await EventSubscription(
         thread_id="thread-1",
-        workspace_id=workspace_id,
         multitask_strategy="enqueue",
         run_config={"thread_id": "thread-1"},
         expires_at=datetime.now(UTC) + timedelta(hours=1),
@@ -358,7 +349,7 @@ async def test_dashboard_lists_event_listeners_without_waking_an_idle_sandbox(
     assert [
         (listener.target, listener.event_types, listener.instructions)
         for listener in work.listeners
-    ] == [("workspace", ["check_suite.completed"], "Recheck CI.")]
+    ] == [("Robin events", ["check_suite.completed"], "Recheck CI.")]
 
 
 async def test_dashboard_shows_no_output_of_another_threads_command(

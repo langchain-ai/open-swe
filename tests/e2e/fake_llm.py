@@ -321,7 +321,7 @@ curl --fail --silent --show-error \
 
 class SystemPromptRecord:
     """The system prompt of the most recent model call, so specs can assert what the
-    agent was actually told (e.g. the workspace section) rather than infer it.
+    agent was actually told (e.g. shared instructions) rather than infer it.
 
     The harness serves it. A model running in another process, as on the Managed
     Deep Agents server, sends each prompt there through ``report_to``.
@@ -347,7 +347,7 @@ _THREAD_TITLE_PROMPT_PREFIX = "Generate a terse title that will help the user re
 THOUGHT_MARKER = "E2E_THOUGHT"
 THOUGHT_TEXT = (
     "**Checking the snapshot status**\n\n"
-    "The workspace image looks stale, so I will compare it with the latest capture."
+    "The sandbox image looks stale, so I will compare it with the latest capture."
 )
 _BUSY_HOLD_RE = re.compile(r"E2E_BUSY_HOLD(?::(\d+(?:\.\d+)?))?")
 _PLAN_URL_RE = re.compile(r"https?://[^\s\"'<>)\]|]+/plan\b")
@@ -1386,6 +1386,7 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
                 "action": "subscribe",
                 "timeout_seconds": 300,
                 "event_types": ["check_suite.completed"],
+                "repo": f"{OWNER}/{REPO}",
                 "instructions": BACKGROUND_WORK_LISTENER_INSTRUCTIONS,
             },
             "call-background-work-listen",

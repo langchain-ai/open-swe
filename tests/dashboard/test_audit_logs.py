@@ -14,7 +14,7 @@ from openswe.audit_logs.models import AuditLog, AuditLogEnrichments, AuditLogsCu
 from openswe.audit_logs.routes import router
 from openswe.bridge import routes as bridge_routes
 from openswe.bridge.store import BridgeStore
-from openswe.dashboard import deps, oauth, workspace_settings
+from openswe.dashboard import deps, oauth, settings
 from openswe.dashboard.langsmith_api_keys import LangSmithApiKey
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS
 from openswe.threads import principals
@@ -172,7 +172,7 @@ async def test_settings_audit_changes_are_redacted_and_track_resets(
 
     monkeypatch.setattr(middleware, "append_safely", append)
     application = app()
-    application.include_router(workspace_settings.router, prefix="/dashboard/api")
+    application.include_router(settings.router, prefix="/dashboard/api")
     await INSTANCE_SETTINGS.put(
         "",
         {"model_routing_enabled": False, "org_guidelines": "old-secret", "unknown": "secret"},
@@ -194,7 +194,6 @@ async def test_settings_audit_changes_are_redacted_and_track_resets(
     assert changed.operation_succeeded is True
     assert changed.operation_name == "put_instance_settings"
     assert changed.enrichments.settings_scope == "instance"
-    assert changed.enrichments.workspace is None
     assert changed.enrichments.settings_changes == {
         "model_routing_enabled": {"before": False, "after": True},
         "org_guidelines": {"before": "[REDACTED]", "after": "[REDACTED]"},
@@ -225,11 +224,11 @@ async def test_settings_audit_does_not_invent_changes_on_store_failure(
 
     monkeypatch.setattr(middleware, "append_safely", append)
     if failure == "read":
-        monkeypatch.setattr(workspace_settings, "instance_record", fail)
+        monkeypatch.setattr(settings, "instance_record", fail)
     else:
         monkeypatch.setattr(INSTANCE_SETTINGS, "put", fail)
     application = app()
-    application.include_router(workspace_settings.router, prefix="/dashboard/api")
+    application.include_router(settings.router, prefix="/dashboard/api")
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application, raise_app_exceptions=False),
         base_url="http://test",
@@ -314,12 +313,11 @@ async def test_admin_query_paginates_equal_timestamps_and_filters(
     monkeypatch.setenv("DASHBOARD_JWT_SECRET", "audit-test-secret-that-is-at-least-32-bytes")
     monkeypatch.setattr(deps, "is_admin", lambda email, *, login: login == "admin")
     now = datetime.now(UTC)
-    workspace_id, user_id = uuid4(), uuid4()
+    user_id = uuid4()
     entries = [
         AuditLog(
             request_time=now,
-            operation_name="update_workspace",
-            workspace_id=workspace_id,
+            operation_name="update_settings",
             user_id=user_id,
             enrichments=AuditLogEnrichments(actor_kind="person"),
         )
@@ -328,13 +326,12 @@ async def test_admin_query_paginates_equal_timestamps_and_filters(
     for entry in entries:
         await store.append(entry)
     await store.append(entries[0])
-    await store.append(AuditLog(operation_name="other", request_time=now, workspace_id=uuid4()))
+    await store.append(AuditLog(operation_name="other", request_time=now))
     params = {
         "start_time": now.isoformat(),
         "end_time": now.isoformat(),
-        "workspace_id": str(workspace_id),
         "user_id": str(user_id),
-        "operation_name": "update_workspace",
+        "operation_name": "update_settings",
         "limit": "2",
     }
     async with httpx.AsyncClient(

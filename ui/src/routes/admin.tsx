@@ -10,7 +10,7 @@ import {
   DefaultRepoSection,
   ModelDefaultsSection,
   ModelRoutingSection,
-} from "@/features/settings/components/WorkspaceSettingsSections"
+} from "@/features/settings/components/DefaultsSettingsSections"
 import { useOptions, useRepos } from "@/lib/profile"
 import { pageTitle } from "@/lib/pageTitle"
 

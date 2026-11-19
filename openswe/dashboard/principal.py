@@ -107,14 +107,12 @@ class DashboardPrincipal:
             if relative in {
                 "settings",
                 "team-settings",
-                "workspaces/options",
+                "routing",
                 "organization-skills",
                 "analytics/gateway-spend",
             }:
                 return
             parts = relative.split("/")
-            if len(parts) == 3 and parts[0] == "workspaces" and parts[2] == "settings":
-                return
             if len(parts) == 2 and parts[0] == "plan":
                 return
         raise HTTPException(403, "This operation requires a linked GitHub account")

@@ -23,7 +23,7 @@ All agent code runs for real.
 | The LLM                                                          | **fake** — a scripted model (`fake_llm.py`) emitting a fixed tool sequence |
 | `api.github.com` REST (PR create) + dashboard GitHub OAuth login | **fake** (`/fake-gh/...`), state rendered at `/mock/github`                |
 | `slack.com/api` (post message, etc.)                             | **fake** (`/fake-slack/...`), thread rendered at `/mock/slack`             |
-| Workspace tools, store records, snapshot naming + status       | **real**                                                                   |
+| Global execution tools, store records, snapshot naming + status       | **real**                                                                   |
 | Electron UI, main process, IPC, git diff                         | **real**                                                                   |
 | Pinned uv `dcode --acp`, tools, and local project                | **real**; only its model class points at `fake_llm.py`                      |
 | LangSmith snapshot service (capture/delete)                      | **fake** (`patches.py`) — the stand-in sandbox has nothing to snapshot      |

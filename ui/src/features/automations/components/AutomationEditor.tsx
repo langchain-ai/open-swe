@@ -52,13 +52,11 @@ import {
   useDeleteAgentSchedule,
   useTriggerAgentSchedule,
   useUpdateAgentSchedule,
-  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import { useModelOptions } from "@/features/agents/lib/provider/useModelOptions"
 import { ModelPicker } from "@/features/agents/components/ModelPicker"
 import { useUnsavedChangesWarning } from "@/features/automations/lib/useUnsavedChangesWarning"
 import { useRepos } from "@/lib/profile"
-import { DEFAULT_WORKSPACE_SLUG } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
@@ -140,7 +138,6 @@ export function AutomationEditor({
       (each) => each.full_name.toLowerCase() === repo.toLowerCase()
     )?.private === false
   const { models, defaultSelection } = useModelOptions()
-  const workspaceOptionsQuery = useWorkspaceOptions(Boolean(session.data))
 
   const createSchedule = useCreateAgentSchedule()
   const updateSchedule = useUpdateAgentSchedule()
@@ -157,10 +154,6 @@ export function AutomationEditor({
   )
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
   const [adminThread, setAdminThread] = useState(schedule?.adminThread ?? false)
-  const workspace =
-    schedule?.workspace ??
-    workspaceOptionsQuery.data?.default_slug ??
-    DEFAULT_WORKSPACE_SLUG
   // undefined = untouched (derive from the schedule / default as models load).
   const [selectionOverride, setSelectionOverride] = useState<
     ModelSelection | null | undefined
@@ -189,7 +182,6 @@ export function AutomationEditor({
   const canSave =
     name.trim().length > 0 &&
     prompt.trim().length > 0 &&
-    workspace !== null &&
     drafts.length > 0 &&
     drafts.every((draft) => draftProblem(draft, isPublicRepo) === null)
 
@@ -256,7 +248,7 @@ export function AutomationEditor({
     })
 
   const handleSave = () => {
-    if (!canSave || workspace === null) return
+    if (!canSave) return
     const modelIsReal = models.some((m) => m.id === activeSelection?.modelId)
     const modelId =
       system && modelIsReal ? (activeSelection?.modelId ?? null) : null
@@ -272,7 +264,6 @@ export function AutomationEditor({
           admin_thread: isAdmin && adminThread,
           model_id: modelId,
           effort,
-          workspace,
           system,
         },
         {

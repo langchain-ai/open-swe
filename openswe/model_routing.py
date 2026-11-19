@@ -13,7 +13,7 @@ class RoutingArm:
 
     # The share of experiment threads that run on Performance; the rest run on Balanced.
     PERFORMANCE_SHARE: Final = 0.5
-    # Sources no person starts: workspace automations and API runs.
+    # Sources no person starts: automations and API runs.
     AUTOMATED_SOURCES: Final = frozenset({"schedule", "api"})
 
     @classmethod

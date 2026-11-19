@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 
 from openswe.rollout_events import router
+from openswe.routing.store import INTEGRATIONS
 
 _PRIVATE = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _REPO = "langchain-ai/langchainplus"
@@ -45,12 +46,11 @@ def _token(**overrides: object) -> str:
 
 
 @pytest.fixture
-def app(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    async def allowed(full_name: str) -> str | None:
-        return "default" if full_name == _REPO else None
+async def app(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    await INTEGRATIONS.configure_repository(_REPO, may_start_threads=True, actor=None)
+    await INTEGRATIONS.configure_repository("other/repo", may_start_threads=False, actor=None)
 
     monkeypatch.setattr("openswe.federation.github_oidc._keys", lambda: _Keys())
-    monkeypatch.setattr("openswe.rollout_events.WORKSPACES.thread_starter_of_repo", allowed)
     from openswe.webhooks.event_log import EventLog
 
     record = AsyncMock(wraps=EventLog.record)
@@ -186,10 +186,7 @@ class TestRolloutRetries:
     async def test_distinct_repositories_targets_and_commits_are_recorded(
         self, app: FastAPI, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(
-            "openswe.rollout_events.WORKSPACES.thread_starter_of_repo",
-            AsyncMock(return_value="default"),
-        )
+        await INTEGRATIONS.configure_repository("other/repo", may_start_threads=True, actor=None)
         for repository, target, commit in [
             (_REPO, "gcp-dev", "a" * 40),
             ("other/repo", "gcp-dev", "a" * 40),

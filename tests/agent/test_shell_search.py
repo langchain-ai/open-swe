@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from openswe import reviewer
-from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.dashboard.settings import Settings
 from openswe.review_scout import graph as scout
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
@@ -24,9 +24,7 @@ async def _planned(kind: str) -> ToolSurface:
     module = reviewer if kind == "reviewer" else scout
     plan = reviewer.reviewer_catalog if kind == "reviewer" else scout.review_scout_catalog
     surface = ToolSurface()
-    with patch.object(
-        module, "cached_workspace_settings", AsyncMock(return_value=WorkspaceSettings({}))
-    ):
+    with patch.object(module, "cached_settings", AsyncMock(return_value=Settings({}))):
         await plan(_base_config(), surface)
     return surface
 

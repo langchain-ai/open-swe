@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from openswe.dashboard.options import default_model_pair
-from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.dashboard.settings import Settings
 from openswe.database import postgres
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.pull_requests import PullRequest
@@ -126,7 +126,7 @@ async def test_a_shadow_keeps_its_findings_apart_and_publishes_only_a_snapshot()
 @pytest.mark.usefixtures("registry_db")
 async def test_a_sampled_pull_requests_shadow_follows_its_reviews_from_its_own_commit() -> None:
     model, effort = default_model_pair()
-    settings = WorkspaceSettings(
+    settings = Settings(
         {
             "review_shadow_percent": 100,
             "review_shadow_model": model,
@@ -149,7 +149,7 @@ async def test_a_sampled_pull_requests_shadow_follows_its_reviews_from_its_own_c
         )
 
     with (
-        patch("openswe.review.shadow.cached_workspace_settings", AsyncMock(return_value=settings)),
+        patch("openswe.review.shadow.cached_settings", AsyncMock(return_value=settings)),
         patch("openswe.review.shadow.dispatch_client", return_value=client),
         patch("openswe.review.shadow.ensure_titled_thread", AsyncMock()),
         patch(

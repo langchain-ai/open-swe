@@ -25,7 +25,7 @@ from runtime_api.models import DEFAULT_LLM_REASONING, make_model, provider_model
 from runtime_api.provenance import Provenance
 
 from openswe.dashboard.options import gate_fable_model
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.dashboard.settings_cache import cached_settings
 from openswe.execution import ExecutionProfile
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.pull_request_key import PullRequestKey
@@ -95,7 +95,6 @@ async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBacken
     # Like the reviewer's, a scout sandbox holds only a checkout every run re-derives.
     return await ensure_sandbox_for_thread(
         thread_id,
-        workspace_slug=cfg.workspace_slug,
         github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
         github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         abandon_unreachable=True,
@@ -198,9 +197,9 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             concise_walkthrough=await workspace.pull_request.concise_walkthrough(),
         )
         execution = ExecutionProfile.current()
-        if execution is not None and execution.uses_defaults:
+        if execution is not None:
             system_prompt = "\n\n".join(
-                part for part in (system_prompt, execution.workspace_prompt()) if part
+                part for part in (system_prompt, execution.prompt()) if part
             )
         run_context = prompt(
             "review-scout/run-context",
@@ -274,8 +273,8 @@ def _make_model_or_defer(model_id: str, **kwargs: Any) -> BaseChatModel:
 
 
 async def scout_models(cfg: RunConfig) -> SurfaceModels:
-    """The model the workspace picked for its review scout and the subagent it reads with."""
-    settings = await cached_workspace_settings(cfg.workspace_slug)
+    """The globally configured model for the review scout and its reading subagent."""
+    settings = await cached_settings()
     model_id, effort = settings.review_scout_model
     model_id, effort = gate_fable_model(model_id, effort, fable_enabled=settings.fable_enabled)
     choice = ModelChoice(

@@ -25,14 +25,12 @@ def bind_actor(
     *,
     user_id: UUID | None = None,
     api_key_id: str | None = None,
-    workspace_id: UUID | None = None,
     enrichments: AuditLogEnrichments,
 ) -> None:
     entry = getattr(request.state, _STATE_KEY, None)
     if isinstance(entry, AuditLog):
         entry.user_id = user_id
         entry.api_key_id = api_key_id
-        entry.workspace_id = workspace_id
         entry.enrichments = enrichments
 
 

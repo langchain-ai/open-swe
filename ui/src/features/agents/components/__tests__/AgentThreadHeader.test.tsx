@@ -41,7 +41,7 @@ vi.mock("@/features/agents/lib/queries", () => ({
   useResolveAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
   useDeleteAgentThread: () => ({ isPending: false, mutate: vi.fn() }),
   useContinueThreadPrivately: () => ({ isPending: false, mutate: vi.fn() }),
-  useShareThreadWithWorkspace: () => ({
+  useShareThread: () => ({
     isPending: false,
     mutate: shareThread,
   }),

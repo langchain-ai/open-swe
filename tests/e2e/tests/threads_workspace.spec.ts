@@ -301,7 +301,6 @@ async function seedSchedules(request: APIRequestContext) {
     {
       key: "daily" as const,
       body: {
-        workspace: "default",
         name: "E2E Daily Health",
         prompt: "Check repository health.",
         triggers: [{ kind: "schedule", cron: "0 9 * * 1-5" }],
@@ -311,7 +310,6 @@ async function seedSchedules(request: APIRequestContext) {
     {
       key: "weekly" as const,
       body: {
-        workspace: "default",
         name: "E2E Weekly Cleanup",
         prompt: "Clean up stale work.",
         triggers: [{ kind: "schedule", cron: "0 10 * * 1" }],

@@ -47,13 +47,11 @@ export function CreateProjectDialog({
   open,
   onOpenChange,
   initialName = "",
-  workspace = null,
   onCreated,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   initialName?: string
-  workspace?: string | null
   onCreated?: (project: Project) => void
 }) {
   const desktop = typeof window !== "undefined" ? window.openSweDesktop : null
@@ -109,7 +107,6 @@ export function CreateProjectDialog({
     const project = await createProject
       .mutateAsync({
         name: name.trim(),
-        workspace,
         repo_full_name: repo,
       })
       .catch((cause: unknown) => {

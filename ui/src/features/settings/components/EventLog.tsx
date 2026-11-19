@@ -27,7 +27,7 @@ const SOURCE_OPTIONS = [
     "slack",
     "linear",
     "deployment",
-    "workspace",
+    "robin",
     "human_review",
     "reviewer",
   ].map((source) => ({ value: source, label: source })),

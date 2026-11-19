@@ -248,7 +248,7 @@ export function AgentThreadView({
     modelSelectionEnabled,
     isLoading: modelsLoading,
     isError: modelsError,
-  } = useModelOptions(thread.workspace)
+  } = useModelOptions()
   const threadSelection = useMemo<ModelSelection | null>(() => {
     if (!thread.model || !thread.effort) return null
     const supported = models.some(

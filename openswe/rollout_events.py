@@ -11,7 +11,6 @@ import logging
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Literal, TypedDict
-from uuid import UUID
 
 import httpx2
 from fastapi import APIRouter, HTTPException, Request
@@ -24,11 +23,10 @@ from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.github.repositories import Repository
 from openswe.input_messages import InputMessageContext, SystemIdentity
 from openswe.prompts import prompt
+from openswe.routing.store import INTEGRATIONS
 from openswe.source_context import SlackThreadRef, SourceContext
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.webhooks.event_subscriptions import EventSubscription
-from openswe.workspaces.routing import workspace_for_repo
-from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +63,6 @@ _ROLLOUT_ASK_CONTEXT: InputMessageContext = {
 }
 _CONFIG_KEYS = (
     "source",
-    "workspace",
-    "environment",
     "github_login",
     "github_user_id",
     "user_email",
@@ -203,7 +199,6 @@ def _run_config(
     owner: str,
     repo: str,
     number: int,
-    workspace: str,
     metadata: dict[str, object],
 ) -> dict[str, JsonValue]:
     config: dict[str, JsonValue] = {}
@@ -218,7 +213,6 @@ def _run_config(
     config["source"] = config.get("source") if isinstance(config.get("source"), str) else "github"
     config["repo"] = {"owner": owner, "name": repo}
     config["pr_number"] = number
-    config["workspace"] = workspace
     return config
 
 
@@ -246,7 +240,7 @@ async def _authorize(header: str) -> GitHubActionsClaims:
     except InvalidFederatedToken as exc:
         logger.warning("Rejected rollout OIDC token", extra={"rollout_error": str(exc)})
         raise HTTPException(status_code=401, detail="Invalid token") from None
-    if await WORKSPACES.thread_starter_of_repo(claims.repository) is None:
+    if not await INTEGRATIONS.repository_may_start_threads(claims.repository):
         logger.warning(
             "Rejected rollout event from a repository that may not start threads",
             extra={
@@ -265,26 +259,6 @@ async def accept_rollout_deploy(target: str, commits: list[str]) -> RolloutAccep
         extra={"rollout_target": target, "rollout_commits": len(commits)},
     )
     return {"status": "accepted", "target": target, "commits": len(commits)}
-
-
-async def _deployment_workspace(owner: str, repo: str) -> tuple[Repository, str, UUID] | None:
-    """The repository and workspace that can keep a deployment subscription, if any."""
-    repository = await Repository.get(f"{owner}/{repo}")
-    workspace = await workspace_for_repo(owner, repo)
-    if repository is None or not workspace:
-        logger.info(
-            "Skipping rollout monitoring; repository is not in a workspace",
-            extra={"repository": f"{owner}/{repo}"},
-        )
-        return None
-    workspace_id = await WORKSPACES.id_for_slug(workspace)
-    if workspace_id is None:
-        logger.info(
-            "Skipping rollout monitoring; workspace has no id",
-            extra={"workspace": workspace},
-        )
-        return None
-    return repository, workspace, workspace_id
 
 
 async def subscribe_merged_thread(
@@ -306,10 +280,9 @@ async def subscribe_merged_thread(
     if not _SHA_RE.fullmatch(merge_sha):
         return
     try:
-        listener = await _deployment_workspace(owner, repo)
-        if listener is None:
+        repository = await Repository.get(f"{owner}/{repo}")
+        if repository is None:
             return
-        repository, workspace, workspace_id = listener
         existing = await EventSubscription.for_thread(thread_id)
         if _already_listening(existing, merge_sha):
             return
@@ -321,7 +294,6 @@ async def subscribe_merged_thread(
             return
         await EventSubscription(
             thread_id=thread_id,
-            workspace_id=workspace_id,
             sources=["deployment"],
             repository_id=repository.id,
             pull_request_id=None,
@@ -330,7 +302,7 @@ async def subscribe_merged_thread(
             multitask_strategy="enqueue",
             one_shot=False,
             instructions=_instructions(merge_sha, metadata),
-            run_config=_run_config(thread_id, owner, repo, number, workspace, metadata),
+            run_config=_run_config(thread_id, owner, repo, number, metadata),
             expires_at=datetime.now(UTC) + timedelta(days=_LISTEN_DAYS),
         ).create()
     except Exception:  # noqa: BLE001
@@ -380,17 +352,15 @@ async def ask_to_monitor_rollout(
 ) -> None:
     """Start a run that asks only when the repository rollout skill says to."""
     try:
-        if await _deployment_workspace(owner, repo) is None:
+        if await Repository.get(f"{owner}/{repo}") is None:
             return
         if not await _rollout_skill_at_merge(owner, repo, sha):
             return
-        workspace = metadata.get("workspace")
         config = _run_config(
             thread_id,
             owner,
             repo,
             number,
-            workspace if isinstance(workspace, str) else "",
             metadata,
         )
         source = config.get("source")

@@ -36,7 +36,6 @@ from openswe.transcript.routes import (
     api_get_thread_transcript_turns,
     api_stream_thread_transcript,
 )
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 class _FakeThreads:
@@ -79,15 +78,13 @@ async def machine(monkeypatch: pytest.MonkeyPatch, registry_db: None) -> _FakeCl
     monkeypatch.setattr(runs, "langgraph_client", lambda: client)
 
     async def fake_repo_access(full_name: str) -> str:
-        return "workspace-app-token"
+        return "app-token"
 
-    monkeypatch.setattr(runs, "require_repo_access_for_workspace", fake_repo_access)
-    await WORKSPACES.create(WorkspaceCreate(name="core", repos=["acme/api"]), "admin")
-    await WORKSPACES.create(WorkspaceCreate(name="oss", repos=["acme/oss"]), "admin")
+    monkeypatch.setattr(runs, "require_repo_access_for_system", fake_repo_access)
     return client
 
 
-def _bot_caller(workspace: str = "core") -> Principal:
+def _bot_caller() -> Principal:
     key = LangSmithApiKey(
         kind="service",
         fingerprint="0123456789abcdef",
@@ -95,12 +92,10 @@ def _bot_caller(workspace: str = "core") -> Principal:
         workspace_id="ws",
         audit_id="langsmith:key-1",
     )
-    return Principal.of_bot(key, workspace)
+    return Principal.of_bot(key)
 
 
-def _workflow_caller(
-    repository: str = "acme/api", workspace: str = "core", visibility: str = "private"
-) -> Principal:
+def _workflow_caller(repository: str = "acme/api", visibility: str = "private") -> Principal:
     return Principal.of_workflow(
         GitHubActionsClaims(
             sub=f"repo:{repository}:ref:refs/heads/main",
@@ -109,7 +104,6 @@ def _workflow_caller(
             repository_visibility=visibility,
             workflow_ref=f"{repository}/.github/workflows/nightly.yml@refs/heads/main",
         ),
-        workspace,
     )
 
 
@@ -128,7 +122,6 @@ async def test_the_bot_starts_a_system_thread_with_no_person_on_it(machine: _Fak
     assert metadata["source"] == "api"
     assert metadata["owner_type"] == "system"
     assert metadata["visibility"] == "public"
-    assert metadata["workspace"] == "core"
     assert metadata["created_by"] == "bot"
     assert metadata["started_by_name"] == "Robin bot"
     assert metadata["started_by_id"] == "bot:ws"
@@ -137,7 +130,6 @@ async def test_the_bot_starts_a_system_thread_with_no_person_on_it(machine: _Fak
 
     configurable = enriched["params"]["config"]["configurable"]
     assert configurable["source"] == "api"
-    assert configurable["workspace"] == configurable["environment"] == "core"
     assert configurable["repo"] == {"owner": "acme", "name": "api"}
     assert configurable["invocation_id"]
     assert configurable["origin"] == "api"
@@ -241,7 +233,7 @@ async def test_a_workflow_defaults_to_its_own_repository(machine: _FakeClient) -
     assert machine.threads.created[0]["metadata"]["started_by_id"] == "github_actions:acme/api"
 
 
-async def test_a_repository_another_workspace_prefers_is_usable(machine: _FakeClient) -> None:
+async def test_the_bot_can_use_another_repository_the_app_can_reach(machine: _FakeClient) -> None:
     principal = _bot_caller()
 
     await runs._enrich_system_run_start_command(

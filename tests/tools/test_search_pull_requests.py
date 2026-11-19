@@ -16,13 +16,11 @@ def context(monkeypatch):
     monkeypatch.setattr(
         search.RunConfig,
         "from_runtime",
-        lambda: RunConfig(
-            thread_id="thread", workspace="default", repo=Repo(owner="acme", name="app")
-        ),
+        lambda: RunConfig(thread_id="thread", repo=Repo(owner="acme", name="app")),
     )
     monkeypatch.setattr(search, "thread_token_repositories", AsyncMock(return_value=None))
     token = AsyncMock(return_value=SandboxGitHubAccess("repo-token"))
-    monkeypatch.setattr(search, "workspace_token", token)
+    monkeypatch.setattr(search, "sandbox_token", token)
     return token
 
 
@@ -72,7 +70,7 @@ async def test_search_text_pagination_and_repo_isolation(monkeypatch, context):
     monkeypatch.setattr(search, "github_client", client)
     result = await search.search_pull_requests('"needle" repo:acme/other', page=2)
     context.assert_awaited_once_with(
-        "default", repositories=["acme/app"], permissions={"pull_requests": "read"}
+        repositories=["acme/app"], permissions={"pull_requests": "read"}
     )
     assert result["success"] is True
     assert result["incomplete_results"] is True

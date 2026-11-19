@@ -1,6 +1,6 @@
 """What only the backend knows about a Linear agent session turn, and the run it signs.
 
-MDA's Linear channel reads the turn, picks the repository and workspace, writes
+MDA's Linear channel reads the turn, picks the repository, writes
 the run's input and starts it on the session's own thread, so the conversation's
 reply, Stop and errors reach Linear. It asks here for Open SWE's data
 (``linear_session_facts``): whether the author has signed in to Open SWE, which
@@ -41,7 +41,6 @@ from openswe.threads.router import (
 from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
 from openswe.webhooks import common
-from openswe.workspaces.routing import resolve_workspace
 
 #: The channel's name in run and thread metadata (``CHANNEL_METADATA_KEY``).
 LINEAR_CHANNEL = "linear"
@@ -71,22 +70,16 @@ async def _author(email: str) -> tuple[User | None, AuthorStanding]:
     return user, "sign_in_again" if gap == "revoked" else "sign_in"
 
 
-async def _personal_default(user: User, thread_workspace: str | None) -> RepositoryChoice | None:
-    """The author's default for the thread's workspace, else their global one."""
+async def _personal_default(user: User) -> RepositoryChoice | None:
+    """The author's default repository."""
     try:
-        workspace = thread_workspace or (await resolve_workspace(login=user.github_login)).slug
-        personal = await user.default_repo(workspace, fallback_global=False)
-        if personal:
-            return RepositoryChoice(
-                repository=f"{personal['owner']}/{personal['name']}", workspace=workspace
-            )
-        fallback = await user.default_repo()
+        personal = await user.default_repo()
     except Exception:
         common.logger.exception("Reading a Linear user's default repository failed")
         return None
-    if not fallback:
+    if not personal:
         return None
-    return RepositoryChoice(repository=f"{fallback['owner']}/{fallback['name']}")
+    return RepositoryChoice(repository=f"{personal['owner']}/{personal['name']}")
 
 
 async def linear_session_facts(request: LinearSessionFactsRequest) -> LinearSessionFacts:
@@ -110,9 +103,8 @@ async def linear_session_facts(request: LinearSessionFactsRequest) -> LinearSess
         author=standing,
         settings_url=build_settings_url(),
         thread_repository=_full_name(thread.repo),
-        thread_workspace=thread.workspace,
-        personal_default=await _personal_default(user, thread.workspace),
-        instance_default=_full_name((await common.get_workspace_settings()).default_repo),
+        personal_default=await _personal_default(user),
+        instance_default=_full_name((await common.get_settings()).default_repo),
         policy=_policy(),
     )
 
@@ -151,7 +143,6 @@ async def plan_linear_session(plan: PlanLinearSession) -> LinearSessionStart:
         )
         return _declined("repository_not_allowed", repository=plan.repository)
     login = user.github_login
-    workspace = plan.workspace or await common.workspace_for_repo_config(repo)
     title = turn.issue.title or turn.issue.identifier or "Linear issue"
     linear_issue: dict[str, JsonValue] = {
         "id": turn.issue.id,
@@ -165,8 +156,6 @@ async def plan_linear_session(plan: PlanLinearSession) -> LinearSessionStart:
         "linear_issue": linear_issue,
         "user_email": turn.author.email,
         "source": "linear",
-        "workspace": workspace,
-        "environment": workspace,
         "github_login": login,
     }
 
@@ -180,7 +169,6 @@ async def plan_linear_session(plan: PlanLinearSession) -> LinearSessionStart:
         user_email=turn.author.email,
         title=title,
         source_context=SourceContext.parse({"linear_issue": linear_issue}),
-        workspace=workspace,
     )
     run_config = await prepare_durable_run(
         "agent",

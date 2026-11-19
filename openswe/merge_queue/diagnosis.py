@@ -66,7 +66,7 @@ class QueueRecovery:
         async with postgres.session() as session:
             queue = await session.scalar(
                 select(MergeQueue).where(
-                    MergeQueue.workspace_id == config.workspace_id,
+                    MergeQueue.routing_id == config.routing_id,
                     MergeQueue.repository_id == repository.id,
                     MergeQueue.target_branch == "main",
                     MergeQueue.mode == "native",
@@ -109,7 +109,7 @@ class QueueRecovery:
         lease = await self.claim()
         try:
             async with asyncio.timeout(45):
-                current = await MergeQueue.load(self.queue.id, self.queue.workspace_id)
+                current = await MergeQueue.load(self.queue.id, self.queue.bound_routing_id)
                 if current is None:
                     raise PermissionError("Queue no longer exists")
                 self.queue = current
@@ -160,7 +160,7 @@ class QueueRecovery:
     ) -> None:
         payload: dict[str, JsonValue] = {
             "queue_id": str(self.queue.id),
-            "workspace_id": str(self.queue.workspace_id),
+            "routing_id": str(self.queue.routing_id),
             "batch_id": str(batch_id),
             "investigate": investigate,
         }
@@ -413,12 +413,12 @@ class QueueRecovery:
             return
         service = await cls.current()
         if str(service.queue.id) != job.payload.get("queue_id") or str(
-            service.queue.workspace_id
-        ) != job.payload.get("workspace_id"):
+            service.queue.routing_id
+        ) != job.payload.get("routing_id"):
             return
         batch_id = UUID(str(job.payload["batch_id"]))
         scope = f"{JOB}:wake"
-        key = f"{service.queue.workspace_id}:{service.queue.id}:{batch_id}"
+        key = f"{service.queue.routing_id}:{service.queue.id}:{batch_id}"
         if not await event_claims.claim(scope, key, ttl=timedelta(minutes=2)):
             raise QueueBusy("A recovery wake is already in progress; the job will retry")
         try:

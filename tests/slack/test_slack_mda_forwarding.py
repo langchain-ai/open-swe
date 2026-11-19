@@ -104,7 +104,7 @@ _SLACK_HEADERS = {
 @pytest.fixture(autouse=True)
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
-    monkeypatch.setattr(slack_service.WORKSPACES, "is_ask_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(slack_service.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(
@@ -475,7 +475,6 @@ def facts(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock | Mock]:
         "owned": AsyncMock(return_value=None),
         "held": AsyncMock(return_value=None),
         "indexed": AsyncMock(return_value=None),
-        "workspace": AsyncMock(return_value=None),
     }
     monkeypatch.setattr(slack_channel, "slack_channel_watched", lookups["watched"])
     monkeypatch.setattr(slack_channel, "is_kitchen_channel", lookups["kitchen"])
@@ -486,7 +485,6 @@ def facts(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock | Mock]:
     monkeypatch.setattr(mda_forwarding, "owned_thread", lookups["owned"])
     monkeypatch.setattr(slack_channel, "lookup_slack_thread_id", lookups["held"])
     monkeypatch.setattr(slack_channel.index, "get", lookups["indexed"])
-    monkeypatch.setattr(slack_channel.WORKSPACES, "get", lookups["workspace"])
     return lookups
 
 
@@ -512,7 +510,6 @@ async def test_facts_of_a_mention_in_a_plain_channel(
         "bot_name": "",
         "solo_followup": False,
         "conversation": "new",
-        "workspace_known": False,
     }
     # A mention counts toward who talks in the thread, for later untagged replies.
     assert facts["track"].call_args.kwargs["message_ts"] == "1.2"
@@ -601,21 +598,6 @@ async def test_facts_say_who_holds_the_conversation(
         facts["indexed"].assert_awaited_once_with(
             mda_forwarding.mda_thread_id("A1", "T1", "C1", "1.2")
         )
-
-
-@pytest.mark.parametrize(("workspace", "known"), [(None, False), (object(), True)])
-async def test_facts_say_whether_a_workspace_tag_names_a_workspace(
-    monkeypatch: pytest.MonkeyPatch,
-    facts: dict[str, AsyncMock | Mock],
-    workspace: object,
-    known: bool,
-) -> None:
-    facts["workspace"].return_value = workspace
-
-    answered = await _facts(_api(monkeypatch), workspace_tag="infra")
-
-    assert answered.json()["workspace_known"] is known
-    facts["workspace"].assert_awaited_once_with("infra")
 
 
 def _channel_is(monkeypatch: pytest.MonkeyPatch, channel: SlackChannelContext) -> None:
@@ -886,7 +868,7 @@ async def test_an_unlinked_ask_sender_can_start_without_a_personal_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _prepared(monkeypatch, prompt=_PROMPT)
-    monkeypatch.setattr(slack_service.WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_service.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=True))
     monkeypatch.setattr(
         slack_service,
         "account_link_needed",
@@ -1115,9 +1097,6 @@ async def test_a_web_breakout_runs_on_a_thread_of_its_own_and_its_thread_hears_o
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prepare = _prepared(monkeypatch)
-    monkeypatch.setattr(
-        webhook_common, "get_thread_workspace", AsyncMock(return_value="engineering")
-    )
     notify = AsyncMock()
     monkeypatch.setattr(slack_channel, "notify_web_breakout", notify)
     app = _start_app(monkeypatch)
@@ -1131,7 +1110,6 @@ async def test_a_web_breakout_runs_on_a_thread_of_its_own_and_its_thread_hears_o
     request = prepare.await_args.args[0]
     assert (request.thread_id, request.web_only, request.text) == (side, True, "why is CI red?")
     assert (request.context_channel_id, request.context_thread_ts) == ("C1", "1.2")
-    assert request.inherited_workspace == "engineering"
     # MDA asking again under the same webhook id gets the run, not a second notice.
     notify.assert_awaited_once()
 
@@ -1148,9 +1126,6 @@ async def test_a_question_in_an_mda_conversation_branches_off_its_thread(
     prepare_ask = AsyncMock(return_value=asked)
     monkeypatch.setattr(slack_channel, "prepare_ask_channel_run", prepare_ask)
     monkeypatch.setattr(slack_channel, "notify_web_breakout", AsyncMock())
-    monkeypatch.setattr(
-        webhook_common, "get_thread_workspace", AsyncMock(return_value="engineering")
-    )
     monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
     branches = AsyncMock(return_value=True)
     monkeypatch.setattr(forks, "branches_from", branches)

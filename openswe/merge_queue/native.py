@@ -319,7 +319,7 @@ class NativeQueueRuntime:
     async def reconcile(self, payload: QueueJob) -> None:
         if payload.queue_id != self.queue_id:
             return
-        queue = await MergeQueue.load(payload.queue_id, payload.workspace_id)
+        queue = await MergeQueue.load(payload.queue_id, payload.routing_id)
         if queue is None or queue.mode != "native":
             return
         lease = await queue.claim(uuid7(), timedelta(seconds=60), config=self.config)
@@ -355,7 +355,7 @@ class NativeQueueRuntime:
 
                 try:
                     async with asyncio.timeout(8):
-                        current = await MergeQueue.load(queue.id, queue.workspace_id)
+                        current = await MergeQueue.load(queue.id, queue.bound_routing_id)
                         if current is not None:
                             recovery = QueueRecovery(self.config, current)
                             await recovery.reconcile(lease)

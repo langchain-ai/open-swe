@@ -20,7 +20,6 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as MySettingsRouteImport } from './routes/my-settings'
 import { Route as ReviewRouteImport } from './routes/review'
 import { Route as UsageRouteImport } from './routes/usage'
-import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as AdminAuditLogsRouteImport } from './routes/admin_.audit-logs'
 import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
 import { Route as AdminEventLogRouteImport } from './routes/admin_.event-log'
@@ -34,7 +33,6 @@ import { Route as AgentsChatRouteImport } from './routes/agents/chat'
 import { Route as AgentsConnectionsRouteImport } from './routes/agents/connections'
 import { Route as AgentsSkillsRouteImport } from './routes/agents/skills'
 import { Route as AgentsInstructionsRouteImport } from './routes/agents_.instructions'
-import { Route as AgentsWorkspacesRouteImport } from './routes/agents_.workspaces'
 import { Route as AssistantIndexRouteImport } from './routes/assistant/index'
 import { Route as AssistantThreadIdRouteImport } from './routes/assistant/$threadId'
 import { Route as MySettingsAboutRouteImport } from './routes/my-settings_.about'
@@ -45,7 +43,6 @@ import { Route as MySettingsGitRouteImport } from './routes/my-settings_.git'
 import { Route as MySettingsInstructionsRouteImport } from './routes/my-settings_.instructions'
 import { Route as MySettingsPluginsRouteImport } from './routes/my-settings_.plugins'
 import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
-import { Route as WorkspacesSlugRouteImport } from './routes/workspaces_.$slug'
 import { Route as AgentsThreadIdPlanRouteImport } from './routes/agents/$threadId_.plan'
 import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
 import { Route as AgentsAutomationsScheduleIdRouteImport } from './routes/agents/automations/$scheduleId'
@@ -110,11 +107,6 @@ const ReviewRoute = ReviewRouteImport.update({
 const UsageRoute = UsageRouteImport.update({
   id: '/usage',
   path: '/usage',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const WorkspacesRoute = WorkspacesRouteImport.update({
-  id: '/workspaces',
-  path: '/workspaces',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
@@ -182,11 +174,6 @@ const AgentsInstructionsRoute = AgentsInstructionsRouteImport.update({
   path: '/agents/instructions',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsWorkspacesRoute = AgentsWorkspacesRouteImport.update({
-  id: '/agents_/workspaces',
-  path: '/agents/workspaces',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AssistantIndexRoute = AssistantIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -235,11 +222,6 @@ const MySettingsPluginsRoute = MySettingsPluginsRouteImport.update({
 const ReviewStylesRoute = ReviewStylesRouteImport.update({
   id: '/review_/styles',
   path: '/review/styles',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const WorkspacesSlugRoute = WorkspacesSlugRouteImport.update({
-  id: '/workspaces_/$slug',
-  path: '/workspaces/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsThreadIdPlanRoute = AgentsThreadIdPlanRouteImport.update({
@@ -307,7 +289,6 @@ export interface FileRoutesByFullPath {
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
-  '/workspaces': typeof WorkspacesRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/evals': typeof AdminEvalsRoute
   '/admin/event-log': typeof AdminEventLogRoute
@@ -320,7 +301,6 @@ export interface FileRoutesByFullPath {
   '/agents/connections': typeof AgentsConnectionsRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
-  '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/my-settings/about': typeof MySettingsAboutRoute
   '/my-settings/agent': typeof MySettingsAgentRoute
@@ -330,7 +310,6 @@ export interface FileRoutesByFullPath {
   '/my-settings/instructions': typeof MySettingsInstructionsRoute
   '/my-settings/plugins': typeof MySettingsPluginsRoute
   '/review/styles': typeof ReviewStylesRoute
-  '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
   '/assistant/': typeof AssistantIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
@@ -354,7 +333,6 @@ export interface FileRoutesByTo {
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
-  '/workspaces': typeof WorkspacesRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
   '/admin/evals': typeof AdminEvalsRoute
   '/admin/event-log': typeof AdminEventLogRoute
@@ -367,7 +345,6 @@ export interface FileRoutesByTo {
   '/agents/connections': typeof AgentsConnectionsRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents/instructions': typeof AgentsInstructionsRoute
-  '/agents/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/my-settings/about': typeof MySettingsAboutRoute
   '/my-settings/agent': typeof MySettingsAgentRoute
@@ -377,7 +354,6 @@ export interface FileRoutesByTo {
   '/my-settings/instructions': typeof MySettingsInstructionsRoute
   '/my-settings/plugins': typeof MySettingsPluginsRoute
   '/review/styles': typeof ReviewStylesRoute
-  '/workspaces/$slug': typeof WorkspacesSlugRoute
   '/agents': typeof AgentsIndexRoute
   '/assistant': typeof AssistantIndexRoute
   '/agents/$threadId/plan': typeof AgentsThreadIdPlanRoute
@@ -404,7 +380,6 @@ export interface FileRoutesById {
   '/my-settings': typeof MySettingsRoute
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
-  '/workspaces': typeof WorkspacesRoute
   '/admin_/audit-logs': typeof AdminAuditLogsRoute
   '/admin_/evals': typeof AdminEvalsRoute
   '/admin_/event-log': typeof AdminEventLogRoute
@@ -417,7 +392,6 @@ export interface FileRoutesById {
   '/agents/connections': typeof AgentsConnectionsRoute
   '/agents/skills': typeof AgentsSkillsRoute
   '/agents_/instructions': typeof AgentsInstructionsRoute
-  '/agents_/workspaces': typeof AgentsWorkspacesRoute
   '/assistant/$threadId': typeof AssistantThreadIdRoute
   '/my-settings_/about': typeof MySettingsAboutRoute
   '/my-settings_/agent': typeof MySettingsAgentRoute
@@ -427,7 +401,6 @@ export interface FileRoutesById {
   '/my-settings_/instructions': typeof MySettingsInstructionsRoute
   '/my-settings_/plugins': typeof MySettingsPluginsRoute
   '/review_/styles': typeof ReviewStylesRoute
-  '/workspaces_/$slug': typeof WorkspacesSlugRoute
   '/agents/': typeof AgentsIndexRoute
   '/assistant/': typeof AssistantIndexRoute
   '/agents/$threadId_/plan': typeof AgentsThreadIdPlanRoute
@@ -455,7 +428,6 @@ export interface FileRouteTypes {
     | '/my-settings'
     | '/review'
     | '/usage'
-    | '/workspaces'
     | '/admin/audit-logs'
     | '/admin/evals'
     | '/admin/event-log'
@@ -468,7 +440,6 @@ export interface FileRouteTypes {
     | '/agents/connections'
     | '/agents/skills'
     | '/agents/instructions'
-    | '/agents/workspaces'
     | '/assistant/$threadId'
     | '/my-settings/about'
     | '/my-settings/agent'
@@ -478,7 +449,6 @@ export interface FileRouteTypes {
     | '/my-settings/instructions'
     | '/my-settings/plugins'
     | '/review/styles'
-    | '/workspaces/$slug'
     | '/agents/'
     | '/assistant/'
     | '/agents/$threadId/plan'
@@ -502,7 +472,6 @@ export interface FileRouteTypes {
     | '/my-settings'
     | '/review'
     | '/usage'
-    | '/workspaces'
     | '/admin/audit-logs'
     | '/admin/evals'
     | '/admin/event-log'
@@ -515,7 +484,6 @@ export interface FileRouteTypes {
     | '/agents/connections'
     | '/agents/skills'
     | '/agents/instructions'
-    | '/agents/workspaces'
     | '/assistant/$threadId'
     | '/my-settings/about'
     | '/my-settings/agent'
@@ -525,7 +493,6 @@ export interface FileRouteTypes {
     | '/my-settings/instructions'
     | '/my-settings/plugins'
     | '/review/styles'
-    | '/workspaces/$slug'
     | '/agents'
     | '/assistant'
     | '/agents/$threadId/plan'
@@ -551,7 +518,6 @@ export interface FileRouteTypes {
     | '/my-settings'
     | '/review'
     | '/usage'
-    | '/workspaces'
     | '/admin_/audit-logs'
     | '/admin_/evals'
     | '/admin_/event-log'
@@ -564,7 +530,6 @@ export interface FileRouteTypes {
     | '/agents/connections'
     | '/agents/skills'
     | '/agents_/instructions'
-    | '/agents_/workspaces'
     | '/assistant/$threadId'
     | '/my-settings_/about'
     | '/my-settings_/agent'
@@ -574,7 +539,6 @@ export interface FileRouteTypes {
     | '/my-settings_/instructions'
     | '/my-settings_/plugins'
     | '/review_/styles'
-    | '/workspaces_/$slug'
     | '/agents/'
     | '/assistant/'
     | '/agents/$threadId_/plan'
@@ -601,7 +565,6 @@ export interface RootRouteChildren {
   MySettingsRoute: typeof MySettingsRoute
   ReviewRoute: typeof ReviewRoute
   UsageRoute: typeof UsageRoute
-  WorkspacesRoute: typeof WorkspacesRoute
   AdminAuditLogsRoute: typeof AdminAuditLogsRoute
   AdminEvalsRoute: typeof AdminEvalsRoute
   AdminEventLogRoute: typeof AdminEventLogRoute
@@ -610,7 +573,6 @@ export interface RootRouteChildren {
   AdminOperationsRoute: typeof AdminOperationsRoute
   AdminUsersRoute: typeof AdminUsersRoute
   AgentsInstructionsRoute: typeof AgentsInstructionsRoute
-  AgentsWorkspacesRoute: typeof AgentsWorkspacesRoute
   MySettingsAboutRoute: typeof MySettingsAboutRoute
   MySettingsAgentRoute: typeof MySettingsAgentRoute
   MySettingsConnectionsRoute: typeof MySettingsConnectionsRoute
@@ -619,7 +581,6 @@ export interface RootRouteChildren {
   MySettingsInstructionsRoute: typeof MySettingsInstructionsRoute
   MySettingsPluginsRoute: typeof MySettingsPluginsRoute
   ReviewStylesRoute: typeof ReviewStylesRoute
-  WorkspacesSlugRoute: typeof WorkspacesSlugRoute
   ReviewRepositoriesOwnerRoute: typeof ReviewRepositoriesOwnerRoute
   OwnerRepoPullNumberRoute: typeof OwnerRepoPullNumberRoute
 }
@@ -701,13 +662,6 @@ declare module '@tanstack/react-router' {
       path: '/usage'
       fullPath: '/usage'
       preLoaderRoute: typeof UsageRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/workspaces': {
-      id: '/workspaces'
-      path: '/workspaces'
-      fullPath: '/workspaces'
-      preLoaderRoute: typeof WorkspacesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin_/audit-logs': {
@@ -801,13 +755,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsInstructionsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agents_/workspaces': {
-      id: '/agents_/workspaces'
-      path: '/agents/workspaces'
-      fullPath: '/agents/workspaces'
-      preLoaderRoute: typeof AgentsWorkspacesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/assistant/': {
       id: '/assistant/'
       path: '/'
@@ -876,13 +823,6 @@ declare module '@tanstack/react-router' {
       path: '/review/styles'
       fullPath: '/review/styles'
       preLoaderRoute: typeof ReviewStylesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/workspaces_/$slug': {
-      id: '/workspaces_/$slug'
-      path: '/workspaces/$slug'
-      fullPath: '/workspaces/$slug'
-      preLoaderRoute: typeof WorkspacesSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/$threadId_/plan': {
@@ -1019,7 +959,6 @@ const rootRouteChildren: RootRouteChildren = {
   MySettingsRoute: MySettingsRoute,
   ReviewRoute: ReviewRoute,
   UsageRoute: UsageRoute,
-  WorkspacesRoute: WorkspacesRoute,
   AdminAuditLogsRoute: AdminAuditLogsRoute,
   AdminEvalsRoute: AdminEvalsRoute,
   AdminEventLogRoute: AdminEventLogRoute,
@@ -1028,7 +967,6 @@ const rootRouteChildren: RootRouteChildren = {
   AdminOperationsRoute: AdminOperationsRoute,
   AdminUsersRoute: AdminUsersRoute,
   AgentsInstructionsRoute: AgentsInstructionsRoute,
-  AgentsWorkspacesRoute: AgentsWorkspacesRoute,
   MySettingsAboutRoute: MySettingsAboutRoute,
   MySettingsAgentRoute: MySettingsAgentRoute,
   MySettingsConnectionsRoute: MySettingsConnectionsRoute,
@@ -1037,7 +975,6 @@ const rootRouteChildren: RootRouteChildren = {
   MySettingsInstructionsRoute: MySettingsInstructionsRoute,
   MySettingsPluginsRoute: MySettingsPluginsRoute,
   ReviewStylesRoute: ReviewStylesRoute,
-  WorkspacesSlugRoute: WorkspacesSlugRoute,
   ReviewRepositoriesOwnerRoute: ReviewRepositoriesOwnerRoute,
   OwnerRepoPullNumberRoute: OwnerRepoPullNumberRoute,
 }

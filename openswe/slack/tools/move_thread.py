@@ -6,7 +6,6 @@ from typing import Annotated, Any
 from langgraph.config import get_config
 from pydantic import Field
 
-from openswe.run_config import RunConfig
 from openswe.slack.breakout_destination import resolve_breakout_destination
 from openswe.slack.client import get_active_slack_thread
 from openswe.slack.move import move_slack_thread, rebind_slack_thread
@@ -50,7 +49,7 @@ async def check_move(message: str, destination: str | None = None) -> CheckedMov
 
     The answer is an error, or a move an earlier call left unfinished, finished now.
     The thread is the run's own, from its config. Without ``destination`` (a person's
-    bare move) it goes where the workspace sends breakouts.
+    bare move) it stays in the source channel.
     """
     config = get_config()
     configurable = config.get("configurable", {})
@@ -101,9 +100,7 @@ async def check_move(message: str, destination: str | None = None) -> CheckedMov
                 "retryable": True,
             }
 
-    resolved = await resolve_breakout_destination(
-        active_channel, destination, workspace=RunConfig.from_runtime().workspace_slug
-    )
+    resolved = await resolve_breakout_destination(active_channel, destination)
     target_channel = resolved.channel_id
     if error := await resolved.channel_error(active_channel):
         return {"success": False, "error": error}

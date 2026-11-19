@@ -1,26 +1,13 @@
-"""One poll for every kind of background work.
-
-Two things run in the background and both take long enough that the model has to
-be able to ask "how far has it got": a command launched with
-``background_execute``, and an automatic workspace refresh or a Robin-wide image
-build. They keep their state in
-different places — a command's in the thread sandbox's own filesystem, a
-refresh's on the workspace record plus a live trace on its builder — so each
-kind owns a provider that knows how to read it, and this tool routes by the
-task id's prefix.
-
-Both report the same fields: ``status``, ``started_at``/``finished_at``,
-``output``, and where that output came from. A refresh adds ``steps``, because a
-rebuild is minutes to an hour of setup script and a single pending status cannot
-tell slow from wedged.
-"""
+"""Inspect or stop sandbox commands and authorized Robin-wide image builds."""
 
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, NamedTuple
 
-from openswe.tools.admin_gate import require_admin
-from openswe.workspaces import refresh as workspace_refresh
+from openswe.execution_images import EXECUTION_IMAGES
+from openswe.tools.access import Policy, resolve_access
+
+_PRIVATE_IMAGE_TASKS = Policy(trusted="admin_surface", actor="admin")
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +18,7 @@ class _Provider(NamedTuple):
     status: Callable[[str], Awaitable[dict[str, Any]]]
     stop: Callable[[str], Awaitable[dict[str, Any]]]
     list_all: Callable[[], Awaitable[list[dict[str, Any]]]]
-    # Refreshes are workspace-wide: a `stop` cancels a rebuild everyone depends
+    # Image builds are Robin-wide: a `stop` cancels a rebuild everyone depends
     # on, and a `bash -x` trace expands arguments. Commands are the calling
     # thread's own, in its own sandbox, so they need no such gate.
     admin_only: bool
@@ -48,11 +35,11 @@ def _providers() -> tuple[_Provider, ...]:
 
     return (
         _Provider(
-            "workspace refresh",
-            workspace_refresh.owns_task,
-            workspace_refresh.task_status,
-            workspace_refresh.task_stop,
-            workspace_refresh.task_list,
+            "execution image build",
+            EXECUTION_IMAGES.owns_task,
+            EXECUTION_IMAGES.task_status,
+            EXECUTION_IMAGES.task_stop,
+            EXECUTION_IMAGES.task_list,
             admin_only=True,
         ),
         _Provider(
@@ -72,8 +59,11 @@ async def background_task(
             return {"success": True, "tasks": await _list_all()}
         assert task_id is not None
         provider = next(p for p in _providers() if p.owns(task_id))
-        if provider.admin_only and (denied := await require_admin(f"read {provider.name} tasks")):
-            return {"success": False, "error": denied}
+        if provider.admin_only and (await resolve_access()).mode(_PRIVATE_IMAGE_TASKS) is None:
+            return {
+                "success": False,
+                "error": f"Only Robin admins in a private admin conversation can access {provider.name} tasks.",
+            }
         result = await (provider.status if action == "status" else provider.stop)(task_id)
         return {"success": True, **result}
     except Exception as exc:
@@ -82,14 +72,10 @@ async def background_task(
 
 
 async def _list_all() -> list[dict[str, Any]]:
-    """Every task from every provider.
-
-    One provider failing must not blank the listing: a thread with no sandbox
-    bound cannot list commands, but its workspace refreshes are still visible.
-    """
+    """List authorized tasks without one unavailable provider hiding the others."""
     tasks: list[dict[str, Any]] = []
     for provider in _providers():
-        if provider.admin_only and await require_admin(f"list {provider.name} tasks"):
+        if provider.admin_only and (await resolve_access()).mode(_PRIVATE_IMAGE_TASKS) is None:
             continue
         try:
             tasks.extend(await provider.list_all())

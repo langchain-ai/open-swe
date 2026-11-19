@@ -1,7 +1,7 @@
 """Standard human review: ask a repository's review channel to review a pull request.
 
 A request is refused while the pull request is closed or a draft. People sign up from the card; after
-the workspace auto-assignment timeout with nobody signed up Open SWE picks someone (see
+the automatic assignment timeout with nobody signed up Open SWE picks someone (see
 ``openswe.human_review.picking``), waking an agent to pick when nobody qualifies. The
 pull request, when auto-merge is enabled, merges once every reviewer approves on
 GitHub, or once ``AUTO_MERGE_AFTER_HOURS`` have passed with at least one approval,
@@ -9,7 +9,7 @@ and only while it is otherwise ready.
 
 A ``posted`` request settles here too but never merges: its message gets an
 approved reaction, and once its pull request has sat green and unapproved for
-the workspace auto-assignment timeout the agent picks a reviewer, the same way.
+the automatic assignment timeout the agent picks a reviewer, the same way.
 """
 
 import asyncio
@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
 from openswe.dashboard.profiles import PROFILES
-from openswe.dashboard.workspace_settings import WorkspaceSettings, get_workspace_settings
+from openswe.dashboard.settings import get_settings
 from openswe.expedited_review.eligibility import MAX_FILES, ChangedFile
 from openswe.expedited_review.readiness import (
     PullRequestSnapshot,
@@ -71,7 +71,6 @@ from openswe.human_review.supplementary import (
     SupplementaryReviews,
 )
 from openswe.prompts import prompt
-from openswe.run_config import RunConfig
 from openswe.slack.availability import ReviewerAvailability
 from openswe.slack.blocks import actions, block_payload, escape, section
 from openswe.slack.cards import origin_footer
@@ -92,7 +91,6 @@ from openswe.utils.json_types import JsonObject
 from openswe.utils.preview import skip_on_preview
 from openswe.utils.startup_trace import apm_span
 from openswe.webhooks.event_log import EventLog, EventRefs
-from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -128,19 +126,8 @@ async def in_review_channel(repo: RepoClient, channel_id: str) -> bool:
     return False
 
 
-async def _workspace_settings(request: HumanReviewRequest) -> WorkspaceSettings:
-    workspace = RunConfig.parse(request.run_config).workspace_slug
-    pr = request.pull_request
-    resolved = await resolve_workspace(
-        thread_workspace=workspace,
-        slack_channel_id=request.slack_channel_id,
-        repo=(pr.owner, pr.repo),
-    )
-    return await get_workspace_settings(resolved.slug)
-
-
 async def _assignment_minutes(request: HumanReviewRequest) -> int:
-    return (await _workspace_settings(request)).human_review_auto_assign_minutes
+    return (await get_settings()).human_review_auto_assign_minutes
 
 
 class RequestResult(BaseModel):
@@ -569,7 +556,7 @@ async def _request_review(
         )
         request.pull_request = pull_request
         request.auto_merge = (
-            (await _workspace_settings(request)).human_review_auto_merge_enabled
+            (await get_settings()).human_review_auto_merge_enabled
             if auto_merge is None
             else auto_merge
         )

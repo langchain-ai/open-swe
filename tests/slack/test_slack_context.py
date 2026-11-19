@@ -15,6 +15,7 @@ from runtime_api.provenance import PROVENANCE_KEY, Provenance
 from runtime_api.slack import SlackMessageOrigin
 
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
+from openswe.routing.store import INTEGRATIONS
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack import webhook as slack_webhooks
@@ -32,7 +33,6 @@ from openswe.users.models import UserIdentity
 from openswe.utils.run_usage import RunUsageSummary
 from openswe.utils.thread_participants import participant_ids
 from openswe.webhooks import common as webhook_common
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -377,7 +377,9 @@ def test_format_slack_messages_for_prompt_renders_app_card_attachments() -> None
 def _setup_slack_mention_fakes(
     monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
 ) -> None:
-    monkeypatch.setattr(slack_webhooks.WORKSPACES, "is_ask_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        slack_webhooks.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=False)
+    )
 
     async def fake_get_slack_user_info(user_id: str) -> dict:
         return {
@@ -592,7 +594,6 @@ async def slack_file_mention(monkeypatch, registry_db):
     monkeypatch.setattr(state.THREADS, "get", client.threads.indexed_get)
     monkeypatch.setattr(webhook_common, "get_slack_permalink", AsyncMock(return_value=None))
     monkeypatch.setattr(slack_utils, "download_slack_file", AsyncMock(return_value=b"zip"))
-    await WORKSPACES.create(WorkspaceCreate(name="Staging", repos=["acme/staging"]), "alice")
     request = SlackRequest(
         channel_id="C123",
         thread_ts="1700000000.000100",
@@ -627,14 +628,11 @@ async def slack_file_mention(monkeypatch, registry_db):
 
 @pytest.mark.parametrize("private", [False, True])
 @pytest.mark.parametrize(
-    ("existing", "tag", "environment"),
-    # A first mention with no tag, repo, or channel binding still resolves
-    # through the shared workspace resolver, which falls all the way back to
-    # the instance default rather than leaving the sandbox unbound.
-    [(False, "", "default"), (False, "env:staging", "staging"), (True, "", "staging")],
+    ("existing", "tag"),
+    [(False, ""), (False, "env:staging"), (True, "")],
 )
 async def test_slack_files_wait_for_the_sandbox_mda_opens_for_the_run(
-    slack_file_mention, private, existing, tag, environment
+    slack_file_mention, private, existing, tag
 ):
     """The webhook never gives the thread a sandbox: it records where the files go."""
     from openswe.slack.staged_files import PENDING_SLACK_FILES_KEY
@@ -664,7 +662,10 @@ async def test_slack_files_wait_for_the_sandbox_mda_opens_for_the_run(
         }
     ]
     run = captured["run_create"]["kwargs"]
-    assert run["config"]["configurable"].get("environment") == environment
+    assert "environment" not in run["config"]["configurable"]
+    assert "workspace" not in run["config"]["configurable"]
+    if tag:
+        assert tag in str(run["input"]["messages"])
     assert "/workspace/.open-swe/slack-files/bundle.zip" in str(run["input"]["messages"])
 
 
@@ -714,7 +715,7 @@ async def test_a_channel_run_does_not_wait_on_the_sandbox_for_slack_files(
 ):
     request, threads, captured = slack_file_mention
     monkeypatch.setattr(
-        slack_webhooks.WORKSPACES, "is_ask_channel", AsyncMock(return_value=ask_channel)
+        slack_webhooks.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=ask_channel)
     )
 
     prepared, _ = await slack_webhooks.prepare_slack_channel_run(request, None)
@@ -1074,7 +1075,7 @@ async def test_unlinked_ask_answers_without_borrowing_an_account(monkeypatch, bo
             ),
         }
     )
-    monkeypatch.setattr(WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=True))
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=None))
     monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value=None))
     monkeypatch.setattr(User, "login_for_email", AsyncMock(return_value="email-owner"))
@@ -1156,7 +1157,7 @@ async def test_unlinked_ask_preserves_account_and_private_boundaries(
         }
     )
     monkeypatch.setattr(
-        WORKSPACES, "is_ask_channel", AsyncMock(return_value=boundary != "unconfigured")
+        INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=boundary != "unconfigured")
     )
     authorization = slack_webhooks.SlackAuthorization(
         "U123", None, None, "revoked" if boundary == "revoked" else "unlinked"
@@ -1194,7 +1195,7 @@ async def test_unlinked_ask_fails_closed_if_ownership_cannot_be_saved(
             ),
         }
     )
-    monkeypatch.setattr(WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=True))
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=None))
     if failure == "write":
         monkeypatch.setattr(threads, "create", AsyncMock(side_effect=RuntimeError("offline")))

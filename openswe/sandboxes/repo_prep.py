@@ -35,7 +35,7 @@ BLOBLESS_CLONE_ARGS = "--filter=blob:none"
 def _fetch_missing(shas: Sequence[str]) -> list[str]:
     """Shell lines fetching whichever of ``shas`` the clone lacks, and nothing else.
 
-    Workspace images preload a full clone, and refreshing all of its branches
+    Execution images preload a full clone, and refreshing all of its branches
     (langchainplus has over 12,000) took minutes; a reused sandbox usually has
     every commit already and fetches nothing.
     """

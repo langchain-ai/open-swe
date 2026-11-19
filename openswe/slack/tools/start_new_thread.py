@@ -9,7 +9,7 @@ from pydantic import Field
 
 from openswe.dashboard.options import available_requested_models
 from openswe.dashboard.repo_access import require_repo_access_for_user
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.dashboard.settings_cache import cached_settings
 from openswe.dispatch import dispatch_agent_run
 from openswe.prompts import prompt
 from openswe.run_config import Repo, RunConfig
@@ -199,7 +199,7 @@ async def slack_breakout_thread(
         return {"success": False, "error": "Missing slack_thread config"}
     model_choice: tuple[str, str] | None = None
     if model is not None or effort is not None:
-        settings = await cached_workspace_settings(cfg.workspace_slug)
+        settings = await cached_settings()
         models = available_requested_models(fable_enabled=settings.fable_enabled)
         selected_model = (
             model
@@ -356,7 +356,6 @@ async def slack_breakout_thread(
                 repo=Repo.model_validate(repo) if repo else None,
                 explicit=bool(default_repo),
             ),
-            inherited_workspace=cfg.workspace_slug,
             model_choice=model_choice,
         )
         if not started:
@@ -368,9 +367,7 @@ async def slack_breakout_thread(
             "next_step": "Share the dashboard_url with the requester; the thread is web-only.",
         }
 
-    resolved = await resolve_breakout_destination(
-        source_channel, destination, workspace=cfg.workspace_slug
-    )
+    resolved = await resolve_breakout_destination(source_channel, destination)
     if error := await resolved.channel_error(source_channel):
         return {"success": False, "error": error}
     clean_channel_id = resolved.channel_id
@@ -453,7 +450,6 @@ async def slack_breakout_thread(
     thread_title = clean_title[:80]
     metadata: dict[str, Any] = {
         "source": "slack",
-        "workspace": resolved.workspace,
         "title": thread_title,
         "visibility": visibility,
         "owner_type": owner_type,
@@ -484,8 +480,6 @@ async def slack_breakout_thread(
         "source": "slack",
         "slack_kickoff_eligible": False,
         "slack_breakout": True,
-        "workspace": resolved.workspace,
-        "environment": resolved.workspace,
     }
     if repo:
         new_configurable["repo"] = repo

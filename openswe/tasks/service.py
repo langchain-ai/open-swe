@@ -16,7 +16,7 @@ from openswe.agent_api.client import MDA_GRAPH_METADATA_KEY, MDA_WORKER_GRAPH_ID
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import available_requested_models, normalize_model_choice
 from openswe.dashboard.profiles import get_profile
-from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.dashboard.settings import get_settings
 from openswe.database import postgres
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
@@ -48,7 +48,6 @@ from openswe.utils.thread_participants import (
 )
 from openswe.utils.thread_settings import thread_model_choice
 from openswe.webhooks.event_subscriptions import EventSubscription
-from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 _JSON_OBJECT = TypeAdapter(dict[str, JsonValue])
@@ -163,7 +162,7 @@ async def authorized_metadata(
 async def authorized_context(
     actor: Actor, *, coordinator: bool = False, allow_participants: bool = False
 ) -> store.TaskContext:
-    metadata = await authorized_metadata(actor, allow_participants=allow_participants)
+    await authorized_metadata(actor, allow_participants=allow_participants)
     context = await store.TaskMembership.context_for_thread(actor.thread_id)
     if context is None:
         raise ValueError("No task exists yet; launching the first worker creates it")
@@ -173,9 +172,6 @@ async def authorized_context(
     ):
         # Participants steer only from the coordinator; a worker thread stays owner-only.
         await authorized_metadata(actor)
-    workspace = metadata.workspace or metadata.environment
-    if workspace and workspace != context.task.workspace.slug and context.task.delegated:
-        raise PermissionError("The thread no longer belongs to the task's workspace")
     if coordinator and (
         context.membership.role != "coordinator"
         or context.task.coordinator_thread_id != actor.thread_id
@@ -185,12 +181,11 @@ async def authorized_context(
 
 
 async def model_choice(
-    workspace: str,
     metadata: Mapping[str, object],
     model: str | None,
     effort: str | None,
 ) -> tuple[str, str]:
-    settings = await get_workspace_settings(workspace)
+    settings = await get_settings()
     choices = available_requested_models(fable_enabled=settings.fable_enabled)
     default_model, default_effort = settings.default_model("agent")
     inherited_model, inherited_effort = thread_model_choice(metadata)
@@ -198,7 +193,7 @@ async def model_choice(
     option = choices.get(chosen_model)
     if option is None:
         raise ValueError(
-            f"The requested model is not available in this workspace; choose one of {', '.join(choices)}"
+            f"The requested model is not available; choose one of {', '.join(choices)}"
         )
     chosen_effort = effort or (
         inherited_effort
@@ -221,7 +216,6 @@ async def recipient_config(thread_id: str) -> dict[str, JsonValue]:
     config: dict[str, JsonValue] = {
         "thread_id": thread_id,
         "source": metadata.source,
-        "workspace": metadata.workspace,
         "admin_thread": metadata.admin_thread,
         "repo_explicitly_none": metadata.repo_explicitly_none,
     }
@@ -281,10 +275,6 @@ async def record_event(
     """Record a message for the recipient; false when its sender was silenced and owes nothing."""
     config = await recipient_config(recipient_thread_id)
     config["origin"] = RunOrigin.resolve(origin).value
-    workspace = config.get("workspace")
-    if workspace and workspace != task.workspace.slug:
-        raise PermissionError("The recipient no longer belongs to the task's workspace")
-    config["workspace"] = task.workspace.slug
     async with postgres.session() as session:
         await session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
@@ -378,8 +368,6 @@ class WorkerAccess:
                 raise PermissionError("A task's threads share their coordinator's owner")
             if metadata.owner_type != "system":
                 await self.actor.authorize_owner(worker_thread_id, metadata)
-            if metadata.workspace != self.context.task.workspace.slug:
-                raise PermissionError("The worker no longer belongs to the task's workspace")
         except NotFoundError:
             logger.info(
                 "Worker thread creation is incomplete",
@@ -437,7 +425,6 @@ def _worker_metadata(
         origin="task",
         thread_category="interactive",
         trigger_kind="task_delegation",
-        workspace=task.workspace.slug,
         sandbox_host_thread_id=delegation.coordinator_thread_id,
         task_id=str(task.id),
         model=delegation.model,
@@ -478,7 +465,6 @@ async def index_worker(
     if (
         persisted.owner_user_id != expected.owner_user_id
         or persisted.owner_type != expected.owner_type
-        or persisted.workspace != expected.workspace
         or persisted.task_id != expected.task_id
         or persisted.sandbox_host_thread_id != expected.sandbox_host_thread_id
         or persisted.admin_thread != expected.admin_thread
@@ -500,11 +486,10 @@ def worker_reply(task: store.Task, delegation: store.TaskDelegation) -> dict[str
 
 @dataclass(frozen=True)
 class Delegation:
-    """A coordinator cleared to delegate, with the workspace and model its next worker gets."""
+    """A coordinator cleared to delegate, with the model its next worker gets."""
 
     actor: Actor
     metadata: ThreadMetadata
-    workspace: str
     model: str
     effort: str
 
@@ -526,19 +511,8 @@ class Delegation:
             )
         if not metadata.sandbox_id:
             raise ValueError("The coordinator needs an attached sandbox before delegation")
-        workspace_value = metadata.workspace or metadata.environment
-        workspace = await resolve_workspace(
-            thread_workspace=(
-                context.task.workspace.slug
-                if context is not None and context.task.delegated
-                else workspace_value
-            ),
-            login=actor.login,
-        )
-        chosen_model, chosen_effort = await model_choice(
-            workspace.slug, metadata.json_metadata(), model, effort
-        )
-        return cls(actor, metadata, workspace.slug, chosen_model, chosen_effort)
+        chosen_model, chosen_effort = await model_choice(metadata.json_metadata(), model, effort)
+        return cls(actor, metadata, chosen_model, chosen_effort)
 
     async def reserve(
         self, worker_thread_id: str, instructions: str, request_id: str
@@ -548,7 +522,6 @@ class Delegation:
             self.actor.thread_id,
             worker_thread_id,
             title=title.strip() if title and title.strip() else "Delegated work",
-            workspace=self.workspace,
             instructions=instructions,
             model=self.model,
             effort=self.effort,

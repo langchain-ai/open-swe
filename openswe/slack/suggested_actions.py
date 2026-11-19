@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from fastapi import BackgroundTasks
 
 from openswe.prompts import prompt
+from openswe.routing.store import is_kitchen_channel
 from openswe.slack import webhook as service
 from openswe.slack.blocks import ButtonElement, actions, block_payload, button, section
 from openswe.slack.client import post_slack_ephemeral_message, respond_to_slack_interaction
@@ -25,7 +26,6 @@ from openswe.slack.payloads import SlackButtonValue, SlackInteraction
 from openswe.slack.request import SlackRequest
 from openswe.slack.responses import WebhookResponse, accepted, ignored
 from openswe.webhooks import common
-from openswe.workspaces.routing import is_kitchen_channel
 
 logger = logging.getLogger(__name__)
 

@@ -412,16 +412,7 @@ _CONTINUED_METADATA_KEYS = (
 )
 
 
-def _continued_workspace(metadata: Mapping[str, Any]) -> str | None:
-    """The workspace to carry into a private continuation; ``environment`` is the pre-workspace key."""
-    for key in ("workspace", "environment"):
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-async def share_thread_with_workspace(
+async def share_thread(
     thread_id: str, requester_login: str, *, email: str | None = None
 ) -> dict[str, object]:
     """Publish a private thread only at its owner's explicit request."""
@@ -536,9 +527,6 @@ async def continue_thread_privately(
     new_metadata: dict[str, Any] = {
         key: metadata[key] for key in _CONTINUED_METADATA_KEYS if metadata.get(key) is not None
     }
-    workspace = _continued_workspace(metadata)
-    if workspace is not None:
-        new_metadata["workspace"] = workspace
     new_metadata.update(
         {
             "source": DASHBOARD_SOURCE,

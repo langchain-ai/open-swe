@@ -4,12 +4,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from openswe.routing.store import INTEGRATIONS
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.tasks.schemas import ThreadMetadata
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.thread_reads import read_thread
-from openswe.workspaces.store import WORKSPACES
 
 
 async def _thread_scope(
@@ -73,7 +73,7 @@ async def private_credential_login(
 
 @dataclass(frozen=True)
 class GitHubCredentialScope:
-    """GitHub acts as the verified private owner, or as the workspace App."""
+    """GitHub acts as the verified private owner, or as the GitHub App."""
 
     login: str | None
 
@@ -89,7 +89,7 @@ class GitHubCredentialScope:
             metadata.get("visibility", "public") == "public"
             and slack is not None
             and bool(slack.channel_id)
-            and await WORKSPACES.is_ask_channel(slack.channel_id)
+            and await INTEGRATIONS.is_ask_channel(slack.channel_id)
         )
 
     @classmethod

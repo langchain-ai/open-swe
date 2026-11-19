@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx2
 import pytest
 
-from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
+from openswe.dashboard.settings import SettingsUpdate, upsert_instance_settings
 from openswe.github import http as github_http
 from openswe.github import webhook as github_webhooks
 from openswe.github.http import GitHubClient
@@ -18,7 +18,6 @@ from openswe.review import assessment_feedback
 from openswe.review.approvals import ApprovalPolicy
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.webhooks import common as webhook_common
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 pytestmark = pytest.mark.usefixtures("no_local_threads")
 
@@ -81,7 +80,7 @@ async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     monkeypatch.setattr(webhook_common, "set_reviewer_thread_metadata", AsyncMock())
     monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
     monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
-    monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(webhook_common, "get_settings", AsyncMock(return_value={}))
 
     await github_webhooks.process_github_pr_ready(
         _pr_payload(action="opened", draft=False, private=False)
@@ -116,7 +115,7 @@ async def test_pr_ready_for_review_skips_when_head_already_reviewed(
     )
     monkeypatch.setattr(webhook_common, "get_client", lambda url: fake_client)
     monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
-    monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(webhook_common, "get_settings", AsyncMock(return_value={}))
 
     await github_webhooks.process_github_pr_ready(
         _pr_payload(action="ready_for_review", draft=False)
@@ -237,7 +236,7 @@ async def test_pr_ready_for_review_uses_re_review_after_previous_review(
         ),
     )
     monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
-    monkeypatch.setattr(webhook_common, "get_workspace_settings", AsyncMock(return_value={}))
+    monkeypatch.setattr(webhook_common, "get_settings", AsyncMock(return_value={}))
 
     await github_webhooks.process_github_pr_ready(
         _pr_payload(action="ready_for_review", draft=False)
@@ -274,7 +273,7 @@ async def test_pr_ready_draft_user_override_off_wins_over_team_on(
         AsyncMock(return_value={"login": "alice", "review_draft_prs": False}),
     )
     monkeypatch.setattr(
-        webhook_common, "get_workspace_settings", AsyncMock(return_value={"review_draft_prs": True})
+        webhook_common, "get_settings", AsyncMock(return_value={"review_draft_prs": True})
     )
 
     await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=True))
@@ -296,7 +295,7 @@ async def test_pr_ready_draft_user_override_on_wins_over_team_off(
     )
     monkeypatch.setattr(
         webhook_common,
-        "get_workspace_settings",
+        "get_settings",
         AsyncMock(return_value={"review_draft_prs": False}),
     )
 
@@ -338,7 +337,7 @@ async def test_converted_to_draft_disables_watch_when_drafts_off(
             return_value={"login": "alice", "review_draft_prs": False},
         ),
         patch(
-            "openswe.webhooks.common.get_workspace_settings",
+            "openswe.webhooks.common.get_settings",
             new_callable=AsyncMock,
             return_value={"review_draft_prs": False},
         ),
@@ -349,17 +348,14 @@ async def test_converted_to_draft_disables_watch_when_drafts_off(
 
 
 @pytest.mark.asyncio
-async def test_pr_ready_draft_reads_the_owning_workspaces_team_default(
+async def test_pr_ready_draft_reads_the_global_default(
     monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
-    """The draft-review default belongs to the workspace that owns the repo."""
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     _patch_dispatch_deps(monkeypatch, fake_client)
     monkeypatch.setattr(webhook_common, "get_profile", AsyncMock(return_value=None))
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["lc/repo"]), "alice")
-    await upsert_workspace_overrides("oss", WorkspaceSettingsUpdate(review_draft_prs=True))
-    await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(review_draft_prs=False))
+    await upsert_instance_settings(SettingsUpdate(review_draft_prs=True))
 
     await github_webhooks.process_github_pr_ready(_pr_payload(action="opened", draft=True))
 
@@ -379,16 +375,15 @@ async def test_walkthrough_generation_includes_drafts_without_starting_an_assess
     implementation_busy: bool,
     registered: bool,
 ) -> None:
-    from openswe.dashboard import workspace_settings_cache
+    from openswe.dashboard import settings_cache
     from openswe.review_scout.launch import ReviewScoutTarget
 
     payload = _pr_payload(action=action, draft=draft)
     payload["repository"]["full_name"] = "lc/repo"
     payload["pull_request"]["body"] = "Made by [Open SWE](https://example.com)"
-    monkeypatch.setattr(WORKSPACES, "owner_of_repo", AsyncMock(return_value="default"))
     monkeypatch.setattr(
-        workspace_settings_cache,
-        "cached_workspace_settings",
+        settings_cache,
+        "cached_settings",
         AsyncMock(return_value={"implementation_walkthrough_enabled": inline}),
     )
     monkeypatch.setattr(

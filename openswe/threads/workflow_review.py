@@ -49,7 +49,6 @@ class WorkflowReview:
             or not isinstance(owner, str)
             or not thread_is_owner(coordinator.metadata, owner)
             or not thread_is_readable(coordinator.metadata, viewer_login, viewer_email)
-            or coordinator.metadata.get("workspace") != metadata.get("workspace")
         ):
             return cls(approvals)
         decisions = cls.parse(coordinator.metadata)

@@ -4,7 +4,7 @@ import { Select } from "@langchain/macaw-components/Select"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import type { ModelOption } from "@/lib/api"
 import { useInstanceSettings } from "@/features/settings/lib/settingsScope"
-import { ModelPairControl } from "./WorkspaceSettingsSections"
+import { ModelPairControl } from "./DefaultsSettingsSections"
 
 const PERCENTS = [0, 1, 2, 5, 10, 25, 50, 100]
 

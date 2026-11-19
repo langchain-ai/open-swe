@@ -4,25 +4,21 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import {
-  api,
-  type WorkspaceSettings,
-  type WorkspaceSettingsOverrides,
-} from "@/lib/api"
+import { api, type RobinSettings, type RobinSettingsPatch } from "@/lib/api"
 
 export type StringSettingField = {
-  [K in keyof WorkspaceSettings]-?: WorkspaceSettings[K] extends
+  [K in keyof RobinSettings]-?: RobinSettings[K] extends
     | string
     | null
     | undefined
     ? K
     : never
-}[keyof WorkspaceSettings]
+}[keyof RobinSettings]
 
 export interface InstanceSettings {
-  data: WorkspaceSettings | undefined
-  saved: WorkspaceSettings | undefined
-  save: (patch: WorkspaceSettingsOverrides) => void
+  data: RobinSettings | undefined
+  saved: RobinSettings | undefined
+  save: (patch: RobinSettingsPatch) => void
 }
 
 const QUERY_KEY = ["instanceSettings"]
@@ -39,8 +35,8 @@ export function useInstanceSettings(): InstanceSettings {
     mutationKey: MUTATION_KEY,
     scope: { id: JSON.stringify(MUTATION_KEY) },
     meta: { errorTitle: "Couldn't save settings" },
-    mutationFn: (patch: WorkspaceSettingsOverrides) => {
-      const base = qc.getQueryData<WorkspaceSettings>(QUERY_KEY)
+    mutationFn: (patch: RobinSettingsPatch) => {
+      const base = qc.getQueryData<RobinSettings>(QUERY_KEY)
       if (!base) throw new Error("Settings are not loaded.")
       return api.saveInstanceSettings({ ...base, ...patch })
     },
@@ -55,17 +51,16 @@ export function useInstanceSettings(): InstanceSettings {
       await Promise.all([
         qc.invalidateQueries({ queryKey: QUERY_KEY }),
         qc.invalidateQueries({ queryKey: ["options"] }),
-        qc.invalidateQueries({ queryKey: ["workspaceSettings"] }),
       ])
     },
   })
   const pendingEdits = useMutationState({
     filters: { mutationKey: MUTATION_KEY, exact: true, status: "pending" },
-    select: (m) => m.state.variables as WorkspaceSettingsOverrides,
+    select: (m) => m.state.variables as RobinSettingsPatch,
   })
   const confirmed = snapshot.data
   const current = confirmed
-    ? pendingEdits.reduce<WorkspaceSettings>(
+    ? pendingEdits.reduce<RobinSettings>(
         (data, patch) => ({ ...data, ...patch }),
         confirmed
       )

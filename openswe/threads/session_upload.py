@@ -25,7 +25,6 @@ from openswe.threads.diffs import _safe_git_ref
 from openswe.threads.runs import (
     _ASSISTANT_ID,
     _resolve_agent_model_choice,
-    _resolve_requested_workspace,
 )
 from openswe.threads.summary import (
     DASHBOARD_SOURCE,
@@ -279,12 +278,8 @@ async def reserve_session_upload(
 ) -> SessionReservation:
     """Create the thread an uploaded session continues in, before its transcript arrives."""
     target = await _target(header, login)
-    repo_config = {"owner": target.owner, "name": target.name}
-    workspace = await _resolve_requested_workspace(None, repo_config, login=login)
     profile = await get_profile(login) or {}
-    resolved_model, resolved_effort = await _resolve_agent_model_choice(
-        profile, None, None, workspace
-    )
+    resolved_model, resolved_effort = await _resolve_agent_model_choice(profile, None, None)
     now_ms = _now_ms()
     title = f"Uploaded session on {target.branch}"
     metadata: dict[str, Any] = {
@@ -297,7 +292,6 @@ async def reserve_session_upload(
         "trigger_kind": "user",
         **await participant_metadata({}, login=login, email=email),
         "title": title,
-        "workspace": workspace,
         "repo_owner": target.owner,
         "repo_name": target.name,
         "branch_name": target.branch,

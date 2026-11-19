@@ -1,5 +1,5 @@
 This message has kitchen-channel handling: untagged messages and drive-by comments in threads can reach you.
-Workspace kitchen channels enable this for everyone; a personal kitchen preference enables it only for the person who selected the channel.
+Shared kitchen channel bindings enable this for everyone; a personal kitchen preference enables it only for the person who selected the channel.
 Respond by default to both new top-level messages and replies, unless the message is obviously directed at someone else.
 A problem reported to you is not a tentative thought: investigate and fix it.
 

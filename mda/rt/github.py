@@ -163,8 +163,7 @@ async def _issue_run_request(
     if not facts.sender_email_known:
         return _no_run("No email mapping for the sender", delivery_id)
     if facts.conversation_started:
-        # A follow-up stays in the workspace its thread started in.
-        return _request(thread_id, mention.follow_up(trusted), facts.thread_workspace)
+        return _request(thread_id, mention.follow_up(trusted))
     comments = mention.with_comment(await mention.comments())
     if unasked := [login for login in mention.logins(comments) if login not in asked]:
         trusted |= frozenset(
@@ -178,14 +177,13 @@ async def _issue_run_request(
                 )
             ).trusted
         )
-    return _request(thread_id, mention.first(comments, trusted), None)
+    return _request(thread_id, mention.first(comments, trusted))
 
 
-def _request(thread_id: UUID, run_input: RunInput, workspace: str | None) -> GitHubIssueRunRequest:
+def _request(thread_id: UUID, run_input: RunInput) -> GitHubIssueRunRequest:
     return GitHubIssueRunRequest(
         thread_id=thread_id,
         input=cast(dict[str, JsonValue], run_input),
-        workspace=workspace,
     )
 
 

@@ -1273,7 +1273,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
-    await page.route("**/dashboard/api/options?*", (route) =>
+    await page.route("**/dashboard/api/options", (route) =>
       route.fulfill({ status: 503, json: { detail: "Options unavailable" } }),
     );
     await page.goto("/agents");

@@ -14,7 +14,6 @@ from openswe.github.app import (
 )
 from openswe.github.repositories import Repository
 from openswe.github.sdk import GITHUB_API_VERSION, github_sdk
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +90,7 @@ async def repository_token(
         force_refresh=force_refresh,
     )
     if not token:
-        raise RuntimeError("Workspace GitHub repository token is unavailable")
+        raise RuntimeError("Sandbox GitHub repository token is unavailable")
     return SandboxGitHubAccess(token, expires_at)
 
 
@@ -171,29 +170,13 @@ async def installation_token(
     return SandboxGitHubAccess(token, expires_at)
 
 
-async def workspace_token(
-    workspace_slug: str | None,
+async def sandbox_token(
     *,
     repositories: Sequence[str] | None = None,
     permissions: PermissionMap | None = None,
     force_refresh: bool = False,
 ) -> SandboxGitHubAccess:
-    """The token a workspace's sandbox gets: the whole installation unless narrowed.
-
-    A workspace's repositories are where its work is routed and what its image
-    preloads, not a limit on access. ``repositories`` narrows the token for
-    callers that must not reach anything else, such as the reviewer or a thread
-    started by an event on a public repository.
-    """
-    from openswe.execution import ExecutionProfile
-
-    slug = workspace_slug or DEFAULT_WORKSPACE_SLUG
-    if (
-        slug != DEFAULT_WORKSPACE_SLUG
-        and not await ExecutionProfile.use_defaults()
-        and not await WORKSPACES.slug_exists(slug)
-    ):
-        raise ValueError(f"Workspace {slug!r} does not exist")
+    """Mint a sandbox token, preserving any explicit repository and permission limits."""
     if repositories is not None:
         return await repository_token(
             sorted(repositories), permissions=permissions, force_refresh=force_refresh

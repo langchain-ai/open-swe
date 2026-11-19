@@ -1,20 +1,17 @@
 import json
 from collections.abc import Callable
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from openswe.dashboard.settings_records import WORKSPACE_SETTINGS
-from openswe.dashboard.workspace_settings import (
+from openswe.dashboard.settings import (
     AppRelease,
-    WorkspaceSettingsUpdate,
-    get_workspace_settings,
+    SettingsUpdate,
+    get_settings,
     upsert_instance_settings,
 )
 from openswe.plugins.records import AppVersion, PluginApps
 from openswe.tools.manage_review_apps import manage_review_apps
 from openswe.users import User
-from openswe.workspaces.store import WORKSPACES, Workspace
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -62,7 +59,7 @@ def _described(release: AppVersion) -> dict[str, object]:
 
 
 async def test_instance_review_apps_are_added_and_removed_keeping_other_settings() -> None:
-    await upsert_instance_settings(WorkspaceSettingsUpdate(org_guidelines="Keep me"))
+    await upsert_instance_settings(SettingsUpdate(org_guidelines="Keep me"))
     release = await _release("design-qa", review=True)
 
     added = await manage_review_apps("add", str(release.app))
@@ -70,7 +67,7 @@ async def test_instance_review_apps_are_added_and_removed_keeping_other_settings
     assert added["apps"] == [
         {**_described(release), "browser": False, "newer_release_number": None}
     ]
-    assert (await get_workspace_settings())["org_guidelines"] == "Keep me"
+    assert (await get_settings())["org_guidelines"] == "Keep me"
     await manage_review_apps("remove", str(release.app))
     assert (await manage_review_apps("read"))["apps"] == []
 
@@ -95,7 +92,7 @@ async def test_reviews_follow_the_release_an_admin_added_until_they_add_it_again
 
 
 async def test_preview_checks_are_set_and_read_keeping_other_settings() -> None:
-    await upsert_instance_settings(WorkspaceSettingsUpdate(org_guidelines="Keep me"))
+    await upsert_instance_settings(SettingsUpdate(org_guidelines="Keep me"))
 
     saved = await manage_review_apps(
         "set_preview_checks",
@@ -105,7 +102,7 @@ async def test_preview_checks_are_set_and_read_keeping_other_settings() -> None:
     expected = [".github/workflows/preview.yml", "Build and Deploy Frontend Preview"]
     assert saved["preview_checks"] == expected
     assert (await manage_review_apps("read"))["preview_checks"] == expected
-    assert (await get_workspace_settings())["org_guidelines"] == "Keep me"
+    assert (await get_settings())["org_guidelines"] == "Keep me"
     with pytest.raises(ValueError, match="set_preview_checks"):
         await manage_review_apps("read", preview_checks=[])
 
@@ -117,17 +114,13 @@ async def test_only_an_app_with_a_review_step_can_be_added() -> None:
         await manage_review_apps("add", str(release.app))
 
 
-async def test_a_workspace_starts_its_own_list_from_what_it_inherits() -> None:
+async def test_adding_an_app_keeps_previously_approved_releases() -> None:
     first, second = await _release("design-qa", review=True), await _release("audit", review=True)
-    await upsert_instance_settings(WorkspaceSettingsUpdate(review_apps=[_pinned(first)]))
-    await WORKSPACE_SETTINGS.put("team", {"org_guidelines": "Keep me"})
-    with patch.object(
-        WORKSPACES, "get", AsyncMock(return_value=Workspace(name="team", slug="team", prompt=""))
-    ):
-        await manage_review_apps("add", str(second.app), workspace="team")
+    await upsert_instance_settings(
+        SettingsUpdate(review_apps=[_pinned(first)], org_guidelines="Keep me")
+    )
 
-    assert (await get_workspace_settings("team"))["review_apps"] == [
-        _pinned(first),
-        _pinned(second),
-    ]
-    assert (await get_workspace_settings())["review_apps"] == [_pinned(first)]
+    await manage_review_apps("add", str(second.app))
+
+    assert (await get_settings())["review_apps"] == [_pinned(first), _pinned(second)]
+    assert (await get_settings())["org_guidelines"] == "Keep me"

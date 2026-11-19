@@ -1,7 +1,6 @@
 """Projects: named folders of threads that people create and share.
 
-A project belongs to a workspace, whose sandbox and settings its runs use, and
-may be bound to one GitHub repository; a repository belongs to at most one
+A project may be bound to one GitHub repository; a repository belongs to at most one
 project. A thread is in a project through ``project_id`` in its metadata, or
 through the project bound to its repository.
 
@@ -32,8 +31,6 @@ from openswe.github.repositories import Repository
 from openswe.threads.store import THREADS
 from openswe.threads.summary import thread_is_owner
 from openswe.users import User
-from openswe.workspaces.rows import WorkspaceRow
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +68,6 @@ class ProjectRow(Base):
     __tablename__ = "project"
 
     name: Mapped[str]
-    workspace_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("workspace.id", ondelete="SET NULL"), default=None
-    )
     repository_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("repository.id", ondelete="SET NULL"), default=None
     )
@@ -118,7 +112,6 @@ class Project(BaseModel):
 
     id: UUID
     name: str
-    workspace: str
     repo_full_name: str | None
     role: ProjectRole
     members: list[ProjectMember]
@@ -130,7 +123,6 @@ class ProjectChanges(BaseModel):
     """What an owner may change; an omitted field stays as it is."""
 
     name: str | None = Field(default=None, min_length=1, max_length=NAME_MAX_CHARS)
-    workspace: str | None = None
     # ``""`` unbinds the repository.
     repo_full_name: str | None = None
 
@@ -222,11 +214,10 @@ class ProjectStore:
         user: User,
         name: str,
         *,
-        workspace: str | None = None,
         repo_full_name: str | None = None,
     ) -> Project:
         """A new project with ``user`` as its owner."""
-        changes = ProjectChanges(name=name, workspace=workspace, repo_full_name=repo_full_name)
+        changes = ProjectChanges(name=name, repo_full_name=repo_full_name)
         if changes.name is None:
             raise ProjectError("name is required")
         await self._authorize_repository(changes, user)
@@ -339,11 +330,6 @@ class ProjectStore:
     ) -> None:
         if changes.name is not None:
             project.name = changes.name
-        if changes.workspace is not None:
-            workspace_id = await WORKSPACES.id_for_slug(changes.workspace, session=session)
-            if workspace_id is None:
-                raise ProjectError(f"no workspace named {changes.workspace!r}")
-            project.workspace_id = workspace_id
         if changes.repo_full_name == "":
             project.repository_id = None
         elif changes.repo_full_name is not None:
@@ -354,15 +340,9 @@ class ProjectStore:
         self, changes: ProjectChanges, user: User, *, project_id: UUID | None = None
     ) -> None:
         if changes.repo_full_name:
-            if project_id is not None or changes.workspace is not None:
+            if project_id is not None:
                 async with postgres.session() as session:
-                    if project_id is not None:
-                        await self._require_owner(session, project_id, user)
-                    if (
-                        changes.workspace is not None
-                        and await WORKSPACES.id_for_slug(changes.workspace, session=session) is None
-                    ):
-                        raise ProjectError(f"no workspace named {changes.workspace!r}")
+                    await self._require_owner(session, project_id, user)
             full_name = normalize_repo_full_name(changes.repo_full_name)
             if not user.github_login:
                 raise ProjectForbidden("Link GitHub to bind a repository to a project")
@@ -415,8 +395,7 @@ class ProjectStore:
             return []
         rows = (
             await session.execute(
-                select(ProjectRow, WorkspaceRow.slug, Repository.full_name)
-                .outerjoin(WorkspaceRow, WorkspaceRow.id == ProjectRow.workspace_id)
+                select(ProjectRow, Repository.full_name)
                 .outerjoin(Repository, Repository.id == ProjectRow.repository_id)
                 .where(ProjectRow.id.in_(project_ids))
                 .order_by(ProjectRow.updated_at.desc())
@@ -443,7 +422,7 @@ class ProjectStore:
                 )
             )
         projects: list[Project] = []
-        for row, workspace, repo_full_name in rows:
+        for row, repo_full_name in rows:
             project_members = members.get(row.id, [])
             role = next(
                 (member.role for member in project_members if member.user_id == viewer.id),
@@ -453,7 +432,6 @@ class ProjectStore:
                 Project(
                     id=row.id,
                     name=row.name,
-                    workspace=workspace or DEFAULT_WORKSPACE_SLUG,
                     repo_full_name=repo_full_name,
                     role=role,
                     members=project_members,

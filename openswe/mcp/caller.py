@@ -23,7 +23,8 @@ if TYPE_CHECKING:
 
 _TOOL_MODULES: Final = (
     "openswe.tools.automations",
-    "openswe.tools.workspaces",
+    "openswe.routing.tools",
+    "openswe.tools.snapshotctl",
     "openswe.tools.organization_skills",
     "openswe.tools.manage_feature_flags",
     "openswe.tools.execution_defaults",

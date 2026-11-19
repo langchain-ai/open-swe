@@ -365,7 +365,7 @@ An app can have pull request reviews do work for it, such as screenshotting a fr
   Robin reads the changed files as the GitHub App and judges the first 3,000, all GitHub lists.
   When GitHub won't answer even after retrying, the app is left out too, with its outcome recorded as `failed` so a person can retry it.
 
-A workspace admin adds apps to reviews in **Settings → Review → Apps in reviews**, or with `manage_review_apps`.
+An admin adds apps to reviews in **Defaults → Apps in reviews**, or with `manage_review_apps`.
 Reviews follow the release that was newest when the admin added the app, so a later release changes no review until an admin updates it, and only on private repositories, whose previews run only code the organization's members pushed.
 
 A review usually finishes before its pull request's preview is up.
@@ -611,7 +611,7 @@ Bump `version` with each release so people can tell what they run.
 
 For apps with an administrator-approved browser review step, `host.github(repository).requestReview(number)` queues a retry on an open private PR.
 It requires the installed app's `agent` and `github:read` (or `github:write`) grants and the person's current repository access.
-Workspace automatic-review and preview-check gates still apply.
+Shared automatic-review and preview-check gates still apply.
 Duplicate queued work is reused; requests are limited to three per app and PR per hour.
 The call returns a `ReviewOutcome`, including an actionable blocked reason when preview reviews are not configured.
 

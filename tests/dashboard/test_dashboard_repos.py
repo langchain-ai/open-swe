@@ -239,39 +239,39 @@ async def test_parallel_access_checks_share_one_refresh_and_never_outlive_it(
 @pytest.mark.parametrize(
     ("github_status", "expected", "detail"),
     [
-        (None, 503, "workspace GitHub App token unavailable"),
+        (None, 503, "Robin GitHub App token unavailable"),
         (200, None, None),
-        (401, 502, "workspace GitHub App token rejected"),
-        (403, 403, "repository unavailable to the workspace GitHub App"),
-        (404, 404, "repository unavailable to the workspace GitHub App"),
+        (401, 502, "Robin GitHub App token rejected"),
+        (403, 403, "repository unavailable to the Robin GitHub App"),
+        (404, 404, "repository unavailable to the Robin GitHub App"),
         (429, 429, "GitHub API rate limit reached"),
     ],
 )
-async def test_workspace_access_uses_default_app_identity(
+async def test_system_access_uses_default_app_identity(
     monkeypatch: pytest.MonkeyPatch,
     github_status: int | None,
     expected: int | None,
     detail: str | None,
 ) -> None:
-    app_token = AsyncMock(return_value="workspace-token" if github_status else None)
+    app_token = AsyncMock(return_value="app-token" if github_status else None)
     monkeypatch.setattr("openswe.github.app.get_github_app_installation_token", app_token)
     monkeypatch.setattr(
         "openswe.dashboard.profiles.get_valid_access_token",
-        AsyncMock(side_effect=AssertionError("Workspace checks must not use OAuth")),
+        AsyncMock(side_effect=AssertionError("System checks must not use OAuth")),
     )
 
     def handle(request: httpx2.Request) -> httpx2.Response:
-        assert request.headers["authorization"] == "Bearer workspace-token"
+        assert request.headers["authorization"] == "Bearer app-token"
         assert request.url.path == "/repos/acme/api"
         assert github_status is not None
         return httpx2.Response(github_status, json={})
 
     monkeypatch.setattr(http, "GITHUB_TRANSPORT", httpx2.MockTransport(handle))
     if expected is None:
-        assert await repo_access.require_repo_access_for_workspace("acme/api") == "workspace-token"
+        assert await repo_access.require_repo_access_for_system("acme/api") == "app-token"
     else:
         with pytest.raises(HTTPException) as excinfo:
-            await repo_access.require_repo_access_for_workspace("acme/api")
+            await repo_access.require_repo_access_for_system("acme/api")
         assert excinfo.value.status_code == expected
         assert detail is not None
         assert detail in excinfo.value.detail

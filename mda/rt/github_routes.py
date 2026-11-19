@@ -77,7 +77,7 @@ def route(
 ) -> Route:
     """What a delivery of ``event`` starts here. ``from_app``: Open SWE's own App caused it."""
     if not (facts.allowed and facts.routable):
-        # Outside the repository allowlist, or no workspace owns the repository.
+        # The delivery cannot start agent work or is outside the repository allowlist.
         return Route()
     action = str(payload.get("action") or "")
     if event == "pull_request":

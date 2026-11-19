@@ -520,7 +520,7 @@ async def test_only_the_watching_task_can_take_over_stop_or_record_retries(
 ) -> None:
     watch = await _start_watch()
     assert watch.thread_id == "thread-1"
-    task = await Task.for_thread("thread-1", title="", workspace="default")
+    task = await Task.for_thread("thread-1", title="")
     assert watch.task_id == task.id
 
     with pytest.raises(baby_sit.WatchOwnedElsewhere):

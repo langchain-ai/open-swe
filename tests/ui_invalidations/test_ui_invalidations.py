@@ -7,14 +7,15 @@ from uuid import uuid7
 import pytest
 from sqlalchemy import text
 
+from openswe.dashboard.settings import SettingsUpdate, upsert_instance_settings
 from openswe.database import postgres
 from openswe.database.notifications import LISTENER
 from openswe.plugins.records import DocumentScope
+from openswe.routing.store import INTEGRATIONS
 from openswe.ui_invalidations import Topic, outbox
 from openswe.ui_invalidations.hub import HUB, Stream
 from openswe.ui_invalidations.routes import _stream
 from openswe.ui_invalidations.topics import KeyedTopic
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 
 def test_a_plugins_document_topics_can_always_be_subscribed_to() -> None:
@@ -71,9 +72,9 @@ def _parse(frame: str) -> tuple[str, dict[str, object]]:
 async def test_a_reconnecting_reader_is_told_only_what_committed_within_its_window(
     registry_db: None,
 ) -> None:
-    workspaces = Topic.WORKSPACES.name
+    settings = Topic.SETTINGS.name
     async with postgres.transaction() as conn:
-        await Topic.WORKSPACES.invalidate(conn)
+        await Topic.SETTINGS.invalidate(conn)
     try:
         async with postgres.transaction() as conn:
             await Topic.REVIEW_STYLES.invalidate(conn)
@@ -81,16 +82,14 @@ async def test_a_reconnecting_reader_is_told_only_what_committed_within_its_wind
     except RuntimeError:
         pass
 
-    assert await outbox.invalidated_since({workspaces: 5, Topic.REVIEW_STYLES.name: 5}) == {
-        workspaces
-    }
+    assert await outbox.invalidated_since({settings: 5, Topic.REVIEW_STYLES.name: 5}) == {settings}
 
     async with postgres.transaction() as conn:
         await conn.execute(
             text("UPDATE ui_invalidation SET created_at = created_at - interval '10 minutes'")
         )
-    assert await outbox.invalidated_since({workspaces: 60}) == set()
-    assert await outbox.invalidated_since({workspaces: 3600}) == {workspaces}
+    assert await outbox.invalidated_since({settings: 60}) == set()
+    assert await outbox.invalidated_since({settings: 3600}) == {settings}
 
     assert await outbox.prune() == 0
     async with postgres.transaction() as conn:
@@ -151,7 +150,7 @@ async def test_only_readers_of_a_private_thread_hear_its_queue(
         "thread-queues/t-review-alice",
     }
     assert await Topic.audible({"sub": "bob"}, topics) == {"thread-queues/t-shared"}
-    # An unlinked LangSmith session cannot read public GitHub-workspace dashboard threads.
+    # An unlinked LangSmith session cannot read public shared GitHub dashboard threads.
     unlinked = f"user:{uuid7()}"
     assert await Topic.audible({"sub": unlinked, "provider": "langsmith"}, topics) == set()
 
@@ -183,23 +182,30 @@ async def test_private_activity_only_reaches_its_owner(
     ) == {Topic.THREADS.keyed(str(owner))}
 
 
-async def test_a_workspace_write_reaches_an_open_stream(registry_db: None) -> None:
+async def test_a_global_settings_write_reaches_an_open_stream(registry_db: None) -> None:
     await HUB.start()
     LISTENER.start()
     try:
         async with asyncio.timeout(10):
             while not LISTENER.connected:
                 await asyncio.sleep(0.05)
-            async with aclosing(_stream({Topic.WORKSPACES.name: 0}, [])) as frames:
+            topics = (Topic.SETTINGS, Topic.ROUTING)
+            async with aclosing(_stream({topic.name: 0 for topic in topics}, [])) as frames:
                 event, hello = _parse(await anext(frames))
                 assert (event, hello["invalidated"], hello["denied"]) == ("hello", [], [])
 
-                await WORKSPACES.mark_refresh_builder(DEFAULT_WORKSPACE_SLUG, None)
+                for topic in topics:
+                    if topic is Topic.SETTINGS:
+                        await upsert_instance_settings(SettingsUpdate(pr_summaries=False))
+                    else:
+                        await INTEGRATIONS.configure_repository(
+                            "acme/app", may_start_threads=False, actor=None
+                        )
 
-                assert _parse(await anext(frames)) == (
-                    "invalidated",
-                    {"topics": [Topic.WORKSPACES.name]},
-                )
+                    assert _parse(await anext(frames)) == (
+                        "invalidated",
+                        {"topics": [topic.name]},
+                    )
     finally:
         await HUB.stop()
         await LISTENER.stop()

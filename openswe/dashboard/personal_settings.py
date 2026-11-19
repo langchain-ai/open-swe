@@ -23,7 +23,6 @@ SQL_SETTING_KEYS = SQL_FLAG_KEYS | {"personal_kitchen_channel_id"}
 PROFILE_SETTING_KEYS = frozenset(
     {
         "default_repo",
-        "workspace_default_repos",
         "base_branch",
         "branch_prefix",
         "auto_fix_ci",
@@ -35,12 +34,11 @@ PROFILE_SETTING_KEYS = frozenset(
 PREFERENCE_SETTING_KEYS = frozenset(
     {
         "default_visibility",
-        "default_workspace",
         "follow_up_behavior",
         "auto_show_changes",
     }
 )
-type SettingValue = str | bool | dict[str, str] | None
+type SettingValue = str | bool | None
 
 
 async def patch_personal_settings(

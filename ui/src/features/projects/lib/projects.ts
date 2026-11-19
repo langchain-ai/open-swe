@@ -17,7 +17,6 @@ export interface ProjectMember {
 export interface Project {
   id: string
   name: string
-  workspace: string
   repo_full_name: string | null
   /** The viewer's own role. */
   role: ProjectRole
@@ -28,7 +27,6 @@ export interface Project {
 
 export interface ProjectChanges {
   name?: string
-  workspace?: string
   /** `""` unbinds the repository. */
   repo_full_name?: string
 }
@@ -37,11 +35,7 @@ const path = (projectId: string) => `/projects/${encodeURIComponent(projectId)}`
 
 export const projectsApi = {
   list: () => agentsRequest<{ projects: Array<Project> }>("/projects"),
-  create: (body: {
-    name: string
-    workspace?: string | null
-    repo_full_name?: string | null
-  }) =>
+  create: (body: { name: string; repo_full_name?: string | null }) =>
     agentsRequest<Project>("/projects", {
       method: "POST",
       body: JSON.stringify(body),
@@ -145,7 +139,6 @@ export function useUpdateProject() {
           ? {
               ...project,
               ...(changes.name ? { name: changes.name } : {}),
-              ...(changes.workspace ? { workspace: changes.workspace } : {}),
               ...(changes.repo_full_name !== undefined
                 ? { repo_full_name: changes.repo_full_name || null }
                 : {}),

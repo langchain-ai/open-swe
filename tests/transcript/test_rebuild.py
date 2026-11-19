@@ -14,9 +14,11 @@ from openswe.database import postgres
 from openswe.transcript import tool_output
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (
+    TRANSCRIPT_EVENT_ADAPTER,
     MessageAppended,
     MessageCompleted,
     MessageSender,
+    RunNotice,
     ThreadCreated,
     ThreadMetaPatch,
     ThreadMetaUpdated,
@@ -145,6 +147,21 @@ async def _seed(thread_id: str, turn_id: UUID) -> None:
 def _comparable(snapshot: TranscriptSnapshot) -> dict[str, object]:
     """The snapshot without the wall clock a projection stamps as it writes."""
     return snapshot.model_dump(mode="json", exclude={"thread": {"updated_at"}})
+
+
+async def test_a_legacy_execution_notice_is_normalized_when_replayed() -> None:
+    payload = {
+        "type": "run.notice",
+        "turn_id": str(uuid7()),
+        "kind": "workspace_stale",
+        "data": {"snapshot": "old-image"},
+    }
+
+    notice = TRANSCRIPT_EVENT_ADAPTER.validate_python(payload)
+
+    assert isinstance(notice, RunNotice)
+    assert notice.model_dump(mode="json") == {**payload, "kind": "execution_stale"}
+    assert payload["kind"] == "workspace_stale"
 
 
 async def test_rebuilding_a_thread_folds_its_projections_back_out_of_the_log(

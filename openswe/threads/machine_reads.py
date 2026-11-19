@@ -33,7 +33,6 @@ def _view(thread: Any, thread_id: str, metadata: JsonObject) -> JsonObject:
             stored if isinstance(stored, str) else None,
         ),
         "title": title if isinstance(title, str) else None,
-        "workspace": metadata.get("workspace"),
         "url": dashboard_thread_url(thread_id),
     }
 

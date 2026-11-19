@@ -14,9 +14,9 @@ from pydantic import JsonValue, ValidationError
 
 from openswe import event_claims, reviewer
 from openswe.agent_api.reviewer import ReviewerKind
-from openswe.dashboard import workspace_settings as workspace_settings_module
-from openswe.dashboard import workspace_settings_cache
-from openswe.dashboard.workspace_settings import WorkspaceSettings, WorkspaceSettingsUpdate
+from openswe.dashboard import settings as settings_module
+from openswe.dashboard import settings_cache
+from openswe.dashboard.settings import Settings, SettingsUpdate
 from openswe.github import webhook as github_webhook
 from openswe.github.http import GitHubClient
 from openswe.github.pull_request_status import HeadChecks, PullRequestClient
@@ -43,7 +43,6 @@ from openswe.threads import succession as thread_succession
 from openswe.tools import review_apps as review_app_tools
 from openswe.users import User
 from openswe.webhooks import common as webhook_common
-from openswe.workspaces.store import WORKSPACES
 from tests.agent.test_agent_assembly_context import _base_config
 from tests.agent.test_agent_assembly_context import saved_thread_scope as saved_thread_scope
 
@@ -236,7 +235,7 @@ def test_a_file_webp_would_change_is_kept_as_it_is(content: bytes) -> None:
         (True, True, True, {"pr_number": None}, False),
     ],
 )
-async def test_a_review_of_a_private_repository_works_for_the_apps_its_workspace_added(
+async def test_a_review_of_a_private_repository_works_for_the_apps_the_admin_added(
     monkeypatch: pytest.MonkeyPatch,
     ids: bool,
     private: bool | None,
@@ -246,10 +245,8 @@ async def test_a_review_of_a_private_repository_works_for_the_apps_its_workspace
 ) -> None:
     app, release = uuid4(), uuid4()
     pinned = [{"app": str(app), "release": str(release)}] if ids else []
-    settings = WorkspaceSettings({"review_apps": pinned})
-    monkeypatch.setattr(
-        review_apps_module, "cached_workspace_settings", AsyncMock(return_value=settings)
-    )
+    settings = Settings({"review_apps": pinned})
+    monkeypatch.setattr(review_apps_module, "cached_settings", AsyncMock(return_value=settings))
     stored = None if private is None else Mock(private=private)
     monkeypatch.setattr(review_apps_module.Repository, "get", AsyncMock(return_value=stored))
     review = {"instructions": "Capture.", "writes": ["captures"], "browser": True}
@@ -282,10 +279,8 @@ async def test_a_review_leaves_out_an_app_whose_paths_the_pull_request_misses(
     monkeypatch: pytest.MonkeyPatch, files: list[str] | None, works: bool
 ) -> None:
     app, release = uuid4(), uuid4()
-    settings = WorkspaceSettings({"review_apps": [{"app": str(app), "release": str(release)}]})
-    monkeypatch.setattr(
-        review_apps_module, "cached_workspace_settings", AsyncMock(return_value=settings)
-    )
+    settings = Settings({"review_apps": [{"app": str(app), "release": str(release)}]})
+    monkeypatch.setattr(review_apps_module, "cached_settings", AsyncMock(return_value=settings))
     monkeypatch.setattr(
         review_apps_module.Repository, "get", AsyncMock(return_value=Mock(private=True))
     )
@@ -340,11 +335,11 @@ def _mcp_tool(name: str, server_name: str) -> BaseTool:
 
 def _instance_settings(monkeypatch: pytest.MonkeyPatch, **values: object) -> None:
     """The instance settings the review browser reads, saved as an admin would save them."""
-    record = WorkspaceSettingsUpdate.model_validate(values).model_dump()
+    record = SettingsUpdate.model_validate(values).model_dump()
     monkeypatch.setattr(
         review_browser_module,
         "cached_instance_settings",
-        AsyncMock(return_value=WorkspaceSettings(record)),
+        AsyncMock(return_value=Settings(record)),
     )
 
 
@@ -402,16 +397,16 @@ def test_review_browser_settings_take_domains_and_one_kit_tool(
     values: dict[str, object],
 ) -> None:
     with pytest.raises(ValidationError):
-        WorkspaceSettingsUpdate.model_validate(values)
+        SettingsUpdate.model_validate(values)
 
 
 def test_preview_checks_are_kept_whole_once_each() -> None:
-    update = WorkspaceSettingsUpdate.model_validate(
+    update = SettingsUpdate.model_validate(
         {"review_app_preview_checks": [" Deploy Preview ", "Deploy Preview", " "]}
     )
     assert update.review_app_preview_checks == ["Deploy Preview"]
     with pytest.raises(ValidationError):
-        WorkspaceSettingsUpdate.model_validate({"review_app_preview_checks": ["x" * 201]})
+        SettingsUpdate.model_validate({"review_app_preview_checks": ["x" * 201]})
 
 
 _PREVIEW_CHECK = "wait-for-dns"
@@ -435,7 +430,7 @@ def _check_passed(
 
 
 class _Preview:
-    """acme/widgets#7, open at ``_HEAD`` and reviewed by Robin, in a workspace whose reviews
+    """acme/widgets#7, open at ``_HEAD`` and reviewed by Robin, with global reviews that
     work for an app that browses, with the job queue and the review thread's runs in memory."""
 
     def __init__(
@@ -453,27 +448,22 @@ class _Preview:
     ) -> None:
         pinned = [{"app": str(uuid4()), "release": str(uuid4())}] if apps else []
         # None while the settings can't be read, when the cached read answers the defaults.
-        self.settings: WorkspaceSettings | None = WorkspaceSettings(
+        self.settings: Settings | None = Settings(
             {"review_apps": pinned, "review_app_preview_checks": list(checks)}
         )
         monkeypatch.setattr(
-            workspace_settings_cache,
-            "cached_workspace_settings",
-            AsyncMock(side_effect=lambda _workspace: self.settings or WorkspaceSettings({})),
+            settings_cache,
+            "cached_settings",
+            AsyncMock(side_effect=lambda: self.settings or Settings({})),
         )
         monkeypatch.setattr(
-            workspace_settings_module, "load_workspace_settings", AsyncMock(side_effect=self._load)
+            settings_module, "load_instance_settings", AsyncMock(side_effect=self._load)
         )
-        monkeypatch.setattr(WORKSPACES, "owner_of_repo", AsyncMock(return_value="w"))
         monkeypatch.setattr(webhook_common, "is_repo_allowed", lambda _repo: allowed)
-        monkeypatch.setattr(github_webhook, "repo_is_routable", AsyncMock(return_value=True))
         monkeypatch.setattr(
             webhook_common, "is_repo_auto_review_enabled", AsyncMock(return_value=auto_review)
         )
         monkeypatch.setattr(ReviewApps, "triaged", AsyncMock(return_value=_apps(browser=browses)))
-        monkeypatch.setattr(
-            webhook_common, "workspace_for_repo_config", AsyncMock(return_value="w")
-        )
         self.reviewed = reviewed
         monkeypatch.setattr(
             webhook_common, "draft_review_enabled_for_author", AsyncMock(return_value=review_drafts)
@@ -575,7 +565,7 @@ class _Preview:
             workflows={} if self.overflow else self.workflows,
         )
 
-    async def _load(self, _workspace: str) -> WorkspaceSettings:
+    async def _load(self) -> Settings:
         if self.settings is None:
             raise RuntimeError("The settings can't be read")
         return self.settings
@@ -913,7 +903,7 @@ async def test_the_watch_stops_once_the_pull_request_moves_on(
 
 
 @pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
-async def test_a_workspace_without_preview_checks_starts_no_watch(
+async def test_global_settings_without_preview_checks_starts_no_watch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     preview = _Preview(monkeypatch, checks=())
@@ -1255,10 +1245,8 @@ async def _reviewing(
         }
     )
     pinned = {"app": str(release.app), "release": str(release.id)}
-    settings = WorkspaceSettings({"review_apps": [pinned]})
-    monkeypatch.setattr(
-        review_apps_module, "cached_workspace_settings", AsyncMock(return_value=settings)
-    )
+    settings = Settings({"review_apps": [pinned]})
+    monkeypatch.setattr(review_apps_module, "cached_settings", AsyncMock(return_value=settings))
     monkeypatch.setattr(
         review_apps_module.Repository, "get", AsyncMock(return_value=Mock(private=True))
     )
@@ -1389,9 +1377,7 @@ async def test_only_a_review_that_works_for_apps_gets_their_tools_and_browser(
 ) -> None:
     _instance_settings(monkeypatch, review_browser_session_tool="hub_mint_session")
     monkeypatch.setattr(ReviewApps, "of", AsyncMock(return_value=_apps() if works else None))
-    monkeypatch.setattr(
-        reviewer, "cached_workspace_settings", AsyncMock(return_value=WorkspaceSettings({}))
-    )
+    monkeypatch.setattr(reviewer, "cached_settings", AsyncMock(return_value=Settings({})))
     loaded = MCPTools(
         [
             _mcp_tool("mcp_lmt_hub_mint_session", "hub_mint_session"),
@@ -1427,9 +1413,7 @@ async def test_a_run_for_a_deployed_preview_cannot_change_the_reviews_findings(
 ) -> None:
     _instance_settings(monkeypatch)
     monkeypatch.setattr(ReviewApps, "of", AsyncMock(return_value=_apps(browser=False)))
-    monkeypatch.setattr(
-        reviewer, "cached_workspace_settings", AsyncMock(return_value=WorkspaceSettings({}))
-    )
+    monkeypatch.setattr(reviewer, "cached_settings", AsyncMock(return_value=Settings({})))
     config = _base_config()
     config["configurable"].update(
         {
@@ -1480,7 +1464,7 @@ async def test_closing_a_pull_request_deletes_what_reviews_saved_for_it(
     await documents.attach(
         "captures", reviewed, "pulls/7/a", "a.png", "image/png", _png((2, 2)), by=None
     )
-    # The owner's next release drops the step; workspaces that added the app before still
+    # The owner's next release drops the step; admins who added the app before still
     # have reviews follow the release that saved these.
     await _published(None, collections)
 

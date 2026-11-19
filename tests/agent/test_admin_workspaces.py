@@ -5,18 +5,21 @@ import pytest
 from langgraph.graph.state import RunnableConfig
 
 from openswe import server
-from openswe.sandboxes import lifecycle
+from openswe.execution_images import EXECUTION_IMAGES
+from openswe.routing import tools as routing_tools
+from openswe.routing.store import INTEGRATIONS
 from openswe.slack.channels import SlackChannel
-from openswe.tools import workspaces as env_tools
+from openswe.tools.snapshotctl import (
+    publish_execution_image,
+    read_execution_image,
+    rebuild_execution_image,
+    snapshotctl,
+)
 from openswe.users import User
 from openswe.utils.authorship import CollaboratorIdentity
-from openswe.workspaces.store import WORKSPACES, Workspace, WorkspaceCreate, WorkspaceRoutingUpdate
 from tests.conftest import serve_threads_from
 
 pytestmark = pytest.mark.usefixtures("registry_db")
-
-
-_READY = Workspace(slug="base", name="Base", snapshot_status="ready", snapshot_id="env-snap")
 
 
 def _config(**configurable: object) -> RunnableConfig:
@@ -31,30 +34,6 @@ def private_thread_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-# --- snapshot precedence ---
-
-
-@pytest.mark.asyncio
-async def test_workspace_without_a_captured_snapshot_falls_back_to_the_provider_base() -> None:
-    never_captured = _READY.model_copy(update={"snapshot_status": "failed", "snapshot_id": None})
-    with patch.object(
-        lifecycle, "load_workspace", new_callable=AsyncMock, return_value=never_captured
-    ):
-        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id is None
-
-
-@pytest.mark.asyncio
-async def test_a_nightly_capture_does_not_send_runs_to_the_base_image() -> None:
-    """The new id lands only on success, so a refresh in flight changes nothing."""
-    capturing = _READY.model_copy(update={"snapshot_status": "capturing"})
-    with patch.object(lifecycle, "load_workspace", new_callable=AsyncMock, return_value=capturing):
-        assert (await lifecycle.SandboxCreateConfig.resolve()).snapshot_id == "env-snap"
-
-
-# --- admin thread gate ---
-
-
-@pytest.mark.asyncio
 async def test_admin_thread_accepts_configured_admin_slack_dm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -73,31 +52,24 @@ async def test_admin_thread_accepts_configured_admin_slack_dm(
     assert await server._admin_thread(config, None) is True
 
 
-# --- tool gate ---
-
-
-@pytest.mark.asyncio
 async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     config = _config(admin_thread=True, github_login="someone-else")
     with patch("openswe.run_config.get_config", return_value=config):
-        assert (await env_tools.list_workspaces())["ok"] is False
-        assert (await env_tools.snapshotctl("stop", "base"))["ok"] is False
-        assert (await env_tools.read_execution_image())["ok"] is False
-        assert (await env_tools.rebuild_execution_image())["ok"] is False
-        assert (await env_tools.publish_execution_image())["ok"] is False
-        assert (
-            await env_tools.configure_workspace(
-                "base", WorkspaceRoutingUpdate(kitchen_channel_ids=["C0NEW"])
-            )
-        )["ok"] is False
+        assert (await routing_tools.list_integration_bindings())["ok"] is False
+        assert (await routing_tools.bind_repository("acme/app"))["ok"] is False
+        assert (await routing_tools.unbind_repository("acme/app"))["ok"] is False
+        assert (await routing_tools.bind_slack_channel("C0NEW", "kitchen"))["ok"] is False
+        assert (await routing_tools.unbind_slack_channel("C0NEW"))["ok"] is False
+        assert (await snapshotctl("stop"))["ok"] is False
+        assert (await read_execution_image())["ok"] is False
+        assert (await rebuild_execution_image())["ok"] is False
+        assert (await publish_execution_image())["ok"] is False
 
 
-@pytest.mark.asyncio
 async def test_snapshot_reads_need_a_private_admin_surface(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Logs and audit history stay out of shared threads; writes still reach the store."""
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
     serve_threads_from(
         monkeypatch,
@@ -107,33 +79,24 @@ async def test_snapshot_reads_need_a_private_admin_surface(
             }
         ),
     )
-    get = AsyncMock(return_value=_READY)
+    status = AsyncMock(return_value={"status": "idle"})
     with (
         patch(
             "openswe.run_config.get_config",
             return_value=_config(admin_thread=True, github_login="ramonn"),
         ),
-        patch.object(env_tools.store.WORKSPACES, "get", get),
+        patch.object(EXECUTION_IMAGES, "status", status),
     ):
-        assert (await env_tools.snapshotctl("status", "base"))["ok"] is False
-        assert (await env_tools.snapshotctl("history", "base"))["ok"] is False
-        assert (await env_tools.read_execution_image())["ok"] is False
-        global_task = await env_tools.refresh.task_status("image-not-visible")
-        assert "private admin" in global_task["error"]
-        get.assert_not_awaited()
-        refused = await env_tools.snapshotctl("stop", "base")
+        assert (await snapshotctl("status"))["ok"] is False
+        assert (await snapshotctl("history"))["ok"] is False
+        assert (await read_execution_image())["ok"] is False
+        status.assert_not_awaited()
+        refused = await snapshotctl("stop")
 
-    get.assert_awaited_once_with("base")
-    assert "no refresh" in str(refused["error"])
-
-
-# --- prompt wiring ---
+    assert "no global execution image build" in str(refused["error"])
 
 
 async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An admin requester must not make everyone else in the roster look like one."""
-    from openswe import server
-
     monkeypatch.setenv("CONFIGURED_ADMINS", "admin@example.com")
     monkeypatch.setattr(server, "_participant_user", AsyncMock(return_value=None))
     monkeypatch.setattr(server, "load_profile", AsyncMock(return_value=None))
@@ -152,14 +115,11 @@ async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.Mon
 
 
 @pytest.mark.parametrize("eligible", [True, False])
-async def test_configure_workspace_preserves_definition_and_checks_kitchen(
-    monkeypatch: pytest.MonkeyPatch, registry_db: None, eligible: bool
+async def test_channel_binding_checks_kitchen_eligibility(
+    monkeypatch: pytest.MonkeyPatch, eligible: bool
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
-    await WORKSPACES.create(
-        WorkspaceCreate(name="Core", prompt="keep me", slack_channel_ids=["C0OLD", "C0NEW"]),
-        "ramonn",
-    )
+    await SlackChannel.save_all({"id": "C0NEW", "name": "new"})
     channel = SlackChannel(
         id="C0NEW",
         payload={"is_member": eligible, "is_ext_shared": False, "is_pending_ext_shared": False},
@@ -169,12 +129,10 @@ async def test_configure_workspace_preserves_definition_and_checks_kitchen(
         patch("openswe.run_config.get_config", return_value=config),
         patch.object(SlackChannel, "load", AsyncMock(return_value=channel)),
     ):
-        result = await env_tools.configure_workspace(
-            "core", WorkspaceRoutingUpdate(kitchen_channel_ids=["C0NEW"])
-        )
-    assert result["ok"] is eligible
-    stored = await WORKSPACES.get("core")
-    assert stored is not None
-    assert stored.prompt == "keep me"
-    assert stored.slack_channel_ids == ["C0NEW", "C0OLD"]
-    assert stored.kitchen_channel_ids == (["C0NEW"] if eligible else [])
+        if eligible:
+            result = await routing_tools.bind_slack_channel("C0NEW", "kitchen")
+            assert result["ok"] is True
+        else:
+            with pytest.raises(ValueError, match="internal channel"):
+                await routing_tools.bind_slack_channel("C0NEW", "kitchen")
+    assert await INTEGRATIONS.channel_mode("C0NEW") == ("kitchen" if eligible else None)

@@ -23,7 +23,6 @@ FollowUpBehavior = Literal["queue", "steer"]
 
 class UserPreferencesUpdate(BaseModel):
     default_visibility: ThreadVisibility
-    default_workspace: str | None = None
     # What Enter does while a run is live: hold the message until the run ends,
     # or steer the live run. Omitted keeps the stored value.
     follow_up_behavior: FollowUpBehavior | None = None
@@ -33,13 +32,8 @@ class UserPreferencesUpdate(BaseModel):
 
 def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
     visibility = (record or {}).get("default_visibility")
-    workspace = (record or {}).get("default_workspace")
-    normalized_workspace = (
-        workspace.strip().lower() if isinstance(workspace, str) and workspace.strip() else None
-    )
     return {
         "default_visibility": visibility if visibility in ("public", "private") else "private",
-        "default_workspace": normalized_workspace,
         "follow_up_behavior": (
             "queue" if (record or {}).get("follow_up_behavior") == "queue" else "steer"
         ),
@@ -66,12 +60,9 @@ async def set_user_preferences(
     async with postgres.session(session) as db:
         existing = await USER_PREFERENCES.get(login, session=db) or {}
         value = {
-            **existing,
+            **{key: value for key, value in existing.items() if key != "default_workspace"},
             "login": login,
             "default_visibility": update.default_visibility,
-            "default_workspace": update.default_workspace.strip().lower()
-            if update.default_workspace and update.default_workspace.strip()
-            else None,
             "follow_up_behavior": (
                 update.follow_up_behavior
                 if update.follow_up_behavior is not None

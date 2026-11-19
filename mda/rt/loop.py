@@ -395,7 +395,7 @@ class RunLoop:
             if self.rules.pinned_model
             else model_for(self._models, {**current, "model_route": self._backend.run.route})
         )
-        system_prompt, workspace_prompt, thread_prompt = self._system_prompt(current)
+        system_prompt, execution_prompt, thread_prompt = self._system_prompt(current)
         if self.rules.client_prompt:
             system_prompt = f"{system_prompt}\n\n{self.rules.client_prompt}"
         return BeforeModel(
@@ -403,7 +403,7 @@ class RunLoop:
             messages=_json_dicts.validate_python(messages_to_dict(added)),
             call=ModelCall(
                 system_prompt=system_prompt,
-                workspace_prompt=workspace_prompt,
+                execution_prompt=execution_prompt,
                 thread_prompt=thread_prompt,
                 hidden_tools=self._hidden(current),
                 model=model,
@@ -589,24 +589,21 @@ class RunLoop:
         return Route(route=route, persist=persist)
 
     def _system_prompt(self, held: Mapping[str, object]) -> tuple[str, str, str]:
-        """The prompt every thread shares, the part its workspace's threads share, and the
-        part only this one's says, all fixed for the thread's life: a changed byte misses
-        the provider's cache.
-
-        The rendered prompt ends in the workspace's part and then the thread's. A thread
-        rendered before the backend named a part has none, and the first holds the rest.
-        """
+        """The shared, execution and thread partitions of the cached prompt."""
         rendered = held.get("rendered_system_prompt")
         rest = rendered if isinstance(rendered, str) else ""
         parts: list[str] = []
-        for key in ("rendered_thread_prompt", "rendered_workspace_prompt"):
-            part = held.get(key)
+        for keys in (
+            ("rendered_thread_prompt",),
+            ("rendered_execution_prompt", "rendered_workspace_prompt"),
+        ):
+            part = next((held[key] for key in keys if key in held), None)
             part = part if isinstance(part, str) and rest.endswith(part) else ""
             rest = rest.removesuffix(part).rstrip()
             parts.append(part)
-        thread, workspace = parts
+        thread, execution = parts
         sections = [self.rules.deployment_prompt, rest]
-        return "\n\n".join(section for section in sections if section), workspace, thread
+        return "\n\n".join(section for section in sections if section), execution, thread
 
     def _hidden(self, held: Mapping[str, object]) -> list[str]:
         hidden = set(self.rules.hidden_tools)

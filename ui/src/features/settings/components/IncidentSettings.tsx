@@ -231,7 +231,7 @@ function SlackConnectionStatus({
           )}
           <dl className="mt-space-4 grid grid-cols-1 gap-space-3 text-xs sm:grid-cols-3">
             <div>
-              <dt className="text-secondary">Workspace</dt>
+              <dt className="text-secondary">Slack workspace</dt>
               <dd className="mt-space-1 font-mono">
                 {connection.workspace_id ||
                   policy.workspace_id ||

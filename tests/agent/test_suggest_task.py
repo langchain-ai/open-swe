@@ -13,23 +13,20 @@ from openswe.tasks.store import Task
 from openswe.threads import index
 from openswe.tools import suggest_task as tool
 from openswe.users import User
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 
 
 @pytest.mark.usefixtures("registry_db")
 class TestSuggestedTasks:
     @pytest.mark.parametrize("source", ["dashboard", "github"])
-    async def test_cross_workspace_suggestion_keeps_origin_and_publishes_event(
+    async def test_cross_repository_suggestion_keeps_origin_and_publishes_event(
         self, monkeypatch: pytest.MonkeyPatch, source: str
     ) -> None:
-        await WORKSPACES.create(WorkspaceCreate(name="Origin", repos=["acme/origin"]), "alice")
-        await WORKSPACES.create(WorkspaceCreate(name="Target", repos=["acme/target"]), "alice")
         await index.create("origin-thread", runtime="mda")
         monkeypatch.setattr(
             "openswe.users.models.is_authorized_github_login", AsyncMock(return_value=True)
         )
         user = await User.sign_in("github", "123", login="alice")
-        task = await Task.for_thread("origin-thread", title="Original task", workspace="origin")
+        task = await Task.for_thread("origin-thread", title="Original task")
         pull = await (await PullRequest.load("acme", "origin", 7)).ensure()
         monkeypatch.setattr(
             RunConfig,
@@ -37,7 +34,6 @@ class TestSuggestedTasks:
             lambda: RunConfig.parse(
                 {
                     "thread_id": "origin-thread",
-                    "workspace": "origin",
                     "source": source,
                     "github_login": "alice",
                     "user_id": str(user.id),
@@ -52,7 +48,6 @@ class TestSuggestedTasks:
             summary="Fix old bug",
             details="A pre-existing bug outside the original task.",
             repo="acme/target",
-            workspace="target",
             context_links=["https://github.com/acme/target/issues/9"],
         )
         assert result["success"] is True
@@ -76,7 +71,7 @@ class TestSuggestedTasks:
                 .mappings()
                 .one()
             )
-        assert row["workspace_id"] == await WORKSPACES.id_for_slug("target")
+        assert row["workspace_id"] is None
         assert row["thread_id"] == "origin-thread"
         assert row["task_id"] == task.id
         assert row["pull_request_id"] == pull.id
@@ -86,7 +81,8 @@ class TestSuggestedTasks:
         )
         assert row["id"].version == 7
         assert row["created_at"] is not None and row["updated_at"] is not None
-        assert event["workspace_id"] == row["workspace_id"]
+        assert event["workspace_id"] is None
+        assert event["source"] == "robin"
         assert event["repository_id"] == row["repository_id"]
         assert event["payload"]["context_links"] == row["context_links"]
         assert event["payload"]["id"] == str(row["id"])
@@ -94,7 +90,6 @@ class TestSuggestedTasks:
     async def test_denied_target_does_not_record_a_suggestion(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        await WORKSPACES.create(WorkspaceCreate(name="Target", repos=["acme/private"]), "alice")
         monkeypatch.setattr(
             RunConfig,
             "from_runtime",
@@ -117,7 +112,6 @@ class TestSuggestedTasks:
     async def test_webhook_sender_without_oauth_can_only_suggest_for_current_repo(
         self, monkeypatch: pytest.MonkeyPatch, repo: str, review_shadow: bool
     ) -> None:
-        await WORKSPACES.create(WorkspaceCreate(name="Origin", repos=["acme/origin"]), "alice")
         await index.create("review-thread", runtime="mda")
         monkeypatch.setattr(
             RunConfig,
@@ -126,7 +120,6 @@ class TestSuggestedTasks:
                 {
                     "thread_id": "review-thread",
                     "source": "github",
-                    "workspace": "origin",
                     "github_login": "webhook-sender",
                     "repo": {"owner": "acme", "name": "origin"},
                     "pr_number": 7,
@@ -140,7 +133,7 @@ class TestSuggestedTasks:
             "require_repo_access_for_user",
             AsyncMock(side_effect=HTTPException(401, "no OAuth")),
         )
-        monkeypatch.setattr(module, "require_repo_access_for_workspace", AsyncMock())
+        monkeypatch.setattr(module, "require_repo_access_for_system", AsyncMock())
         result = await tool(summary="Old bug", details="Fix later", repo=repo)
         async with transaction() as conn:
             count = await conn.scalar(text("SELECT count(*) FROM suggested_task"))
@@ -171,7 +164,6 @@ class TestSuggestedTasks:
         repo: str,
         links: list[str],
     ) -> None:
-        await WORKSPACES.create(WorkspaceCreate(name="Origin"), "alice")
         await index.create("review-thread", runtime="mda")
         monkeypatch.setattr(
             RunConfig,
@@ -180,7 +172,6 @@ class TestSuggestedTasks:
                 {
                     "thread_id": "review-thread",
                     "source": "github",
-                    "workspace": "origin",
                     "github_login": "sender",
                     "pr_url": "https://github.com/acme/origin/pull/7",
                 }

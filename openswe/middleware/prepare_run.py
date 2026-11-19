@@ -26,17 +26,10 @@ class PrepareRunState(AgentState):
     run_prepared_for: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
     work_dir: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
     rendered_system_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
-    # The workspace's part, just ahead of the thread's.
-    rendered_workspace_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
+    rendered_execution_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
     # How the rendered prompt ends: the part only this thread's says.
     rendered_thread_prompt: NotRequired[Annotated[str | None, OmitFromOutput, _take_latest]]
     system_prompt_fixed: NotRequired[Annotated[bool, OmitFromOutput, _take_latest]]
-    execution_prompt_enabled: NotRequired[Annotated[bool, OmitFromOutput, _take_latest]]
-    execution_shared_prompt: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
-    execution_thread_prompt: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
-    legacy_system_prompt: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
-    legacy_workspace_prompt: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
-    legacy_thread_prompt: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]
     requested_model: NotRequired[Annotated[str | None, OmitFromOutput]]
     requested_effort: NotRequired[Annotated[str | None, OmitFromOutput]]
     selected_model_id: NotRequired[Annotated[str, OmitFromOutput, _take_latest]]

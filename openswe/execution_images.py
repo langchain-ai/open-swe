@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 from datetime import UTC, datetime
-from typing import Literal, Self
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,21 +13,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS, ExecutionDefaults
 from openswe.database import postgres
 from openswe.jobs import queue
-from openswe.ui_invalidations import Topic
-from openswe.utils.json_types import JsonObject
-from openswe.utils.time import now_iso, parse_iso
-from openswe.workspaces import refresh
-from openswe.workspaces.store import (
+from openswe.sandboxes.image_build import (
     REFRESH_LOG_MAX_CHARS,
     REFRESH_LOG_TAIL_CHARS,
+    UPDATE_INTERVAL_SECONDS,
     RefreshKind,
     RefreshStatus,
     RefreshStep,
+    SnapshotBuild,
     StepStatus,
-    Workspace,
-    capture_sandbox_snapshot,
-    snapshot_name_prefix,
 )
+from openswe.ui_invalidations import Topic
+from openswe.utils.json_types import JsonObject
+from openswe.utils.time import now_iso, parse_iso
 
 logger = logging.getLogger(__name__)
 
@@ -35,16 +33,18 @@ logger = logging.getLogger(__name__)
 class ExecutionTarget(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    kind: Literal["workspace", "global"]
-    workspace_slug: str | None = None
+    kind: Literal["global"]
 
-    @model_validator(mode="after")
-    def valid_workspace(self) -> Self:
-        if (self.kind == "workspace" and not (self.workspace_slug or "").strip()) or (
-            self.kind == "global" and self.workspace_slug is not None
+    @model_validator(mode="before")
+    @classmethod
+    def historical_global_target(cls, value: object) -> object:
+        if (
+            isinstance(value, dict)
+            and value.get("kind") == "global"
+            and value.get("workspace_slug") is None
         ):
-            raise ValueError("workspace_slug is required only for workspace execution targets")
-        return self
+            return {key: item for key, item in value.items() if key != "workspace_slug"}
+        return value
 
 
 class ImageState(BaseModel):
@@ -69,7 +69,7 @@ class ImageState(BaseModel):
         captured = parse_iso(self.captured_at(definition.snapshot_id))
         return (
             captured is None
-            or (datetime.now(UTC) - captured).total_seconds() >= refresh.UPDATE_INTERVAL_SECONDS
+            or (datetime.now(UTC) - captured).total_seconds() >= UPDATE_INTERVAL_SECONDS
         )
 
     def update_due(self, definition: ExecutionDefaults) -> bool:
@@ -78,7 +78,7 @@ class ImageState(BaseModel):
         finished = parse_iso(self.refresh_finished_at)
         return (
             finished is None
-            or (datetime.now(UTC) - finished).total_seconds() >= refresh.UPDATE_INTERVAL_SECONDS
+            or (datetime.now(UTC) - finished).total_seconds() >= UPDATE_INTERVAL_SECONDS
         )
 
 
@@ -151,9 +151,12 @@ class ExecutionImageAttempt:
             await self.images.save_state(state, session=session)
 
     async def capture(self, sandbox_id: str) -> None:
-        name = self.definition.snapshot_name or f"{snapshot_name_prefix()}-execution-global"
-        snapshot_id = await capture_sandbox_snapshot(
-            sandbox_id, name, timeout=refresh.capture_timeout()
+        name = (
+            self.definition.snapshot_name
+            or f"{SnapshotBuild.snapshot_name_prefix()}-execution-global"
+        )
+        snapshot_id = await SnapshotBuild.capture_sandbox_snapshot(
+            sandbox_id, name, timeout=SnapshotBuild.capture_timeout()
         )
         async with postgres.session() as session:
             current = ExecutionDefaults.model_validate(
@@ -174,7 +177,7 @@ class ExecutionImageAttempt:
             state.snapshot_id = snapshot_id
             state.last_captured_at = now_iso()
             await self.images.save_state(state, session=session)
-        await Topic.WORKSPACES.invalidate()
+        await Topic.SETTINGS.invalidate()
 
 
 class ExecutionImages:
@@ -188,7 +191,7 @@ class ExecutionImages:
 
     @staticmethod
     def fingerprint(definition: ExecutionDefaults) -> str:
-        value = definition.model_dump(mode="json", exclude={"enabled", "prompt"})
+        value = definition.model_dump(mode="json", exclude={"prompt"})
         return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
     async def state(self, *, session: AsyncSession | None = None) -> ImageState:
@@ -203,12 +206,12 @@ class ExecutionImages:
 
     async def ensure_refresh_cron(self) -> str | None:
         definition = await EXECUTION_DEFAULTS.load()
-        if not definition.enabled or not definition.setup_script:
+        if not definition.setup_script:
             return None
         job = await queue.schedule(
             self.JOB,
             {"target": {"kind": "global"}, "refresh_kind": "full"},
-            cron=refresh.daily_schedule("global-execution"),
+            cron=SnapshotBuild.daily_schedule("global-execution"),
             key=self.CRON_KEY,
             metadata={"kind": self.JOB, "target": "global"},
             replace=False,
@@ -217,10 +220,6 @@ class ExecutionImages:
 
     @staticmethod
     def assert_refreshable(definition: ExecutionDefaults, kind: RefreshKind) -> None:
-        if not definition.enabled:
-            raise ValueError(
-                "global execution defaults are disabled; enable Use Robin-wide Defaults before rebuilding"
-            )
         if kind == "full" and not definition.setup_script:
             raise ValueError("global execution image has no setup script to run")
         if kind == "update" and not definition.update_script:
@@ -254,17 +253,11 @@ class ExecutionImages:
         return str(job.id)
 
     async def publish(self, sandbox_id: str) -> str:
-        if not await EXECUTION_DEFAULTS.is_enabled():
-            raise ValueError(
-                "global execution defaults are disabled; enable Use Robin-wide Defaults before publishing"
-            )
         return await self.enqueue("full", sandbox_id=sandbox_id)
 
     async def maybe_start_update(self) -> str | None:
         try:
             definition = await EXECUTION_DEFAULTS.load()
-            if not definition.enabled:
-                return None
             await self.ensure_refresh_cron()
             if not (await self.state()).update_due(definition):
                 return None
@@ -278,7 +271,7 @@ class ExecutionImages:
         async with postgres.session() as session:
             definition = ExecutionDefaults.model_validate(await self.records.lock(session=session))
             state = ImageState.model_validate(await self.records.lock("image", session=session))
-            if not definition.enabled or not await job.held(session=session):
+            if not await job.held(session=session):
                 return None
             if "source_sandbox_id" not in job.payload:
                 self.assert_refreshable(
@@ -296,7 +289,7 @@ class ExecutionImages:
             state.refresh_sandbox_id = None
             await self.save_state(state, session=session)
         if interrupted_builder and interrupted_builder != job.payload.get("source_sandbox_id"):
-            await refresh.release_builder_sandbox(interrupted_builder)
+            await SnapshotBuild.release_builder_sandbox(interrupted_builder)
         return ExecutionImageAttempt(self, job, definition)
 
     async def refresh(self, job: queue.Job) -> dict[str, JsonValue]:
@@ -304,8 +297,6 @@ class ExecutionImages:
         if target.kind != "global":
             raise ValueError("execution image jobs require an explicit global target")
         definition = await EXECUTION_DEFAULTS.load()
-        if not definition.enabled:
-            return {"status": "global_execution_disabled"}
         if job.cron:
             if not definition.setup_script:
                 return {"status": "no_setup_script"}
@@ -330,13 +321,9 @@ class ExecutionImages:
                 return {"status": "failed", "target": "global"}
         kind: RefreshKind = "update" if job.payload.get("refresh_kind") == "update" else "full"
         definition = attempt.definition
-        adapter = Workspace(
-            slug="global-execution",
-            **definition.model_dump(exclude={"enabled", "prompt"}),
-        )
-        adapter.sandbox_create_params()
-        build = refresh.SnapshotBuild(
-            adapter,
+        definition.sandbox_create_params()
+        build = SnapshotBuild(
+            definition,
             definition.snapshot_id if kind == "update" else definition.base_snapshot_id,
             kind,
             attempt,
@@ -352,7 +339,6 @@ class ExecutionImages:
             "target": ExecutionTarget(kind="global").model_dump(mode="json"),
             "task_id": self.TASK_PREFIX + state.refresh_run_id if state.refresh_run_id else None,
             "kind": self.JOB,
-            "enabled": definition.enabled,
             "snapshot_id": definition.snapshot_id,
             "snapshot_name": definition.snapshot_name,
             "base_snapshot_id": definition.base_snapshot_id,
@@ -384,13 +370,20 @@ class ExecutionImages:
             result["output"] = (state.refresh_log or "")[-REFRESH_LOG_TAIL_CHARS:] or None
             result["output_source"] = "record"
             if step and step.log_path and state.refresh_sandbox_id:
-                result["output"] = await refresh.read_builder_log(
+                result["output"] = await SnapshotBuild.read_builder_log(
                     state.refresh_sandbox_id, step.log_path
                 )
                 result["output_source"] = "builder"
                 result["output_path"] = step.log_path
                 result["output_truncated"] = True
         return result
+
+    def owns_task(self, task_id: str) -> bool:
+        return task_id.startswith(self.TASK_PREFIX)
+
+    async def task_list(self) -> list[dict[str, JsonValue]]:
+        status = await self.status()
+        return [status] if status.get("task_id") else []
 
     async def task_status(self, task_id: str, *, with_output: bool = True) -> dict[str, JsonValue]:
         state = await self.state()
@@ -420,7 +413,7 @@ class ExecutionImages:
                 state.refresh_sandbox_id = None
                 await self.save_state(state, session=session)
         if builder:
-            await refresh.release_builder_sandbox(builder)
+            await SnapshotBuild.release_builder_sandbox(builder)
         return {"task_id": task_id, "status": "cancelled", "target": "global"}
 
 

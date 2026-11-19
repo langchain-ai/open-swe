@@ -30,12 +30,10 @@ const SETTINGS_ROOTS = [
   "/my-settings",
   "/review",
   "/admin",
-  "/workspaces",
   "/usage",
   "/integrations",
   "/feature-flags",
   "/agents/instructions",
-  "/agents/workspaces",
 ]
 
 export class ContextNavigation {

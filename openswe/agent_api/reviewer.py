@@ -132,6 +132,6 @@ class ReviewerKind(RunKind):
         static = _tools_by_name().get(name)
         if static is not None:
             return static
-        # The tools the workspace's review apps add, as the run's catalog offered them.
+        # The tools the configured review apps add, as the run's catalog offered them.
         app_tools = await ReviewAppTools.of_run(RunConfig.from_config(config))
         return None if app_tools is None else await app_tools.tool(name)

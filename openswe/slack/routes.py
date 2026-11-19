@@ -13,6 +13,7 @@ from openswe.expedited_review import slack as expedited_review
 from openswe.human_review import offer as review_offer
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
+from openswe.routing.store import is_kitchen_channel
 from openswe.slack import app_modals, mda_forwarding, retry, suggested_actions, workflow_approval
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
@@ -65,7 +66,6 @@ from openswe.users import User
 from openswe.utils.json_types import JsonObject
 from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
-from openswe.workspaces.routing import is_kitchen_channel
 
 router = APIRouter()
 

@@ -121,18 +121,18 @@ async def require_repo_access_for_user(login: str, full_name: str) -> str:
     return await _ACCESS_CHECKS.require(login, full_name)
 
 
-async def require_repo_access_for_workspace(full_name: str) -> str:
+async def require_repo_access_for_system(full_name: str) -> str:
     try:
         async with GitHubClient.as_app(timeout=DEFAULT_HTTP_TIMEOUT) as github:
             return await RepoAccessResponse.check(github, full_name)
     except GitHubAppUnavailable as exc:
-        raise HTTPException(503, "workspace GitHub App token unavailable") from exc
+        raise HTTPException(503, "Robin GitHub App token unavailable") from exc
     except HTTPException as exc:
         if exc.status_code == 401:
-            raise HTTPException(502, "workspace GitHub App token rejected") from exc
+            raise HTTPException(502, "Robin GitHub App token rejected") from exc
         if exc.status_code in (403, 404):
             raise HTTPException(
-                exc.status_code, "repository unavailable to the workspace GitHub App"
+                exc.status_code, "repository unavailable to the Robin GitHub App"
             ) from exc
         raise
 
@@ -149,20 +149,20 @@ async def repo_config_for_user(login: str, full_name: str | None) -> dict[str, s
     return {"owner": owner, "name": name}
 
 
-async def repo_config_for_workspace(full_name: str | None) -> dict[str, str] | None:
+async def repo_config_for_system(full_name: str | None) -> dict[str, str] | None:
     if not isinstance(full_name, str) or not full_name.strip():
         return None
     try:
         normalized = normalize_repo_full_name(full_name)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    await require_repo_access_for_workspace(normalized)
+    await require_repo_access_for_system(normalized)
     owner, name = normalized.split("/", 1)
     return {"owner": owner, "name": name}
 
 
 async def repo_is_private(full_name: str) -> bool | None:
-    """Whether ``full_name`` is private, read with the workspace GitHub App; ``None`` if unknown."""
+    """Whether ``full_name`` is private, read with the Robin GitHub App; ``None`` if unknown."""
     token = await get_github_app_installation_token()
     if not token:
         return None

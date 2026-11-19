@@ -35,7 +35,7 @@ from openswe.dashboard.profiles import (  # noqa: F401
     get_valid_access_token,
     has_access_token_record,
 )
-from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.dashboard.settings import get_settings
 from openswe.dispatch import dispatch_agent_run
 from openswe.github.app import (
     get_github_app_installation_token,  # noqa: F401
@@ -93,6 +93,7 @@ from openswe.rollout_events import (
     remembered_merge_sha,
     subscribe_merged_thread,
 )
+from openswe.routing.store import is_kitchen_channel
 from openswe.run_config import Repo
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
@@ -162,12 +163,6 @@ from openswe.utils.repo import extract_repo_from_text
 from openswe.utils.thread_ops import queue_message_for_thread  # noqa: F401
 from openswe.utils.thread_participants import participant_metadata
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
-from openswe.workspaces.routing import (
-    is_kitchen_channel,
-    workspace_for_repo,
-    workspace_for_slack_channel,
-)
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 __all__ = [
     "Any",
@@ -201,7 +196,6 @@ __all__ = [
     "get_or_resolve_thread_github_token",
     "resolve_slack_channel_context",
     "get_thread_metadata_safe",
-    "get_thread_workspace",
     "get_thread_model_choice",
     "is_not_found_error",
     "is_pr_diff_unchanged_since_last_review",
@@ -250,7 +244,7 @@ __all__ = [
     "get_slack_repo_config",
     "get_slack_user_info",
     "get_slack_user_names",
-    "get_workspace_settings",
+    "get_settings",
     "get_valid_access_token",
     "has_access_token_record",
     "json",
@@ -282,7 +276,6 @@ __all__ = [
     "update_slack_message",
     "upsert_agent_thread_metadata",
     "verify_slack_signature",
-    "workspace_for_repo_config",
 ]
 
 logger = logging.getLogger(__name__)
@@ -514,7 +507,6 @@ async def upsert_agent_thread_metadata(
     title: str,
     static_title: bool = False,
     source_context: SourceContext | None = None,
-    workspace: str | None = None,
     slack_participant_user_ids: Collection[str] = (),
     visibility: str = "public",
     owner_login: str = "",
@@ -559,8 +551,6 @@ async def upsert_agent_thread_metadata(
         metadata["repo_name"] = repo_config["name"]
     if title:
         metadata["title"] = title[:80]
-    if workspace:
-        metadata["workspace"] = workspace
     # Only ever set here: the dashboard clears it when someone continues the
     # thread on the web, and that promotion must survive later Slack events.
     if unlisted:
@@ -750,21 +740,12 @@ async def upsert_agent_thread_metadata(
 class SlackRepoResolution:
     """A Slack run's repository, plus whether anything actually named it.
 
-    A named repository may pick the workspace when no Slack channel is bound,
-    while a deployment-wide default behind it never does, so routing needs to
-    tell the two apart. ``explicit`` is true only for a repository the thread
+    ``explicit`` is true only for a repository the thread
     or the channel description named.
     """
 
     repo: Repo | None = None
     explicit: bool = False
-
-    @property
-    def routing_repo(self) -> tuple[str, str] | None:
-        """The repository allowed to decide the workspace, if any."""
-        if self.repo is None or not self.explicit:
-            return None
-        return (self.repo.owner, self.repo.name)
 
 
 async def get_slack_repo_config(
@@ -780,7 +761,7 @@ async def get_slack_repo_config(
         1. Repo carried over from the existing Slack thread's metadata.
         2. A ``repo:owner/name`` token in the channel's topic/purpose.
         3. The explicitly linked Slack user's dashboard ``default_repo``.
-        4. The default repo of the workspace this channel is bound to.
+        4. The instance default repository.
         5. ``SLACK_REPO_*`` env defaults.
 
     An empty resolution is not an error: the agent clones lazily and the message
@@ -844,11 +825,7 @@ async def get_slack_repo_config(
             logger.exception("Failed to apply dashboard default_repo for Slack user")
 
     if not repo_config:
-        # A channel bound to a workspace takes the default repository that
-        # workspace resolves to: its own override, else the instance record's.
-        repo_config = (
-            await get_workspace_settings(await workspace_for_slack_channel(channel_id))
-        ).default_repo
+        repo_config = (await get_settings()).default_repo
 
     if not repo_config and default_owner and default_name:
         repo_config = {"owner": default_owner, "name": default_name}
@@ -919,15 +896,6 @@ class ThreadRecord:
         """The repository the thread works in, as its last run recorded it."""
         return _repo_in_thread_metadata(self.metadata)
 
-    @property
-    def workspace(self) -> str | None:
-        """The workspace the thread was created in; ``environment`` is the pre-workspace key."""
-        for key in ("workspace", "environment"):
-            value = self.metadata.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        return None
-
 
 async def thread_exists(thread_id: str) -> bool:
     """Return whether a LangGraph thread already exists; raise when that can't be read."""
@@ -960,34 +928,6 @@ async def get_thread_model_choice(thread_id: str) -> tuple[str, str] | None:
         logger.warning("Failed to fetch model metadata for thread %s", thread_id)
         return None
     return record.model_choice
-
-
-async def get_thread_workspace(thread_id: str) -> str | None:
-    """The workspace a thread was created in."""
-    try:
-        record = await ThreadRecord.read(thread_id)
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Failed to fetch workspace metadata for thread",
-            extra={"agent_thread_id": thread_id},
-        )
-        return None
-    return record.workspace
-
-
-async def workspace_for_repo_config(repo_config: dict[str, str] | None) -> str:
-    """The workspace that owns ``repo_config``, or the instance default.
-
-    A failed ownership lookup lands on the default too:
-    :func:`openswe.workspaces.routing.workspace_for_repo` logs it at error and
-    answers ``None``, because every caller of this is about to start or label a
-    run, and one in ``default`` beats none.
-    """
-    if not repo_config or not repo_config.get("owner") or not repo_config.get("name"):
-        return DEFAULT_WORKSPACE_SLUG
-    return (
-        await workspace_for_repo(repo_config["owner"], repo_config["name"])
-    ) or DEFAULT_WORKSPACE_SLUG
 
 
 AccountLinkReason = Literal["revoked", "unlinked"]
@@ -1116,10 +1056,6 @@ async def trigger_or_queue_run(
     """
     record = await ThreadRecord.read(thread_id)
     record.authorize(github_login)
-    # An existing thread keeps the workspace it started in even if its
-    # repository has since moved: the settings a conversation began with
-    # must not change under it.
-    workspace = record.workspace or await workspace_for_repo_config(repo_config)
     persisted = await upsert_agent_thread_metadata(
         thread_id,
         source="github",
@@ -1127,7 +1063,6 @@ async def trigger_or_queue_run(
         github_login=github_login,
         title=f"PR #{pr_number}" if pr_number else "Pull request",
         source_context=SourceContext(pr_number=pr_number) if pr_number else None,
-        workspace=workspace,
         token_repositories=token_repositories,
     )
     if not persisted and token_repositories is not None:
@@ -1142,8 +1077,6 @@ async def trigger_or_queue_run(
         "github_user_id": github_user_id,
         "repo": repo_config,
         "pr_number": pr_number,
-        "workspace": workspace,
-        "environment": workspace,
     }
     slack_thread = SourceContext.from_metadata(record.metadata).slack_thread
     if slack_thread is not None:
@@ -1322,7 +1255,6 @@ async def build_reviewer_configurable(
     slack_thread_ts: str = "",
 ) -> dict[str, Any]:
     """Assemble the runnable-config ``configurable`` dict for a reviewer run."""
-    workspace = await workspace_for_repo_config(repo_config)
     configurable: dict[str, Any] = {
         "source": source,
         "github_login": github_login,
@@ -1334,8 +1266,6 @@ async def build_reviewer_configurable(
         "head_sha": head_sha,
         "review_requested": True,
         "re_review": re_review,
-        "workspace": workspace,
-        "environment": workspace,
     }
     if branch_name:
         configurable["branch_name"] = branch_name
@@ -1358,7 +1288,7 @@ async def draft_review_enabled_for_author(
 
     Tri-state: the PR author's profile ``review_draft_prs`` wins when set to
     True/False; ``None`` (or no profile, e.g. external contributors) falls back
-    to the default of the workspace that owns ``repo_config``.
+    to the instance default.
     """
     if author_login:
         profile = await get_profile(author_login)
@@ -1366,7 +1296,7 @@ async def draft_review_enabled_for_author(
             override = profile.get("review_draft_prs")
             if isinstance(override, bool):
                 return override
-    settings = await get_workspace_settings(await workspace_for_repo_config(repo_config))
+    settings = await get_settings()
     return bool(settings.get("review_draft_prs"))
 
 

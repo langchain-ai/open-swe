@@ -1,10 +1,9 @@
-"""Resolve breakout channels and the source workspace."""
+"""Resolve explicit breakout channel destinations."""
 
 import logging
 from dataclasses import dataclass
 
 from openswe.slack.channels import ChannelLookupUnavailable, SlackChannel
-from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +11,6 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class BreakoutDestination:
     channel_id: str
-    workspace: str
 
     async def channel_error(self, source_channel: str) -> str | None:
         for channel_id in dict.fromkeys((source_channel, self.channel_id)):
@@ -40,19 +38,5 @@ class BreakoutDestination:
 async def resolve_breakout_destination(
     source_channel: str,
     explicit_channel: str | None = None,
-    *,
-    workspace: str | None = None,
-    repo: tuple[str, str] | None = None,
-    tag: str | None = None,
-    login: str | None = None,
 ) -> BreakoutDestination:
-    resolved = await resolve_workspace(
-        thread_workspace=workspace,
-        slack_channel_id=source_channel,
-        repo=repo,
-        tag=tag,
-        login=login,
-    )
-    return BreakoutDestination(
-        explicit_channel.strip() if explicit_channel else source_channel, resolved.slug
-    )
+    return BreakoutDestination(explicit_channel.strip() if explicit_channel else source_channel)

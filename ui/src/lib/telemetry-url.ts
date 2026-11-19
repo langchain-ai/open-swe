@@ -7,7 +7,7 @@ function templateDashboardPath(pathname: string): string {
     return "/agents/:threadId/plan"
   if (
     /^\/agents\/[^/]+\/?$/.test(pathname) &&
-    !/^\/agents\/(automations|connections|instructions|reviews|sandbox|skills|threads|workspaces)\/?$/.test(
+    !/^\/agents\/(automations|connections|instructions|reviews|sandbox|skills|threads)\/?$/.test(
       pathname
     )
   )

@@ -5,38 +5,32 @@ from typing import Literal
 from uuid import UUID
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.workspace_settings import (
+from openswe.dashboard.settings import (
     AppRelease,
-    WorkspaceSettings,
-    WorkspaceSettingsUpdate,
+    SettingsUpdate,
     get_instance_settings,
     instance_record,
     upsert_instance_settings,
-    upsert_workspace_overrides,
-    workspace_record,
-    workspace_settings_view,
 )
 from openswe.plugins.records import PluginApps
 from openswe.review_apps.apps import ReviewApp
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.mcp_exposure import expose_mcp
-from openswe.workspaces.store import WORKSPACES, slugify
 
 _READ = Policy(trusted="admin_surface", actor="admin")
 _WRITE = Policy(
     trusted="admin_surface",
     actor="admin",
-    sole=ack("scope", "workspace", "apps", "preview_checks"),
+    sole=ack("scope", "apps", "preview_checks"),
 )
 
 
-@audit_tool(reads={"read"}, target_workspace="workspace")
+@audit_tool(reads={"read"})
 @expose_mcp(access="admin")
 @access(_WRITE, per_call=lambda args: _READ if args.get("action") == "read" else _WRITE)
 async def manage_review_apps(
     action: Literal["read", "add", "remove", "set_preview_checks"],
     app: str | None = None,
-    workspace: str | None = None,
     preview_checks: list[str] | None = None,
 ) -> dict[str, object]:
     """Read, add or remove the apps whose review step reviews follow, or set the checks,
@@ -55,14 +49,7 @@ async def manage_review_apps(
             raise ValueError("Provide the app's id")
     else:
         raise ValueError("Action must be read, add, remove or set_preview_checks")
-    slug = slugify(workspace) if workspace is not None else None
-    if slug is not None and await WORKSPACES.get(slug) is None:
-        raise ValueError("Workspace not found")
-    settings = (
-        WorkspaceSettings((await workspace_settings_view(slug))["effective"])
-        if slug is not None
-        else await get_instance_settings()
-    )
+    settings = await get_instance_settings()
     current = settings.review_app_releases
     changes: dict[str, object] = {}
     if preview_checks is not None:
@@ -82,20 +69,12 @@ async def manage_review_apps(
         ]
     checks = settings.review_app_preview_checks
     if changes:
-        # Over the scope's own record, so its other settings stay as they are.
-        if slug is not None:
-            update = WorkspaceSettingsUpdate.model_validate(
-                {**await workspace_record(slug), **changes}
-            )
-            await upsert_workspace_overrides(slug, update)
-        else:
-            update = WorkspaceSettingsUpdate.model_validate({**await instance_record(), **changes})
-            await upsert_instance_settings(update)
+        update = SettingsUpdate.model_validate({**await instance_record(), **changes})
+        await upsert_instance_settings(update)
         if preview_checks is not None:
             checks = frozenset(update.review_app_preview_checks or [])
     return {
-        "scope": "workspace" if slug is not None else "instance",
-        "workspace": slug,
+        "scope": "instance",
         "apps": await ReviewApp.describe(current),
         "preview_checks": sorted(checks),
     }

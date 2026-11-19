@@ -56,8 +56,6 @@ from openswe.utils.search import FuzzySearch
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.thread_participants import participant_search_filters
 from openswe.walkthrough.record import Walkthrough
-from openswe.workspaces.routing import workspace_for_repo
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG
 
 _THREADS_SEARCH_PAGE = 50
 _THREADS_PAGE_SCAN_CAP = 5000
@@ -1047,9 +1045,7 @@ async def list_dashboard_thread_repos(
     """The sidebar's folders: the viewer's projects and the repositories their other
     threads ran in, newest activity first.
 
-    Each entry names the workspace it belongs to so the sidebar can nest folders
-    under their workspace; an unassigned repository belongs to ``default``. A
-    project's entry carries its ``projectId`` and is listed even before it has a
+    A project's entry carries its ``projectId`` and is listed even before it has a
     thread.
     """
     filing = await PROJECTS.filing_for(login)
@@ -1083,9 +1079,6 @@ async def list_dashboard_thread_repos(
                 "updatedAt": updated_at,
                 "projectId": None,
             }
-    for entry in repos.values():
-        owner, _, repo_name = str(entry["repoFullName"]).partition("/")
-        entry["workspace"] = await workspace_for_repo(owner, repo_name) or DEFAULT_WORKSPACE_SLUG
     folders = [
         *repos.values(),
         *(
@@ -1097,7 +1090,6 @@ async def list_dashboard_thread_repos(
                     int(project.updated_at.timestamp() * 1000),
                 ),
                 "projectId": project_id,
-                "workspace": project.workspace,
             }
             for project_id, project in filing.projects.items()
         ),

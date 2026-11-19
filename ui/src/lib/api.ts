@@ -346,6 +346,7 @@ export interface ModelOption {
 }
 
 export interface OptionsPayload {
+  default_repo: string | null
   models: Array<ModelOption>
   cloud_first_desktop_enabled?: boolean
   model_selection_enabled?: boolean
@@ -360,7 +361,6 @@ export interface Profile {
   login?: string
   email?: string
   default_repo?: string | null
-  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
@@ -379,7 +379,6 @@ export interface Profile {
 export interface ProfileUpdate {
   experimental_background_callbacks?: boolean | null
   default_repo?: string | null
-  workspace_default_repos?: Record<string, string>
   base_branch?: string | null
   branch_prefix?: string | null
   auto_fix_ci?: boolean
@@ -424,8 +423,8 @@ export interface FeaturedApp extends AppRelease {
   repositories?: Array<string>
 }
 
-/** The settings record at either tier: the instance, or what a workspace's runs see. */
-export interface WorkspaceSettings {
+/** Robin-wide settings. */
+export interface RobinSettings {
   review_draft_prs: boolean
   pr_summaries: boolean
   review_trace_links: boolean
@@ -439,7 +438,7 @@ export interface WorkspaceSettings {
   review_browser_domains?: Array<string> | null
   /** Instance only: the `<connection>/<tool>` that signs a review's browser in. */
   review_browser_session_tool?: string | null
-  /** Tri-state adaptive model routing toggle; threads may override this workspace default. */
+  /** Tri-state adaptive model routing toggle; threads may override this default. */
   model_routing_enabled?: boolean | null
   /** Routing v2: split Auto threads 50/50 between Balanced and Performance instead of classifying. */
   model_routing_split?: boolean | null
@@ -472,14 +471,7 @@ export interface WorkspaceSettings {
   updated_at?: string | null
 }
 
-/** The fields of a workspace's own settings record; anything absent inherits the instance value. */
-export type WorkspaceSettingsOverrides = Partial<WorkspaceSettings>
-
-/** One workspace's settings: what its runs see, and which of those values it set itself. */
-export interface WorkspaceSettingsView {
-  effective: WorkspaceSettings
-  overrides: WorkspaceSettingsOverrides
-}
+export type RobinSettingsPatch = Partial<RobinSettings>
 
 /** One of the caller's LangSmith Managed Tools servers. */
 export interface ManagedServer {
@@ -814,7 +806,6 @@ export type FollowUpBehavior = "queue" | "steer"
 
 export interface UserPreferences {
   default_visibility: ThreadVisibility
-  default_workspace: string | null
   follow_up_behavior: FollowUpBehavior
   auto_show_changes: boolean
 }
@@ -842,46 +833,6 @@ export interface OrganizationSkillsPage {
   next_cursor: string | null
 }
 
-/** What a non-admin needs to pick a workspace for a new thread. */
-export type WorkspaceRefreshStatus =
-  | "never"
-  | "refreshing"
-  | "success"
-  | "failed"
-
-/** One stage of a rebuild: booting the builder, a script, the capture. */
-export interface WorkspaceRefreshStep {
-  label: string
-  status: "running" | "success" | "failed"
-  started_at?: string
-  finished_at?: string | null
-  exit_code?: number | null
-  log_path?: string | null
-}
-
-/** Slug of the workspace every deployment ships with; matches the backend's `DEFAULT_WORKSPACE_SLUG`. */
-export const DEFAULT_WORKSPACE_SLUG = "default"
-
-export interface WorkspaceOption {
-  slug: string
-  name: string
-  repos: Array<string>
-  /** Effective default repository, from the workspace's settings tiers. */
-  default_repo: string | null
-  slack_channel_ids: Array<string>
-  /** Bound channels where untagged messages start and continue threads. */
-  kitchen_channel_ids: Array<string>
-  ask_channel_ids?: Array<string>
-  is_default: boolean
-  has_snapshot: boolean
-  refresh_status?: WorkspaceRefreshStatus
-  refresh_kind?: "full" | "update" | null
-  refresh_finished_at?: string | null
-  refresh_error?: string | null
-  refresh_log_excerpt?: string | null
-  refresh_steps?: Array<WorkspaceRefreshStep>
-}
-
 /** A person in the Slack workspace, offered when mentioning someone in a composer. */
 export interface SlackUserOption {
   id: string
@@ -890,7 +841,7 @@ export interface SlackUserOption {
   real_name: string
 }
 
-/** A channel the Slack bot can see, offered when binding channels to a workspace. */
+/** A channel the Slack bot can see. */
 export interface SlackChannelOption {
   id: string
   name: string
@@ -907,12 +858,6 @@ export interface SlackChannelDirectory {
   refreshing: boolean
 }
 
-export interface WorkspaceOptionList {
-  execution_defaults_enabled?: boolean
-  workspaces: Array<WorkspaceOption>
-  default_slug: string
-}
-
 export type JsonValue =
   | string
   | number
@@ -922,7 +867,6 @@ export type JsonValue =
   | { [key: string]: JsonValue }
 
 export interface ExecutionDefaults {
-  enabled: boolean
   prompt: string
   repos: string[]
   setup_script: string
@@ -936,47 +880,16 @@ export interface ExecutionDefaults {
   create_params: Record<string, JsonValue>
 }
 
-/** Body for `PUT /workspaces/{slug}`. Only the fields present are changed. */
-export interface WorkspaceUpdate {
-  repos?: Array<string>
-  slack_channel_ids?: Array<string>
-  kitchen_channel_ids?: Array<string>
-  ask_channel_ids?: Array<string>
-}
-
-export type WorkspaceSnapshotStatus = "none" | "capturing" | "ready" | "failed"
-
-/** A retained workspace and its routing and image state. */
-export interface WorkspaceRecord {
-  inherit_default_sandbox?: boolean
-  create_params?: Record<string, JsonValue>
-  slug: string
-  name: string
-  prompt: string
-  repos: Array<string>
-  slack_channel_ids: Array<string>
-  kitchen_channel_ids: Array<string>
-  ask_channel_ids?: Array<string>
-  setup_script?: string
-  update_script?: string
-  base_snapshot_id?: string | null
-  snapshot_id?: string | null
-  snapshot_name?: string | null
-  snapshot_status?: WorkspaceSnapshotStatus
-  status_message?: string | null
-  mem_bytes?: number | null
-  vcpus?: number | null
-  fs_capacity_bytes?: number | null
-  refresh_status?: WorkspaceRefreshStatus
-  refresh_kind?: "full" | "update" | null
-  refresh_finished_at?: string | null
-  refresh_error?: string | null
-}
-
-/** How one repository is configured inside a workspace. */
 export interface RepositorySettings {
   repo: string
   may_start_threads: boolean
+}
+
+export type ChannelMode = "mentions" | "kitchen" | "ask"
+
+export interface RoutingSettings {
+  repos: RepositorySettings[]
+  slack_channels: Array<{ channel_id: string; mode: ChannelMode }>
 }
 
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
@@ -1523,11 +1436,7 @@ function pullRequestThread(
 
 export const api = {
   me: () => request<SessionUser>("/me"),
-  /** Model list and defaults for one workspace; model defaults are per workspace. */
-  options: (workspace: string = DEFAULT_WORKSPACE_SLUG) =>
-    request<OptionsPayload>(
-      `/options?workspace=${encodeURIComponent(workspace)}`
-    ),
+  options: () => request<OptionsPayload>("/options"),
   concierge: () =>
     request<{ thread_id: string | null; channel_id: string | null }>(
       "/slack/concierge"
@@ -1645,43 +1554,33 @@ export const api = {
     request<void>(`/agent-instructions/${encodeURIComponent(full_name)}`, {
       method: "DELETE",
     }),
-  listWorkspaceOptions: () =>
-    request<WorkspaceOptionList>("/workspaces/options"),
-  getWorkspace: (slug: string) =>
-    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`),
-  updateWorkspace: (slug: string, body: WorkspaceUpdate) =>
-    request<WorkspaceRecord>(`/workspaces/${encodeURIComponent(slug)}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  listWorkspaceRepositories: (slug: string) =>
-    request<RepositorySettings[]>(
-      `/workspaces/${encodeURIComponent(slug)}/repositories`
-    ),
-  configureWorkspaceRepository: (
-    slug: string,
-    repo: string,
-    settings: { may_start_threads?: boolean }
-  ) =>
+  getRouting: () => request<RoutingSettings>("/routing"),
+  configureRoutingRepository: (repo: string, may_start_threads: boolean) =>
     request<RepositorySettings>(
-      `/workspaces/${encodeURIComponent(slug)}/repositories/${repo
-        .split("/")
-        .map(encodeURIComponent)
-        .join("/")}`,
-      { method: "PUT", body: JSON.stringify(settings) }
+      `/routing/repositories/${repo.split("/").map(encodeURIComponent).join("/")}`,
+      { method: "PUT", body: JSON.stringify({ may_start_threads }) }
     ),
+  removeRoutingRepository: (repo: string) =>
+    request<void>(
+      `/routing/repositories/${repo.split("/").map(encodeURIComponent).join("/")}`,
+      { method: "DELETE" }
+    ),
+  configureRoutingChannel: (channelId: string, mode: ChannelMode) =>
+    request<void>(`/routing/slack-channels/${encodeURIComponent(channelId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ mode }),
+    }),
+  removeRoutingChannel: (channelId: string) =>
+    request<void>(`/routing/slack-channels/${encodeURIComponent(channelId)}`, {
+      method: "DELETE",
+    }),
   getExecutionDefaults: () => request<ExecutionDefaults>("/settings/execution"),
   updateExecutionDefaults: (changes: Partial<ExecutionDefaults>) =>
     request<ExecutionDefaults>("/settings/execution", {
       method: "PATCH",
       body: JSON.stringify(changes),
     }),
-  /** The instance record every workspace inherits. */
-  getInstanceSettings: () => request<WorkspaceSettings>("/settings"),
-  getWorkspaceSettings: (slug: string) =>
-    request<WorkspaceSettingsView>(
-      `/workspaces/${encodeURIComponent(slug)}/settings`
-    ),
+  getInstanceSettings: () => request<RobinSettings>("/settings"),
   pendingNotifications: () => request<AppNotification[]>("/notifications"),
   acknowledgeNotification: (id: string) =>
     request<{ ok: boolean }>(
@@ -1710,8 +1609,8 @@ export const api = {
       `/slack/allowed-bots/${encodeURIComponent(teamId)}/${encodeURIComponent(botId)}`,
       { method: "DELETE" }
     ),
-  saveInstanceSettings: (body: WorkspaceSettings) =>
-    request<WorkspaceSettings>("/settings", {
+  saveInstanceSettings: (body: RobinSettings) =>
+    request<RobinSettings>("/settings", {
       method: "PUT",
       body: JSON.stringify(body),
     }),

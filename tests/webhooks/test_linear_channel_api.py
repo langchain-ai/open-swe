@@ -177,9 +177,9 @@ async def test_a_session_turns_facts_are_what_open_swe_knows(
     # The facts call logs the turn's delivery, so a turn takes two calls, not three.
     app.state.record.assert_awaited_once()
     assert app.state.record.await_args.kwargs["delivery_id"] == "delivery-1"
-    assert (facts.thread_repository, facts.thread_workspace) == ("acme/api", "core")
-    # The author's default for the thread's workspace.
-    assert facts.personal_default == RepositoryChoice(repository="ada/personal", workspace="core")
+    assert facts.thread_repository == "acme/api"
+    assert "thread_workspace" not in facts.model_dump()
+    assert facts.personal_default == RepositoryChoice(repository="ada/personal")
 
 
 @pytest.mark.asyncio
@@ -259,7 +259,10 @@ async def test_a_session_turn_gets_the_run_context_mda_starts_it_with(
     token = verify_runtime_token(str(run.context["__run_token"]))
     assert token.thread_id == _THREAD
     assert token.metadata["ls_attribution_identifier"] == "ada"
-    assert token.configurable["workspace"] == "core"
+    assert "workspace" not in token.configurable
+    assert "environment" not in token.configurable
+    assert "workspace" not in run.metadata
+    assert "environment" not in run.metadata
     # MDA starts a channel's run as its sender, so its catalog may name their connections.
     assert token.metadata[ACTING_USER_KEY] == "user-1"
     # MDA starts the run: its metadata sets none of the keys MDA keeps.

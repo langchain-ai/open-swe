@@ -4,7 +4,7 @@ import { Input } from "@langchain/macaw-components/Input"
 import { Select } from "@langchain/macaw-components/Select"
 
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
-import { api, DEFAULT_WORKSPACE_SLUG, type ProfileUpdate } from "@/lib/api"
+import { api, type ProfileUpdate } from "@/lib/api"
 import { useRepos } from "@/lib/profile"
 import { ProfileSwitchRow, useProfileSettings } from "./ProfileSwitchRow"
 import { RepoSelector } from "./RepoSelector"
@@ -87,21 +87,12 @@ function TextSettingInput({
 export function GitSettings() {
   const { profile, ready, save } = useProfileSettings()
   const repos = useRepos()
-  const preferences = useQuery({
-    queryKey: ["myPreferences"],
-    queryFn: api.getMyPreferences,
+  const settings = useQuery({
+    queryKey: ["instanceSettings"],
+    queryFn: api.getInstanceSettings,
   })
-  const workspace =
-    preferences.data?.default_workspace ?? DEFAULT_WORKSPACE_SLUG
-  const workspaceSettings = useQuery({
-    queryKey: ["workspaceSettings", workspace],
-    queryFn: () => api.getWorkspaceSettings(workspace),
-  })
-
-  const teamDefaultOn =
-    workspaceSettings.data?.effective.review_draft_prs ?? false
-  const expeditedOn =
-    workspaceSettings.data?.effective.expedited_review_enabled ?? false
+  const teamDefaultOn = settings.data?.review_draft_prs ?? false
+  const expeditedOn = settings.data?.expedited_review_enabled ?? false
   const draftReviewItems: Array<{ value: DraftReviewChoice; label: string }> = [
     {
       value: "team_default",

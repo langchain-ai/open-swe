@@ -450,8 +450,8 @@ async def test_an_issue_mention_starts_the_run_it_wrote_on_the_issues_thread(
     ]
     messages = cast(list[dict[str, Any]], cast(dict[str, Any], act.issue_run.input)["messages"])
     assert "## GitHub Issue: #7 - Issue ID: 70" in messages[1]["content"]
-    # A new conversation: in the repository's own workspace, with the issue's comments.
-    assert act.issue_run.workspace is None
+    # A new conversation includes the issue's comments, without a routing selector.
+    assert "workspace" not in act.issue_run.model_dump()
     gh.listed.assert_awaited_once()
     # A list of one run, as a dict alone would be state: MDA starts it on the conversation.
     [run] = normalize_run_inputs(started, RunChannel(name="github", provider="github"))
@@ -498,8 +498,12 @@ async def test_the_people_only_the_comments_name_are_looked_up_once_more(
 async def test_a_follow_up_mention_is_the_persons_own_message(
     backend: _Backend, gh: _GitHub
 ) -> None:
-    backend.issue_facts = backend.issue_facts.model_copy(
-        update={"conversation_started": True, "thread_workspace": "team-a"}
+    backend.issue_facts = GitHubIssueFacts.model_validate(
+        {
+            **backend.issue_facts.model_dump(),
+            "conversation_started": True,
+            "thread_workspace": "team-a",
+        }
     )
 
     await github.on_event(
@@ -508,8 +512,8 @@ async def test_a_follow_up_mention_is_the_persons_own_message(
 
     [act] = backend.called(ACT_ON_GITHUB_DELIVERY)
     assert act.issue_run is not None
-    # It stays in the workspace its thread started in, and reads no comments.
-    assert act.issue_run.workspace == "team-a"
+    # A follow-up reads no comments and forwards no legacy routing selector.
+    assert "workspace" not in act.issue_run.model_dump()
     gh.listed.assert_not_awaited()
     [message] = cast(list[dict[str, Any]], cast(dict, act.issue_run.input)["messages"])
     assert message["content"].startswith('<input-message sender="github:2"')

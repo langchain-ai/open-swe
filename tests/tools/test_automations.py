@@ -24,13 +24,12 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
 
     async def create(login: str, body: Any, **kwargs: Any) -> dict[str, Any]:
         called.update(login=login, body=body, kwargs=kwargs)
-        return {"id": "schedule-1", "scope": "workspace"}
+        return {"id": "schedule-1", "scope": "system"}
 
     monkeypatch.setattr(automations.schedules, "create_agent_schedule", create)
 
     result = await automations.create_automation(
         "Check open pull requests",
-        workspace="default",
         triggers=[
             automations.schedules.GitHubTrigger(
                 repo="langchain-ai/open-swe", events=["pull_request.closed"]
@@ -43,7 +42,7 @@ async def test_create_automation_uses_trusted_admin_identity(monkeypatch) -> Non
     assert called["kwargs"] == {
         "email": "alice@example.com",
         "allow_admin_thread": True,
-        "use_workspace_credentials": False,
+        "use_system_credentials": False,
     }
     assert called["body"].triggers[0].repo == "langchain-ai/open-swe"
 
@@ -91,11 +90,10 @@ async def test_member_can_create_from_own_private_thread(  # noqa: ANN001
     monkeypatch.setattr(automations.schedules, "create_agent_schedule", create)
     result = await automations.create_automation(
         "Report",
-        "default",
         [automations.schedules.ScheduleTrigger(cron="0 9 * * *", timezone="America/New_York")],
     )
     assert result["ok"] is True
     assert create.call_args.kwargs["allow_admin_thread"] is False
     assert create.call_args.args[1].triggers[0].timezone == "America/New_York"
-    assert create.call_args.kwargs["use_workspace_credentials"] is False
+    assert create.call_args.kwargs["use_system_credentials"] is False
     assert create.call_args.args[0] == "alice"

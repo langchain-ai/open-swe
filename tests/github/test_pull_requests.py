@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx2
 import pytest
 
-from openswe.github import channel as github_channel
 from openswe.github import pull_request_dashboard_routes, pull_requests
 from openswe.github.pull_requests import PullRequest, PullRequestEvent
 from openswe.github.repositories import Repository
@@ -261,7 +260,6 @@ async def test_webhooks_sync_descriptions_without_auto_review(
 ) -> None:
     await PullRequest(owner="lc", repo="repo", number=7, body="Old description").save()
     monkeypatch.setattr(common, "get_client", lambda **kwargs: _client_returning())
-    monkeypatch.setattr(github_channel, "repo_is_routable", AsyncMock(return_value=True))
     monkeypatch.setattr(common, "is_repo_auto_review_enabled", AsyncMock(return_value=False))
     monkeypatch.setattr(common, "update_agent_pr_usage_from_webhook", AsyncMock())
     payload = {

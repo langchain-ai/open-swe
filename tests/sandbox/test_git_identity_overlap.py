@@ -42,7 +42,7 @@ async def test_identity_is_written_while_the_proxy_is_configured() -> None:
 
     with (
         patch(
-            "openswe.sandboxes.lifecycle.workspace_token",
+            "openswe.sandboxes.lifecycle.sandbox_token",
             new_callable=AsyncMock,
             return_value=SandboxGitHubAccess("token"),
         ),
@@ -62,7 +62,7 @@ async def test_identity_failure_does_not_fail_the_sandbox(caplog: pytest.LogCapt
 
     with (
         patch(
-            "openswe.sandboxes.lifecycle.workspace_token",
+            "openswe.sandboxes.lifecycle.sandbox_token",
             new_callable=AsyncMock,
             return_value=SandboxGitHubAccess("token"),
         ),
@@ -86,7 +86,7 @@ async def test_a_failed_proxy_does_not_leave_the_identity_write_running() -> Non
 
     with (
         patch(
-            "openswe.sandboxes.lifecycle.workspace_token",
+            "openswe.sandboxes.lifecycle.sandbox_token",
             new_callable=AsyncMock,
             return_value=SandboxGitHubAccess("token"),
         ),
@@ -146,7 +146,7 @@ async def test_identity_is_reset_each_run_in_the_first_command(
 
     with (
         patch(
-            "openswe.sandboxes.lifecycle.workspace_token",
+            "openswe.sandboxes.lifecycle.sandbox_token",
             new_callable=AsyncMock,
             return_value=SandboxGitHubAccess("token"),
         ),

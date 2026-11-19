@@ -73,10 +73,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-it("preserves the hidden saved context when unrelated preferences change", async () => {
+it("saves follow-up behavior without changing other preferences", async () => {
   let stored: UserPreferences = {
     default_visibility: "private",
-    default_workspace: "engineering",
     follow_up_behavior: "queue",
     auto_show_changes: true,
   }
@@ -98,8 +97,6 @@ it("preserves the hidden saved context when unrelated preferences change", async
   )
   const followUp = screen.getByRole("combobox", { name: "Follow-up behavior" })
   await waitFor(() => expect(followUp.hasAttribute("disabled")).toBe(false))
-  expect(screen.queryByText("Default environment")).toBeNull()
-  expect(screen.queryByRole("combobox", { name: /environment/i })).toBeNull()
   expect(save).not.toHaveBeenCalled()
   fireEvent.click(followUp)
   const steer = await screen.findByRole("option", { name: "Steer" })
@@ -108,7 +105,6 @@ it("preserves the hidden saved context when unrelated preferences change", async
   await waitFor(() =>
     expect(save.mock.lastCall?.[0]).toEqual({
       default_visibility: "private",
-      default_workspace: "engineering",
       follow_up_behavior: "steer",
       auto_show_changes: true,
     })
@@ -118,13 +114,8 @@ it("preserves the hidden saved context when unrelated preferences change", async
 it("optimistically selects a personal kitchen, rolls back a failed save, and clears it", async () => {
   vi.spyOn(api, "getMyPreferences").mockResolvedValue({
     default_visibility: "private",
-    default_workspace: null,
     follow_up_behavior: "queue",
     auto_show_changes: true,
-  })
-  vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
-    default_slug: "default",
-    workspaces: [],
   })
   let rejectSave: (error: Error) => void = () => {}
   const save = vi.spyOn(api, "saveProfile").mockImplementationOnce(

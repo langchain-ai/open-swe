@@ -12,7 +12,6 @@ from openswe.api.github_errors import add_github_error_handlers
 from openswe.dashboard.oauth import require_session
 from openswe.database import postgres
 from openswe.github import app as github_app
-from openswe.github import channel as github_channel
 from openswe.github import http as github_http
 from openswe.github.http import GitHubError
 from openswe.github.pull_request_key import PullRequestKey
@@ -269,7 +268,6 @@ async def test_review_page_reconciles_stored_flags_and_invalidates_after_missed_
     assert (topic in topics) is not github_failure
 
     if not github_failure:
-        monkeypatch.setattr(github_channel, "repo_is_routable", AsyncMock(return_value=True))
         monkeypatch.setattr(
             webhook_common, "get_thread_metadata_safe", AsyncMock(return_value=thread["metadata"])
         )

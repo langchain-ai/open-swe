@@ -30,7 +30,6 @@ async def test_scout_records_security_identity_before_starting_or_reusing_a_run(
         pr_title="Change",
         base_sha="base",
         head_sha="head",
-        workspace_slug="workspace",
     )
 
     async def active_run(self: launch.ReviewScoutTarget) -> str | None:
@@ -67,7 +66,6 @@ async def test_scout_refuses_a_repository_outside_the_allowed_orgs(
         pr_title="Change",
         base_sha="base",
         head_sha="head",
-        workspace_slug=None,
     )
 
     with pytest.raises(launch.RepositoryNotAllowed):

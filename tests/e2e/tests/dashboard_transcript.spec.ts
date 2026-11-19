@@ -422,7 +422,7 @@ test.describe("transcript rendering", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
-    await page.route("**/dashboard/api/options?**", async (route) => {
+    await page.route("**/dashboard/api/options", async (route) => {
       const response = await route.fetch();
       const options = (await response.json()) as Record<string, unknown>;
       await route.fulfill({
@@ -456,8 +456,8 @@ test.describe("transcript rendering", () => {
       })
       .toBe("anthropic:claude-opus-5-5");
 
-    await page.unroute("**/dashboard/api/options?**");
-    await page.route("**/dashboard/api/options?*", (route) =>
+    await page.unroute("**/dashboard/api/options");
+    await page.route("**/dashboard/api/options", (route) =>
       route.fulfill({ status: 503, json: { detail: "Options unavailable" } }),
     );
     await page.reload();

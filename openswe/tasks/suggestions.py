@@ -21,7 +21,6 @@ class SuggestedTaskContent(BaseModel):
 
 
 class SuggestedTask(SuggestedTaskContent):
-    workspace_id: UUID
     repository_id: UUID
     id: UUID = Field(default_factory=uuid7)
     thread_id: str | None = None
@@ -35,16 +34,16 @@ class SuggestedTask(SuggestedTaskContent):
     updated_at: datetime | None = None
 
     async def create(self) -> Self:
-        """Save the suggestion and publish its target-scoped workspace event."""
+        """Save the suggestion and publish its repository-scoped event."""
         async with transaction() as conn:
             result = await conn.execute(
                 text("""
                     INSERT INTO suggested_task (
-                        id, summary, details, workspace_id, repository_id,
+                        id, summary, details, repository_id,
                         thread_id, task_id, pull_request_id, triggered_by,
                         context_links, created_by, updated_by
                     ) VALUES (
-                        :id, :summary, :details, :workspace_id, :repository_id,
+                        :id, :summary, :details, :repository_id,
                         :thread_id, :task_id, :pull_request_id, :triggered_by,
                         CAST(:context_links AS jsonb), :created_by, :updated_by
                     ) RETURNING *
@@ -59,11 +58,11 @@ class SuggestedTask(SuggestedTaskContent):
                 text("SELECT key FROM repository WHERE id = :id"), {"id": self.repository_id}
             )
         if not await EventLog.append(
-            "workspace",
+            "robin",
             saved.model_dump(mode="json"),
             event_type="task.suggested",
             delivery_id=str(saved.id),
-            refs=EventRefs(workspace_id=self.workspace_id, github_repository=str(repository)),
+            refs=EventRefs(github_repository=str(repository)),
         ):
             logger.error(
                 "Suggested task saved without its event",

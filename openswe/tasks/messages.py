@@ -246,7 +246,6 @@ class TaskMessage(Base):
             metadata={
                 "kind": RETRY_JOB_KIND,
                 "thread_id": thread_id,
-                "workspace_id": str(task.workspace_id),
             },
             replace=False,
         )

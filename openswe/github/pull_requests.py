@@ -374,17 +374,15 @@ class PullRequest(Base):
         return f"{repository}#{self.number}"
 
     async def concise_walkthrough(self) -> bool:
-        """Whether the owning workspace opted into terse walkthrough plans."""
+        """Whether the instance opted into terse walkthrough plans."""
         return await self.concise_for_repo(self.owner, self.repo)
 
     @staticmethod
     async def concise_for_repo(owner: str, repo: str) -> bool:
-        """Whether the workspace owning ``owner/repo`` opted into terse walkthroughs and findings."""
-        from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
-        from openswe.workspaces.routing import workspace_for_repo
+        """Whether the instance opted into terse walkthroughs and findings."""
+        from openswe.dashboard.settings_cache import cached_settings
 
-        workspace = await workspace_for_repo(owner, repo)
-        settings = await cached_workspace_settings(workspace)
+        settings = await cached_settings()
         return settings.get("concise_walkthrough_enabled") is True
 
     @property

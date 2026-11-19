@@ -10,7 +10,6 @@ from fastapi import HTTPException
 from openswe.bridge.constants import HANDOFF_FROM_KEY
 from openswe.bridge.local_access_policy import LocalAccess
 from openswe.bridge.store import Bridge, BridgeStore, SandboxBridgeBinding
-from openswe.dispatch import thread_workspace
 from openswe.input_messages import SystemIdentity, build_input_messages
 from openswe.threads.summary import TRANSCRIPT_VERSION, thread_is_owner
 from openswe.transcript.engine import Command, append
@@ -39,7 +38,6 @@ class SandboxMove:
         self.thread_id = thread_id
         self.update = update
         self._login = login
-        self._workspace = thread_workspace(metadata)
         self._transcribed = metadata.get("transcript") == TRANSCRIPT_VERSION
         self._before = {key: metadata.get(key) for key in update}
 
@@ -109,7 +107,7 @@ class SandboxMove:
         await self._write(self.update)
         if not self.to_cloud:
             try:
-                await ensure_sandbox_for_thread(self.thread_id, workspace_slug=self._workspace)
+                await ensure_sandbox_for_thread(self.thread_id)
             except BaseException:
                 logger.warning(
                     "Could not carry a thread's checkout over; moving it back",

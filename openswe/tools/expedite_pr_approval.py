@@ -8,7 +8,7 @@ from langgraph.config import get_config
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard import repo_access
-from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.dashboard.settings import get_settings
 from openswe.expedited_review.eligibility import Exclusion
 from openswe.expedited_review.nomination import ExpeditedReviewIneligible, ExpeditedReviewNomination
 from openswe.github.token import resolve_github_token
@@ -48,7 +48,7 @@ async def expedite_pr_approval(
     requester = await User.for_login("github", caller) if caller else None
     if not thread_id and requester is None:
         return _failure("No executable agent thread is available")
-    if not (await get_workspace_settings()).expedited_review_enabled:
+    if not (await get_settings()).expedited_review_enabled:
         return _failure(
             "Expedited review is disabled for this Robin instance. "
             "An admin can enable it under Settings; ask for a normal review instead."

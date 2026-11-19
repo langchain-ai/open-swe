@@ -16,7 +16,7 @@ def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
     prompt = reviewer._reviewer_system_prompt(
         org_guidelines="Org rule text.",
         repo_style_prompt="Repo rule text.",
-    ).workspace
+    ).execution
     assert prompt.index("Organization-wide review guidelines") < prompt.index(
         "Repository-specific review style"
     )
@@ -25,7 +25,7 @@ def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
 def test_reviewer_approval_policy_stays_in_system_prompt_after_shared_parts() -> None:
     prompt = reviewer._reviewer_system_prompt(approval_policy="Docs-only changes may merge.")
     assert "Docs-only changes may merge." in prompt.thread
-    assert "Docs-only changes may merge." not in prompt.shared + prompt.workspace
+    assert "Docs-only changes may merge." not in prompt.shared + prompt.execution
     assert "# Approval assessment" in prompt.shared
 
 
@@ -61,7 +61,7 @@ async def _run_prepare(prepare: AgentMiddleware) -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> None:
+async def test_reviewer_limits_sandbox_to_reviewed_repository() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -70,7 +70,6 @@ async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> 
             "source": "github",
             "pr_number": 42,
             "base_sha": "base",
-            "workspace": "oss",
         },
         "metadata": {},
     }
@@ -106,7 +105,6 @@ async def test_reviewer_limits_sandbox_to_reviewed_repository_in_workspace() -> 
 
     mock_sandbox.assert_awaited_once_with(
         "reviewer-thread-id",
-        workspace_slug="oss",
         github_proxy_repositories=["acme/repo"],
         github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         abandon_unreachable=True,

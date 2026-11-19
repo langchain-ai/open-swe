@@ -66,8 +66,6 @@ export interface ScheduleCreateRequest {
   admin_thread?: boolean
   model_id?: string | null
   effort?: string | null
-  /** Slug of the workspace every run launches in. */
-  workspace: string
   /** Robin's, not the creator's: admins only, unbounded. */
   system?: boolean
 }
@@ -81,7 +79,6 @@ export interface ScheduleUpdateRequest {
   model_id?: string | null
   effort?: string | null
   enabled?: boolean | null
-  workspace?: string | null
   system?: boolean
 }
 
@@ -210,8 +207,6 @@ export interface SidebarRepo {
   repoFullName: string
   name: string
   updatedAt: number
-  /** Slug of the workspace that owns this repository; `"default"` when unassigned. */
-  workspace: string
   projectId?: null
 }
 
@@ -222,7 +217,6 @@ export interface SidebarProjectFolder {
   repoFullName: string | null
   name: string
   updatedAt: number
-  workspace: string
 }
 
 export type SidebarFolder = SidebarRepo | SidebarProjectFolder
@@ -458,9 +452,9 @@ export const agentsApi = {
       {},
       measure
     ),
-  shareThreadWithWorkspace: (threadId: string) =>
+  shareThread: (threadId: string) =>
     agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}/share-to-workspace`,
+      `/threads/${encodeURIComponent(threadId)}/share`,
       { method: "POST" }
     ),
   moveThread: (threadId: string, destination: ThreadMoveDestination) =>

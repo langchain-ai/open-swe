@@ -351,15 +351,6 @@ def _slack_channel_metadata(configurable: object) -> dict[str, str]:
     return {key: value for key, value in values.items() if value}
 
 
-def thread_workspace(metadata: Mapping[str, Any]) -> str | None:
-    """The workspace a thread's follow-up run carries; ``environment`` is the pre-workspace key."""
-    for key in ("workspace", "environment"):
-        value = metadata.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
 def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[str, Any]:
     """Config for a system-started run that continues a thread where its last run left off."""
     configurable: dict[str, Any] = {"thread_id": thread_id}
@@ -379,10 +370,6 @@ def follow_up_configurable(metadata: Mapping[str, Any], thread_id: str) -> dict[
         )
         configurable.pop("github_login", None)
         configurable.pop("repo", None)
-    workspace = thread_workspace(metadata)
-    if workspace is not None:
-        configurable["workspace"] = workspace
-        configurable["environment"] = workspace
     configurable.update(SourceContext.from_metadata(metadata).dump())
     return configurable
 

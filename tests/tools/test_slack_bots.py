@@ -16,7 +16,7 @@ from openswe.tools.access import Access
 @pytest.fixture
 async def audit(monkeypatch: pytest.MonkeyPatch) -> list[AuditLog]:
     entries: list[AuditLog] = []
-    monkeypatch.setattr(audit_tools, "_enrich", AsyncMock())
+    monkeypatch.setattr(AuditLog, "enrich_tool", AsyncMock())
     monkeypatch.setattr(audit_tools, "append_safely", AsyncMock(side_effect=entries.append))
     return entries
 

@@ -22,7 +22,7 @@ from datetime import datetime
 from typing import Final, Literal
 from uuid import UUID
 
-from pydantic import AliasChoices, BaseModel, Field, JsonValue
+from pydantic import AliasChoices, BaseModel, Field, JsonValue, field_validator
 
 from runtime_api.catalog import InboxSpec, ModelSpec, TaskContext
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
@@ -155,8 +155,13 @@ class GatewayCredential(BaseModel):
 class RunNotice(BaseModel):
     """A notice the transcript shows on the run's turn."""
 
-    kind: Literal["workspace_stale"]
+    kind: Literal["execution_stale"]
     data: dict[str, JsonValue] = {}
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _legacy_kind(cls, kind: object) -> object:
+        return "execution_stale" if kind == "workspace_stale" else kind
 
 
 class RunSender(BaseModel):
@@ -188,9 +193,10 @@ class ModelCall(BaseModel):
     """What the graph's own middleware says the next model call sends."""
 
     system_prompt: str
-    # What every thread of the workspace says, sent after ``system_prompt`` and ahead of
-    # the run's skills so the workspace's threads share it from the cache.
-    workspace_prompt: str = ""
+    # Robin-wide execution instructions, sent after ``system_prompt`` and ahead of skills.
+    execution_prompt: str = Field(
+        default="", validation_alias=AliasChoices("execution_prompt", "workspace_prompt")
+    )
     # What only this thread's prompt says, sent after ``system_prompt`` and the run's
     # skills so that every thread shares the cached prefix before it.
     thread_prompt: str = ""

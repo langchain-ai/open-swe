@@ -285,7 +285,6 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     # The coding agent narrows its token no further than its thread does.
     refresh.assert_awaited_once_with(
         run.thread_id,
-        workspace_slug=None,
         github_proxy_repositories=None,
         github_proxy_permissions=None,
         force_refresh=False,
@@ -311,7 +310,7 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     )
     worker = run.model_copy(update={"settings": RunSettings(agent=turn)})
     await TokenRun.answer(parts, worker, "refresh_github_proxy", {"run_id": "run-1"})
-    refresh.assert_awaited_once_with("owner", workspace_slug=None, force_refresh=False)
+    refresh.assert_awaited_once_with("owner", force_refresh=False)
 
 
 async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_off_its_path(
@@ -340,9 +339,9 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     monkeypatch.setattr(
         run_sandbox, "refresh_thread_github_proxy", AsyncMock(return_value=expires_at)
     )
-    # Binding the sandbox found its workspace image stale.
+    # Binding the sandbox found its execution image stale.
     monkeypatch.setattr(run_calls, "take_stale_boot", lambda thread_id: object())
-    monkeypatch.setattr(run_calls, "StaleWorkspaceReporter", MagicMock(report=AsyncMock()))
+    monkeypatch.setattr(run_calls, "StaleExecutionReporter", MagicMock(report=AsyncMock()))
     monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", never_reached)
     monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
@@ -358,7 +357,6 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     monkeypatch.setattr(server, "construct_system_prompt", render)
     for name in (
         "resolve_triggering_user_identity",
-        "load_workspace",
         "_resolve_prompt_default_repo",
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
@@ -393,7 +391,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     assert update["work_dir"] == "/workspace"
     assert update["selected_model_id"] == "openai:gpt-6.1-sol"
     assert len(prompts) == 1
-    bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None, workspace_slug=None)
+    bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None)
     updated.assert_not_awaited()
     usage.assert_not_awaited()
     assert prepared["notices"] == []
@@ -471,7 +469,7 @@ async def test_a_run_still_opening_its_sandbox_prepares_without_it_and_binds_it_
     monkeypatch.setattr(run_sandbox, "bind_mda_sandbox", bound)
     monkeypatch.setattr(run_sandbox, "refresh_thread_github_proxy", refresh)
     monkeypatch.setattr(run_sandbox, "post_sandbox_unreachable_notification", told)
-    monkeypatch.setattr(run_calls, "StaleWorkspaceReporter", stale)
+    monkeypatch.setattr(run_calls, "StaleExecutionReporter", stale)
     monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
     monkeypatch.setattr(server, "get_or_create_sandbox_backend_proxy", never_reached)
     monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value=pending))
@@ -483,7 +481,6 @@ async def test_a_run_still_opening_its_sandbox_prepares_without_it_and_binds_it_
     )
     for name in (
         "resolve_triggering_user_identity",
-        "load_workspace",
         "_resolve_prompt_default_repo",
     ):
         monkeypatch.setattr(server, name, AsyncMock(return_value=None))
@@ -518,7 +515,7 @@ async def test_a_run_still_opening_its_sandbox_prepares_without_it_and_binds_it_
     bound.assert_not_awaited()
     refresh.assert_not_awaited()
 
-    # Binding the sandbox found its workspace image stale.
+    # Binding the sandbox found its execution image stale.
     monkeypatch.setattr(run_calls, "take_stale_boot", lambda thread_id: object())
     answered = await TokenRun.answer(
         parts,
@@ -528,7 +525,7 @@ async def test_a_run_still_opening_its_sandbox_prepares_without_it_and_binds_it_
     )
 
     assert answered == {"unreachable": None, "github_proxy": {"expires_at": "2030-01-01T00:00:00Z"}}
-    bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None, workspace_slug=None)
+    bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None)
     refresh.assert_awaited_once()
     stale.report.assert_awaited_once()
 
@@ -557,7 +554,6 @@ async def test_a_runs_task_context_is_worked_out_as_it_starts_and_a_cancelled_wo
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from unittest.mock import AsyncMock
-    from uuid import uuid4
 
     from runtime_api.catalog import TaskContext
 
@@ -565,7 +561,7 @@ async def test_a_runs_task_context_is_worked_out_as_it_starts_and_a_cancelled_wo
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
     from openswe.tasks import store
 
-    task = store.Task(title="Repair login", workspace_id=uuid4(), coordinator_thread_id="owner")
+    task = store.Task(title="Repair login", coordinator_thread_id="owner")
     context = store.TaskContext(
         task, store.TaskMembership(thread_id=RUN.thread_id, task_id=task.id, role="worker")
     )
@@ -919,9 +915,7 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
     async def draft_preference(note: str) -> str:
         """Say whether this run opens pull requests as drafts."""
         current = ExecutionProfile.current()
-        observed.append(
-            (current.create.snapshot_id if current else None, await ExecutionProfile.use_defaults())
-        )
+        observed.append((current.create.snapshot_id if current else None, current is not None))
         return f"{note}: {get_config()['configurable'].get('draft_prs')}"
 
     monkeypatch.setattr(
@@ -978,7 +972,6 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
         assert isinstance(refused, dict) and refused["status"] == "error"
         assert "not one of this run's operations" in str(refused["content"])
 
-    defaults.enabled = True
     legacy = run.model_copy(update={"settings": RunSettings(draft_prs=False)})
     assert run_config(legacy)["configurable"]["execution"] is None
     await TokenRun.answer(
@@ -1985,7 +1978,6 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
-    from uuid import uuid7
 
     from runtime_api.workers import Launched
 
@@ -1994,7 +1986,7 @@ async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_
     from openswe.threads import runtimes
 
     coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
-    task = store.Task(title="Fix login", workspace_id=uuid7(), coordinator_thread_id="coordinator")
+    task = store.Task(title="Fix login", coordinator_thread_id="coordinator")
     first = store.TaskDelegation(
         worker_thread_id="first-worker",
         task_id=task.id,
@@ -2035,7 +2027,6 @@ async def test_a_registered_worker_tells_its_coordinators_run_the_task_it_now_co
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
-    from uuid import uuid7
 
     from runtime_api.workers import Launched
 
@@ -2045,7 +2036,7 @@ async def test_a_registered_worker_tells_its_coordinators_run_the_task_it_now_co
     from openswe.threads import runtimes
 
     coordinator = RemoteRun(thread_id="coordinator", assistant_id="agent", configurable={})
-    task = store.Task(title="Fix login", workspace_id=uuid7(), coordinator_thread_id="coordinator")
+    task = store.Task(title="Fix login", coordinator_thread_id="coordinator")
     membership = store.TaskMembership(thread_id="coordinator", task_id=task.id, role="coordinator")
     coordination = TaskCoordinationMiddleware(
         "coordinator", True, store.TaskContext(task, membership)

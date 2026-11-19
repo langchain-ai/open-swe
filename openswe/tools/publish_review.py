@@ -11,7 +11,7 @@ from pydantic import JsonValue, TypeAdapter
 
 from openswe.analytics.usage import record_reviewer_publication
 from openswe.audit_logs.tools import audit_tool
-from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.dashboard.settings import get_settings
 from openswe.github.approval_policy import PullRequestApproval
 from openswe.github.checks import review_check_conclusion
 from openswe.github.http import GitHubClient
@@ -260,7 +260,7 @@ async def _record_ranking(
 async def _resolve_review_trace_url(thread_id: str, config_override: bool | None) -> str | None:
     if config_override is False:
         return None
-    if not (await get_workspace_settings()).review_trace_links_enabled:
+    if not (await get_settings()).review_trace_links_enabled:
         return None
     if not thread_id:
         return None

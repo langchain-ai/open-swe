@@ -364,9 +364,7 @@ export interface AgentSchedule {
   prompt: string
   schedule: string | null
   triggers: Array<AutomationTriggerConfig & { id: string }>
-  scope: "workspace"
-  /** Slug of the workspace every run launches in. */
-  workspace: string
+  scope: "system"
   adminThread: boolean
   model: string
   effort?: string | null
@@ -645,7 +643,6 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
-  workspace?: string | null
   /** The Open SWE project the thread was started in or moved to. */
   projectId?: string | null
   branch: string

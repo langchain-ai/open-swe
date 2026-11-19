@@ -46,7 +46,7 @@ class UserPreferences(BaseModel):
     # Code mode can classify with TypeSafe's System One model (the ``classify`` tool).
     experimental_classify: bool = False
     experimental_force_code_mode: bool = False
-    # Cloud-first desktop for this person, ahead of their workspace's
+    # Cloud-first desktop for this person, ahead of the instance's
     # ``cloud_first_desktop_enabled``: new desktop threads run in the cloud, with
     # individually approved local actions (``openswe/bridge/local_access.py``).
     experimental_cloud_first_desktop: bool = True

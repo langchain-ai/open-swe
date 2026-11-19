@@ -435,7 +435,9 @@ async def test_ask_channel_prs_require_the_persons_linked_github_credentials(
     run_config = config(source="slack")
     run_config["configurable"]["github_linked"] = provider == "github"
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
-    monkeypatch.setattr(credential_scope.WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        credential_scope.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(
         opr, "get_github_app_installation_token", AsyncMock(return_value="bot-token")
     )
@@ -463,7 +465,9 @@ async def test_ask_preflight_requires_the_authenticated_requester(
     run_config = config(source="slack", login=login)
     run_config["configurable"]["background_task_completion"] = background
     monkeypatch.setattr("openswe.run_config.get_config", lambda: run_config)
-    monkeypatch.setattr(credential_scope.WORKSPACES, "is_ask_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        credential_scope.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=True)
+    )
     credentials.side_effect = {"alice": "alice-token", "bob": "bob-token"}.get
     app = AsyncMock(return_value="bot-token")
     monkeypatch.setattr(opr, "get_github_app_installation_token", app)

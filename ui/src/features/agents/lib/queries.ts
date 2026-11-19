@@ -536,21 +536,6 @@ const BUNDLED_SKILLS: Array<Skill> = [
   },
 ]
 
-export const workspaceOptionKeys = {
-  all: ["workspace-options"] as const,
-}
-
-/** Workspaces a new thread can boot from. Empty when none are configured. */
-export function useWorkspaceOptions(enabled = true) {
-  return useQuery({
-    queryKey: workspaceOptionKeys.all,
-    queryFn: api.listWorkspaceOptions,
-    staleTime: 60_000,
-    enabled,
-    meta: { invalidatedBy: [invalidationTopic("workspaces")] },
-  })
-}
-
 async function listPersonalSkills() {
   const items = []
   let offset = 0
@@ -1640,12 +1625,11 @@ export function useDeleteAgentThread() {
   })
 }
 
-export function useShareThreadWithWorkspace() {
+export function useShareThread() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (threadId: string) =>
-      agentsApi.shareThreadWithWorkspace(threadId),
+    mutationFn: (threadId: string) => agentsApi.shareThread(threadId),
     meta: { errorTitle: "Couldn't share thread" },
     onSuccess: async (thread) => {
       await Promise.all([

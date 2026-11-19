@@ -235,8 +235,9 @@ async def test_a_session_turn_starts_the_run_the_backend_planned(
         "@Open SWE fix it",
         "comment-1",
     )
-    # Nothing named, nothing remembered: the instance's default, in the workspace that owns it.
-    assert (plan.repository, plan.workspace) == ("acme/api", None)
+    # Nothing named, nothing remembered: the instance's default.
+    assert plan.repository == "acme/api"
+    assert "workspace" not in plan.model_dump()
     # One run on the session's own thread: a list, as a dict alone would be state.
     assert isinstance(result, list)
     (run,) = cast(list[ChannelRun], result)
@@ -330,33 +331,35 @@ def test_a_reply_named_only_by_id_never_borrows_the_creators_identity(
     assert (turn.turn.author.id, turn.turn.author.email) == (author_id, author_email)
 
 
-_PERSONAL = RepositoryChoice(repository="ada/personal", workspace="ada-space")
+_PERSONAL = RepositoryChoice.model_validate(
+    {"repository": "ada/personal", "workspace": "ada-space"}
+)
 
 
 @pytest.mark.parametrize(
     ("body", "facts", "chosen"),
     [
-        # The turn names it: that wins, in the thread's workspace.
+        # The turn names it: that wins; legacy routing fields are ignored.
         (
             "fix it in repo:acme/web",
             {"thread_repository": "acme/api", "thread_workspace": "core"},
-            ("acme/web", "core"),
+            "acme/web",
         ),
         # A bare name takes the default owner.
-        ("fix it in repo web", {}, ("acme/web", None)),
+        ("fix it in repo web", {}, "acme/web"),
         # A follow-up works where the session does.
-        ("now add a test", {"thread_repository": "acme/api"}, ("acme/api", None)),
+        ("now add a test", {"thread_repository": "acme/api"}, "acme/api"),
         # The issue names it explicitly; an uploaded screenshot is no repository.
-        ("fix it", {"issue": "Crashes in repo:acme/app"}, ("acme/app", None)),
-        # The author's default, in the workspace whose default it is.
-        ("fix it", {"personal_default": _PERSONAL}, ("ada/personal", "ada-space")),
+        ("fix it", {"issue": "Crashes in repo:acme/app"}, "acme/app"),
+        # The author's default.
+        ("fix it", {"personal_default": _PERSONAL}, "ada/personal"),
         # The instance's default comes last.
-        ("fix it", {"instance_default": "acme/main"}, ("acme/main", None)),
+        ("fix it", {"instance_default": "acme/main"}, "acme/main"),
     ],
     ids=["named", "bare-name", "remembered", "issue", "personal", "instance"],
 )
 def test_a_turn_works_in_the_repository_it_names_remembers_or_prefers(
-    body: str, facts: dict[str, object], chosen: tuple[str, str | None]
+    body: str, facts: dict[str, object], chosen: str
 ) -> None:
     issue_text = cast(str, facts.pop("issue", "![shot](https://github.com/user-attachments/x)"))
     event = _created(body, issue={"id": "issue-1", "title": "Bug", "description": issue_text})
@@ -368,7 +371,7 @@ def test_a_turn_works_in_the_repository_it_names_remembers_or_prefers(
         )
     )
     assert isinstance(choice, RepositoryChoice)
-    assert (choice.repository, choice.workspace) == chosen
+    assert choice.repository == chosen
 
 
 @pytest.mark.asyncio

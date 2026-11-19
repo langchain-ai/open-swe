@@ -37,7 +37,7 @@ import {
   useSetAgentThreadViewed,
   usePinAgentThread,
   useResolveAgentThread,
-  useShareThreadWithWorkspace,
+  useShareThread,
   useSidebarPinnedThreads,
   useSidebarRepos,
 } from "@/features/agents/lib/queries"
@@ -135,7 +135,7 @@ export function AgentThreadHeader({
   const deleteThread = useDeleteAgentThread()
   const setViewed = useSetAgentThreadViewed()
   const continuePrivately = useContinueThreadPrivately()
-  const shareWithWorkspace = useShareThreadWithWorkspace()
+  const shareThread = useShareThread()
   const session = useSession()
   // A thread on its owner's machine runs commands there, so it stays private.
   const canShare = Boolean(
@@ -196,7 +196,7 @@ export function AgentThreadHeader({
       disabledValues={
         thread.visibility === "private" && !canShare ? ["public"] : []
       }
-      busy={continuePrivately.isPending || shareWithWorkspace.isPending}
+      busy={continuePrivately.isPending || shareThread.isPending}
     />
   ) : visibility ? (
     <ThreadVisibilityMenu
@@ -389,10 +389,10 @@ export function AgentThreadHeader({
       <ShareThreadDialog
         open={shareOpen}
         onOpenChange={setShareOpen}
-        busy={shareWithWorkspace.isPending}
+        busy={shareThread.isPending}
         running={thread.status === "running"}
         onConfirm={() =>
-          shareWithWorkspace.mutate(thread.id, {
+          shareThread.mutate(thread.id, {
             onSuccess: () => setShareOpen(false),
           })
         }

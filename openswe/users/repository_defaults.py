@@ -1,22 +1,16 @@
-"""Personal repository defaults, scoped by workspace."""
+"""Personal global repository defaults."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class RepositoryDefaults(BaseModel):
     default_repo: str | None = None
-    workspace_default_repos: dict[str, str] = Field(default_factory=dict)
 
-    def repository(
-        self, workspace: str | None = None, *, fallback_global: bool = True
-    ) -> str | None:
-        scoped = self.workspace_default_repos.get(workspace) if workspace else None
-        return scoped or (self.default_repo if fallback_global else None)
+    def repository(self) -> str | None:
+        return self.default_repo
 
-    def repo_config(
-        self, workspace: str | None = None, *, fallback_global: bool = True
-    ) -> dict[str, str] | None:
-        repository = self.repository(workspace, fallback_global=fallback_global)
+    def repo_config(self) -> dict[str, str] | None:
+        repository = self.repository()
         if not repository:
             return None
         parts = repository.strip().split("/", 1)

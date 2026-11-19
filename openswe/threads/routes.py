@@ -65,7 +65,7 @@ from openswe.threads.handlers import (
     rename_dashboard_thread,
     resolve_all_dashboard_threads,
     resolve_dashboard_thread,
-    share_thread_with_workspace,
+    share_thread,
 )
 from openswe.threads.listing import (
     SIDEBAR_ORDERS,
@@ -611,13 +611,13 @@ async def api_rename_thread(
     )
 
 
-@router.post("/threads/{thread_id}/share-to-workspace")
+@router.post("/threads/{thread_id}/share")
 @audit_endpoint
-async def api_share_thread_with_workspace(
+async def api_share_thread(
     thread_id: str,
     session: dict[str, str] = SESSION_DEP,
 ) -> dict[str, object]:
-    return await share_thread_with_workspace(thread_id, session["sub"], email=session.get("email"))
+    return await share_thread(thread_id, session["sub"], email=session.get("email"))
 
 
 class ThreadMoveRequest(BaseModel):

@@ -4,14 +4,14 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, expect, it, vi } from "vitest"
 
-import { api, type WorkspaceSettings } from "@/lib/api"
+import { api, type RobinSettings } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
 import { makeQueryClient } from "@/lib/query"
 import { useInstanceSettings } from "./settingsScope"
 
 vi.mock("@/lib/errorReporting", () => ({ reportError: vi.fn() }))
 
-const BASE: WorkspaceSettings = {
+const BASE: RobinSettings = {
   review_draft_prs: false,
   pr_summaries: false,
   review_trace_links: false,
@@ -24,18 +24,18 @@ afterEach(() => {
 })
 
 interface Pending {
-  settings: WorkspaceSettings
+  settings: RobinSettings
   resolve: () => void
   reject: (error: Error) => void
 }
 
 function mockInstanceServer() {
-  let stored: WorkspaceSettings = BASE
+  let stored: RobinSettings = BASE
   const requests: Array<Pending> = []
   vi.spyOn(api, "getInstanceSettings").mockImplementation(async () => stored)
   vi.spyOn(api, "saveInstanceSettings").mockImplementation(
     (settings) =>
-      new Promise<WorkspaceSettings>((resolve, reject) =>
+      new Promise<RobinSettings>((resolve, reject) =>
         requests.push({
           settings,
           resolve: () => {
@@ -125,32 +125,4 @@ it("drops only the failed patch and reports the failure", async () => {
       pr_summaries: true,
     })
   )
-})
-
-it("refreshes workspace settings after an instance save", async () => {
-  vi.spyOn(api, "getInstanceSettings").mockResolvedValue(BASE)
-  vi.spyOn(api, "saveInstanceSettings").mockImplementation(async (body) => body)
-  const client = newClient()
-  client.setQueryData(["workspaceSettings", "oss"], {
-    effective: BASE,
-    overrides: {},
-  })
-  const { result } = renderHook(() => useInstanceSettings(), {
-    wrapper: ({ children }) => (
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    ),
-  })
-  await waitFor(() => expect(result.current.data).toBeDefined())
-
-  act(() => result.current.save({ fable_enabled: true }))
-
-  await waitFor(() =>
-    expect(
-      client.getQueryState(["workspaceSettings", "oss"])?.isInvalidated
-    ).toBe(true)
-  )
-  expect(api.saveInstanceSettings).toHaveBeenCalledWith({
-    ...BASE,
-    fable_enabled: true,
-  })
 })

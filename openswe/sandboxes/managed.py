@@ -53,7 +53,6 @@ class ManagedSandbox(BaseModel):
     async def for_thread(
         cls,
         thread_id: str,
-        workspace_slug: str | None,
         *,
         github_repositories: Sequence[str] | None = None,
         github_permissions: PermissionMap | None = None,
@@ -94,7 +93,7 @@ class ManagedSandbox(BaseModel):
                 return None
             sandbox_metadata = {**raw, "sandbox_id": None}
         config = await SandboxCreateConfig.for_thread(
-            sandbox_metadata, workspace_slug, thread_id=owner or thread_id
+            sandbox_metadata, thread_id=owner or thread_id
         )
         carries_checkout = sandbox_metadata.get(HANDOFF_FROM_KEY) is not None
         return cls(

@@ -1,21 +1,20 @@
 from collections.abc import Callable
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from openswe.audit_logs import tools as audit_tools
 from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.models import AuditLog
-from openswe.dashboard.settings_records import WORKSPACE_SETTINGS
-from openswe.dashboard.workspace_settings import (
-    WorkspaceSettingsUpdate,
-    get_workspace_settings,
+from openswe.dashboard.settings import (
+    SettingsUpdate,
+    get_settings,
+    instance_record,
     upsert_instance_settings,
-    workspace_record,
 )
+from openswe.dashboard.settings_records import INSTANCE_SETTINGS
 from openswe.tools import access as tool_access
 from openswe.tools.manage_feature_flags import manage_feature_flags
-from openswe.workspaces.store import WORKSPACES, Workspace
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -31,55 +30,25 @@ def private_admin(grant_tool_access: Callable[..., None]) -> None:
 @pytest.mark.usefixtures("registry_db")
 async def test_instance_flags_keep_unrelated_settings_and_reset() -> None:
     await upsert_instance_settings(
-        WorkspaceSettingsUpdate(
-            pr_summaries=False, org_guidelines="Keep me", model_selection_enabled=True
-        )
+        SettingsUpdate(pr_summaries=False, org_guidelines="Keep me", model_selection_enabled=True)
     )
     set_result = await manage_feature_flags(
         "set", {"pr_summaries": True, "model_selection_enabled": False}
     )
     assert set_result["effective"]["model_selection_enabled"] is False
     assert set_result["effective"]["pr_summaries"] is True
-    assert (await get_workspace_settings())["org_guidelines"] == "Keep me"
+    assert (await get_settings())["org_guidelines"] == "Keep me"
     await manage_feature_flags("set", {"pr_summaries": None})
-    assert (await get_workspace_settings())["pr_summaries"] is True
-    assert (await get_workspace_settings())["model_selection_enabled"] is False
+    assert (await get_settings())["pr_summaries"] is True
+    assert (await get_settings())["model_selection_enabled"] is False
 
 
 async def test_retired_gateway_override_is_not_returned() -> None:
-    await WORKSPACE_SETTINGS.put("team", {"gateway_enabled": False, "pr_summaries": False})
-    settings = await get_workspace_settings("team")
+    await INSTANCE_SETTINGS.put("", {"gateway_enabled": False, "pr_summaries": False})
+    settings = await get_settings()
     assert "gateway_enabled" not in settings
-    assert "gateway_enabled" not in await workspace_record("team")
+    assert "gateway_enabled" not in await instance_record()
     assert settings["pr_summaries"] is False
-
-
-@pytest.mark.usefixtures("registry_db")
-@pytest.mark.parametrize(
-    "flag",
-    ["pr_summaries", "human_review_auto_merge_enabled", "implementation_walkthrough_enabled"],
-)
-async def test_workspace_flags_inherit_and_keep_other_overrides(flag: str) -> None:
-    await WORKSPACE_SETTINGS.put("team", {"org_guidelines": "Keep me", flag: False})
-    with (
-        patch.object(
-            WORKSPACES,
-            "get",
-            AsyncMock(return_value=Workspace(name="team", slug="team", prompt="")),
-        ),
-    ):
-        assert (await manage_feature_flags("read", workspace="team"))["overrides"] == {flag: False}
-        await manage_feature_flags("set", {flag: True}, workspace="team")
-        assert (await get_workspace_settings("team"))[flag] is True
-        await manage_feature_flags("set", {flag: False})
-        result = await manage_feature_flags("set", {flag: None}, workspace="team")
-        assert result["overrides"] == {}
-        assert (await get_workspace_settings("team"))[flag] is False
-        await manage_feature_flags("set", {flag: None})
-        assert (await get_workspace_settings("team"))[flag] is (
-            flag != "implementation_walkthrough_enabled"
-        )
-        assert (await WORKSPACE_SETTINGS.get("team") or {})["org_guidelines"] == "Keep me"
 
 
 @pytest.mark.parametrize(
@@ -141,7 +110,7 @@ async def test_sole_writer_sets_flags_but_cannot_read_them(
         "ok": True,
         "scope": "instance",
     }
-    assert (await get_workspace_settings())["model_selection_enabled"] is True
+    assert (await get_settings())["model_selection_enabled"] is True
     assert "not available in this thread" in str((await manage_feature_flags("read"))["error"])
     (entry,) = entries
     assert entry.operation_succeeded is True

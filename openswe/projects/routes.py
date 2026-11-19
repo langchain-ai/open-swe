@@ -35,7 +35,6 @@ Viewer = Annotated[User, Depends(require_viewer)]
 
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=NAME_MAX_CHARS)
-    workspace: str | None = None
     repo_full_name: str | None = None
 
 
@@ -54,9 +53,7 @@ async def api_list_projects(reader: DashboardReadDep) -> dict[str, list[Project]
 @audit_endpoint
 async def api_create_project(body: ProjectCreate, request: Request, viewer: Viewer) -> Project:
     try:
-        return await PROJECTS.create(
-            viewer, body.name, workspace=body.workspace, repo_full_name=body.repo_full_name
-        )
+        return await PROJECTS.create(viewer, body.name, repo_full_name=body.repo_full_name)
     except ProjectError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
 

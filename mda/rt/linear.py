@@ -4,7 +4,7 @@ Every delivery the channel handles goes to the backend's event log: the first ca
 for it carries it, so each event takes at most two calls (``record`` logs one that
 asks nothing else). An agent session turn starts the coding agent's run on the
 session's own thread. This side reads the turn and decides: whether its author may
-run as themselves, which repository and workspace it works in, and why nothing
+run as themselves, which repository it works in, and why nothing
 starts when nothing does, from what Open SWE knows about them
 (``linear_session_facts``). It fetches the images the turn shows and writes the
 run's input. The backend checks the choice again, indexes the thread and signs the
@@ -170,9 +170,7 @@ class SessionTurn:
 
         A repository the turn names wins; then the one the session's thread already
         works in, so a follow-up needn't name it again; then one the issue names;
-        then the author's and the instance's defaults. With it, the thread's
-        workspace, else the one whose default chose it; ``None`` leaves it to the
-        workspace that owns the repository. Otherwise why the turn starts nothing.
+        then the author's and the instance's defaults. Otherwise why the turn starts nothing.
         """
         issue = self.turn.issue
         owner = facts.policy.default_owner
@@ -183,16 +181,11 @@ class SessionTurn:
         )
         choice: RepositoryChoice | None = None
         if named:
-            choice = RepositoryChoice(repository=named, workspace=facts.thread_workspace)
+            choice = RepositoryChoice(repository=named)
         elif facts.personal_default is not None:
-            choice = RepositoryChoice(
-                repository=facts.personal_default.repository,
-                workspace=facts.thread_workspace or facts.personal_default.workspace,
-            )
+            choice = facts.personal_default
         elif facts.instance_default:
-            choice = RepositoryChoice(
-                repository=facts.instance_default, workspace=facts.thread_workspace
-            )
+            choice = RepositoryChoice(repository=facts.instance_default)
         if choice is None:
             return LinearSessionDeclined(reason="no_repository")
         if not is_allowed(
@@ -327,9 +320,7 @@ async def start_session(
     started = (
         await ask_backend(
             PLAN_LINEAR_SESSION,
-            PlanLinearSession(
-                turn=turn.turn, repository=choice.repository, workspace=choice.workspace
-            ),
+            PlanLinearSession(turn=turn.turn, repository=choice.repository),
             msg_id=f"msg_{event.delivery_id}",
         )
     ).answer

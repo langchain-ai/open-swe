@@ -15,9 +15,9 @@ from starlette.types import Message
 
 from openswe.client_tools import ClientToolSpec
 from openswe.dashboard import repo_access
-from openswe.dashboard.workspace_settings import (
-    WorkspaceSettings,
-    WorkspaceSettingsUpdate,
+from openswe.dashboard.settings import (
+    Settings,
+    SettingsUpdate,
     upsert_instance_settings,
 )
 from openswe.database import postgres
@@ -57,7 +57,6 @@ from openswe.users import User
 from openswe.users.models import UserIdentity
 from openswe.utils import ttl_cache
 from openswe.utils.object_store import ObjectStore, StoredObject
-from openswe.webhooks import common as webhook_common
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -438,7 +437,7 @@ class _Admin:
     @staticmethod
     async def feature(*entries: tuple[AppVersion, list[str]]) -> None:
         await upsert_instance_settings(
-            WorkspaceSettingsUpdate.model_validate(
+            SettingsUpdate.model_validate(
                 {
                     "featured_apps": [
                         {"app": str(v.app), "release": str(v.id), "repositories": names}
@@ -666,7 +665,7 @@ async def test_requesting_app_reviews_requires_both_grants_and_repository_access
     assert refused.value.status_code == 403
 
 
-async def test_review_requests_use_one_job_and_require_workspace_approval(
+async def test_review_requests_use_one_job_and_require_admin_approval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ada = await _person("ada", "1")
@@ -691,14 +690,13 @@ async def test_review_requests_use_one_job_and_require_workspace_approval(
     github = MagicMock()
     github.__aenter__.return_value = Mock(repo=Mock(return_value=repository))
     monkeypatch.setattr(GitHubClient, "as_user", Mock(return_value=github))
-    monkeypatch.setattr(webhook_common, "workspace_for_repo_config", AsyncMock(return_value=None))
-    settings = AsyncMock(return_value=WorkspaceSettings({}))
-    monkeypatch.setattr(review_requests, "cached_workspace_settings", settings)
+    settings = AsyncMock(return_value=Settings({}))
+    monkeypatch.setattr(review_requests, "cached_settings", settings)
     monkeypatch.setattr(PreviewReady, "checks", AsyncMock(return_value=frozenset({"preview"})))
     with pytest.raises(HTTPException) as refused:
         await plugin_routes.api_plugin_request_review("acme", "app", 7, plugin)
     assert refused.value.status_code == 403
-    settings.return_value = WorkspaceSettings(
+    settings.return_value = Settings(
         {"review_apps": [{"app": str(release.app), "release": str(release.id)}]}
     )
     first = await plugin_routes.api_plugin_request_review("acme", "app", 7, plugin)

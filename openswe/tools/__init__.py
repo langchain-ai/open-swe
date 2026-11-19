@@ -33,7 +33,6 @@ _TOOL_MODULES = {
     "list_event_types": ".listen_events",
     "listen_events": ".listen_events",
     "monitor": ".monitor",
-    "list_workspaces": ".workspaces",
     "list_findings": ".list_findings",
     "list_review_findings": ".list_review_findings",
     "link_pull_request": ".open_pull_request",
@@ -53,8 +52,6 @@ _TOOL_MODULES = {
     "read_user_settings": ".read_user_settings",
     "record_human_input": ".record_human_input",
     "recreate_sandbox": ".recreate_sandbox",
-    "configure_repository": ".workspaces",
-    "configure_workspace": ".workspaces",
     "report_platform_issue": ".report_platform_issue",
     "request_human_review": ".request_human_review",
     "request_pr_review": "openswe.slack.tools.request_pr_review",
@@ -74,7 +71,12 @@ _TOOL_MODULES = {
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
     "search_pull_requests": ".search_pull_requests",
-    "snapshotctl": ".workspaces",
+    "snapshotctl": ".snapshotctl",
+    "list_integration_bindings": "openswe.routing.tools",
+    "bind_repository": "openswe.routing.tools",
+    "unbind_repository": "openswe.routing.tools",
+    "bind_slack_channel": "openswe.routing.tools",
+    "unbind_slack_channel": "openswe.routing.tools",
     "send_announcement": ".send_announcement",
     "start_thread": ".threads",
     "slack_add_reaction": "openswe.slack.tools.add_reaction",
@@ -124,7 +126,6 @@ __all__ = [
     "list_event_types",
     "listen_events",
     "monitor",
-    "list_workspaces",
     "list_findings",
     "list_review_findings",
     "link_pull_request",
@@ -144,8 +145,6 @@ __all__ = [
     "read_user_settings",
     "record_human_input",
     "recreate_sandbox",
-    "configure_repository",
-    "configure_workspace",
     "report_platform_issue",
     "request_human_review",
     "request_pr_review",
@@ -172,6 +171,11 @@ __all__ = [
     "schedule_thread_wakeup",
     "search_pull_requests",
     "snapshotctl",
+    "list_integration_bindings",
+    "bind_repository",
+    "unbind_repository",
+    "bind_slack_channel",
+    "unbind_slack_channel",
     "send_announcement",
     "start_thread",
     "slack_add_reaction",
@@ -197,6 +201,13 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
+    from openswe.routing.tools import (
+        bind_repository,
+        bind_slack_channel,
+        list_integration_bindings,
+        unbind_repository,
+        unbind_slack_channel,
+    )
     from openswe.slack.tools.add_reaction import slack_add_reaction
     from openswe.slack.tools.attach_html import slack_attach_html
     from openswe.slack.tools.channels import (
@@ -276,6 +287,7 @@ if TYPE_CHECKING:
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from openswe.tools.search_pull_requests import search_pull_requests
     from openswe.tools.send_announcement import send_announcement
+    from openswe.tools.snapshotctl import snapshotctl
     from openswe.tools.submit_thread_feedback import submit_thread_feedback
     from openswe.tools.suggest_task import suggest_task
     from openswe.tools.switch_to_performance_model import switch_to_performance_model
@@ -291,12 +303,6 @@ if TYPE_CHECKING:
     from openswe.tools.update_finding import update_finding
     from openswe.tools.user_skills import delete_user_skill, save_user_skill
     from openswe.tools.web_search import web_search
-    from openswe.tools.workspaces import (
-        configure_repository,
-        configure_workspace,
-        list_workspaces,
-        snapshotctl,
-    )
 
 
 def _load_export(name: str) -> Any:

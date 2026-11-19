@@ -1,6 +1,6 @@
 """Shadow reviews: a second reviewer on a sample of pull requests, kept for offline comparison.
 
-When a pull request's first review starts, the workspace's ``review_shadow_*``
+When a pull request's first review starts, the global ``review_shadow_*``
 settings decide whether it is sampled and pin the model its shadow runs on. A
 sampled pull request's shadow then follows each review its reviewer runs there,
 first reviews and re-reviews alike, on its own thread with the same prompt and
@@ -20,7 +20,7 @@ from sqlalchemy import ForeignKey, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.orm import Mapped, mapped_column
 
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.dashboard.settings_cache import cached_settings
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.dispatch import dispatch_agent_run, dispatch_client
@@ -102,7 +102,7 @@ class ReviewShadow(Base):
         if shadow is None:
             if control.re_review:
                 return
-            shadow = await cls._sample(pull, workspace=control.workspace_slug)
+            shadow = await cls._sample(pull)
             if shadow is None:
                 return
         await shadow.start(control, pull, kickoff=kickoff, pr_title=pr_title)
@@ -113,9 +113,9 @@ class ReviewShadow(Base):
             return await session.scalar(select(cls).where(cls.pull_request_id == pull_request_id))
 
     @classmethod
-    async def _sample(cls, pull: PullRequest, *, workspace: str | None) -> ReviewShadow | None:
+    async def _sample(cls, pull: PullRequest) -> ReviewShadow | None:
         """The pull request's new shadow, when the experiment is on and samples it."""
-        arm = (await cached_workspace_settings(workspace)).review_shadow
+        arm = (await cached_settings()).review_shadow
         # uuid7's trailing bits are random, so this samples evenly and stays put on a retry.
         if arm is None or pull.id.int % 100 >= arm.percent:
             return None

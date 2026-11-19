@@ -1225,6 +1225,24 @@ describe("notices", () => {
     expect(routedNotice(nextTurn)).toBeNull()
   })
 
+  it.each(["execution_stale", "workspace_stale"] as const)(
+    "updates a reloaded %s notice without duplicating it",
+    (kind) => {
+      const row = {
+        turn_id: "turn-2",
+        kind,
+        data: { captured_at: "2026-01-01T00:00:00Z" },
+      }
+      const reloaded = fromSnapshot(snapshot({ notices: [row] }))
+      const data = { captured_at: "2026-01-01T00:01:00Z" }
+      const updated = applyEvent(reloaded, notice(11, { ...row, data }))
+
+      expect(Object.values(updated.notices)).toEqual([
+        { turnId: "turn-2", kind: "execution_stale", data },
+      ])
+    }
+  )
+
   it("stops reporting offloading once the turn it described settles", () => {
     const started = applyEvent(
       fromSnapshot(twoTurnSnapshot()),

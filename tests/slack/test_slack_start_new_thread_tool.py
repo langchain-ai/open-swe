@@ -8,7 +8,7 @@ import httpx2
 import pytest
 
 from openswe.credential_scope import pr_author_login, private_credential_login
-from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.dashboard.settings import Settings
 from openswe.slack import solo_threads, staged_files
 from openswe.slack.channels import SlackChannel
 from openswe.users.models import User, UserIdentity
@@ -90,7 +90,6 @@ def _config() -> dict[str, Any]:
     return {
         "configurable": {
             "thread_id": "parent-thread",
-            "workspace": "engineering",
             "repo": {"owner": "langchain-ai", "name": "open-swe"},
             "github_login": "alice",
             "user_email": "alice@example.com",
@@ -150,8 +149,8 @@ def parent_client(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         slack_breakout_tool,
-        "cached_workspace_settings",
-        AsyncMock(return_value=WorkspaceSettings({"fable_enabled": False})),
+        "cached_settings",
+        AsyncMock(return_value=Settings({"fable_enabled": False})),
     )
     # The parent conversation is the backend's unless a test says MDA's channel holds it.
     monkeypatch.setattr(slack_breakout_tool.mda_forwarding, "holds", AsyncMock(return_value=False))
@@ -629,7 +628,7 @@ async def test_slack_breakout_thread_success(
     assert captured["binding"]["thread_ts"] == new_ts
     metadata = captured["thread_update"]["metadata"]
     assert metadata["source"] == "slack"
-    assert metadata["workspace"] == "engineering"
+    assert "workspace" not in metadata
     assert metadata["source_context"]["slack_thread"]["channel_id"] == target
     assert metadata["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
     assert metadata["github_login"] == "alice"
@@ -644,7 +643,7 @@ async def test_slack_breakout_thread_success(
     dispatch = captured["dispatch"]
     assert dispatch["thread_id"] == expected_thread_id
     assert dispatch["source"] == "slack"
-    assert dispatch["configurable"]["workspace"] == "engineering"
+    assert "workspace" not in dispatch["configurable"]
     assert dispatch["configurable"]["slack_thread"]["channel_id"] == target
     assert dispatch["configurable"]["slack_thread"]["thread_ts"] == new_ts
     assert dispatch["configurable"]["repo"] == {"owner": "langchain-ai", "name": "open-swe"}
@@ -703,7 +702,7 @@ async def test_breakout_preserves_requester_and_credential_scope(
     )
     saved_slack = dict(config["configurable"]["slack_thread"])
     monkeypatch.setattr(
-        "openswe.credential_scope.WORKSPACES.is_ask_channel", AsyncMock(return_value=False)
+        "openswe.credential_scope.INTEGRATIONS.is_ask_channel", AsyncMock(return_value=False)
     )
     monkeypatch.setattr(
         slack_breakout_tool.User,

@@ -29,12 +29,6 @@ def _ready(
         AsyncMock(return_value=SimpleNamespace(id=uuid4())),
     )
     monkeypatch.setattr(
-        "openswe.rollout_events.workspace_for_repo", AsyncMock(return_value="default")
-    )
-    monkeypatch.setattr(
-        "openswe.rollout_events.WORKSPACES.id_for_slug", AsyncMock(return_value=uuid4())
-    )
-    monkeypatch.setattr(
         "openswe.rollout_events.EventSubscription.for_thread",
         AsyncMock(return_value=existing or []),
     )
@@ -207,7 +201,6 @@ async def test_ask_to_monitor_rollout_does_not_ask_when_a_yes_cannot_subscribe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("openswe.rollout_events.Repository.get", AsyncMock(return_value=None))
-    monkeypatch.setattr("openswe.rollout_events.workspace_for_repo", AsyncMock(return_value=""))
     dispatch = AsyncMock()
     monkeypatch.setattr("openswe.rollout_events.dispatch_agent_run", dispatch)
     await ask_to_monitor_rollout("thread-1", owner="lc", repo="repo", number=7, metadata={})

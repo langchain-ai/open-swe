@@ -180,8 +180,12 @@ async def test_a_refresh_asked_for_a_call_that_is_not_made_is_stopped(
     assert stopped.is_set()
 
 
+@pytest.mark.parametrize(
+    "execution_key", ["rendered_execution_prompt", "rendered_workspace_prompt"]
+)
 async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     monkeypatch: pytest.MonkeyPatch,
+    execution_key: str,
 ) -> None:
     context = '<dynamic-context kind="task" id="task-1">Fix login</dynamic-context>'
     role = '<dynamic-context kind="run" id="task-role">You coordinate the task.</dynamic-context>'
@@ -203,7 +207,7 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         rendered_system_prompt=(
             "You are Open SWE.\n\nWe deploy on Fridays.\n\nThis thread's artifacts are here."
         ),
-        rendered_workspace_prompt="We deploy on Fridays.",
+        **{execution_key: "We deploy on Fridays."},
         rendered_thread_prompt="This thread's artifacts are here.",
     )
 
@@ -211,10 +215,9 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     await backend.outbox.drain()
 
     assert planned.call is not None
-    # What the workspace's threads and this thread alone say go apart, after what every
-    # thread shares.
+    # The execution and thread partitions follow what every thread shares.
     assert planned.call.system_prompt == "This is a preview deployment.\n\nYou are Open SWE."
-    assert planned.call.workspace_prompt == "We deploy on Fridays."
+    assert planned.call.execution_prompt == "We deploy on Fridays."
     assert planned.call.thread_prompt == "This thread's artifacts are here."
     assert planned.call.hidden_tools == ["grep", "record_human_input"]
     assert planned.update == {

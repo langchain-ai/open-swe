@@ -48,7 +48,6 @@ class RunSandbox:
         repositories, permissions = self._github_scope()
         return await ManagedSandbox.for_thread(
             self._cfg.thread_id,
-            self._cfg.workspace_slug,
             allow_github=self._cfg.github_linked,
             github_repositories=repositories,
             github_permissions=permissions,
@@ -73,7 +72,6 @@ class RunSandbox:
             self._cfg.thread_id,
             sandbox_id,
             open_error=open_error,
-            workspace_slug=self._cfg.workspace_slug,
         )
 
     async def bind_or_tell(self, sandbox_id: str | None, *, open_error: str | None) -> None:
@@ -104,7 +102,6 @@ class RunSandbox:
             repositories, permissions = self._github_scope()
             await reconnect_replaced_sandbox(
                 self._cfg.thread_id,
-                workspace_slug=self._cfg.workspace_slug,
                 github_proxy_repositories=repositories,
                 github_proxy_permissions=permissions,
                 invocation_id=self._cfg.invocation_id,
@@ -123,7 +120,6 @@ class RunSandbox:
                 repositories = None
         return await refresh_thread_github_proxy(
             self._cfg.thread_id,
-            workspace_slug=self._cfg.workspace_slug,
             github_proxy_repositories=repositories,
             github_proxy_permissions=permissions,
             force_refresh=force_refresh,

@@ -8,9 +8,11 @@ import httpx2
 import pytest
 from pydantic import JsonValue
 
+from openswe.execution import ExecutionProfile
 from openswe.github.sandbox_access import SandboxGitHubAccess
 from openswe.sandboxes.providers.langsmith import (
     PROXY_CONFIG_RETRY_WINDOW_SECONDS,
+    LangSmithCreateOptions,
     configure_sandbox_proxy,
 )
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
@@ -245,7 +247,7 @@ class TestRefreshProxyOnSandboxReuse:
 
         with (
             patch(
-                "openswe.sandboxes.lifecycle.workspace_token",
+                "openswe.sandboxes.lifecycle.sandbox_token",
                 new_callable=AsyncMock,
                 return_value=SandboxGitHubAccess("ghs_fresh"),
             ),
@@ -291,17 +293,28 @@ class TestRefreshThreadGithubProxy:
     async def test_a_replica_that_never_connected_still_gives_the_sandbox_a_fresh_token(
         self,
     ) -> None:
-        """Nothing is read from this process: the sandbox and its rules come from the thread."""
+        """Replica refresh uses private authority even when public metadata disagrees."""
         proxy_config = {"rules": [{"name": "public-api"}]}
-        metadata = {"sandbox_id": "sandbox-abc", SANDBOX_PROXY_CONFIG_METADATA_KEY: proxy_config}
+        profile = ExecutionProfile(
+            create=LangSmithCreateOptions.resolve(create_params={"proxy_config": proxy_config})
+        )
+        metadata = {
+            "sandbox_id": "sandbox-abc",
+            SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [{"name": "forged"}]},
+        }
         with (
+            patch(
+                "openswe.sandboxes.lifecycle.SANDBOX_EXECUTION.bound",
+                new_callable=AsyncMock,
+                return_value=profile,
+            ),
             patch(
                 "openswe.sandboxes.lifecycle.get_sandbox_metadata",
                 new_callable=AsyncMock,
                 return_value=metadata,
             ),
             patch(
-                "openswe.sandboxes.lifecycle.workspace_token",
+                "openswe.sandboxes.lifecycle.sandbox_token",
                 new_callable=AsyncMock,
                 return_value=SandboxGitHubAccess("ghs_fresh", "2026-10-27T20:00:00Z"),
             ),
@@ -353,39 +366,29 @@ class TestMdaProxyConfig:
                         "extra_fields": {"proxy_config": {"rules": [_AWS_RULE]}}
                     },
                 },
-                _RECORDED_RULE,
+                [],
             ),
             (
                 {
                     "sandbox_id": "sandbox-abc",
                     SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [_RECORDED_RULE]},
                 },
-                _RECORDED_RULE,
+                [],
             ),
         ],
     )
-    async def test_the_backends_part_keeps_the_cloud_identity_the_sandbox_was_created_with(
-        self, metadata: dict[str, object], expected: dict[str, object] | None
+    async def test_public_metadata_cannot_grant_cloud_authority(
+        self, metadata: dict[str, object], expected: list[dict[str, object]] | None
     ) -> None:
         """Informational replacement metadata cannot select a different cloud identity."""
         from openswe.sandboxes.lifecycle import mda_proxy_config
-        from openswe.workspaces.store import Workspace
 
-        other = Workspace(
-            slug="other",
-            create_params={"proxy_config": {"rules": [_AWS_RULE]}, "tag_value_ids": [_TAG]},
-        )
         tools_rule = {"name": "open-swe-thread-tools", "match_hosts": ["backend.invalid"]}
         with (
             patch(
                 "openswe.sandboxes.lifecycle.get_sandbox_metadata",
                 new_callable=AsyncMock,
                 return_value=metadata,
-            ),
-            patch(
-                "openswe.sandboxes.lifecycle.load_workspace",
-                new_callable=AsyncMock,
-                side_effect=lambda slug: other if slug == "other" else None,
             ),
             patch(
                 "openswe.sandboxes.tool_access.tool_proxy_rule",
@@ -395,8 +398,8 @@ class TestMdaProxyConfig:
         ):
             if expected is None:
                 with pytest.raises(ValueError, match="not privately pinned"):
-                    await mda_proxy_config("thread-123", "sandbox-abc", workspace_slug="mine")
+                    await mda_proxy_config("thread-123", "sandbox-abc")
                 return
-            config = await mda_proxy_config("thread-123", "sandbox-abc", workspace_slug="mine")
+            config = await mda_proxy_config("thread-123", "sandbox-abc")
 
-        assert config["rules"] == [tools_rule, expected]
+        assert config["rules"] == [tools_rule, *expected]

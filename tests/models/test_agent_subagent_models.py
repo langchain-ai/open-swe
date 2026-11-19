@@ -5,7 +5,7 @@ import langgraph_sdk
 import pytest
 from langgraph.graph.state import RunnableConfig
 
-from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.dashboard.settings import Settings
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.server import agent_catalog
 from openswe.threads import index
@@ -41,7 +41,7 @@ async def saved_thread_scope(
 
 
 @pytest.mark.asyncio
-async def test_agent_subagent_uses_workspace_defaults_despite_profile_override() -> None:
+async def test_agent_subagent_uses_global_defaults_despite_profile_override() -> None:
     config: RunnableConfig = {
         "configurable": {
             "__is_for_execution__": True,
@@ -70,9 +70,9 @@ async def test_agent_subagent_uses_workspace_defaults_despite_profile_override()
             return_value="/workspace",
         ),
         patch(
-            "openswe.server.cached_workspace_settings",
+            "openswe.server.cached_settings",
             new_callable=AsyncMock,
-            return_value=WorkspaceSettings(_MODEL_DEFAULTS),
+            return_value=Settings(_MODEL_DEFAULTS),
         ),
         patch(
             "openswe.server.load_profile",
@@ -122,9 +122,9 @@ async def test_agent_ignores_disabled_fable_profile() -> None:
             return_value="/workspace",
         ),
         patch(
-            "openswe.server.cached_workspace_settings",
+            "openswe.server.cached_settings",
             new_callable=AsyncMock,
-            return_value=WorkspaceSettings({**_MODEL_DEFAULTS, "fable_enabled": False}),
+            return_value=Settings({**_MODEL_DEFAULTS, "fable_enabled": False}),
         ),
         # Profile selected Fable back when it was allowed; it's now disabled.
         patch(

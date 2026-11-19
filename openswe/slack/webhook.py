@@ -17,7 +17,7 @@ from pydantic import JsonValue
 from runtime_api.slack import SlackMessageOrigin, SlackNotice, SlackTurnPrompt
 
 from openswe.dashboard.langsmith_login import LangSmithLogin
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.dashboard.settings_cache import cached_settings
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import (
     ChannelIdentity,
@@ -37,6 +37,7 @@ from openswe.input_messages import (
     visible_dynamic_context_hashes,
 )
 from openswe.prompts import prompt
+from openswe.routing.store import INTEGRATIONS
 from openswe.run_config import Repo
 from openswe.slack import client as slack_utils
 from openswe.slack.allowed_bots import AllowedSlackBot, resolve_allowed_slack_bot
@@ -70,8 +71,6 @@ from openswe.utils.thread_ops import queue_message_for_thread
 from openswe.utils.thread_participants import slack_participant_ids
 from openswe.utils.thread_settings import load_thread_settings
 from openswe.webhooks import common
-from openswe.workspaces.routing import resolve_workspace, workspace_for_repo
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 _CONCIERGE_CONTEXT = prompt("runs/slack-concierge")
 _KITCHEN_CONTEXT = prompt("runs/slack-kitchen")
@@ -544,8 +543,6 @@ async def _clear_early_status_if_idle(request: SlackRequest, status_ts: str) -> 
 async def process_slack_mention(
     request: SlackRequest,
     repo: common.SlackRepoResolution | None,
-    *,
-    inherited_workspace: str | None = None,
 ) -> None:
     """Process a Slack request by creating a run or queuing a mid-run message."""
     status_ts = request.thread_ts
@@ -564,7 +561,7 @@ async def process_slack_mention(
     )
     try:
         status_handed_off = await _process_slack_mention_impl(
-            request, repo, inherited_workspace=inherited_workspace, status_shown=status_shown
+            request, repo, status_shown=status_shown
         )
         if status_shown is not None and not status_handed_off:
             await asyncio.wait({status_shown})
@@ -662,7 +659,7 @@ class SlackAuthorization:
             and not is_dm_channel(channel)
             and channel.is_mpim is not True
             and (not channel.id or channel.id == channel_id)
-            and await WORKSPACES.is_ask_channel(channel_id)
+            and await INTEGRATIONS.is_ask_channel(channel_id)
         )
 
     @property
@@ -701,32 +698,6 @@ class SlackAuthorization:
 async def account_link_needed(user_id: str) -> AccountLinkNeeded | None:
     """Why a human Slack sender cannot run without explicitly linked LangSmith sign-in."""
     return (await SlackAuthorization.resolve(user_id)).needed
-
-
-async def workspace_scoped_default_repo(
-    candidate: Repo | None, workspace: str | None, login: str | None = None
-) -> Repo | None:
-    """Keep a defaulted repository unless another workspace prefers it.
-
-    Nobody named this repository, so it did not pick the workspace, and the
-    workspace the run landed in should not inherit a default meant for another:
-    its own default repository takes over when it has one. Every workspace can
-    use every repository, so the candidate stays otherwise.
-    """
-    from openswe.execution import ExecutionProfile
-
-    if await ExecutionProfile.use_defaults():
-        return candidate
-    personal = await common.get_profile_default_repo(login, workspace, fallback_global=False)
-    if personal:
-        return Repo.model_validate(personal)
-    if not workspace or candidate is None:
-        return candidate
-    preferred_by = await workspace_for_repo(candidate.owner, candidate.name)
-    if preferred_by is None or preferred_by == workspace:
-        return candidate
-    scoped = (await common.get_workspace_settings(workspace)).default_repo
-    return Repo.model_validate(scoped) if scoped else candidate
 
 
 async def _resolved[T](value: T) -> T:
@@ -850,14 +821,12 @@ async def process_slack_web_mention(
     request: SlackRequest,
     repo: common.SlackRepoResolution | None,
     *,
-    inherited_workspace: str | None = None,
     model_choice: tuple[str, str | None] | None = None,
 ) -> bool:
     """Dispatch a web-only request seeded from Slack without Slack delivery."""
     return await _process_slack_mention_impl(
         request.model_copy(update={"web_only": True}),
         repo,
-        inherited_workspace=inherited_workspace,
         model_choice=model_choice,
     )
 
@@ -914,9 +883,7 @@ async def prepare_slack_channel_run(
     prompt's facts come back with the run.
     """
     capture = _ChannelRunCapture(read=read)
-    await _process_slack_mention_impl(
-        request, repo, inherited_workspace=request.inherited_workspace, channel_run=capture
-    )
+    await _process_slack_mention_impl(request, repo, channel_run=capture)
     return capture.run, capture.prompt
 
 
@@ -924,7 +891,6 @@ async def _process_slack_mention_impl(
     request: SlackRequest,
     repo_resolution: common.SlackRepoResolution | None,
     *,
-    inherited_workspace: str | None = None,
     model_choice: tuple[str, str | None] | None = None,
     status_shown: asyncio.Future[bool] | None = None,
     channel_run: _ChannelRunCapture | None = None,
@@ -1191,26 +1157,9 @@ async def _process_slack_mention_impl(
         and not concierge_mode
     )
     is_first_mention = not thread_record.started
-    # A `/workspace:<name>` command on the message that opens a thread is one
-    # input to which workspace its sandbox boots from — resolved below, once the
-    # triggering user's GitHub login is known. Only the opening message can pick
-    # it: the sandbox is created once, so honoring a later one would change the
-    # prompt but not the image. It is stripped only when it names a real
-    # workspace, so a typo stays visible in the transcript instead of vanishing.
-    tagged_slug: str | None = None
-    if is_first_mention and parsed.workspace:
-        if await WORKSPACES.get(parsed.workspace) is not None:
-            tagged_slug = parsed.workspace
-        else:
-            common.logger.info(
-                "Slack thread tagged an unknown workspace",
-                extra={"slack_thread_id": thread_id, "tagged_workspace": parsed.workspace},
-            )
     clean_text = (
         slack_utils.replace_bot_mention_with_username(
-            parsed.without(
-                performance_model=performance_command, workspace=tagged_slug is not None
-            ),
+            parsed.without(performance_model=performance_command),
             bot_user_id,
             common.SLACK_BOT_USERNAME,
         ).strip()
@@ -1244,34 +1193,6 @@ async def _process_slack_mention_impl(
     # choice is never routed into it.
     thread_model_choice = None if concierge_mode else model_choice or thread_record.model_choice
 
-    # Routing comes before the run's repository: a repository nobody named
-    # must not outrank the channel's binding, and once a workspace has won, a
-    # default repository another workspace owns has to give way to its own.
-    # Later mentions carry no tag, so the thread's workspace comes back from
-    # metadata — a follow-up must not be told about `default` while its sandbox
-    # was built from the workspace the opening message resolved to. It is
-    # resolved here, before the model is, because the model default and the
-    # Fable flag are the resolved workspace's.
-    if is_first_mention:
-        # A DM is one person's own space rather than a routed channel, so it opens
-        # in the instance default unless they named a workspace; an environment
-        # tool can move it afterwards and metadata carries that to later messages.
-        thread_workspace = (
-            DEFAULT_WORKSPACE_SLUG
-            if concierge_mode and not tagged_slug
-            else (
-                await resolve_workspace(
-                    thread_workspace=inherited_workspace,
-                    tag=tagged_slug,
-                    repo=resolution.routing_repo,
-                    slack_channel_id=channel_id,
-                    login=mapped_login,
-                )
-            ).slug
-        )
-    else:
-        thread_workspace = thread_record.workspace
-
     image_model_override: tuple[str, str] | None = None
     if performance_command:
         stored_settings = await load_thread_settings(langgraph_client, thread_id)
@@ -1279,7 +1200,7 @@ async def _process_slack_mention_impl(
         if stored_performance:
             thread_model_choice = (stored_performance["model_id"], stored_performance["effort"])
         else:
-            settings = await cached_workspace_settings(thread_workspace)
+            settings = await cached_settings()
             thread_model_choice = settings.agent_routing_models["performance"]
 
     if image_urls or (read is not None and read.has_images):
@@ -1288,9 +1209,7 @@ async def _process_slack_mention_impl(
             thread_settings = await load_thread_settings(langgraph_client, thread_id)
             resolved_model_id = thread_settings.get("model_id")
         if resolved_model_id is None:
-            resolved_model_id = await common.resolve_agent_model_id(
-                mapped_login, workspace=thread_workspace
-            )
+            resolved_model_id = await common.resolve_agent_model_id(mapped_login)
         if not common.model_supports_images(resolved_model_id):
             fallback_model_id, fallback_effort = common.default_vision_model_pair()
             common.logger.info(
@@ -1355,8 +1274,6 @@ async def _process_slack_mention_impl(
     if review_card is not None and not resolution.explicit and (allowed_bot or mapped_login):
         reviewed = review_card.pull_request
         repo = Repo.model_validate({"owner": reviewed.owner, "name": reviewed.repo})
-    elif not resolution.explicit and (allowed_bot or mapped_login):
-        repo = await workspace_scoped_default_repo(repo, thread_workspace, mapped_login)
     repo_dict = repo.model_dump() if repo else None
 
     channel_identity = await _slack_channel_identity(
@@ -1366,7 +1283,7 @@ async def _process_slack_mention_impl(
     # Guidance that holds for the whole thread, deduped by content so the model
     # is told once; only what this turn adds travels as a message.
     try:
-        ask_channel = unlinked_ask or await WORKSPACES.is_ask_channel(channel_id)
+        ask_channel = unlinked_ask or await INTEGRATIONS.is_ask_channel(channel_id)
     except Exception:
         common.logger.warning(
             "Ask channel lookup failed; retaining normal Slack guidance",
@@ -1445,9 +1362,6 @@ async def _process_slack_mention_impl(
         configurable["admin_thread"] = True
     if request.context_thread_ts:
         configurable["slack_breakout"] = True
-    if thread_workspace:
-        configurable["workspace"] = thread_workspace
-        configurable["environment"] = thread_workspace
     if image_model_override:
         configurable["agent_model_id"] = image_model_override[0]
         configurable["agent_effort"] = image_model_override[1]
@@ -1495,7 +1409,6 @@ async def _process_slack_mention_impl(
         else "",
         static_title=concierge_mode,
         source_context=source_context,
-        workspace=thread_workspace,
         # Everyone who has spoken in the Slack thread keeps their Open SWE
         # participant credit, so a later message from any one of them refreshes
         # the whole set rather than only the latest sender.

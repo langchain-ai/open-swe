@@ -521,10 +521,6 @@ async def test_a_slack_mention_without_github_prepares_a_canonical_chat_run(
     )
     upsert = AsyncMock(return_value=True)
     monkeypatch.setattr(slack_ask.common, "upsert_agent_thread_metadata", upsert)
-    default_repo = AsyncMock(
-        side_effect=AssertionError("A GitHub-free run must not default a repository")
-    )
-    monkeypatch.setattr(slack_service, "workspace_scoped_default_repo", default_repo)
 
     prepared, _ = await slack_service.prepare_slack_channel_run(
         SlackRequest(
@@ -546,7 +542,6 @@ async def test_a_slack_mention_without_github_prepares_a_canonical_chat_run(
     assert config["repo_explicitly_none"] is True
     assert "github_login" not in config
     assert upsert.await_args.kwargs["owner_login"] == "mason-gh"
-    default_repo.assert_not_awaited()
 
 
 @pytest.mark.asyncio

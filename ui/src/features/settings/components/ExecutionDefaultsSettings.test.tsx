@@ -10,7 +10,6 @@ import { ExecutionDefaultsSettings } from "./ExecutionDefaultsSettings"
 
 class ExecutionSettingsServer {
   defaults: ExecutionDefaults = {
-    enabled: false,
     prompt: "",
     repos: [],
     setup_script: "",
@@ -310,43 +309,4 @@ it("rejects invalid sandbox sizes without saving and keeps valid configuration e
     screen.getByRole("button", { name: "Save sandbox configuration" })
   )
   await vi.waitFor(() => expect(server.defaults.vcpus).toBe(2))
-})
-
-it("leaves the cutover off on load and waits for a confirmed field-only save before changing it", async () => {
-  const server = new ExecutionSettingsServer()
-  server.defaults.create_params = { custom_option: { keep: true } }
-  server.failure = "Activation could not be saved."
-  server.holdNextSave()
-  server.render()
-  const toggle = await screen.findByRole("switch", {
-    name: "Use Robin-wide Defaults",
-  })
-  expect(toggle.getAttribute("aria-checked")).toBe("false")
-  expect(server.patches).toEqual([])
-  fireEvent.click(toggle)
-  await vi.waitFor(() => expect(server.patches).toEqual([{ enabled: true }]))
-  expect(toggle.getAttribute("aria-checked")).toBe("false")
-  expect(toggle.hasAttribute("data-disabled")).toBe(true)
-  server.release?.()
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Activation could not be saved."
-  )
-  expect(toggle.getAttribute("aria-checked")).toBe("false")
-  fireEvent.click(toggle)
-  await vi.waitFor(() => {
-    expect(toggle.getAttribute("aria-checked")).toBe("true")
-    expect(toggle.hasAttribute("data-disabled")).toBe(false)
-  })
-  fireEvent.click(toggle)
-  await vi.waitFor(() =>
-    expect(toggle.getAttribute("aria-checked")).toBe("false")
-  )
-  expect(server.patches).toEqual([
-    { enabled: true },
-    { enabled: true },
-    { enabled: false },
-  ])
-  expect(server.defaults.create_params).toEqual({
-    custom_option: { keep: true },
-  })
 })

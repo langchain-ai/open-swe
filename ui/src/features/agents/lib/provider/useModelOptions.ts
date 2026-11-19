@@ -9,6 +9,7 @@ export interface ModelSelection {
 
 export interface ModelOptionsResult {
   models: Array<ModelOption>
+  defaultRepo: string | null
   defaultSelection: ModelSelection | null
   cloudFirstDesktopEnabled: boolean
   modelSelectionEnabled: boolean
@@ -56,9 +57,8 @@ export function persistModelSelection(
   } catch {}
 }
 
-/** ``workspace`` is the workspace being composed in, whose defaults these are. */
-export function useModelOptions(workspace?: string | null): ModelOptionsResult {
-  const optionsQuery = useOptions(workspace)
+export function useModelOptions(): ModelOptionsResult {
+  const optionsQuery = useOptions()
   const profile = useProfile()
   const session = useSession()
   const models = optionsQuery.data?.models ?? []
@@ -68,8 +68,9 @@ export function useModelOptions(workspace?: string | null): ModelOptionsResult {
 
   return {
     models,
+    defaultRepo: optionsQuery.data?.default_repo ?? null,
     defaultSelection,
-    // On for the workspace, or by the person's own opt-in under Experiments.
+    // On globally, or by the person's own opt-in under Experiments.
     cloudFirstDesktopEnabled:
       optionsQuery.data?.cloud_first_desktop_enabled === true ||
       profile.data?.experimental_cloud_first_desktop === true,

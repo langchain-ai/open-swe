@@ -780,18 +780,12 @@ async def test_process_github_pr_review_skips_only_empty_untagged_approvals(
         link.assert_not_awaited()
 
 
-@pytest.mark.parametrize(("workspace", "runs_in"), [("core", "core"), (None, "oss")])
-def test_a_github_issue_run_works_in_its_threads_workspace_else_the_repositorys(
-    monkeypatch, workspace: str | None, runs_in: str
-) -> None:
-    """A follow-up lands in the thread's workspace even if the repository is preferred elsewhere."""
+@pytest.mark.parametrize(("owner", "name"), [("langchain-ai", "open-swe"), ("acme", "other")])
+def test_a_github_issue_run_uses_the_event_repository(monkeypatch, owner: str, name: str) -> None:
     monkeypatch.setattr(
         webhook_common,
         "get_or_resolve_thread_github_token",
         lambda thread_id, email: asyncio.sleep(0, result="app-token"),
-    )
-    monkeypatch.setattr(
-        webhook_common, "workspace_for_repo_config", lambda repo: asyncio.sleep(0, result="oss")
     )
     monkeypatch.setattr(
         webhook_common,
@@ -811,16 +805,16 @@ def test_a_github_issue_run_works_in_its_threads_workspace_else_the_repositorys(
                     "title": "Fix the flaky test",
                     "html_url": "https://github.com/langchain-ai/open-swe/issues/42",
                 },
-                "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+                "repository": {"owner": {"login": owner}, "name": name},
                 "sender": {"login": "octocat", "id": 7},
             },
             "thread-1",
-            workspace=workspace,
         )
     )
 
     assert configurable is not None
-    assert configurable["workspace"] == configurable["environment"] == runs_in
+    assert configurable["source"] == "github"
+    assert configurable["repo"] == {"owner": owner, "name": name}
     assert configurable["github_issue"] == {
         "id": "12345",
         "number": 42,
@@ -843,7 +837,6 @@ def test_a_github_issue_run_needs_the_senders_email(monkeypatch) -> None:
                 "sender": {"login": "stranger"},
             },
             "thread-1",
-            workspace=None,
         )
     )
 
@@ -901,9 +894,6 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
         "get_or_resolve_thread_github_token",
         lambda thread_id, email: asyncio.sleep(0, result="app-token"),
     )
-    monkeypatch.setattr(
-        webhook_common, "workspace_for_repo_config", lambda repo: asyncio.sleep(0, result="oss")
-    )
     monkeypatch.setattr(webhook_common, "upsert_agent_thread_metadata", fake_upsert)
     monkeypatch.setattr(
         User, "email_for_login", lambda login: asyncio.sleep(0, result="octocat@example.com")
@@ -926,7 +916,6 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
                 "sender": {"login": "octocat"},
             },
             "thread-1",
-            workspace=None,
         )
     )
 

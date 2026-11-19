@@ -9,8 +9,7 @@ goes first:
    every run offered the same tools;
 2. the run's prompt (``ModelCall.system_prompt``), the same for every thread of the
    deployment;
-3. the workspace's prompt (``ModelCall.workspace_prompt``), the same for every thread
-   of the workspace;
+3. the execution prompt (``ModelCall.execution_prompt``), Robin-wide instructions;
 4. the run's skills, the same for the runs of people who see the same skills;
 5. what only the thread's prompt says (``ModelCall.thread_prompt``).
 
@@ -82,12 +81,7 @@ def _appended(
 
 
 class RunPromptMiddleware(AgentMiddleware):
-    """Add the run's prompt, then the workspace's, after what every run offered the same
-    tools shares.
-
-    Place it inside the middleware that adds to the graph's own instructions for
-    every run alike, and outside the skills middleware and ``ThreadPromptMiddleware``.
-    """
+    """Add the shared and execution prompts before skills and the thread prompt."""
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
 
@@ -99,7 +93,7 @@ class RunPromptMiddleware(AgentMiddleware):
         planned = _planned(request)
         if planned is None or not planned.system_prompt:
             return await handler(request)
-        texts = [text for text in (planned.system_prompt, planned.workspace_prompt) if text]
+        texts = [text for text in (planned.system_prompt, planned.execution_prompt) if text]
         system = _appended(
             request.system_message, texts, cached=2, marker=self._breakpoint(request.model)
         )

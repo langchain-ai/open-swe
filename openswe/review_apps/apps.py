@@ -2,7 +2,7 @@
 
 An app's manifest can declare a review step (``ReviewStep``): instructions, the
 app-written collections the review may write, and whether it needs a browser. A
-workspace adds apps to its reviews (``review_apps``). A review of a private repository,
+Robin admin adds apps to its reviews (``review_apps``). A review of a private repository,
 whose preview runs only code its organization's members could push, then follows each
 app's instructions, and writes only that app's declared collections, in the reviewed
 repository's scope, under ``pulls/<number>/``: never another pull request's data.
@@ -24,7 +24,7 @@ import httpx2
 from PIL import Image
 from pydantic import TypeAdapter
 
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.dashboard.settings_cache import cached_settings
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
@@ -154,7 +154,7 @@ class SandboxFile:
 
 @dataclass(frozen=True, slots=True)
 class ReviewApp:
-    """An app a workspace added to its reviews, as the release an admin approved describes it."""
+    """An app enabled for reviews, as the release an admin approved describes it."""
 
     id: UUID
     release: UUID
@@ -210,7 +210,7 @@ class ReviewApps:
     apps: tuple[ReviewApp, ...]
     repository: str
     number: int
-    # The workspace's other apps, left out because the pull request changes none of their
+    # Other configured apps, left out because the pull request changes none of their
     # paths, or because GitHub wouldn't list its files when ``files_read`` is False.
     passed: tuple[ReviewApp, ...] = ()
     files_read: bool = True
@@ -225,12 +225,10 @@ class ReviewApps:
 
     @classmethod
     async def triaged(cls, cfg: RunConfig) -> Self | None:
-        """The apps the workspace added to this review, those with ``paths`` the pull request
-        changes nothing in, or whose files can't be read, moved to ``passed``; None when it
-        adds none to this review."""
+        """The global review apps split by changed paths; None when none are configured."""
         if cfg.is_eval or cfg.repo is None or cfg.pr_number is None or not cfg.head_sha:
             return None
-        pinned = (await cached_workspace_settings(cfg.workspace_slug)).review_app_releases
+        pinned = (await cached_settings()).review_app_releases
         if not pinned:
             return None
         name = f"{cfg.repo.owner}/{cfg.repo.name}"

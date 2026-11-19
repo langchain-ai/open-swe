@@ -41,7 +41,6 @@ async def test_posthog_webhook_excludes_raw_payload_and_keeps_unlinked_events(mo
         delivery_id="delivery-1",
         received_at=datetime.now(UTC),
         user_id=None,
-        workspace_id=None,
         repository_id=None,
         pull_request_id=None,
         payload={
@@ -422,18 +421,15 @@ async def test_slack_event_log_reuses_directory_without_fetching_permissions(
 
 
 async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -> None:
-    ids = {name: uuid4() for name in ("user", "workspace", "repository", "pull_request")}
+    ids = {name: uuid4() for name in ("user", "repository", "pull_request")}
     async with transaction() as conn:
         for statement in (
             "INSERT INTO users (id, display_name) VALUES (:user, 'Ada')",
             "INSERT INTO user_identity (user_id, provider, external_id) "
             "VALUES (:user, 'github', '42')",
             "UPDATE user_identity SET login = 'ada-gh' WHERE user_id = :user",
-            "INSERT INTO workspace (id, slug, name) VALUES (:workspace, 'acme', 'Acme')",
             "INSERT INTO repository (id, key, full_name) "
             "VALUES (:repository, 'acme/widgets', 'acme/widgets')",
-            "INSERT INTO workspace_repository (repository_id, workspace_id) "
-            "VALUES (:repository, :workspace)",
             "INSERT INTO pull_request (id, repository_id, number, owner, repo) "
             "VALUES (:pull_request, :repository, 7, 'acme', 'widgets')",
         ):
@@ -463,7 +459,7 @@ async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -
                 text("SELECT user_id, workspace_id, repository_id, pull_request_id FROM event_log")
             )
         ).one()
-    assert tuple(row) == (ids["user"], ids["workspace"], ids["repository"], ids["pull_request"])
+    assert tuple(row) == (ids["user"], None, ids["repository"], ids["pull_request"])
     now = datetime.now(UTC)
     page = await EventLog.search(
         EventLogQuery(start_time=now - timedelta(hours=1), end_time=now, user_id=ids["user"])
@@ -471,10 +467,9 @@ async def test_record_links_a_github_pr_comment_to_its_rows(registry_db: None) -
     (event,) = page.items
     assert (
         event.user_name,
-        event.workspace_name,
         event.repository_name,
         event.pull_request_name,
-    ) == ("Ada", "Acme", "acme/widgets", "acme/widgets#7")
+    ) == ("Ada", "acme/widgets", "acme/widgets#7")
     assert [user.id for user in await EventLog.users("ada-g")] == [ids["user"]]
     assert await EventLog.users("%") == []
 
@@ -687,3 +682,29 @@ class TestConcurrentEventStorage:
         assert await second is True
         async with original() as conn:
             assert await conn.scalar(text("SELECT count(*) FROM event_log")) == 1
+
+
+async def test_historical_internal_events_remain_admin_only_robin_history(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(event_log, "_ROTATED_AT", None)
+    since = datetime.now(UTC) - timedelta(hours=1)
+    assert await EventLog.append(
+        "robin", {"current": True}, event_type="history", delivery_id="current"
+    )
+    async with transaction() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO event_log (source, endpoint, event_type, delivery_id, payload) "
+                "VALUES ('workspace', '', 'history', 'historical', '{\"old\": true}'::jsonb)"
+            )
+        )
+    assert await EventLog.kinds(since, source="robin", event_type="history") == []
+    (kind,) = await EventLog.kinds(since, source="robin", event_type="history", admin=True)
+    assert kind.count == 2
+    assert kind.payload_shape == {"old": "boolean"}
+    page = await EventLog.search(
+        EventLogQuery(start_time=since, end_time=datetime.now(UTC), source="robin")
+    )
+    assert len(page.items) == 2
+    assert {item.source for item in page.items} == {"robin"}

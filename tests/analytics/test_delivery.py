@@ -163,7 +163,6 @@ class TestSegmentDelivery:
             "failure_class": "timeout",
             "severity": "unknown",
             "configured_effort": "unknown",
-            "robin_environment": "unknown",
             "input_tokens": 123,
             "source": "backend",
         }
@@ -517,18 +516,18 @@ class TestSegmentDelivery:
 
 class TestSegmentActivity:
     @pytest.mark.parametrize(
-        ("selection", "environment"),
+        "selection",
         [
-            ({"workspace": "default"}, "default"),
-            ({"workspace": "oss-team", "environment": "default"}, "oss-team"),
-            ({"environment": "oss"}, "oss"),
-            ({}, "unknown"),
-            ({"workspace": "secret /private?query=value"}, "unknown"),
-            ({"workspace": "a" * 81}, "unknown"),
+            {"workspace": "default"},
+            {"workspace": "oss-team", "environment": "default"},
+            {"environment": "oss"},
+            {},
+            {"workspace": "secret /private?query=value"},
+            {"workspace": "a" * 81},
         ],
     )
     async def test_provenance_carried_reports_and_tool_content_are_minimized(
-        self, monkeypatch, selection, environment
+        self, monkeypatch, selection
     ):
         monkeypatch.setenv("SEGMENT_BROWSER_WRITE_KEY", "test-segment-key")
         monkeypatch.setenv("DD_ENV", "test")
@@ -572,7 +571,7 @@ class TestSegmentActivity:
         assert first["properties"]["source"] == "slack"
         assert first["properties"]["environment"] == "test"
         assert first["properties"]["workspace_id"] == str(workspace)
-        assert first["properties"]["robin_environment"] == "unknown"
+        assert "robin_environment" not in first["properties"]
         assert first["properties"]["trigger_kind"] == "human"
         assert first["properties"]["run_id"] == str(identity.opaque_id("run", "earlier-invocation"))
         assert first["timestamp"] != run.configurable["invocation_started_at"]
@@ -603,7 +602,7 @@ class TestSegmentActivity:
         current = schedule.call_args.args[1]
         assert current["userId"] == str(owner)
         assert current["properties"]["attribution_role"] == "owner"
-        assert current["properties"]["robin_environment"] == environment
+        assert "robin_environment" not in current["properties"]
         assert datetime.fromisoformat(current["timestamp"]) == datetime(2026, 9, 1, tzinfo=UTC)
         await activity.request_started(
             RunStarted(
@@ -618,12 +617,12 @@ class TestSegmentActivity:
         assert human_request["properties"]["activity_kind"] == "human_request"
         assert human_request["properties"]["attribution_role"] == "actor"
         assert human_request["properties"]["identity_quality"] == "canonical"
-        assert human_request["properties"]["robin_environment"] == environment
+        assert "robin_environment" not in human_request["properties"]
         await activity.request_started(RunStarted(run_id="unproven-runtime"), carried=False)
         unproven = schedule.call_args.args[1]
         assert "userId" not in unproven
         assert unproven["properties"]["source"] == "unknown"
-        assert unproven["properties"]["robin_environment"] == "unknown"
+        assert "robin_environment" not in unproven["properties"]
         assert unproven["timestamp"] != run.configurable["invocation_started_at"]
         assert unproven["properties"]["run_id"] == str(
             identity.opaque_id("run", "unproven-runtime")
@@ -644,7 +643,7 @@ class TestSegmentActivity:
         assert tool["properties"]["tool"] == "external"
         assert tool["properties"]["is_error"] is True
         assert tool["properties"]["activity_kind"] == "agent_work"
-        assert tool["properties"]["robin_environment"] == "unknown"
+        assert "robin_environment" not in tool["properties"]
         assert tool["properties"]["runtime_run_id"] == first["properties"]["runtime_run_id"]
         await activity.tool_executed(result, is_error=True)
         assert schedule.call_args.args[1]["messageId"] == tool["messageId"]
@@ -654,7 +653,7 @@ class TestSegmentActivity:
         current_tool = schedule.call_args.args[1]
         assert current_tool["userId"] == str(owner)
         assert current_tool["properties"]["attribution_role"] == "owner"
-        assert current_tool["properties"]["robin_environment"] == environment
+        assert "robin_environment" not in current_tool["properties"]
         assert "private" not in json.dumps(tool)
         assert "private" not in json.dumps(current_tool)
         assert "mcp_customer_secret" not in json.dumps(tool)

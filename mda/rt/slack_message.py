@@ -12,10 +12,8 @@ message is its argument:
     @Open SWE /breakout #eng investigate this
     @Open SWE /btw how does thread routing work?
 
-Options (`/model:perf…`, e.g. `/model:performance`, and `/workspace:<name>`) count
-anywhere outside quotes, so `/model:perf` in backticks or quotation marks is just
-text. The legacy `workspace:<name>` and `env:<name>` tags, without the slash, are
-still accepted anywhere in the message.
+Options (`/model:perf…`, e.g. `/model:performance`) count anywhere outside quotes,
+so `/model:perf` in backticks or quotation marks is just text.
 """
 
 import re
@@ -38,26 +36,10 @@ _QUOTED = re.compile(
 )
 _WORD = re.compile(r"\s*(\S+)")
 _TOKEN = re.compile(r"\S+")
-_WORKSPACE_OPTION = re.compile(r"/workspace:([A-Za-z0-9][A-Za-z0-9._-]*)", re.IGNORECASE)
-_LEGACY_WORKSPACE_TAG = re.compile(
-    r"(?:(?<=\s)|^)(?:env|workspace):([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)", re.IGNORECASE
-)
-
-_SLUG = re.compile(r"[^a-z0-9]+")
-#: A workspace name's longest slug, as the backend stores it.
-_SLUG_MAX_CHARS = 80
 #: A channel a breakout names, as Slack writes it: ``<#C123|name>``.
 _CHANNEL_MENTION = re.compile(r"<#(?P<channel_id>[CG][A-Z0-9]+)(?:\|[^>]*)?>")
 
 type Span = tuple[int, int]
-
-
-def slugify(name: str) -> str:
-    """A workspace name's storage key, as the backend's ``slugify`` makes it."""
-    slug = _SLUG.sub("-", (name or "").strip().lower()).strip("-")
-    if not slug:
-        raise ValueError("name must contain at least one letter or digit")
-    return slug[:_SLUG_MAX_CHARS]
 
 
 @dataclass(frozen=True)
@@ -65,13 +47,11 @@ class ParsedSlackMessage:
     text: str
     action: SlackAction | None = None
     performance_model: bool = False
-    workspace: str | None = None
     prior_text: str = ""
     """What the sender wrote before mentioning Open SWE, when a command follows the mention."""
     argument: str = ""
     argument_start: int = 0
     performance_span: Span | None = None
-    workspace_span: Span | None = None
 
     @classmethod
     def parse(cls, text: str, bot_user_id: str, bot_username: str = "") -> Self:
@@ -84,8 +64,7 @@ class ParsedSlackMessage:
             ),
             cls(text=text, argument=text.strip()),
         )
-        parsed = cls._with_options(parsed, masked)
-        return parsed if parsed.workspace else cls._with_legacy_workspace_tag(parsed, masked)
+        return cls._with_options(parsed, masked)
 
     @classmethod
     def _unquoted(cls, text: str) -> str:
@@ -107,20 +86,8 @@ class ParsedSlackMessage:
         return anchors
 
     @classmethod
-    def _workspace_slug(cls, name: str) -> str | None:
-        try:
-            return slugify(name)
-        except ValueError:
-            return None
-
-    @classmethod
     def _is_performance_option(cls, word: str) -> bool:
         return word.lower().startswith(PERFORMANCE_MODEL)
-
-    @classmethod
-    def _workspace_option(cls, word: str) -> str | None:
-        option = _WORKSPACE_OPTION.fullmatch(word)
-        return cls._workspace_slug(option[1]) if option else None
 
     @classmethod
     def _leading_commands(
@@ -132,7 +99,7 @@ class ParsedSlackMessage:
             token = word[1].lower()
             if action is None and token in SlackAction:
                 action = SlackAction(token)
-            elif not (cls._is_performance_option(token) or cls._workspace_option(word[1])):
+            elif not cls._is_performance_option(token):
                 break
             position = word.end()
         if position == anchor:
@@ -147,56 +114,36 @@ class ParsedSlackMessage:
 
     @classmethod
     def _with_options(cls, parsed: Self, masked: str) -> Self:
-        performance_span: Span | None = None
-        workspace: str | None = None
-        workspace_span: Span | None = None
-        for word in _TOKEN.finditer(masked):
-            if performance_span is None and cls._is_performance_option(word[0]):
-                performance_span = word.span()
-            elif workspace is None and (workspace := cls._workspace_option(word[0])):
-                workspace_span = word.span()
+        performance_span = next(
+            (
+                word.span()
+                for word in _TOKEN.finditer(masked)
+                if cls._is_performance_option(word[0])
+            ),
+            None,
+        )
         return replace(
             parsed,
             performance_model=performance_span is not None,
             performance_span=performance_span,
-            workspace=workspace,
-            workspace_span=workspace_span,
         )
-
-    @classmethod
-    def _with_legacy_workspace_tag(cls, parsed: Self, masked: str) -> Self:
-        tag = _LEGACY_WORKSPACE_TAG.search(masked)
-        workspace = cls._workspace_slug(tag[1]) if tag else None
-        if tag is None or workspace is None:
-            return parsed
-        return replace(parsed, workspace=workspace, workspace_span=tag.span())
 
     @property
     def options(self) -> str:
-        """Options typed outside the argument, normalized, to carry into a thread this message starts."""
-        options = (
-            (self.performance_span, PERFORMANCE_MODEL),
-            (self.workspace_span, f"/workspace:{self.workspace}"),
-        )
-        return " ".join(
-            option for span, option in options if span and span[1] <= self.argument_start
+        """The model option typed outside the argument, normalized for a new thread."""
+        return (
+            PERFORMANCE_MODEL
+            if self.performance_span and self.performance_span[1] <= self.argument_start
+            else ""
         )
 
-    def without(self, *, performance_model: bool = False, workspace: bool = False) -> str:
-        """The message text with the chosen options removed."""
-        spans = [
-            span
-            for span, drop in (
-                (self.performance_span, performance_model),
-                (self.workspace_span, workspace),
-            )
-            if span is not None and drop
-        ]
-        text = self.text
-        for start, end in sorted(spans, reverse=True):
-            before, after = text[:start].rstrip(), text[end:].lstrip()
-            text = f"{before} {after}" if before and after else f"{before}{after}"
-        return text.strip()
+    def without(self, *, performance_model: bool = False) -> str:
+        """The message text with the chosen option removed."""
+        if not performance_model or self.performance_span is None:
+            return self.text.strip()
+        start, end = self.performance_span
+        before, after = self.text[:start].rstrip(), self.text[end:].lstrip()
+        return f"{before} {after}" if before and after else f"{before}{after}"
 
 
 @dataclass(frozen=True)

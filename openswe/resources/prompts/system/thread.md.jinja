@@ -19,10 +19,10 @@ When a repository is not explicitly mentioned, use `{{ default_repo }}`.
 {{ repo_instructions_section }}
 
 {% endif %}
-{% if admin_workspaces %}
-{% include "system/admin-workspace.md" +%}
+{% if admin %}
+{% include "system/admin.md" +%}
 {% else %}
-{% include "system/workspace-admin-required.md" +%}
+{% include "system/admin-required.md" +%}
 {% endif %}
 {% if sole_writer %}
 

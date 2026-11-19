@@ -45,7 +45,6 @@ vi.mock("@/features/agents/lib/queries", () => ({
   }),
   useTriggerAgentSchedule: () => ({}),
   useUpdateAgentSchedule: () => ({}),
-  useWorkspaceOptions: () => ({ data: { workspaces: [] } }),
 }))
 vi.mock("./AutomationRuns", () => ({ AutomationRuns: () => null }))
 vi.mock("./AutomationTemplates", () => ({ AutomationTemplates: () => null }))

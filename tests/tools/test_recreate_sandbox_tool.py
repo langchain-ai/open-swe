@@ -28,15 +28,11 @@ async def test_recreate_sandbox_leaves_an_mda_sandbox_to_mda(
     config = {
         "configurable": {
             "thread_id": "thread-1",
-            "workspace": "open-swe",
             "invocation_id": "request-1",
         }
     }
     with (
         patch("openswe.run_config.get_config", return_value=config),
-        patch(
-            "openswe.sandboxes.lifecycle.load_workspace", new_callable=AsyncMock, return_value=None
-        ),
         patch(
             "openswe.tools.recreate_sandbox.hand_sandbox_to_mda", new_callable=AsyncMock
         ) as recreate,
@@ -47,24 +43,22 @@ async def test_recreate_sandbox_leaves_an_mda_sandbox_to_mda(
     assert result["success"] is True
     assert result["replace"]["snapshot_id"] is None
     recreate.assert_not_awaited()
-    # The reconnect takes the replacement's proxy from this record, never from MDA.
     update.assert_awaited_once_with(
         thread_id="thread-1",
-        metadata={"sandbox_replacement": {"workspace": "open-swe", "source": "base"}},
+        metadata={"sandbox_replacement": {"source": "base"}},
     )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stop_error", [None, "stop unavailable"])
-async def test_recreate_sandbox_hands_an_old_sandbox_to_mda_with_the_admin_workspace(
+async def test_recreate_sandbox_hands_an_old_sandbox_to_mda_from_defaults(
     grant_tool_access: Callable[..., None],
     stop_error: str | None,
 ) -> None:
-    grant_tool_access(admin=True, admin_surface=True)
+    grant_tool_access()
     config = {
         "configurable": {
             "thread_id": "thread-1",
-            "workspace": "open-swe",
             "invocation_id": "request-1",
         }
     }
@@ -76,7 +70,7 @@ async def test_recreate_sandbox_hands_an_old_sandbox_to_mda_with_the_admin_works
             return_value=HandedOver("sandbox-old", stop_error),
         ) as recreate,
     ):
-        result = await recreate_sandbox(workspace="langchainplus")
+        result = await recreate_sandbox()
 
     assert result == {
         "success": True,
@@ -85,34 +79,7 @@ async def test_recreate_sandbox_hands_an_old_sandbox_to_mda_with_the_admin_works
         "old_sandbox_stop_error": stop_error,
         "handed_to_mda": True,
     }
-    recreate.assert_awaited_once_with(
-        "thread-1", workspace_slug="langchainplus", source="workspace"
-    )
-
-
-@pytest.mark.asyncio
-async def test_recreate_sandbox_refuses_other_workspace_outside_private_admin_surface(
-    grant_tool_access: Callable[..., None],
-) -> None:
-    grant_tool_access(admin=True, admin_thread=True)
-    config = {
-        "configurable": {
-            "thread_id": "thread-1",
-            "workspace": "open-swe",
-            "invocation_id": "request-1",
-        }
-    }
-    with (
-        patch("openswe.run_config.get_config", return_value=config),
-        patch(
-            "openswe.tools.recreate_sandbox.hand_sandbox_to_mda",
-            new_callable=AsyncMock,
-        ) as recreate,
-    ):
-        result = await recreate_sandbox(workspace="langchainplus")
-
-    assert "not available in this thread" in str(result["error"])
-    recreate.assert_not_awaited()
+    recreate.assert_awaited_once_with("thread-1", source="defaults")
 
 
 @pytest.mark.asyncio

@@ -104,8 +104,7 @@ class SlackMessage(BaseModel):
 
 
 class SlackMessageFactsRequest(SlackMessage):
-    # A ``/workspace:<name>`` tag the message carries, to check it names a workspace.
-    workspace_tag: str = Field(default="", max_length=128)
+    pass
 
 
 class SlackMessageFacts(BaseModel):
@@ -127,8 +126,6 @@ class SlackMessageFacts(BaseModel):
     solo_followup: bool = False
     # Who holds the Slack thread's conversation: MDA's channel, the backend, or nobody yet.
     conversation: Literal["mda", "backend", "new"] = "new"
-    # Whether ``workspace_tag`` names a workspace.
-    workspace_known: bool = False
 
 
 class StartSlackTurn(SlackMessage):
@@ -146,10 +143,9 @@ class StartSlackTurn(SlackMessage):
     treat_all_messages_as_mentions: bool = False
     # A ``/model:perf`` command, which redirects the work in progress.
     performance_command: bool = False
-    # The request's text with the mention, a known workspace tag and the model command
+    # The request's text with the mention and the model command
     # taken out, which titles a new thread.
     clean_text: str = Field(default="", max_length=40_000)
-    workspace_tag: str = Field(default="", max_length=128)
     # Whether the prompt carries images, which may need a model that reads them.
     has_images: bool = False
     # The people whose messages the prompt may quote, and who spoke in the Slack thread.

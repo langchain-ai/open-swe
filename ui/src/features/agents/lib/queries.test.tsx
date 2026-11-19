@@ -22,7 +22,7 @@ import {
   agentThreadKeys,
   markAgentThreadViewed,
   useSetAgentThreadViewed,
-  useShareThreadWithWorkspace,
+  useShareThread,
   optimisticThread,
   setAgentThreadStatus,
   setAgentThreadResolved,
@@ -1103,7 +1103,7 @@ function wrapperFor(client: QueryClient) {
   )
 }
 
-describe("useShareThreadWithWorkspace", () => {
+describe("useShareThread", () => {
   it("keeps confirmed sharing when an older detail read finishes later", async () => {
     const client = testClient()
     const thread = {
@@ -1115,14 +1115,12 @@ describe("useShareThreadWithWorkspace", () => {
     const staleRead = deferred<AgentThread>()
     const share = deferred<AgentThread>()
     vi.spyOn(agentsApi, "getThread").mockReturnValue(staleRead.promise)
-    vi.spyOn(agentsApi, "shareThreadWithWorkspace").mockReturnValue(
-      share.promise
-    )
+    vi.spyOn(agentsApi, "shareThread").mockReturnValue(share.promise)
     client.setQueryData(agentThreadKeys.detail(thread.id), thread)
     const { result } = renderHook(
       () => ({
         detail: useAgentThread(thread.id),
-        share: useShareThreadWithWorkspace(),
+        share: useShareThread(),
       }),
       { wrapper: wrapperFor(client) }
     )

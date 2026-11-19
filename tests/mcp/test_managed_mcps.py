@@ -998,7 +998,7 @@ async def test_card_resumes_once_its_own_services_are_connected(
     assert blocks[-1]["elements"][0]["text"] == card.slack_footer
     configurable = dispatch.await_args.args[2]
     assert configurable["github_login"] == "alice"
-    assert configurable["workspace"] == "eng"
+    assert "workspace" not in configurable
     assert "Notion, Exa" in dispatch.await_args.args[1]
 
 

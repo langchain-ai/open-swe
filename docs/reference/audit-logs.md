@@ -4,7 +4,7 @@ Robin stores metadata-only audit records in PostgreSQL's `open_swe.audit_logs` t
 The envelope follows LangSmith's current audit schema: `id`, `request_time`, `operation_name`, nullable `operation_succeeded`, `user_id`, `api_key_id`, `workspace_id`, and JSONB `enrichments`.
 Robin has no organization or second LangSmith user identity, so those columns are omitted; API-key IDs retain Robin's text representation.
 
-Records have no cascading foreign keys: deleting an account, key, or workspace must not erase its history.
+Records have no cascading foreign keys: deleting an account or key must not erase its history.
 Application writes are insert-only and duplicate event IDs are ignored.
 Time, workspace/time, and operation/time indexes support queries.
 
@@ -16,20 +16,20 @@ Time, workspace/time, and operation/time indexes support queries.
 - The `save_user_settings`, `save_user_instructions`, `manage_feature_flags`, and `manage_review_approval_mode` tools, whether called by the agent directly or from code mode.
   Read actions are excluded.
   Exceptions and returned `ok: false`, `success: false`, or errors count as failures.
-- Workspace lifecycle, repository-configuration, and workspace-settings HTTP operations attach the target workspace ID before deletion or after creation.
-  Feature-flag tool writes attach their explicit target workspace; instance-wide writes have no workspace ID.
-  Other operations may have no workspace scope.
+- Integration-binding and global-settings mutations record their verified actor and target resource metadata.
+  Shared defaults and image operations have no Robin execution-environment scope.
+  Historical workspace IDs remain audit data, not routing configuration.
 
 Human IDs come from verified sessions.
 API-key actors use the key ID, not its creator.
 Tool records identify an agent, with the initiating user only for a direct user run, and include thread/sandbox provenance where available.
 A saved requester context is not evidence of a fresh human action.
-Tool `enrichments.workspace` can describe the execution workspace; `workspace_id` is set only for explicitly bound scopes.
+Historical `workspace_id` values remain available for audit queries; global operations do not infer a Robin environment from a thread or binding.
 
 Enrichments allowlist actor and execution metadata, HTTP method, route **template**, status, and UUID path resource IDs.
-Instance and workspace settings saves also record `settings_scope` and `settings_changes`: changed field names mapped to `before`/`after` stored override values.
+Global settings saves also record `settings_scope` and `settings_changes`: changed field names mapped to `before`/`after` stored values.
 Feature-flag booleans (including `model_routing_enabled`) and the human-review assignment timeout retain their values; all non-null text values are `[REDACTED]`.
-A null value means the override was unset, restoring defaults or inheritance, not the effective resolved value.
+A null value means the override was unset, restoring defaults, not the effective resolved value.
 Unchanged fields, timestamps, and unknown fields are excluded.
 These changes are attached only after persistence succeeds, even if a later step fails; a no-op save records an empty map.
 A failed comparison read omits the changes rather than inventing previous values.
@@ -37,7 +37,7 @@ Concurrent saves can observe the same previous value; this is not transactional 
 
 Request/response bodies, tool arguments/results, query strings, headers, credentials, and exception text are never stored.
 No IP address is inferred from untrusted forwarded headers.
-Production and preview installations retain their own audit history; a workspace override additionally identifies its workspace.
+Production and preview installations retain their own audit history.
 
 Unauthenticated failures, failures before an actor is bound (including CSRF), GET/read access, login/logout, webhook-driven actions, arbitrary shell commands, and tools not listed above are not covered.
 There is no historical backfill.

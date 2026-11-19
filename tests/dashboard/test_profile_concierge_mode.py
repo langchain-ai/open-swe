@@ -12,9 +12,9 @@ from openswe.dashboard.principal import AuthorizedClaims, DashboardPrincipal
 from openswe.dashboard.profiles import ProfileUpdate, put_my_profile
 from openswe.database import postgres
 from openswe.jobs import queue
+from openswe.routing.store import is_kitchen_channel
 from openswe.slack.channels import PERSONAL_KITCHEN_JOB, SlackChannel
 from openswe.users import User, UserPreferences
-from openswe.workspaces.routing import is_kitchen_channel
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -28,9 +28,7 @@ def _authorized(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _update(concierge_mode: bool | None) -> ProfileUpdate:
-    return ProfileUpdate(
-        default_model="openai:gpt-6.1-sol", reasoning_effort="high", concierge_mode=concierge_mode
-    )
+    return ProfileUpdate(concierge_mode=concierge_mode)
 
 
 class ProfileRequests:

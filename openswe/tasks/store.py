@@ -6,11 +6,10 @@ from uuid import UUID, uuid7
 
 from sqlalchemy import ForeignKey, Text, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.workspaces.rows import WorkspaceRow
 
 type TaskRole = Literal["coordinator", "worker"]
 
@@ -33,8 +32,6 @@ class Task(Base):
     __tablename__ = "task"
 
     title: Mapped[str]
-    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspace.id", ondelete="CASCADE"))
-    workspace: Mapped[WorkspaceRow] = relationship(init=False, lazy="joined", innerjoin=True)
     coordinator_thread_id: Mapped[str | None] = mapped_column(default=None)
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     delegated: Mapped[bool] = mapped_column(default=False)
@@ -51,7 +48,6 @@ class Task(Base):
         worker_thread_id: str,
         *,
         title: str,
-        workspace: str,
         instructions: str,
         model: str,
         effort: str,
@@ -61,12 +57,9 @@ class Task(Base):
         postgres.require_configured()
         async with postgres.session() as session:
             await cls._lock_coordinator(session, coordinator_thread_id)
-            workspace_row = await cls._workspace(session, workspace)
             membership = await session.get(TaskMembership, coordinator_thread_id)
             if membership is None:
-                task = await cls._coordinated_by(
-                    session, coordinator_thread_id, title=title, workspace_row=workspace_row
-                )
+                task = await cls._coordinated_by(session, coordinator_thread_id, title=title)
             else:
                 task = await session.get(cls, membership.task_id, with_for_update={"of": cls})
                 if (
@@ -75,13 +68,6 @@ class Task(Base):
                     or task.coordinator_thread_id != coordinator_thread_id
                 ):
                     raise PermissionError("Only the coordinator can delegate")
-                if task.workspace_id != workspace_row.id:
-                    if task.delegated:
-                        raise PermissionError(
-                            "The thread no longer belongs to the task's workspace"
-                        )
-                    task.workspace_id = workspace_row.id
-                    task.workspace = workspace_row
             existing = await session.get(TaskDelegation, worker_thread_id)
             if existing is not None:
                 if (
@@ -119,7 +105,7 @@ class Task(Base):
             return None if membership is None else await session.get(cls, membership.task_id)
 
     @classmethod
-    async def for_thread(cls, thread_id: str, *, title: str, workspace: str) -> Task:
+    async def for_thread(cls, thread_id: str, *, title: str) -> Task:
         """The thread's task, making the thread the coordinator of a new one when it has none."""
         postgres.require_configured()
         async with postgres.session() as session:
@@ -131,7 +117,6 @@ class Task(Base):
                 session,
                 thread_id,
                 title=title,
-                workspace_row=await cls._workspace(session, workspace),
             )
 
     @staticmethod
@@ -141,19 +126,9 @@ class Task(Base):
             {"key": f"task-delegation:{thread_id}"},
         )
 
-    @staticmethod
-    async def _workspace(session: AsyncSession, slug: str) -> WorkspaceRow:
-        workspace_row = await session.scalar(select(WorkspaceRow).where(WorkspaceRow.slug == slug))
-        if workspace_row is None:
-            raise ValueError("The task's workspace no longer exists")
-        return workspace_row
-
     @classmethod
-    async def _coordinated_by(
-        cls, session: AsyncSession, thread_id: str, *, title: str, workspace_row: WorkspaceRow
-    ) -> Task:
-        task = cls(coordinator_thread_id=thread_id, title=title, workspace_id=workspace_row.id)
-        task.workspace = workspace_row
+    async def _coordinated_by(cls, session: AsyncSession, thread_id: str, *, title: str) -> Task:
+        task = cls(coordinator_thread_id=thread_id, title=title)
         session.add(task)
         await session.flush()
         session.add(TaskMembership(thread_id=thread_id, task_id=task.id, role="coordinator"))

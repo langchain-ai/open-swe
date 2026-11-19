@@ -86,7 +86,7 @@ async def test_ask_channel_messages_need_jev(
             raise JevUnavailable("classifier_error")
         return _jev_answer(choice, reaction)
 
-    monkeypatch.setattr(ask_messages.WORKSPACES, "is_ask_channel", is_ask_channel)
+    monkeypatch.setattr(ask_messages.INTEGRATIONS, "is_ask_channel", is_ask_channel)
     monkeypatch.setattr(AskChannelMessage, "_messages", staticmethod(messages))
 
     async def channel_context(_channel_id: str) -> SlackChannelContext:
@@ -154,7 +154,7 @@ async def test_untagged_replies_stay_with_the_robin_that_started_the_thread(
     allowed: bool,
 ) -> None:
     monkeypatch.setattr(ask_messages.common, "SLACK_BOT_USER_ID", "BOT")
-    monkeypatch.setattr(ask_messages.WORKSPACES, "is_ask_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(ask_messages.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=False))
     slack_api.respond(
         {
             "ok": True,
@@ -192,7 +192,7 @@ async def test_unknown_origin_blocks_followups_until_rechecked(
         return False
 
     monkeypatch.setattr(ask_messages.common, "SLACK_BOT_USER_ID", "BOT")
-    monkeypatch.setattr(ask_messages.WORKSPACES, "is_ask_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(ask_messages.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=False))
     fetch = AsyncMock(side_effect=stalled)
     if failure == "timeout":
         monkeypatch.setattr(SlackThread, "_fetch_other_robin_origin", fetch)
@@ -264,7 +264,7 @@ async def test_ask_attachments_bypass_jev(
         classified.append(True)
         return _jev_answer("do_nothing", None)
 
-    monkeypatch.setattr(ask_messages.WORKSPACES, "is_ask_channel", is_ask_channel)
+    monkeypatch.setattr(ask_messages.INTEGRATIONS, "is_ask_channel", is_ask_channel)
     monkeypatch.setattr(ask_messages, "fetch_slack_thread_messages", fetch)
     monkeypatch.setattr(ask_messages.common, "resolve_slack_channel_context", channel_context)
     monkeypatch.setattr(ask_messages, "JEV", SimpleNamespace(ask=ask))

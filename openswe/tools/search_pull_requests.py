@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GITHUB_API_BASE, github_client, github_request
 from openswe.github.pull_request_status import pull_request_identity
-from openswe.github.sandbox_access import workspace_token
+from openswe.github.sandbox_access import sandbox_token
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import thread_token_repositories
 from openswe.tools.mcp_exposure import expose_mcp
@@ -76,8 +76,8 @@ async def search_pull_requests(
             name.casefold() for name in allowed
         }:
             return {"success": False, "error": "Repository is outside this thread's GitHub access."}
-        access = await workspace_token(
-            cfg.workspace, repositories=[repository], permissions={"pull_requests": "read"}
+        access = await sandbox_token(
+            repositories=[repository], permissions={"pull_requests": "read"}
         )
         if not access.token:
             return {"success": False, "error": "Repository is not accessible to the GitHub App."}

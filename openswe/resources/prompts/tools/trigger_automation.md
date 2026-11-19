@@ -1,1 +1,1 @@
-Start a test run for a workspace automation, including a paused one.
+Start a test run for an automation, including a paused one.

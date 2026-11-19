@@ -15,7 +15,7 @@ import type {
   ReviewerEvalStatus,
 } from "@/lib/api"
 import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
-import { ModelPairControl } from "@/features/settings/components/WorkspaceSettingsSections"
+import { ModelPairControl } from "@/features/settings/components/DefaultsSettingsSections"
 import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"

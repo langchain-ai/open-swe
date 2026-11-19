@@ -1,4 +1,4 @@
-Read or set the shadow review experiment at the instance level or for a workspace.
+Read or set the shadow review experiment globally.
 Requires a currently authorized workspace admin.
 `read` requires a private admin surface; `set` also works in a verified sole-writer shared thread, returning only an acknowledgement.
 Authorization is rechecked on every call.
@@ -16,8 +16,5 @@ A sampled pull request keeps the model it was sampled with; changing the model a
   - `model` and `reasoning_effort`: the shadow's model and effort, set together.
     Sampling stays off until both are set.
 
-  A field passed as null clears the instance value, or restores inheritance from the instance for a workspace.
+  A field passed as null clears the stored value.
   Omit `settings` to read.
-- `workspace`: optional slug.
-  Omit to affect the instance and all inheriting workspaces.
-  A workspace must already exist.

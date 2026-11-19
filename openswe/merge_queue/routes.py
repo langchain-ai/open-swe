@@ -25,7 +25,7 @@ from openswe.users.models import User
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/merge-queue/{workspace_id}", tags=["merge-queue"])
+router = APIRouter(prefix="/merge-queue/{routing_id}", tags=["merge-queue"])
 
 
 class RequestBody(BaseModel):
@@ -119,27 +119,27 @@ class QueueAccess:
             raise HTTPException(403, "Repository write access required")
 
 
-async def queue_access(workspace_id: UUID, reader: DashboardReadDep) -> AsyncIterator[QueueAccess]:
+async def queue_access(routing_id: UUID, reader: DashboardReadDep) -> AsyncIterator[QueueAccess]:
     running = controller.CONTROLLER
-    if running is None or running.config.workspace_id != workspace_id:
-        raise HTTPException(404, "Queue is not enabled for this workspace")
+    if running is None or running.config.routing_id != routing_id:
+        raise HTTPException(404, "Queue is not enabled for this repository binding")
     # A stable user ID must survive login renames; never use an API-key actor here.
     user_id = session_user_id(reader.claims)
     user = reader.user
     if user is None or user.id != user_id or not user.github_login:
         raise HTTPException(401, "Sign in again to use the queue")
     try:
-        config = await QueueConfiguration.load(workspace_id, session=reader.session)
+        config = await QueueConfiguration.load(routing_id, session=reader.session)
     except ValueError as exc:
         raise HTTPException(409, "Queue configuration is invalid") from exc
     if config is None:
-        raise HTTPException(404, "Queue is not enabled for this workspace")
+        raise HTTPException(404, "Queue is not enabled for this repository binding")
     if (
         config.repository.lower() != running.config.repository.lower()
         or config.repository_id != running.config.repository_id
     ):
         raise HTTPException(409, "Queue identity changed; explicit handoff required")
-    queue = await MergeQueue.load(running.queue.id, workspace_id, session=reader.session)
+    queue = await MergeQueue.load(running.queue.id, routing_id, session=reader.session)
     if queue is None:
         raise HTTPException(404, "Queue not found")
     await reader.close()

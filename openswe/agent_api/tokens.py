@@ -14,7 +14,15 @@ from collections.abc import Mapping
 from typing import Final
 
 import jwt
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+)
 
 from openswe.bridge.constants import BridgeClient
 from openswe.config import ENV
@@ -54,8 +62,7 @@ class AgentTurnSettings(BaseModel):
     # Whoever sent the message that started the run, and whose private credentials it may use.
     profile_login: str | None = None
     credential_login: str | None = None
-    # Whether the sender administers workspaces, and is the only one who may write here.
-    admin_workspaces: bool = False
+    admin: bool = Field(default=False, validation_alias=AliasChoices("admin", "admin_workspaces"))
     sole_writer: bool = False
     # The model that titles the thread.
     title_model_id: str

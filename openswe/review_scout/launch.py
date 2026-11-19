@@ -112,7 +112,6 @@ class ReviewScoutTarget(BaseModel):
     pr_title: str
     base_sha: str
     head_sha: str
-    workspace_slug: str | None
 
     async def current_thread_id(self) -> str:
         """The scout thread to read, which follows its successor once one exists."""
@@ -219,7 +218,6 @@ class ReviewScoutTarget(BaseModel):
             "pr_title": self.pr_title,
             "base_sha": self.base_sha,
             "head_sha": self.head_sha,
-            "workspace": self.workspace_slug,
         }
         run = await create_durable_run(
             thread_id,

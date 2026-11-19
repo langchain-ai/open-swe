@@ -1,4 +1,4 @@
-import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@langchain/macaw-components/Button"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Select, type SelectOption } from "@langchain/macaw-components/Select"
@@ -6,34 +6,25 @@ import { Switch } from "@langchain/macaw-components/Switch"
 
 import { SettingsPanel, SettingsSection } from "@/components/AppShell"
 import {
-  useWorkspaceOptions,
-  workspaceOptionKeys,
-} from "@/features/agents/lib/queries"
-import {
   api,
-  type RepositorySettings,
-  type WorkspaceOptionList,
-  type WorkspaceRecord,
-  type WorkspaceUpdate,
+  type ChannelMode,
+  type RoutingSettings as RoutingData,
 } from "@/lib/api"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 import {
   slackChannelHref,
   slackChannelLabel,
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
 import { cn, INHERITED_LINK } from "@/lib/utils"
-import { RepositoryPicker, SlackChannelPicker } from "./WorkspaceBindingPickers"
+import { RepositoryPicker, SlackChannelPicker } from "./RoutingBindingPickers"
 
-type Bindings = Pick<
-  WorkspaceRecord,
-  "repos" | "slack_channel_ids" | "kitchen_channel_ids" | "ask_channel_ids"
->
-type RoutingChange = { slug: string } & (
-  | { update: (record: Bindings) => WorkspaceUpdate }
-  | { repo: string; mayStartThreads: boolean }
-)
+type RoutingChange =
+  | { kind: "repository"; repo: string; allowed: boolean | null }
+  | { kind: "channel"; id: string; mode: ChannelMode | null }
 
-const CHANNEL_MODES: Array<SelectOption<"mentions" | "kitchen" | "ask">> = [
+const QUERY_KEY = ["routing"]
+const CHANNEL_MODES: Array<SelectOption<ChannelMode>> = [
   { value: "mentions", label: "Mention-only" },
   { value: "kitchen", label: "Kitchen" },
   { value: "ask", label: "Ask" },
@@ -41,108 +32,75 @@ const CHANNEL_MODES: Array<SelectOption<"mentions" | "kitchen" | "ask">> = [
 
 export function RoutingSettings() {
   const qc = useQueryClient()
-  const options = useWorkspaceOptions()
-  const records = options.data?.workspaces ?? []
-  const defaultRecord = records.find((record) => record.is_default)
-  const directory = useSlackChannelDirectory(true)
-  const permissions = useQueries({
-    queries: records.map((record) => ({
-      queryKey: ["workspaceRepositories", record.slug],
-      queryFn: () => api.listWorkspaceRepositories(record.slug),
-    })),
+  const routing = useQuery({
+    queryKey: QUERY_KEY,
+    queryFn: api.getRouting,
+    meta: { invalidatedBy: [invalidationTopic("routing")] },
   })
+  const directory = useSlackChannelDirectory(true)
   const save = useMutation({
-    mutationKey: ["routingBindings", "save"],
-    scope: { id: "routingBindings" },
+    mutationKey: ["routing", "save"],
+    scope: { id: "routing" },
     meta: { errorTitle: "Couldn't save routing settings" },
-    mutationFn: async (changes: Array<RoutingChange>) => {
+    mutationFn: async (changes: RoutingChange[]) => {
       for (const change of changes) {
-        if ("update" in change) {
-          const current = await api.getWorkspace(change.slug)
-          await api.updateWorkspace(change.slug, change.update(current))
-        } else {
-          await api.configureWorkspaceRepository(change.slug, change.repo, {
-            may_start_threads: change.mayStartThreads,
-          })
-        }
+        if (change.kind === "repository") {
+          if (change.allowed === null)
+            await api.removeRoutingRepository(change.repo)
+          else await api.configureRoutingRepository(change.repo, change.allowed)
+        } else if (change.mode === null)
+          await api.removeRoutingChannel(change.id)
+        else await api.configureRoutingChannel(change.id, change.mode)
       }
     },
     onMutate: async (changes) => {
-      await qc.cancelQueries({ queryKey: workspaceOptionKeys.all })
-      await qc.cancelQueries({ queryKey: ["workspaceRepositories"] })
-      const previous = qc.getQueryData<WorkspaceOptionList>(
-        workspaceOptionKeys.all
-      )
-      const previousPermissions = qc.getQueriesData<Array<RepositorySettings>>({
-        queryKey: ["workspaceRepositories"],
-      })
-      qc.setQueryData<WorkspaceOptionList>(
-        workspaceOptionKeys.all,
-        (current) =>
-          current && {
-            ...current,
-            workspaces: current.workspaces.map((record) => {
-              let updated = record
-              for (const change of changes) {
-                if (change.slug === record.slug && "update" in change)
-                  updated = { ...updated, ...change.update(updated) }
-              }
-              return updated
-            }),
+      await qc.cancelQueries({ queryKey: QUERY_KEY })
+      const previous = qc.getQueryData<RoutingData>(QUERY_KEY)
+      qc.setQueryData<RoutingData>(QUERY_KEY, (current) => {
+        if (!current) return current
+        let repos = current.repos
+        let channels = current.slack_channels
+        for (const change of changes) {
+          if (change.kind === "repository") {
+            repos = repos.filter(
+              (row) => row.repo.toLowerCase() !== change.repo.toLowerCase()
+            )
+            if (change.allowed !== null)
+              repos = [
+                ...repos,
+                { repo: change.repo, may_start_threads: change.allowed },
+              ]
+          } else {
+            channels = channels.filter((row) => row.channel_id !== change.id)
+            if (change.mode !== null)
+              channels = [
+                ...channels,
+                { channel_id: change.id, mode: change.mode },
+              ]
           }
-      )
-      for (const change of changes) {
-        if ("repo" in change)
-          qc.setQueryData<Array<RepositorySettings>>(
-            ["workspaceRepositories", change.slug],
-            (rows) =>
-              rows?.map((row) =>
-                row.repo === change.repo
-                  ? { ...row, may_start_threads: change.mayStartThreads }
-                  : row
-              )
-          )
-      }
-      return { previous, previousPermissions }
+        }
+        return { repos, slack_channels: channels }
+      })
+      return { previous }
     },
     onError: (_error, _changes, context) => {
-      if (!context) return
-      qc.setQueryData(workspaceOptionKeys.all, context.previous)
-      for (const [key, rows] of context.previousPermissions)
-        qc.setQueryData(key, rows)
+      if (context?.previous) qc.setQueryData(QUERY_KEY, context.previous)
     },
-    onSettled: async () => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: workspaceOptionKeys.all }),
-        qc.invalidateQueries({ queryKey: ["workspaceRepositories"] }),
-        qc.invalidateQueries({ queryKey: ["workspace"] }),
-      ])
-    },
+    onSettled: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
   })
-  const repositoryRows = records
-    .flatMap((record, index) =>
-      record.repos.map((repo) => ({
-        repo,
-        slug: record.slug,
-        permissions: permissions[index],
-        allowed: permissions[index]?.data?.find(
-          (row) => row.repo.toLowerCase() === repo.toLowerCase()
-        )?.may_start_threads,
-      }))
-    )
-    .sort((a, b) => a.repo.localeCompare(b.repo))
-  const selectedRepos = repositoryRows.map((row) => row.repo)
-  const channelRows = records.flatMap((record) =>
-    record.slack_channel_ids.map((id) => ({ id, record }))
+  const repositories = [...(routing.data?.repos ?? [])].sort((a, b) =>
+    a.repo.localeCompare(b.repo)
   )
-  const channelIds = channelRows.map((row) => row.id)
-  const disabled = save.isPending || !options.data || !defaultRecord
+  const selectedRepos = repositories.map((row) => row.repo)
+  const channels = routing.data?.slack_channels ?? []
+  const channelIds = channels.map((row) => row.channel_id)
+  const disabled = save.isPending || !routing.data
 
-  if (!options.data)
+  if (!routing.data)
     return (
       <SettingsSection title="Routing">
         <SettingsPanel>
-          {options.isError ? (
+          {routing.isError ? (
             <>
               <p role="alert" className="text-sm text-error-secondary">
                 Couldn't load routing settings.
@@ -151,7 +109,7 @@ export function RoutingSettings() {
                 size="xs"
                 color="secondary"
                 variant="outlined"
-                onClick={() => void options.refetch()}
+                onClick={() => void routing.refetch()}
               >
                 Retry
               </Button>
@@ -172,22 +130,16 @@ export function RoutingSettings() {
         description="Bind repositories for inbound GitHub and Linear routing. Binding is not an access grant or a preload setting. Can start threads lets a GitHub Actions workflow create ownerless threads with its own OIDC-issued token."
       >
         <SettingsPanel>
-          {!defaultRecord && (
-            <p role="alert" className="text-sm text-error-secondary">
-              The default routing configuration is unavailable. Contact an
-              administrator.
-            </p>
-          )}
           {save.error && (
             <p role="alert" className="text-sm text-error-secondary">
               {save.error.message}
             </p>
           )}
-          {repositoryRows.length === 0 ? (
+          {repositories.length === 0 ? (
             <p className="text-sm text-secondary">No bound repositories.</p>
           ) : (
             <ul className="divide-y divide-default">
-              {repositoryRows.map((row) => (
+              {repositories.map((row) => (
                 <li
                   key={row.repo.toLowerCase()}
                   className="flex flex-wrap items-center justify-between gap-space-3 py-space-2"
@@ -195,32 +147,19 @@ export function RoutingSettings() {
                   <span className="min-w-0 font-mono text-xs break-all text-primary">
                     {row.repo}
                   </span>
-                  <div className="flex items-center gap-space-2">
-                    <label className="flex items-center gap-space-2 text-xs text-secondary">
-                      Can start threads
-                      <Switch
-                        aria-label={`Let ${row.repo} start threads`}
-                        checked={row.allowed === true}
-                        disabled={disabled || row.allowed === undefined}
-                        onChange={(mayStartThreads) =>
-                          save.mutate([
-                            { slug: row.slug, repo: row.repo, mayStartThreads },
-                          ])
-                        }
-                      />
-                    </label>
-                    {row.permissions?.isError && (
-                      <Button
-                        size="xs"
-                        color="secondary"
-                        variant="plain"
-                        disabled={save.isPending}
-                        onClick={() => void row.permissions?.refetch()}
-                      >
-                        Retry permissions
-                      </Button>
-                    )}
-                  </div>
+                  <label className="flex items-center gap-space-2 text-xs text-secondary">
+                    Can start threads
+                    <Switch
+                      aria-label={`Let ${row.repo} start threads`}
+                      checked={row.may_start_threads}
+                      disabled={disabled}
+                      onChange={(allowed) =>
+                        save.mutate([
+                          { kind: "repository", repo: row.repo, allowed },
+                        ])
+                      }
+                    />
+                  </label>
                 </li>
               ))}
             </ul>
@@ -229,42 +168,26 @@ export function RoutingSettings() {
             selected={selectedRepos}
             disabled={disabled}
             onChange={(next) => {
-              if (!defaultRecord) return
               const desired = new Set(next.map((repo) => repo.toLowerCase()))
               const known = new Set(
                 selectedRepos.map((repo) => repo.toLowerCase())
               )
-              const added = next.filter(
-                (repo) => !known.has(repo.toLowerCase())
-              )
-              const changes: Array<RoutingChange> = records.flatMap(
-                (record) => {
-                  const removed = new Set(
-                    record.repos
-                      .filter((repo) => !desired.has(repo.toLowerCase()))
-                      .map((repo) => repo.toLowerCase())
-                  )
-                  const additions =
-                    record.slug === defaultRecord.slug ? added : []
-                  return removed.size || additions.length
-                    ? [
-                        {
-                          slug: record.slug,
-                          update: (current: Bindings) => ({
-                            repos: [
-                              ...new Set([
-                                ...current.repos.filter(
-                                  (repo) => !removed.has(repo.toLowerCase())
-                                ),
-                                ...additions,
-                              ]),
-                            ],
-                          }),
-                        },
-                      ]
-                    : []
-                }
-              )
+              const changes: RoutingChange[] = [
+                ...selectedRepos
+                  .filter((repo) => !desired.has(repo.toLowerCase()))
+                  .map((repo) => ({
+                    kind: "repository" as const,
+                    repo,
+                    allowed: null,
+                  })),
+                ...next
+                  .filter((repo) => !known.has(repo.toLowerCase()))
+                  .map((repo) => ({
+                    kind: "repository" as const,
+                    repo,
+                    allowed: false,
+                  })),
+              ]
               if (changes.length) save.mutate(changes)
             }}
           />
@@ -275,20 +198,24 @@ export function RoutingSettings() {
         description="Mention-only requires an @mention. Kitchen and Ask receive every human message without a mention; Ask investigates reports and proposes next steps. Kitchen and Ask require an internal channel Robin has joined. Personal kitchen preferences remain separate."
       >
         <SettingsPanel>
-          {channelRows.length === 0 ? (
+          {channels.length === 0 ? (
             <p className="text-sm text-secondary">No bound channels.</p>
           ) : (
             <ul className="divide-y divide-default">
-              {channelRows.map(({ id, record }) => {
-                const label = slackChannelLabel(directory.data, id, channelIds)
+              {channels.map((row) => {
+                const label = slackChannelLabel(
+                  directory.data,
+                  row.channel_id,
+                  channelIds
+                )
                 return (
                   <li
-                    key={id}
-                    className="flex items-center justify-between gap-space-3 py-space-2"
+                    key={row.channel_id}
+                    className="flex flex-wrap items-center justify-between gap-space-3 py-space-2"
                   >
                     <MacawLink
                       variant="xs"
-                      href={slackChannelHref(id)}
+                      href={slackChannelHref(row.channel_id)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={cn(
@@ -302,36 +229,14 @@ export function RoutingSettings() {
                       aria-label={`Channel type for ${label}`}
                       size="sm"
                       triggerClassName="w-32 shrink-0"
-                      value={
-                        record.ask_channel_ids?.includes(id)
-                          ? "ask"
-                          : record.kitchen_channel_ids.includes(id)
-                            ? "kitchen"
-                            : "mentions"
-                      }
+                      value={row.mode}
                       options={CHANNEL_MODES}
                       disabled={disabled}
                       onChange={(mode) => {
-                        if (!mode) return
-                        save.mutate([
-                          {
-                            slug: record.slug,
-                            update: (current) => ({
-                              kitchen_channel_ids: [
-                                ...current.kitchen_channel_ids.filter(
-                                  (channel) => channel !== id
-                                ),
-                                ...(mode === "kitchen" ? [id] : []),
-                              ],
-                              ask_channel_ids: [
-                                ...(current.ask_channel_ids ?? []).filter(
-                                  (channel) => channel !== id
-                                ),
-                                ...(mode === "ask" ? [id] : []),
-                              ],
-                            }),
-                          },
-                        ])
+                        if (mode)
+                          save.mutate([
+                            { kind: "channel", id: row.channel_id, mode },
+                          ])
                       }}
                     />
                   </li>
@@ -343,43 +248,20 @@ export function RoutingSettings() {
             selected={channelIds}
             disabled={disabled}
             onChange={(next) => {
-              if (!defaultRecord) return
               const desired = new Set(next)
               const known = new Set(channelIds)
-              const added = next.filter((id) => !known.has(id))
-              const changes: Array<RoutingChange> = records.flatMap(
-                (record) => {
-                  const removed = new Set(
-                    record.slack_channel_ids.filter((id) => !desired.has(id))
-                  )
-                  const additions =
-                    record.slug === defaultRecord.slug ? added : []
-                  return removed.size || additions.length
-                    ? [
-                        {
-                          slug: record.slug,
-                          update: (current: Bindings) => ({
-                            slack_channel_ids: [
-                              ...new Set([
-                                ...current.slack_channel_ids.filter(
-                                  (id) => !removed.has(id)
-                                ),
-                                ...additions,
-                              ]),
-                            ],
-                            kitchen_channel_ids:
-                              current.kitchen_channel_ids.filter(
-                                (id) => !removed.has(id)
-                              ),
-                            ask_channel_ids: (
-                              current.ask_channel_ids ?? []
-                            ).filter((id) => !removed.has(id)),
-                          }),
-                        },
-                      ]
-                    : []
-                }
-              )
+              const changes: RoutingChange[] = [
+                ...channelIds
+                  .filter((id) => !desired.has(id))
+                  .map((id) => ({ kind: "channel" as const, id, mode: null })),
+                ...next
+                  .filter((id) => !known.has(id))
+                  .map((id) => ({
+                    kind: "channel" as const,
+                    id,
+                    mode: "mentions" as const,
+                  })),
+              ]
               if (changes.length) save.mutate(changes)
             }}
           />

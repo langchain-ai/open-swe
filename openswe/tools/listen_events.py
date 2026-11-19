@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
+from fastapi import HTTPException
 from pydantic import JsonValue
 
 from openswe.github.pull_requests import PullRequest
@@ -14,12 +15,12 @@ from openswe.github.repositories import Repository
 from openswe.run_config import RunConfig
 from openswe.slack.client import parse_github_pr_url
 from openswe.threads.identity import ThreadIdentity
+from openswe.threads.store import THREADS
+from openswe.threads.summary import repo_config_from_metadata
 from openswe.tools.access import resolve_access
 from openswe.webhooks.event_log import ADMIN_ONLY_SOURCES, RETAINED_DAYS, EventLog, WebhookSource
 from openswe.webhooks.event_matches import MultitaskStrategy
 from openswe.webhooks.event_subscriptions import EventSubscription
-from openswe.workspaces.routing import workspace_for_repo
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,6 @@ _CARRIED_CONFIG_KEYS = frozenset(
         "thread_id",
         "source",
         "origin",
-        "workspace",
-        "environment",
         "github_login",
         "user_id",
         "github_linked",
@@ -146,11 +145,6 @@ async def listen_events(
             f"A thread can hold at most {_MAX_PER_THREAD} subscriptions; cancel one first"
         )
 
-    workspace_slug = cfg.workspace_slug or DEFAULT_WORKSPACE_SLUG
-    workspace_id = await WORKSPACES.id_for_slug(workspace_slug)
-    if workspace_id is None:
-        return _error(f"Workspace {workspace_slug} does not exist")
-
     pr_ref = parse_github_pr_url(pr_url) if pr_url else None
     if pr_url and pr_ref is None:
         return _error("pr_url must be a GitHub pull request URL")
@@ -162,10 +156,16 @@ async def listen_events(
             full_name = normalize_repo_full_name(repo)
         except ValueError:
             return _error("repo must be owner/name")
-        owner, name = full_name.split("/")
-        repository = await Repository.get(full_name)
-        if repository is None or await workspace_for_repo(owner, name) != workspace_slug:
-            return _error(f"{full_name} is not a repository of workspace {workspace_slug}")
+        try:
+            await EventSubscription.require_access(cfg, full_name)
+        except (HTTPException, PermissionError, RuntimeError) as exc:
+            return _error(str(exc.detail) if isinstance(exc, HTTPException) else str(exc))
+        repository = await Repository(full_name=full_name).save()
+    else:
+        try:
+            await EventSubscription.require_access(cfg, None)
+        except HTTPException as exc:
+            return _error(str(exc.detail))
     pull_request = (
         await (await PullRequest.load(pr_ref.owner, pr_ref.repo, pr_ref.number)).ensure()
         if pr_ref is not None
@@ -175,7 +175,6 @@ async def listen_events(
     dumped = cfg.dump()
     subscription = await EventSubscription(
         thread_id=thread_id,
-        workspace_id=workspace_id,
         sources=sorted(set(sources or ())),
         repository_id=repository.id if repository else None,
         pull_request_id=pull_request.id if pull_request else None,
@@ -209,6 +208,24 @@ async def list_event_types(
     """Implement the `list_event_types` tool."""
     cfg = RunConfig.from_runtime()
     access = await resolve_access(cfg)
+    since = datetime.now(UTC) - timedelta(days=RETAINED_DAYS)
+    repository_id: UUID | None = None
+    if not access.admin_thread:
+        thread = await THREADS.get(cfg.thread_id) if cfg.thread_id else None
+        repo = repo_config_from_metadata(thread.metadata) if thread else {}
+        if not repo:
+            return _error(
+                "Choose a repository thread to list its event types; global discovery requires an admin thread"
+            )
+        full_name = f"{repo['owner']}/{repo['name']}"
+        try:
+            await EventSubscription.require_access(cfg, full_name)
+        except (HTTPException, PermissionError, RuntimeError) as exc:
+            return _error(str(exc.detail) if isinstance(exc, HTTPException) else str(exc))
+        repository = await Repository.get(full_name)
+        if repository is None:
+            return {"since": since.isoformat(), "event_types": []}
+        repository_id = repository.id
     user = (
         await ThreadIdentity(
             f"user:{cfg.user_id}" if cfg.user_id else cfg.github_login or ""
@@ -216,15 +233,13 @@ async def list_event_types(
         if access.private and access.owner
         else None
     )
-    workspace_id = await WORKSPACES.id_for_slug(cfg.workspace_slug or DEFAULT_WORKSPACE_SLUG)
-    since = datetime.now(UTC) - timedelta(days=RETAINED_DAYS)
     kinds = await EventLog.kinds(
         since,
         source=source,
         event_type=event_type.strip(),
         admin=access.admin_thread,
         viewer_id=user.id if user else None,
-        workspace_id=workspace_id,
+        repository_id=repository_id,
     )
     return {
         "since": since.isoformat(),

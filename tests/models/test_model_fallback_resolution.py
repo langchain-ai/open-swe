@@ -9,8 +9,8 @@ from openswe.dashboard.options import (
     provider_fallback_pair,
 )
 from openswe.dashboard.profiles import normalize_profile_for_response
-from openswe.dashboard.workspace_settings import (
-    WorkspaceSettingsUpdate,
+from openswe.dashboard.settings import (
+    SettingsUpdate,
 )
 
 STALE_ANTHROPIC = "anthropic:claude-opus-5"
@@ -56,9 +56,9 @@ def test_profile_response_and_override_defer_deprecated_models(model_id: str, ef
     assert "subagent_reasoning_effort" not in profile
 
 
-def test_workspace_settings_update_rejects_invalid_effort_for_openai_model() -> None:
+def test_global_settings_update_rejects_invalid_effort_for_openai_model() -> None:
     with pytest.raises(ValueError, match="effort 'bogus' not supported"):
-        WorkspaceSettingsUpdate(
+        SettingsUpdate(
             default_agent_model=SUPPORTED_OPENAI,
             default_agent_reasoning_effort="bogus",
         )
@@ -94,8 +94,8 @@ def test_retired_deployment_default_keeps_its_provider(monkeypatch: pytest.Monke
     assert options.default_model_pair() == ("google_genai:gemini-4-carbon", "medium")
 
 
-def test_workspace_settings_carry_a_retired_model_to_its_successor() -> None:
-    update = WorkspaceSettingsUpdate(
+def test_global_settings_carry_a_retired_model_to_its_successor() -> None:
+    update = SettingsUpdate(
         default_agent_model="google_genai:gemini-4-argon", default_agent_reasoning_effort="high"
     )
     assert update.default_agent_model == "google_genai:gemini-4-carbon"
@@ -106,7 +106,7 @@ def test_an_unknown_model_is_rejected_rather_than_remapped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with pytest.raises(ValueError, match="unsupported agent model"):
-        WorkspaceSettingsUpdate(
+        SettingsUpdate(
             default_agent_model="openai:gpt-6.1-slo", default_agent_reasoning_effort="high"
         )
     monkeypatch.setenv("LLM_MODEL_ID", "openai:gpt-6.1-slo")

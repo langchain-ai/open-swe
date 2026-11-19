@@ -40,7 +40,6 @@ from openswe.source_context import SourceContext
 from openswe.tasks.store import Task, TaskMembership
 from openswe.utils.json_types import JsonObject
 from openswe.utils.time import now_iso
-from openswe.workspaces.routing import resolve_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -147,12 +146,7 @@ class BabySitWatch(BabySitState):
 
     async def join_task(self, *, title: str) -> None:
         """Join the starting thread's task, making it a new task's coordinator when it has none."""
-        workspace = self.run_config.get("workspace") or self.run_config.get("environment")
-        resolution = await resolve_workspace(
-            thread_workspace=workspace if isinstance(workspace, str) else None,
-            repo=(self.owner, self.repo),
-        )
-        task = await Task.for_thread(self.thread_id, title=title, workspace=resolution.slug)
+        task = await Task.for_thread(self.thread_id, title=title)
         self.task_id = task.id
         self.thread_id = task.require_coordinator()
 

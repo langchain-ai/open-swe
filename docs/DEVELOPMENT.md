@@ -121,9 +121,9 @@ Linear, if you use it, comes from the [Linear](INSTALLATION.md#linear) section o
 
 Robin needs a PostgreSQL database for its own tables, and `langgraph dev` does not provide one: it keeps LangGraph's threads and Store in memory, so the platform's Postgres is not there locally.
 In LangGraph's `local_dev` runtime, Robin defaults `POSTGRES_URI` to `postgresql://postgres:postgres@127.0.0.1:5433/postgres`; `make dev` and `make dev-ui` run the matching `postgres:16` container named `open-swe-postgres` when no explicit value is set.
-Docker Compose binds the container to loopback only and keeps its data in the `open-swe-postgres` volume, so stopping or removing the container preserves your local users, workspaces, and settings.
+Docker Compose binds the container to loopback only and keeps its data in the `open-swe-postgres` volume, so stopping or removing the container preserves your local users, integration bindings, and settings.
 `make postgres` starts it on its own; use `docker compose down` to stop it.
-Set `POSTGRES_URI` to skip the container and use any database you can create schemas in — see [Analytics storage](INSTALLATION.md#1-create-the-deployment) for what startup migrations create there, including the `repository`, `users`, and `workspace` tables.
+Set `POSTGRES_URI` to skip the container and use any database you can create schemas in — see [Analytics storage](INSTALLATION.md#1-create-the-deployment) for what startup migrations create there, including the repository, user, and integration-binding tables.
 
 With a database, every thread created from then on is also recorded into the append-only transcript event log and its LangGraph metadata is stamped `transcript: v2`.
 The dashboard reads recorded threads from this log by default for everyone.
@@ -195,8 +195,8 @@ Within a few seconds you should see a 👀 reaction, a run in your LangSmith pro
 GitHub-triggered runs act as the commenting user, so that account has to have signed in to your local dashboard once.
 The App's **Advanced** tab lists every delivery and its response, and ngrok's inspector at `http://localhost:4040` shows what arrived.
 
-With only the seeded `default` workspace, Slack and GitHub runs land there by default.
-Create additional workspaces from the **Workspaces** page to exercise routing locally: the same order applies as in a deployment (thread, `/workspace:<slug>` on the opening message — `workspace:<slug>` and `env:<slug>` still work, owning repository, bound Slack channel, user default, then `default`); see [How a run picks its workspace](INSTALLATION.md#7-verify-it-works) in the installation guide.
+Use **Defaults** (`/settings`) for global behavior and sandbox configuration, and **Integrations** (`/admin/integrations`) to bind repositories and choose Mention-only, Kitchen, or Ask for Slack channels.
+Bindings do not select different execution settings; see [Defaults, routing, and sandbox images](reference/execution.md).
 
 **Incident channels.**
 Follow [incident channel setup](INSTALLATION.md#incidents) and set `SLACK_APP_ID`.

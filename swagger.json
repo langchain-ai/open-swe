@@ -637,18 +637,6 @@
               }
             ],
             "title": "User Id"
-          },
-          "workspace_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspace Id"
           }
         },
         "required": [
@@ -658,7 +646,6 @@
         "type": "object"
       },
       "AuditLogEnrichments": {
-        "additionalProperties": false,
         "properties": {
           "actor_kind": {
             "anyOf": [
@@ -821,17 +808,6 @@
               }
             ],
             "title": "Thread Id"
-          },
-          "workspace": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspace"
           }
         },
         "title": "AuditLogEnrichments",
@@ -1383,6 +1359,45 @@
           "challenge"
         ],
         "title": "ChallengeResponse",
+        "type": "object"
+      },
+      "ChannelConfiguration": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/ChannelMode"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "ChannelConfiguration",
+        "type": "object"
+      },
+      "ChannelMode": {
+        "enum": [
+          "mentions",
+          "kitchen",
+          "ask"
+        ],
+        "type": "string"
+      },
+      "ChannelSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/ChannelMode"
+          }
+        },
+        "required": [
+          "channel_id",
+          "mode"
+        ],
+        "title": "ChannelSettings",
         "type": "object"
       },
       "ChatBody": {
@@ -2832,12 +2847,6 @@
             "title": "Create Params",
             "type": "object"
           },
-          "enabled": {
-            "default": false,
-            "description": "Use Robin-wide defaults for future work instead of legacy environment settings.",
-            "title": "Enabled",
-            "type": "boolean"
-          },
           "fs_capacity_bytes": {
             "anyOf": [
               {
@@ -2942,12 +2951,6 @@
             },
             "title": "Create Params",
             "type": "object"
-          },
-          "enabled": {
-            "default": false,
-            "description": "Use Robin-wide defaults for future work instead of legacy environment settings.",
-            "title": "Enabled",
-            "type": "boolean"
           },
           "fs_capacity_bytes": {
             "anyOf": [
@@ -3630,6 +3633,30 @@
           "permissions"
         ],
         "title": "InstallBody",
+        "type": "object"
+      },
+      "IntegrationSettings": {
+        "properties": {
+          "repos": {
+            "items": {
+              "$ref": "#/components/schemas/RepositorySettings"
+            },
+            "title": "Repos",
+            "type": "array"
+          },
+          "slack_channels": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelSettings"
+            },
+            "title": "Slack Channels",
+            "type": "array"
+          }
+        },
+        "required": [
+          "repos",
+          "slack_channels"
+        ],
+        "title": "IntegrationSettings",
         "type": "object"
       },
       "JsonObject-Input": {
@@ -5606,13 +5633,6 @@
             "default": false,
             "title": "Slack Onboarding Dismissed",
             "type": "boolean"
-          },
-          "workspace_default_repos": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Workspace Default Repos",
-            "type": "object"
           }
         },
         "title": "ProfileUpdate",
@@ -5665,16 +5685,11 @@
             "format": "date-time",
             "title": "Updated At",
             "type": "string"
-          },
-          "workspace": {
-            "title": "Workspace",
-            "type": "string"
           }
         },
         "required": [
           "id",
           "name",
-          "workspace",
           "repo_full_name",
           "role",
           "members",
@@ -5710,17 +5725,6 @@
               }
             ],
             "title": "Repo Full Name"
-          },
-          "workspace": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspace"
           }
         },
         "title": "ProjectChanges",
@@ -5744,17 +5748,6 @@
               }
             ],
             "title": "Repo Full Name"
-          },
-          "workspace": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspace"
           }
         },
         "required": [
@@ -6780,68 +6773,6 @@
         "title": "RefResponse",
         "type": "object"
       },
-      "RefreshStep": {
-        "description": "One stage of a refresh \u2014 booting the builder, a script, the capture.\n\nRecorded as it happens so a poll mid-rebuild can say how far it got. A\nrebuild is minutes to an hour, and a single terminal status at the end is\nnot enough to tell slow from wedged.",
-        "properties": {
-          "exit_code": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Exit Code"
-          },
-          "finished_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Finished At"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "log_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Log Path"
-          },
-          "started_at": {
-            "default": "",
-            "title": "Started At",
-            "type": "string"
-          },
-          "status": {
-            "default": "running",
-            "enum": [
-              "running",
-              "success",
-              "failed"
-            ],
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "label"
-        ],
-        "title": "RefreshStep",
-        "type": "object"
-      },
       "RepositoriesBody": {
         "properties": {
           "repositories": {
@@ -6861,20 +6792,16 @@
         "type": "object"
       },
       "RepositoryConfiguration": {
-        "description": "Settings to change on one repository. Anything left out keeps its value.",
+        "additionalProperties": false,
         "properties": {
           "may_start_threads": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "May Start Threads"
+            "title": "May Start Threads",
+            "type": "boolean"
           }
         },
+        "required": [
+          "may_start_threads"
+        ],
         "title": "RepositoryConfiguration",
         "type": "object"
       },
@@ -6923,10 +6850,9 @@
         "type": "object"
       },
       "RepositorySettings": {
-        "description": "How one repository is configured inside one workspace.\n\nSeparate from the binding itself: belonging to a workspace says the agent\nmay work in the repository, while these say what the repository may do.",
+        "additionalProperties": false,
         "properties": {
           "may_start_threads": {
-            "default": false,
             "title": "May Start Threads",
             "type": "boolean"
           },
@@ -6936,7 +6862,8 @@
           }
         },
         "required": [
-          "repo"
+          "repo",
+          "may_start_threads"
         ],
         "title": "RepositorySettings",
         "type": "object"
@@ -8371,18 +8298,11 @@
             "minItems": 1,
             "title": "Triggers",
             "type": "array"
-          },
-          "workspace": {
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Workspace",
-            "type": "string"
           }
         },
         "required": [
           "prompt",
-          "triggers",
-          "workspace"
+          "triggers"
         ],
         "title": "ScheduleCreateBody",
         "type": "object"
@@ -8532,17 +8452,6 @@
               }
             ],
             "title": "Triggers"
-          },
-          "workspace": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspace"
           }
         },
         "title": "ScheduleUpdateBody",
@@ -8847,29 +8756,6 @@
               }
             ],
             "title": "Visible To User Id"
-          },
-          "workspace_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspace Id"
-          },
-          "workspace_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspace Name"
           }
         },
         "required": [
@@ -8878,7 +8764,6 @@
           "delivery_id",
           "received_at",
           "user_id",
-          "workspace_id",
           "repository_id",
           "pull_request_id",
           "payload"
@@ -8948,8 +8833,42 @@
               }
             ],
             "title": "Visibility"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "SessionCreateBody",
+        "type": "object"
+      },
+      "SettingsUpdate": {
+        "description": "Global settings; omitted fields use their built-in defaults.",
+        "properties": {
+          "cloud_first_desktop_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cloud First Desktop Enabled"
           },
-          "workspace": {
+          "concise_walkthrough_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concise Walkthrough Enabled"
+          },
+          "default_agent_model": {
             "anyOf": [
               {
                 "type": "string"
@@ -8958,13 +8877,447 @@
                 "type": "null"
               }
             ],
-            "title": "Workspace"
+            "title": "Default Agent Model"
+          },
+          "default_agent_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Reasoning Effort"
+          },
+          "default_agent_routing_balanced_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Balanced Model"
+          },
+          "default_agent_routing_balanced_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Balanced Reasoning Effort"
+          },
+          "default_agent_routing_fast_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Fast Model"
+          },
+          "default_agent_routing_fast_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Fast Reasoning Effort"
+          },
+          "default_agent_routing_performance_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Performance Model"
+          },
+          "default_agent_routing_performance_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Routing Performance Reasoning Effort"
+          },
+          "default_agent_subagent_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Subagent Model"
+          },
+          "default_agent_subagent_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Agent Subagent Reasoning Effort"
+          },
+          "default_repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Repo"
+          },
+          "default_reviewer_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Reviewer Model"
+          },
+          "default_reviewer_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Reviewer Reasoning Effort"
+          },
+          "default_reviewer_subagent_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Reviewer Subagent Model"
+          },
+          "default_reviewer_subagent_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Reviewer Subagent Reasoning Effort"
+          },
+          "default_thread_title_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Thread Title Model"
+          },
+          "default_thread_title_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Thread Title Reasoning Effort"
+          },
+          "expedited_review_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expedited Review Enabled"
+          },
+          "fable_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fable Enabled"
+          },
+          "featured_apps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FeaturedApp"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Featured Apps"
+          },
+          "human_review_auto_assign_minutes": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Review Auto Assign Minutes"
+          },
+          "human_review_auto_merge_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Human Review Auto Merge Enabled"
+          },
+          "implementation_walkthrough_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Implementation Walkthrough Enabled"
+          },
+          "model_routing_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Routing Enabled"
+          },
+          "model_routing_split": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Routing Split"
+          },
+          "model_selection_enabled": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Selection Enabled"
+          },
+          "org_guidelines": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org Guidelines"
+          },
+          "pr_summaries": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Summaries"
+          },
+          "review_app_preview_checks": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 10,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review App Preview Checks"
+          },
+          "review_apps": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AppRelease"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Apps"
+          },
+          "review_browser_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Browser Domains"
+          },
+          "review_browser_session_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Browser Session Tool"
+          },
+          "review_draft_prs": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Draft Prs"
+          },
+          "review_shadow_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Model"
+          },
+          "review_shadow_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Percent"
+          },
+          "review_shadow_reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Shadow Reasoning Effort"
+          },
+          "review_trace_links": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Trace Links"
+          },
+          "slack_follow_up_suggestions": {
+            "agent_feature_flag": true,
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slack Follow Up Suggestions"
           }
         },
-        "required": [
-          "prompt"
-        ],
-        "title": "SessionCreateBody",
+        "title": "SettingsUpdate",
         "type": "object"
       },
       "SidebarEntry": {
@@ -9742,7 +10095,7 @@
         "type": "object"
       },
       "ThreadCreateBody": {
-        "description": "The SDK's ``threads.create``, which never creates a thread here.\n\nA dashboard thread starts with its first message, whose run config carries what\nthe composer chose for it: its repository, workspace, visibility, project and\nmachine. A create carries none of that, so this answers only for a thread that\nexists, as the Agent Server does for ``if_exists``.",
+        "description": "The SDK's ``threads.create``, which never creates a thread here.\n\nA dashboard thread starts with its first message, whose run config carries what\nthe composer chose for it: its repository, visibility, project and\nmachine. A create carries none of that, so this answers only for a thread that\nexists, as the Agent Server does for ``if_exists``.",
         "properties": {
           "if_exists": {
             "default": "raise",
@@ -10513,17 +10866,6 @@
             "title": "Default Visibility",
             "type": "string"
           },
-          "default_workspace": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Workspace"
-          },
           "follow_up_behavior": {
             "anyOf": [
               {
@@ -10635,7 +10977,7 @@
           "slack",
           "linear",
           "deployment",
-          "workspace",
+          "robin",
           "human_review",
           "reviewer"
         ],
@@ -10713,325 +11055,6 @@
           "cancelled"
         ],
         "type": "string"
-      },
-      "Workspace": {
-        "properties": {
-          "ask_channel_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Ask Channel Ids",
-            "type": "array"
-          },
-          "base_snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Base Snapshot Id"
-          },
-          "create_params": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Output"
-            },
-            "title": "Create Params",
-            "type": "object"
-          },
-          "created_at": {
-            "default": "",
-            "title": "Created At",
-            "type": "string"
-          },
-          "created_by": {
-            "default": "",
-            "title": "Created By",
-            "type": "string"
-          },
-          "fs_capacity_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fs Capacity Bytes"
-          },
-          "inherit_default_sandbox": {
-            "default": false,
-            "title": "Inherit Default Sandbox",
-            "type": "boolean"
-          },
-          "kitchen_channel_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Kitchen Channel Ids",
-            "type": "array"
-          },
-          "last_captured_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Captured At"
-          },
-          "mem_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mem Bytes"
-          },
-          "name": {
-            "default": "",
-            "title": "Name",
-            "type": "string"
-          },
-          "prompt": {
-            "default": "",
-            "title": "Prompt",
-            "type": "string"
-          },
-          "refresh_cron_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Cron Id"
-          },
-          "refresh_error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Error"
-          },
-          "refresh_finished_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Finished At"
-          },
-          "refresh_kind": {
-            "anyOf": [
-              {
-                "enum": [
-                  "full",
-                  "update"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Kind"
-          },
-          "refresh_log": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Log"
-          },
-          "refresh_run_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Run Id"
-          },
-          "refresh_sandbox_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Sandbox Id"
-          },
-          "refresh_started_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refresh Started At"
-          },
-          "refresh_status": {
-            "default": "never",
-            "enum": [
-              "never",
-              "refreshing",
-              "success",
-              "failed"
-            ],
-            "title": "Refresh Status",
-            "type": "string"
-          },
-          "refresh_steps": {
-            "items": {
-              "$ref": "#/components/schemas/RefreshStep"
-            },
-            "title": "Refresh Steps",
-            "type": "array"
-          },
-          "repos": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Repos",
-            "type": "array"
-          },
-          "setup_script": {
-            "default": "",
-            "title": "Setup Script",
-            "type": "string"
-          },
-          "slack_channel_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Slack Channel Ids",
-            "type": "array"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "snapshot_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Id"
-          },
-          "snapshot_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Name"
-          },
-          "snapshot_status": {
-            "default": "none",
-            "enum": [
-              "none",
-              "capturing",
-              "ready",
-              "failed"
-            ],
-            "title": "Snapshot Status",
-            "type": "string"
-          },
-          "snapshot_tag": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Snapshot Tag"
-          },
-          "source_sandbox_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Sandbox Id"
-          },
-          "status_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status Message"
-          },
-          "update_script": {
-            "default": "",
-            "title": "Update Script",
-            "type": "string"
-          },
-          "updated_at": {
-            "default": "",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "vcpus": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vcpus"
-          }
-        },
-        "required": [
-          "slug"
-        ],
-        "title": "Workspace",
-        "type": "object"
       },
       "WorkspaceDirectory": {
         "properties": {
@@ -11131,570 +11154,6 @@
           "paths"
         ],
         "title": "WorkspaceFileIndex",
-        "type": "object"
-      },
-      "WorkspaceRoutingUpdate": {
-        "additionalProperties": false,
-        "description": "Routing changes for a retained workspace.",
-        "properties": {
-          "ask_channel_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ask Channel Ids"
-          },
-          "kitchen_channel_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Kitchen Channel Ids"
-          },
-          "repos": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Repos"
-          },
-          "slack_channel_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Channel Ids"
-          }
-        },
-        "title": "WorkspaceRoutingUpdate",
-        "type": "object"
-      },
-      "WorkspaceSettingsUpdate": {
-        "description": "A settings record at either tier.\n\nEvery field is optional. On the instance record, None means the hardcoded\ndefault; on a workspace's record, None inherits the instance value.",
-        "properties": {
-          "cloud_first_desktop_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cloud First Desktop Enabled"
-          },
-          "concise_walkthrough_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Concise Walkthrough Enabled"
-          },
-          "default_agent_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Model"
-          },
-          "default_agent_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Reasoning Effort"
-          },
-          "default_agent_routing_balanced_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Balanced Model"
-          },
-          "default_agent_routing_balanced_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Balanced Reasoning Effort"
-          },
-          "default_agent_routing_fast_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Model"
-          },
-          "default_agent_routing_fast_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Fast Reasoning Effort"
-          },
-          "default_agent_routing_performance_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Performance Model"
-          },
-          "default_agent_routing_performance_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Routing Performance Reasoning Effort"
-          },
-          "default_agent_subagent_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Subagent Model"
-          },
-          "default_agent_subagent_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Agent Subagent Reasoning Effort"
-          },
-          "default_repo": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Repo"
-          },
-          "default_reviewer_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Reviewer Model"
-          },
-          "default_reviewer_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Reviewer Reasoning Effort"
-          },
-          "default_reviewer_subagent_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Reviewer Subagent Model"
-          },
-          "default_reviewer_subagent_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Reviewer Subagent Reasoning Effort"
-          },
-          "default_thread_title_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Thread Title Model"
-          },
-          "default_thread_title_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Thread Title Reasoning Effort"
-          },
-          "expedited_review_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Expedited Review Enabled"
-          },
-          "fable_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fable Enabled"
-          },
-          "featured_apps": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/FeaturedApp"
-                },
-                "maxItems": 20,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Featured Apps"
-          },
-          "human_review_auto_assign_minutes": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Human Review Auto Assign Minutes"
-          },
-          "human_review_auto_merge_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Human Review Auto Merge Enabled"
-          },
-          "implementation_walkthrough_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Implementation Walkthrough Enabled"
-          },
-          "model_routing_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Routing Enabled"
-          },
-          "model_routing_split": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Routing Split"
-          },
-          "model_selection_enabled": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Selection Enabled"
-          },
-          "org_guidelines": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Org Guidelines"
-          },
-          "pr_summaries": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Summaries"
-          },
-          "review_app_preview_checks": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "maxItems": 10,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review App Preview Checks"
-          },
-          "review_apps": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/AppRelease"
-                },
-                "maxItems": 20,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Apps"
-          },
-          "review_browser_domains": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "maxItems": 20,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Browser Domains"
-          },
-          "review_browser_session_tool": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Browser Session Tool"
-          },
-          "review_draft_prs": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Draft Prs"
-          },
-          "review_shadow_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Shadow Model"
-          },
-          "review_shadow_percent": {
-            "anyOf": [
-              {
-                "maximum": 100.0,
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Shadow Percent"
-          },
-          "review_shadow_reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Shadow Reasoning Effort"
-          },
-          "review_trace_links": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Review Trace Links"
-          },
-          "slack_follow_up_suggestions": {
-            "agent_feature_flag": true,
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slack Follow Up Suggestions"
-          }
-        },
-        "title": "WorkspaceSettingsUpdate",
-        "type": "object"
-      },
-      "WorkspaceSettingsView": {
-        "description": "What a workspace's settings editor needs: the effective values and which of them it set.",
-        "properties": {
-          "effective": {
-            "additionalProperties": true,
-            "title": "Effective",
-            "type": "object"
-          },
-          "overrides": {
-            "additionalProperties": true,
-            "title": "Overrides",
-            "type": "object"
-          }
-        },
-        "required": [
-          "effective",
-          "overrides"
-        ],
-        "title": "WorkspaceSettingsView",
         "type": "object"
       },
       "_EndpointThreadChannel": {
@@ -12002,23 +11461,6 @@
                 }
               ],
               "title": "User Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "workspace_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Workspace Id"
             }
           },
           {
@@ -12991,23 +12433,6 @@
                 }
               ],
               "title": "Api Key Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "workspace_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Workspace Id"
             }
           }
         ],
@@ -14324,17 +13749,17 @@
         ]
       }
     },
-    "/dashboard/api/merge-queue/{workspace_id}": {
+    "/dashboard/api/merge-queue/{routing_id}": {
       "get": {
-        "operationId": "queue_status_dashboard_api_merge_queue__workspace_id__get",
+        "operationId": "queue_status_dashboard_api_merge_queue__routing_id__get",
         "parameters": [
           {
             "in": "path",
-            "name": "workspace_id",
+            "name": "routing_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Workspace Id",
+              "title": "Routing Id",
               "type": "string"
             }
           },
@@ -14402,9 +13827,9 @@
         ]
       }
     },
-    "/dashboard/api/merge-queue/{workspace_id}/batches/{batch_id}": {
+    "/dashboard/api/merge-queue/{routing_id}/batches/{batch_id}": {
       "get": {
-        "operationId": "batch_status_dashboard_api_merge_queue__workspace_id__batches__batch_id__get",
+        "operationId": "batch_status_dashboard_api_merge_queue__routing_id__batches__batch_id__get",
         "parameters": [
           {
             "in": "path",
@@ -14418,11 +13843,11 @@
           },
           {
             "in": "path",
-            "name": "workspace_id",
+            "name": "routing_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Workspace Id",
+              "title": "Routing Id",
               "type": "string"
             }
           }
@@ -14461,17 +13886,17 @@
         ]
       }
     },
-    "/dashboard/api/merge-queue/{workspace_id}/pause": {
+    "/dashboard/api/merge-queue/{routing_id}/pause": {
       "patch": {
-        "operationId": "set_paused_dashboard_api_merge_queue__workspace_id__pause_patch",
+        "operationId": "set_paused_dashboard_api_merge_queue__routing_id__pause_patch",
         "parameters": [
           {
             "in": "path",
-            "name": "workspace_id",
+            "name": "routing_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Workspace Id",
+              "title": "Routing Id",
               "type": "string"
             }
           }
@@ -14513,17 +13938,17 @@
         ]
       }
     },
-    "/dashboard/api/merge-queue/{workspace_id}/requests": {
+    "/dashboard/api/merge-queue/{routing_id}/requests": {
       "post": {
-        "operationId": "request_merge_dashboard_api_merge_queue__workspace_id__requests_post",
+        "operationId": "request_merge_dashboard_api_merge_queue__routing_id__requests_post",
         "parameters": [
           {
             "in": "path",
-            "name": "workspace_id",
+            "name": "routing_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Workspace Id",
+              "title": "Routing Id",
               "type": "string"
             }
           }
@@ -14572,9 +13997,9 @@
         ]
       }
     },
-    "/dashboard/api/merge-queue/{workspace_id}/requests/{request_id}": {
+    "/dashboard/api/merge-queue/{routing_id}/requests/{request_id}": {
       "delete": {
-        "operationId": "withdraw_request_dashboard_api_merge_queue__workspace_id__requests__request_id__delete",
+        "operationId": "withdraw_request_dashboard_api_merge_queue__routing_id__requests__request_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -14588,11 +14013,11 @@
           },
           {
             "in": "path",
-            "name": "workspace_id",
+            "name": "routing_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Workspace Id",
+              "title": "Routing Id",
               "type": "string"
             }
           }
@@ -14624,9 +14049,9 @@
         ]
       }
     },
-    "/dashboard/api/merge-queue/{workspace_id}/requests/{request_id}/priority": {
+    "/dashboard/api/merge-queue/{routing_id}/requests/{request_id}/priority": {
       "patch": {
-        "operationId": "set_priority_dashboard_api_merge_queue__workspace_id__requests__request_id__priority_patch",
+        "operationId": "set_priority_dashboard_api_merge_queue__routing_id__requests__request_id__priority_patch",
         "parameters": [
           {
             "in": "path",
@@ -14640,11 +14065,11 @@
           },
           {
             "in": "path",
-            "name": "workspace_id",
+            "name": "routing_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Workspace Id",
+              "title": "Routing Id",
               "type": "string"
             }
           }
@@ -15203,20 +14628,8 @@
     },
     "/dashboard/api/options": {
       "get": {
-        "description": "The models and defaults a composer may offer for ``workspace``.\n\nModel defaults and the Fable flag resolve per workspace (the instance record\nplus the workspace's overrides), so a picker that asked without one would\nadvertise the default workspace's values wherever the run will not land there.",
+        "description": "The selectable models and effective global defaults.",
         "operationId": "options_dashboard_api_options_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "workspace",
-            "required": false,
-            "schema": {
-              "default": "default",
-              "title": "Workspace",
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -15229,16 +14642,6 @@
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
         "summary": "Options",
@@ -23415,6 +22818,245 @@
         ]
       }
     },
+    "/dashboard/api/routing": {
+      "get": {
+        "operationId": "api_routing_dashboard_api_routing_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Routing",
+        "tags": [
+          "dashboard",
+          "routing"
+        ]
+      }
+    },
+    "/dashboard/api/routing/repositories/{owner}/{name}": {
+      "delete": {
+        "operationId": "api_remove_repository_dashboard_api_routing_repositories__owner___name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Remove Repository",
+        "tags": [
+          "dashboard",
+          "routing"
+        ]
+      },
+      "put": {
+        "operationId": "api_configure_repository_dashboard_api_routing_repositories__owner___name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepositoryConfiguration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositorySettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Configure Repository",
+        "tags": [
+          "dashboard",
+          "routing"
+        ]
+      }
+    },
+    "/dashboard/api/routing/slack-channels/{channel_id}": {
+      "delete": {
+        "operationId": "api_remove_slack_channel_dashboard_api_routing_slack_channels__channel_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "title": "Channel Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Remove Slack Channel",
+        "tags": [
+          "dashboard",
+          "routing"
+        ]
+      },
+      "put": {
+        "operationId": "api_configure_slack_channel_dashboard_api_routing_slack_channels__channel_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "channel_id",
+            "required": true,
+            "schema": {
+              "title": "Channel Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelConfiguration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Configure Slack Channel",
+        "tags": [
+          "dashboard",
+          "routing"
+        ]
+      }
+    },
     "/dashboard/api/sandbox-tools/background-tasks/{task_id}/complete": {
       "post": {
         "operationId": "background_task_complete_dashboard_api_sandbox_tools_background_tasks__task_id__complete_post",
@@ -23777,7 +23419,7 @@
     },
     "/dashboard/api/settings": {
       "get": {
-        "description": "The instance record: what every workspace inherits.",
+        "description": "The global defaults.",
         "operationId": "api_get_instance_settings_dashboard_api_settings_get",
         "responses": {
           "200": {
@@ -23810,7 +23452,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/WorkspaceSettingsUpdate"
+                "$ref": "#/components/schemas/SettingsUpdate"
               }
             }
           },
@@ -27262,9 +26904,9 @@
         ]
       }
     },
-    "/dashboard/api/threads/{thread_id}/share-to-workspace": {
+    "/dashboard/api/threads/{thread_id}/share": {
       "post": {
-        "operationId": "api_share_thread_with_workspace_dashboard_api_threads__thread_id__share_to_workspace_post",
+        "operationId": "api_share_thread_dashboard_api_threads__thread_id__share_post",
         "parameters": [
           {
             "in": "path",
@@ -27282,7 +26924,7 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
-                  "title": "Response Api Share Thread With Workspace Dashboard Api Threads  Thread Id  Share To Workspace Post",
+                  "title": "Response Api Share Thread Dashboard Api Threads  Thread Id  Share Post",
                   "type": "object"
                 }
               }
@@ -27305,7 +26947,7 @@
             "DashboardSession": []
           }
         ],
-        "summary": "Api Share Thread With Workspace",
+        "summary": "Api Share Thread",
         "tags": [
           "dashboard",
           "threads"
@@ -28268,346 +27910,6 @@
         "summary": "Reject Workflow Push",
         "tags": [
           "workflow-approval"
-        ]
-      }
-    },
-    "/dashboard/api/workspaces": {
-      "get": {
-        "operationId": "api_list_workspaces_dashboard_api_workspaces_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api List Workspaces Dashboard Api Workspaces Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Workspaces",
-        "tags": [
-          "dashboard",
-          "workspaces"
-        ]
-      }
-    },
-    "/dashboard/api/workspaces/options": {
-      "get": {
-        "description": "Routing bindings and effective repository defaults; refresh logs only for admins.",
-        "operationId": "api_workspace_options_dashboard_api_workspaces_options_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Api Workspace Options Dashboard Api Workspaces Options Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Workspace Options",
-        "tags": [
-          "dashboard",
-          "workspaces"
-        ]
-      }
-    },
-    "/dashboard/api/workspaces/{slug}": {
-      "get": {
-        "operationId": "api_get_workspace_dashboard_api_workspaces__slug__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Workspace"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Get Workspace",
-        "tags": [
-          "dashboard",
-          "workspaces"
-        ]
-      },
-      "put": {
-        "operationId": "api_update_workspace_dashboard_api_workspaces__slug__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkspaceRoutingUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Workspace"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Update Workspace",
-        "tags": [
-          "dashboard",
-          "workspaces"
-        ]
-      }
-    },
-    "/dashboard/api/workspaces/{slug}/repositories": {
-      "get": {
-        "operationId": "api_list_workspace_repositories_dashboard_api_workspaces__slug__repositories_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/RepositorySettings"
-                  },
-                  "title": "Response Api List Workspace Repositories Dashboard Api Workspaces  Slug  Repositories Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api List Workspace Repositories",
-        "tags": [
-          "dashboard",
-          "workspaces"
-        ]
-      }
-    },
-    "/dashboard/api/workspaces/{slug}/repositories/{owner}/{name}": {
-      "put": {
-        "description": "Change how one of a workspace's repositories is configured there.",
-        "operationId": "api_configure_workspace_repository_dashboard_api_workspaces__slug__repositories__owner___name__put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slug",
-            "required": true,
-            "schema": {
-              "title": "Slug",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "owner",
-            "required": true,
-            "schema": {
-              "title": "Owner",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "title": "Name",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RepositoryConfiguration"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RepositorySettings"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Configure Workspace Repository",
-        "tags": [
-          "dashboard",
-          "workspaces"
-        ]
-      }
-    },
-    "/dashboard/api/workspaces/{workspace}/settings": {
-      "get": {
-        "operationId": "api_get_workspace_settings_dashboard_api_workspaces__workspace__settings_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "workspace",
-            "required": true,
-            "schema": {
-              "title": "Workspace",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceSettingsView"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Api Get Workspace Settings",
-        "tags": [
-          "dashboard",
-          "settings"
         ]
       }
     },

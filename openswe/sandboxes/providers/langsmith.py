@@ -35,6 +35,7 @@ from runtime_api.sandbox_proxy import GITHUB_PROXY_RULES
 from runtime_api.sandbox_setup import GitIdentity
 
 from openswe.config import ENV
+from openswe.sandboxes.cloud_identity import federated_cloud
 from openswe.sandboxes.paths import WORKSPACE_DIR, forget_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
@@ -42,7 +43,6 @@ from openswe.sandboxes.ranges import FileTooLargeError
 from openswe.sandboxes.retry import retry_transient_sandbox_errors
 from openswe.utils.http_pool import pooled_transport
 from openswe.utils.startup_trace import asubphase
-from openswe.workspaces.cloud_identity import federated_cloud
 
 logger = logging.getLogger(__name__)
 

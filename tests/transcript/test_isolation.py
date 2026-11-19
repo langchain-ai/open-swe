@@ -322,6 +322,19 @@ async def test_a_routing_notice_survives_the_turn_that_produced_it(registry_db: 
                 actor_kind="agent",
                 turn_id=turn_id,
             ),
+            *[
+                Command(
+                    command_id=f"notice:execution:{captured_at}",
+                    event=RunNotice(
+                        turn_id=turn_id,
+                        kind="execution_stale",
+                        data={"captured_at": captured_at},
+                    ),
+                    actor_kind="agent",
+                    turn_id=turn_id,
+                )
+                for captured_at in ("old", "new")
+            ],
             Command(
                 command_id="notice:offloading",
                 event=RunNotice(
@@ -333,12 +346,26 @@ async def test_a_routing_notice_survives_the_turn_that_produced_it(registry_db: 
         ],
     )
 
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("""
+                UPDATE thread_event
+                SET payload = jsonb_set(payload, '{kind}', '"workspace_stale"')
+                WHERE thread_id = :thread_id AND command_id = 'notice:execution:old'
+            """),
+            {"thread_id": thread_id},
+        )
+
     running = await load_snapshot(thread_id)
     assert running is not None
     assert {notice.kind for notice in running.notices} == {
         "model_routed",
         "conversation_offloading",
+        "execution_stale",
     }
+    assert [notice.data for notice in running.notices if notice.kind == "execution_stale"] == [
+        {"captured_at": "new"}
+    ]
 
     await append(
         thread_id,
@@ -355,8 +382,20 @@ async def test_a_routing_notice_survives_the_turn_that_produced_it(registry_db: 
     settled = await load_snapshot(thread_id)
     assert settled is not None
     assert [(notice.kind, notice.data) for notice in settled.notices] == [
-        ("model_routed", {"model": "claude-haiku"})
+        ("execution_stale", {"captured_at": "new"}),
+        ("model_routed", {"model": "claude-haiku"}),
     ]
+    async with postgres.transaction() as conn:
+        assert (
+            await conn.scalar(
+                text("""
+                SELECT payload ->> 'kind' FROM thread_event
+                WHERE thread_id = :thread_id AND command_id = 'notice:execution:old'
+            """),
+                {"thread_id": thread_id},
+            )
+            == "workspace_stale"
+        )
 
 
 async def test_an_attachment_is_served_only_to_a_reader_of_its_own_thread(

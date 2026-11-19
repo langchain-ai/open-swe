@@ -15,7 +15,7 @@ from sqlalchemy import text
 from openswe.bridge.local_access_policy import LocalAccess
 from openswe.bridge.protocol import JsonObject
 from openswe.bridge.store import Bridge, BridgeInUseError, BridgeStore, SandboxBridgeBinding
-from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_instance_settings
+from openswe.dashboard.settings import SettingsUpdate, upsert_instance_settings
 from openswe.database import postgres
 from tests.conftest import LangSmithUsers
 
@@ -71,13 +71,13 @@ async def test_local_access_requires_an_enabled_private_owner_cloud_run(
     metadata: dict[str, object] = {"owner_login": OWNER, "visibility": "private"}
     with pytest.raises(HTTPException, match="disabled"):
         await LocalAccess.offer(bridge.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER)
-    await upsert_instance_settings(WorkspaceSettingsUpdate(cloud_first_desktop_enabled=True))
+    await upsert_instance_settings(SettingsUpdate(cloud_first_desktop_enabled=True))
     assert (
         await LocalAccess.offer(bridge.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER)
         == bridge.bridge_id
     )
     for changed, login in [
-        ({**metadata, "visibility": "workspace"}, OWNER),
+        ({**metadata, "visibility": "public"}, OWNER),
         (metadata, OTHER),
         ({**metadata, "sandbox_id": bridge.sandbox_id}, OWNER),
     ]:
@@ -92,7 +92,7 @@ async def test_local_access_requires_an_enabled_private_owner_cloud_run(
     desktop = legacy.model_copy(update={"client": "desktop"})
     with pytest.raises(HTTPException, match="Cloud-first"):
         await LocalAccess.allow_binding(desktop, metadata)
-    await upsert_instance_settings(WorkspaceSettingsUpdate(cloud_first_desktop_enabled=False))
+    await upsert_instance_settings(SettingsUpdate(cloud_first_desktop_enabled=False))
     await LocalAccess.allow_binding(desktop, metadata)
     with pytest.raises(HTTPException, match="disabled"):
         await LocalAccess.offer(bridge.bridge_id, metadata=metadata, login=OWNER, owner_id=OWNER)
@@ -296,7 +296,7 @@ async def test_rotation_drops_request_days_no_waiter_can_still_be_reading(
     }
 
 
-async def test_cloud_first_defaults_on_and_respects_personal_opt_out_without_the_workspace(
+async def test_cloud_first_defaults_on_and_respects_personal_opt_out_without_environment_configuration(
     registry_db: None, langsmith_users: LangSmithUsers
 ) -> None:
     owner = langsmith_users.add(OWNER)
@@ -326,7 +326,7 @@ async def test_cloud_first_defaults_on_and_respects_personal_opt_out_without_the
     with pytest.raises(HTTPException):
         await LocalAccess.offer(
             bridge.bridge_id,
-            metadata={**metadata, "visibility": "workspace"},
+            metadata={**metadata, "visibility": "public"},
             login=OWNER,
             owner_id=OWNER,
         )

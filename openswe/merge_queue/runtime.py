@@ -11,7 +11,7 @@ from uuid import UUID, uuid7
 from pydantic import BaseModel, ConfigDict
 
 from openswe.github.http import RepoClient
-from openswe.jobs.queue import Job
+from openswe.jobs.queue import Job, cancel
 from openswe.merge_queue.admission import QueuePolicy
 from openswe.merge_queue.dispatch import DispatchGateway
 from openswe.merge_queue.scheduler import BatchScheduler
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class QueueJob(BaseModel):
     model_config = ConfigDict(extra="forbid")
     queue_id: UUID
-    workspace_id: UUID
+    routing_id: UUID
 
 
 class QueueRuntime:
@@ -50,7 +50,7 @@ class QueueRuntime:
         policy = self.policies.get(payload.queue_id)
         if policy is None:
             return
-        queue = await MergeQueue.load(payload.queue_id, payload.workspace_id)
+        queue = await MergeQueue.load(payload.queue_id, payload.routing_id)
         if queue is None or queue.mode != "custom":
             return
         lease = await queue.claim(uuid7(), timedelta(seconds=60))
@@ -101,6 +101,10 @@ RUNTIME: QueueRuntime | QueueController | None = None
 
 
 async def reconcile_queue(job: Job) -> None:
+    if "routing_id" not in job.payload:
+        logger.info("Retiring obsolete merge queue job", extra={"job_id": str(job.id)})
+        await cancel(job.id)
+        return
     payload = QueueJob.model_validate(job.payload)
     if RUNTIME is None:
         from openswe.merge_queue.controller import start_queue
@@ -112,7 +116,7 @@ async def reconcile_queue(job: Job) -> None:
     if RUNTIME is not None:
         await RUNTIME.reconcile(payload)
         return
-    queue = await MergeQueue.load(payload.queue_id, payload.workspace_id)
+    queue = await MergeQueue.load(payload.queue_id, payload.routing_id)
     if queue is None or queue.mode != "native":
         return
     lease = await queue.claim(uuid7(), timedelta(seconds=60))

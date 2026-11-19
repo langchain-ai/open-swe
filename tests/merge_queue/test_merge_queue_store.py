@@ -10,7 +10,7 @@ from uuid import UUID, uuid7
 
 import httpx2
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from openswe.database import postgres
@@ -47,9 +47,8 @@ from openswe.merge_queue.runtime import QueueJob, QueueRuntime
 from openswe.merge_queue.scheduler import BatchScheduler
 from openswe.merge_queue.store import LeaseLost, MergeQueue, NativeWork
 from openswe.merge_queue.validation_contract import ValidationPolicy
+from openswe.routing.store import INTEGRATIONS, RepositoryBinding
 from openswe.users.models import User
-from openswe.workspaces.rows import WorkspaceRepositoryRow, WorkspaceRow
-from openswe.workspaces.store import WORKSPACES
 
 pytestmark = pytest.mark.usefixtures("registry_db")
 
@@ -58,11 +57,9 @@ pytestmark = pytest.mark.usefixtures("registry_db")
 async def queue() -> MergeQueue:
     repository = await Repository(full_name="acme/widgets").save()
     async with postgres.session() as session:
-        workspace = WorkspaceRow(slug="widgets", name="Widgets")
-        session.add(workspace)
-        await session.flush()
-        session.add(WorkspaceRepositoryRow(repository_id=repository.id, workspace_id=workspace.id))
-    return await MergeQueue.register(workspace.id, repository.id, "main")
+        binding = RepositoryBinding(repository_id=repository.id)
+        session.add(binding)
+    return await MergeQueue.register(binding.id, repository.id, "main")
 
 
 async def request(queue: MergeQueue, number: int) -> MergeRequest:
@@ -79,9 +76,9 @@ async def claim(queue: MergeQueue) -> Lease:
 async def save_configuration(config: QueueConfiguration) -> None:
     async with postgres.session() as session:
         await session.execute(
-            update(WorkspaceRow)
-            .where(WorkspaceRow.id == config.workspace_id)
-            .values(merge_queue_config=config.model_dump(mode="json", exclude={"workspace_id"}))
+            update(RepositoryBinding)
+            .where(RepositoryBinding.id == config.routing_id)
+            .values(merge_queue_config=config.model_dump(mode="json", exclude={"routing_id"}))
         )
 
 
@@ -106,7 +103,7 @@ async def test_concurrent_requests_and_restarts_preserve_intent(queue: MergeQueu
         session.add(user)
     registrations = await asyncio.gather(
         *(
-            MergeQueue.register(queue.workspace_id, queue.repository_id, "refs/heads/main")
+            MergeQueue.register(queue.bound_routing_id, queue.repository_id, "refs/heads/main")
             for _ in range(2)
         )
     )
@@ -125,7 +122,7 @@ async def test_concurrent_requests_and_restarts_preserve_intent(queue: MergeQueu
         await queue.request_merge(pull.id, "a" * 40, "another-submit")
 
     await postgres.close()
-    restored = await MergeQueue.register(queue.workspace_id, queue.repository_id, "main")
+    restored = await MergeQueue.register(queue.bound_routing_id, queue.repository_id, "main")
     assert [row.id for row in await restored.requests()] == [first.id]
     await restored.withdraw(first.id, actor=user.id)
     retry = await restored.request_merge(pull.id, "a" * 40, "submit")
@@ -136,16 +133,18 @@ async def test_concurrent_requests_and_restarts_preserve_intent(queue: MergeQueu
     assert (await restored.request_merge(pull.id, "b" * 40, "new-intent")).id != first.id
 
 
-async def test_workspace_scoping_and_rebinding_cannot_create_a_second_owner(
+async def test_binding_scoping_and_rebinding_cannot_create_a_second_owner(
     queue: MergeQueue,
 ) -> None:
+    other_repository = await Repository(full_name="other/repository").save()
+    replacement = await Repository(full_name="other/replacement").save()
     async with postgres.session() as session:
-        other = WorkspaceRow(slug="other", name="Other")
+        other = RepositoryBinding(repository_id=other_repository.id)
         session.add(other)
     with pytest.raises(ValueError, match="not bound"):
         await MergeQueue.register(other.id, queue.repository_id, "main")
     forged = MergeQueue(
-        id=queue.id, workspace_id=other.id, repository_id=queue.repository_id, target_branch="main"
+        id=queue.id, routing_id=other.id, repository_id=queue.repository_id, target_branch="main"
     )
     with pytest.raises(ValueError, match="not bound"):
         await forged.requests()
@@ -156,11 +155,16 @@ async def test_workspace_scoping_and_rebinding_cannot_create_a_second_owner(
         await queue.request_merge(foreign.id, "a" * 40, "foreign")
     async with postgres.session() as session:
         await session.execute(
-            update(WorkspaceRepositoryRow)
+            update(RepositoryBinding)
             .where(
-                WorkspaceRepositoryRow.repository_id == queue.repository_id,
+                RepositoryBinding.repository_id == queue.repository_id,
             )
-            .values(workspace_id=other.id)
+            .values(repository_id=replacement.id)
+        )
+        await session.execute(
+            update(RepositoryBinding)
+            .where(RepositoryBinding.id == other.id)
+            .values(repository_id=queue.repository_id)
         )
     with pytest.raises(ValueError, match="not bound"):
         await queue.requests()
@@ -176,8 +180,8 @@ async def test_status_reads_do_not_wait_for_worker_locks(queue: MergeQueue) -> N
     created = await batch(queue, await claim(queue))
     async with postgres.transaction() as conn:
         await conn.execute(
-            select(WorkspaceRepositoryRow)
-            .where(WorkspaceRepositoryRow.workspace_id == queue.workspace_id)
+            select(RepositoryBinding)
+            .where(RepositoryBinding.id == queue.bound_routing_id)
             .with_for_update()
         )
         await conn.execute(update(MergeQueue).where(MergeQueue.id == queue.id).values(paused=False))
@@ -307,7 +311,7 @@ async def test_attempts_plans_and_evidence_are_idempotent_and_budgets_survive_re
         await queue.record_plan(created.id, "plan", {"action": "remove"}, lease)
     await queue.finish_attempt(attempt.id, "failed", lease)
     await postgres.close()
-    restored = await MergeQueue.register(queue.workspace_id, queue.repository_id, "main")
+    restored = await MergeQueue.register(queue.bound_routing_id, queue.repository_id, "main")
     with pytest.raises(ValueError, match="Attempt budget"):
         await restored.start_attempt(created.id, "retry", deadline, lease)
     with pytest.raises(ValueError, match="Planning budget"):
@@ -346,7 +350,7 @@ async def test_cross_queue_ids_and_expired_results_are_rejected(queue: MergeQueu
     lease = await claim(queue)
     created = await batch(queue, lease)
     attempt = await queue.start_attempt(created.id, "run", created.deadline, lease)
-    other = await MergeQueue.register(queue.workspace_id, queue.repository_id, "release")
+    other = await MergeQueue.register(queue.bound_routing_id, queue.repository_id, "release")
     other_lease = await claim(other)
     with pytest.raises(ValueError, match="Batch not found"):
         await other.history(created.id)
@@ -416,7 +420,7 @@ async def test_database_rejects_duplicate_owners_and_active_requests(queue: Merg
         async with postgres.session() as session:
             session.add(
                 MergeQueue(
-                    workspace_id=queue.workspace_id,
+                    routing_id=queue.bound_routing_id,
                     repository_id=queue.repository_id,
                     target_branch="main",
                 )
@@ -433,18 +437,38 @@ async def test_database_rejects_duplicate_owners_and_active_requests(queue: Merg
             )
 
 
-async def test_workspace_deletion_removes_its_queue_history(queue: MergeQueue) -> None:
+async def test_queue_binding_cannot_be_unbound_and_out_of_band_removal_stays_fenced(
+    queue: MergeQueue,
+) -> None:
+    with pytest.raises(ValueError, match="Cannot unbind.*merge queue"):
+        await INTEGRATIONS.remove_repository("acme/widgets")
     lease = await claim(queue)
     created = await batch(queue, lease)
     attempt = await queue.start_attempt(created.id, "run", created.deadline, lease)
     await queue.record_evidence(attempt.id, "report", {"artifact_id": 1}, lease)
     await queue.record_plan(created.id, "plan", {"action": "retry"}, lease)
 
-    await WORKSPACES.delete("widgets")
+    async with postgres.session() as session:
+        await session.execute(
+            delete(RepositoryBinding).where(RepositoryBinding.id == queue.bound_routing_id)
+        )
+
+    assert await MergeQueue.load(queue.id, queue.bound_routing_id) is None
+    with pytest.raises(ValueError, match="binding"):
+        await queue.renew(lease, timedelta(seconds=60))
+    with pytest.raises(ValueError, match="binding"):
+        await queue.record_evidence(attempt.id, "late-report", {"artifact_id": 2}, lease)
+    await INTEGRATIONS.configure_repository("acme/widgets", may_start_threads=False, actor=None)
+    async with postgres.session() as session:
+        replacement = (await session.scalars(select(RepositoryBinding))).one()
+    with pytest.raises(ValueError, match="explicit handoff"):
+        await MergeQueue.register(replacement.id, queue.repository_id, "main")
 
     async with postgres.session() as session:
         for model in (MergeQueue, MergeRequest, Batch, BatchMember, Attempt, Evidence, Decision):
-            assert await session.scalar(select(func.count()).select_from(model)) == 0
+            assert await session.scalar(select(func.count()).select_from(model)) == 1
+        stored = await session.get(MergeQueue, queue.id)
+        assert stored is not None and stored.routing_id is None
         assert await session.get(Repository, queue.repository_id) is not None
         assert await session.scalar(select(func.count()).select_from(PullRequest)) == 1
 
@@ -792,7 +816,7 @@ async def test_validation_intent_is_atomic_and_survives_restart_and_pause(
     deadline = first.attempt.deadline
     await queue.release(lease)
     await postgres.close()
-    restored = await MergeQueue.load(queue.id, queue.workspace_id)
+    restored = await MergeQueue.load(queue.id, queue.bound_routing_id)
     assert restored is not None
     replacement = await claim(restored)
     async with postgres.session() as session:
@@ -888,7 +912,7 @@ async def test_validation_job_expires_saved_budget_during_github_outage(
 
     runtime = QueueRuntime({queue.id: policy}, unavailable, Mock(spec=DispatchGateway))
     with pytest.raises(RuntimeError, match="GitHub unavailable"):
-        await runtime.reconcile(QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id))
+        await runtime.reconcile(QueueJob(queue_id=queue.id, routing_id=queue.bound_routing_id))
     history = await queue.history(batch.id)
     assert len(history.attempts) == 1 and history.attempts[0].state == "timed_out"
     assert history.batch.state == "active"
@@ -956,7 +980,7 @@ async def test_validation_precedes_cleanup_and_cancellation_skips_it(
         yield repo
 
     runtime = QueueRuntime({queue.id: policy}, open_repo, dispatcher)
-    payload = QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id)
+    payload = QueueJob(queue_id=queue.id, routing_id=queue.bound_routing_id)
     if cancelled:
         with pytest.raises(asyncio.CancelledError):
             await runtime.reconcile(payload)
@@ -973,7 +997,7 @@ async def queue_controller(queue: MergeQueue, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(runtime, "RUNTIME", None)
     monkeypatch.setattr(controller, "CONTROLLER", None)
     config = QueueConfiguration(
-        workspace_id=queue.workspace_id,
+        routing_id=queue.bound_routing_id,
         repository="acme/widgets",
         repository_id=42,
         dispatch_url="https://dispatcher.example/queue",
@@ -986,9 +1010,9 @@ async def queue_controller(queue: MergeQueue, monkeypatch: pytest.MonkeyPatch) -
     )
     async with postgres.session() as session:
         await session.execute(
-            update(WorkspaceRow)
-            .where(WorkspaceRow.id == queue.workspace_id)
-            .values(merge_queue_config=config.model_dump(mode="json", exclude={"workspace_id"}))
+            update(RepositoryBinding)
+            .where(RepositoryBinding.id == queue.bound_routing_id)
+            .values(merge_queue_config=config.model_dump(mode="json", exclude={"routing_id"}))
         )
     await controller.start_queue()
     assert controller.CONTROLLER is not None
@@ -1005,7 +1029,13 @@ async def test_queue_startup_preserves_state_and_running_job(
     queue = queue_controller.queue
     assert queue.paused
     pending = await request(queue, 1)
-    first_job = await jobs.get(f"merge-queue:{queue.id}")
+    obsolete = await jobs.schedule(
+        runtime.JOB_KIND,
+        {"queue_id": str(queue.id), "workspace_id": str(uuid7())},
+        key=f"merge-queue:{queue.id}",
+        cron="* * * * *",
+    )
+    first_job = await jobs.get(f"merge-queue:{queue.id}:{queue.bound_routing_id}")
     assert first_job is not None
     # Hold the recurring job while a second replica starts.
     async with postgres.transaction() as conn:
@@ -1018,16 +1048,18 @@ async def test_queue_startup_preserves_state_and_running_job(
     await controller.start_queue()
     assert controller.CONTROLLER is not None
     assert controller.CONTROLLER.config == queue_controller.config
-    next_job = await jobs.get(f"merge-queue:{queue.id}")
+    next_job = await jobs.get(f"merge-queue:{queue.id}:{queue.bound_routing_id}")
     assert next_job is not None and next_job.claim_token == claimed.claim_token
-    restored = await MergeQueue.load(queue.id, queue.workspace_id)
+    await runtime.reconcile_queue(obsolete)
+    assert await jobs.get(f"merge-queue:{queue.id}") is None
+    restored = await MergeQueue.load(queue.id, queue.bound_routing_id)
     assert restored is not None and not restored.paused
     assert [row.id for row in await restored.requests()] == [pending.id]
 
     async with postgres.session() as session:
         await session.execute(
-            update(WorkspaceRow)
-            .where(WorkspaceRow.id == queue.workspace_id)
+            update(RepositoryBinding)
+            .where(RepositoryBinding.id == queue.bound_routing_id)
             .values(merge_queue_config=None)
         )
     await controller.start_queue()
@@ -1052,9 +1084,9 @@ async def test_native_observation_survives_restart_and_old_events(
     )
     async with postgres.session() as session:
         await session.execute(
-            update(WorkspaceRow)
-            .where(WorkspaceRow.id == original.workspace_id)
-            .values(merge_queue_config=config.model_dump(mode="json", exclude={"workspace_id"}))
+            update(RepositoryBinding)
+            .where(RepositoryBinding.id == original.bound_routing_id)
+            .values(merge_queue_config=config.model_dump(mode="json", exclude={"routing_id"}))
         )
     monkeypatch.delenv("MERGE_QUEUE_DISPATCH_SECRET")
     response = native_response()
@@ -1079,9 +1111,9 @@ async def test_native_observation_survives_restart_and_old_events(
     monkeypatch.setattr(GitHubClient, "as_app", as_app)
     await controller.start_queue()
     assert runtime.RUNTIME is not None
-    payload = QueueJob(queue_id=original.id, workspace_id=original.workspace_id)
+    payload = QueueJob(queue_id=original.id, routing_id=original.bound_routing_id)
     await runtime.RUNTIME.reconcile(payload)
-    observed = await MergeQueue.load(original.id, original.workspace_id)
+    observed = await MergeQueue.load(original.id, original.bound_routing_id)
     assert observed is not None and observed.paused and observed.mode == "native"
     saved = NativeQueueSnapshot.model_validate(observed.native_snapshot)
     assert saved.observed_at is not None and len(saved.candidates) == 3
@@ -1089,7 +1121,7 @@ async def test_native_observation_survives_restart_and_old_events(
 
     await postgres.close()
     await controller.start_queue()
-    restored = await MergeQueue.load(original.id, original.workspace_id)
+    restored = await MergeQueue.load(original.id, original.bound_routing_id)
     assert restored is not None and restored.native_snapshot == observed.native_snapshot
     # A delayed event is a wakeup only. The next read sees AC, not its old ABC payload.
     response = native_response((1, 3))
@@ -1106,10 +1138,10 @@ async def test_native_observation_survives_restart_and_old_events(
     for _ in range(2):
         delivered = await deliver_github_event(monkeypatch, "merge_group", event)
         assert delivered.work == ("wake_merge_queue",)
-    job = await jobs.get(f"merge-queue-native-wakeup:{original.id}")
+    job = await jobs.get(f"merge-queue-native-wakeup:{original.id}:{original.bound_routing_id}")
     assert job is not None and runtime.RUNTIME is not None
     await runtime.RUNTIME.reconcile(QueueJob.model_validate(job.payload))
-    current = await MergeQueue.load(original.id, original.workspace_id)
+    current = await MergeQueue.load(original.id, original.bound_routing_id)
     assert current is not None
     rebuilt = NativeQueueSnapshot.model_validate(current.native_snapshot)
     assert old_abc not in rebuilt.candidates
@@ -1117,7 +1149,7 @@ async def test_native_observation_survives_restart_and_old_events(
     # A real empty queue retires every candidate; API errors would instead leave the snapshot intact.
     response = native_response(())
     await runtime.RUNTIME.reconcile(payload)
-    empty = await MergeQueue.load(original.id, original.workspace_id)
+    empty = await MergeQueue.load(original.id, original.bound_routing_id)
     assert (
         empty is not None
         and not NativeQueueSnapshot.model_validate(empty.native_snapshot).candidates
@@ -1131,17 +1163,17 @@ async def test_native_observation_survives_restart_and_old_events(
     )
     await save_configuration(changed)
     await runtime.RUNTIME.reconcile(payload)
-    applied = await MergeQueue.load(original.id, original.workspace_id)
+    applied = await MergeQueue.load(original.id, original.bound_routing_id)
     assert applied is not None and applied.configuration_generation == changed.generation
     async with postgres.session() as session:
         await session.execute(
-            update(WorkspaceRow)
-            .where(WorkspaceRow.id == original.workspace_id)
+            update(RepositoryBinding)
+            .where(RepositoryBinding.id == original.bound_routing_id)
             .values(merge_queue_config=None)
         )
     response = native_response((7,))
     await runtime.RUNTIME.reconcile(payload)
-    disabled = await MergeQueue.load(original.id, original.workspace_id)
+    disabled = await MergeQueue.load(original.id, original.bound_routing_id)
     assert disabled is not None
     assert list(NativeQueueSnapshot.model_validate(disabled.native_snapshot).candidates)
     assert disabled.lease_owner is None
@@ -1152,7 +1184,7 @@ async def test_native_observation_survives_restart_and_old_events(
     await save_configuration(changed)
     response = native_response(())
     await runtime.reconcile_queue(job)
-    restored = await MergeQueue.load(original.id, original.workspace_id)
+    restored = await MergeQueue.load(original.id, original.bound_routing_id)
     assert restored is not None
     assert not NativeQueueSnapshot.model_validate(restored.native_snapshot).candidates
     with pytest.raises(LeaseLost, match="mode changed"):
@@ -1181,20 +1213,20 @@ async def test_native_activation_requires_draining_custom_work(queue: MergeQueue
     assert queue.mode == "native"
 
 
-async def test_queue_startup_rejects_multiple_configured_workspaces(
+async def test_queue_startup_rejects_multiple_configured_repositories(
     queue_controller: QueueController,
 ) -> None:
+    repository = await Repository(full_name="other/canary").save()
     async with postgres.session() as session:
         session.add(
-            WorkspaceRow(
-                slug="other-canary",
-                name="Other canary",
+            RepositoryBinding(
+                repository_id=repository.id,
                 merge_queue_config=queue_controller.config.model_dump(
-                    mode="json", exclude={"workspace_id"}
+                    mode="json", exclude={"routing_id"}
                 ),
             )
         )
-    with pytest.raises(ValueError, match="Only one canary workspace"):
+    with pytest.raises(ValueError, match="Only one canary repository"):
         await controller.start_queue()
     assert controller.CONTROLLER is None and runtime.RUNTIME is None
 
@@ -1297,7 +1329,7 @@ async def test_queue_dashboard_authorization(
     monkeypatch.setattr(GitHubClient, "as_user", as_user)
     app = FastAPI()
     app.include_router(routes.router, dependencies=[Depends(require_same_origin_for_mutations)])
-    path = f"/merge-queue/{queue.workspace_id}"
+    path = f"/merge-queue/{queue.bound_routing_id}"
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://testserver",
@@ -1437,8 +1469,8 @@ async def test_queue_dashboard_authorization(
         assert (await client.patch(f"{path}/pause", json={"paused": False})).status_code == 403
         async with postgres.session() as session:
             await session.execute(
-                update(WorkspaceRow)
-                .where(WorkspaceRow.id == queue.workspace_id)
+                update(RepositoryBinding)
+                .where(RepositoryBinding.id == queue.bound_routing_id)
                 .values(merge_queue_config=None)
             )
         assert (await client.get(path)).status_code == 404
@@ -1522,7 +1554,7 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
     await queue.record_evidence(
         work.attempt.id, "workflow-policy", {"revision": 1, "digest": "a" * 64}, lease
     )
-    restarted = await MergeQueue.load(queue.id, queue.workspace_id)
+    restarted = await MergeQueue.load(queue.id, queue.bound_routing_id)
     assert restarted is not None
 
     queue = restarted
@@ -1556,7 +1588,7 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
             assert pending.envelope.contract == initial
             assert pending.envelope.workflow_policy_revision == 1
             raise RuntimeError("lost report")
-    restarted = await MergeQueue.load(queue.id, queue.workspace_id)
+    restarted = await MergeQueue.load(queue.id, queue.bound_routing_id)
     assert restarted is not None
     queue = restarted
     async with queue.native_check_update(native_snapshot((1, 2, 3, 4, 5, 6)), lease) as replay:
@@ -1735,7 +1767,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
     policy, lease, _ = await enable_native_validation(queue)
     await queue.release(lease)
     config = QueueConfiguration(
-        workspace_id=queue.workspace_id,
+        routing_id=queue.bound_routing_id,
         repository="acme/widgets",
         repository_id=42,
         mode="native",
@@ -1849,7 +1881,9 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             monkeypatch.setattr(QueueController, "open_repo", lambda self, queue: open_repo(queue))
             controller = QueueController(config)
             controller.queue = queue
-            await controller.reconcile(QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id))
+            await controller.reconcile(
+                QueueJob(queue_id=queue.id, routing_id=queue.bound_routing_id)
+            )
             return
         worker = NativeQueueRuntime(
             queue.id,
@@ -1858,7 +1892,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
             config=config,
             dispatcher=DispatchGateway(str(config.dispatch_url), SecretStr("s" * 32)),
         )
-        await worker.reconcile(QueueJob(queue_id=queue.id, workspace_id=queue.workspace_id))
+        await worker.reconcile(QueueJob(queue_id=queue.id, routing_id=queue.bound_routing_id))
 
     if fault in {"issuer", "capacity", "timeout", "allgreen"}:
         rules = repo.branch_rules.return_value
@@ -1893,7 +1927,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         await reconcile()
     if fault == "policy_discovery":
         assert json.loads(sent[0].content)["workflow_policy_revision"] == 2
-        configured = await QueueConfiguration.load(queue.workspace_id)
+        configured = await QueueConfiguration.load(queue.bound_routing_id)
         assert configured is not None and configured.workflow_policy_revision == 2
         assert configured.policy.validation.suite == "services"
         assert json.loads(sent[0].content)["contract"]["base_sha"] == "a" * 40
@@ -1908,7 +1942,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         count = len(sent)
         await reconcile()
         assert len(sent) == count
-        assert await QueueConfiguration.load(queue.workspace_id) == configured
+        assert await QueueConfiguration.load(queue.bound_routing_id) == configured
         policy_revision = 2
     request = ValidationRequest.model_validate(json.loads(sent[0].content)["contract"])
     run = ValidationRun(
@@ -2127,8 +2161,8 @@ async def test_configuration_fences_stale_workers_and_serializes_check_publicati
 
     async with postgres.session() as session:
         await session.execute(
-            update(WorkspaceRow)
-            .where(WorkspaceRow.id == queue.workspace_id)
+            update(RepositoryBinding)
+            .where(RepositoryBinding.id == queue.bound_routing_id)
             .values(merge_queue_config={"repository": "invalid"})
         )
     with pytest.raises(LeaseLost, match="disabled or invalid"):
@@ -2221,7 +2255,7 @@ class TestNativeRecovery:
         )
         with pytest.raises(ValueError, match="bound-thread"):
             await queue.record_plan(work.batch.id, "forged", saved.model_dump(mode="json"), lease)
-        restarted = await MergeQueue.load(queue.id, queue.workspace_id)
+        restarted = await MergeQueue.load(queue.id, queue.bound_routing_id)
         assert restarted is not None
         retry = await restarted.prepare_native_validation(
             snapshot, 600, lease, policy=policy, trust="trusted-policy"
@@ -2468,7 +2502,7 @@ class TestNativeRecovery:
             assert waiting.status == "applying"
             assert not (await queue.snapshot(limit=1))[0]
         await queue.release(lease)
-        restarted = await MergeQueue.load(queue.id, queue.workspace_id)
+        restarted = await MergeQueue.load(queue.id, queue.bound_routing_id)
         assert restarted is not None
         lease = await claim(restarted)
         repo = Mock(spec=RepoClient)
@@ -2604,7 +2638,7 @@ class TestNativeRecovery:
                     )
                 )
             assert await queue.prune_history(datetime.now(UTC), lease) == 0
-        restarted = await MergeQueue.load(queue.id, queue.workspace_id)
+        restarted = await MergeQueue.load(queue.id, queue.bound_routing_id)
         assert restarted is not None
         await restarted.resume_native_recovery(
             work.batch.id,
@@ -2723,7 +2757,7 @@ class TestNativeRecovery:
         state = await queue.ensure_recovery_thread(work.batch.id, settings, lease)
         state = state.model_copy(update={"thread_ts": "123.456", "notices": {"event": "123.789"}})
         await queue.update_recovery_thread(work.batch.id, state, lease)
-        restarted = await MergeQueue.load(queue.id, queue.workspace_id)
+        restarted = await MergeQueue.load(queue.id, queue.bound_routing_id)
         assert restarted is not None
         assert await restarted.ensure_recovery_thread(work.batch.id, settings, lease) == state
         assert (await restarted.recovery_for_thread(state.thread_id)).batch.id == work.batch.id
@@ -2759,7 +2793,7 @@ class TestNativeRecovery:
                     deadline=datetime.now(UTC) - timedelta(seconds=1),
                 )
             )
-        restarted = await MergeQueue.load(queue.id, queue.workspace_id)
+        restarted = await MergeQueue.load(queue.id, queue.bound_routing_id)
         assert restarted is not None
         service = QueueRecovery(Mock(recovery=settings), restarted)
         history = await restarted.history(work.batch.id)

@@ -6,14 +6,14 @@ the instance names a session tool, by its name in Robin's LangSmith Managed Tool
 the review gets that single tool to mint those sessions; never a personal kit's, or any
 other tool of the kit.
 
-Both are instance settings an instance admin sets under Defaults, which no workspace
-overrides: they decide where reviews sign in, and as whom.
+Both are instance settings an admin sets under Defaults: they decide where reviews
+sign in, and as whom.
 """
 
 from langchain_core.tools import BaseTool
 from runtime_api.catalog import BrowserSpec
 
-from openswe.dashboard.workspace_settings_cache import cached_instance_settings
+from openswe.dashboard.settings_cache import cached_instance_settings
 from openswe.mcp import load_mcp_tools
 from openswe.mcp.managed import BotTools
 

@@ -75,9 +75,7 @@ async def test_recreating_an_old_sandbox_hands_the_thread_to_mda(
         ) as update,
         patch("openswe.threads.store.THREADS.update", new=update),
     ):
-        handed = await hand_sandbox_to_mda(
-            thread_id, workspace_slug="large", source="base", invocation_id="request-1"
-        )
+        handed = await hand_sandbox_to_mda(thread_id, source="base", invocation_id="request-1")
 
     sandbox_client.stop_sandbox.assert_awaited_once_with("sandbox-old")
     if stop_failure is None:
@@ -89,7 +87,7 @@ async def test_recreating_an_old_sandbox_hands_the_thread_to_mda(
     assert handed == HandedOver("sandbox-old", stop_error)
     # MDA creates the next sandbox from what was asked for; the thread no longer names the old one.
     assert [call.kwargs["metadata"] for call in update.await_args_list] == [
-        {"sandbox_replacement": {"workspace": "large", "source": "base"}},
+        {"sandbox_replacement": {"source": "base"}},
         {"sandbox_id": None, "sandbox_base_proxy_config": None},
     ]
     assert not proxy.has_backend

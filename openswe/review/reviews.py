@@ -57,7 +57,6 @@ from openswe.utils.json_types import ThreadLike, thread_metadata
 from openswe.utils.langsmith import get_langsmith_trace_url
 from openswe.utils.thread_ops import langgraph_client
 from openswe.walkthrough.record import WalkthroughView
-from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -1335,7 +1334,6 @@ async def _scout_target(
         pr_title=pull.title,
         base_sha=pull.base.sha,
         head_sha=pull.head.sha,
-        workspace_slug=await WORKSPACES.owner_of_repo(f"{owner}/{repo}"),
     )
 
 
@@ -1406,7 +1404,6 @@ async def trigger_review_scout(
             title=pull.title,
             url=pull.html_url,
             state=pull.lifecycle,
-            workspace=target.workspace_slug,
             walkthrough_ready=not trigger.started,
             requested_at_ms=requested_at_ms,
         )

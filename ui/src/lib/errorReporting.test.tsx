@@ -128,7 +128,6 @@ it("formats validation errors without exposing the rejected input in the toast",
     agentsApi.createSchedule({
       name: "private automation instructions".repeat(10),
       prompt: "Check dependencies",
-      workspace: "default",
     })
   )
 

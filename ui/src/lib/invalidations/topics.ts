@@ -7,7 +7,8 @@ import type { Query } from "@tanstack/react-query"
  * never needs a `refetchInterval`.
  */
 type Topic =
-  | "workspaces"
+  | "settings"
+  | "routing"
   | "incident-settings"
   | "announcements"
   | "slack-channels"

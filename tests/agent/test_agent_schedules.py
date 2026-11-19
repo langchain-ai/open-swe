@@ -17,10 +17,9 @@ from sqlalchemy import text
 
 from openswe.agent_api.tokens import verify_runtime_token
 from openswe.dashboard import repo_access
-from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS, ExecutionDefaults
 from openswe.dashboard.langsmith_login import LangSmithAccount, LangSmithLogin
 from openswe.dashboard.options import fable_disabled_fallback
-from openswe.dashboard.workspace_settings import WorkspaceSettingsUpdate, upsert_workspace_overrides
+from openswe.dashboard.settings import SettingsUpdate, upsert_instance_settings
 from openswe.database.postgres import transaction
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.jobs import queue
@@ -39,7 +38,6 @@ from openswe.slack.payloads import SlackChannelContext, SlackEventEnvelope
 from openswe.threads import router
 from openswe.threads.index import IndexedThread
 from openswe.users import User
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate
 from tests.conftest import ThreadStoreOverClient
 from tests.mda_helpers import stub_mda_runtime
 
@@ -85,8 +83,6 @@ WORKING = "66666666-6666-4666-8666-666666666666"
 ADMIN_SCHEDULE = "77777777-7777-4777-8777-777777777777"
 
 
-# Automations name a workspace, and launching or saving one checks that its row
-# exists, so every test runs against a migrated database (which seeds `default`).
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 
@@ -204,7 +200,7 @@ async def auth(monkeypatch, registry_db: None) -> None:  # noqa: ANN001
         owner, name = full_name.split("/", 1)
         return {"owner": owner, "name": name}
 
-    async def fake_require_repo_access_for_workspace(full_name: str) -> str:
+    async def fake_require_repo_access_for_system(full_name: str) -> str:
         return "workspace-app-token"
 
     # Saving reads a repository's visibility from GitHub; the tests about public
@@ -215,10 +211,10 @@ async def auth(monkeypatch, registry_db: None) -> None:  # noqa: ANN001
     monkeypatch.setattr(schedules, "resolve_run_email", fake_resolve_run_email)
     monkeypatch.setattr(schedules, "repo_config_for_user", fake_repo_config_for_user)
     monkeypatch.setattr(
-        schedules, "require_repo_access_for_workspace", fake_require_repo_access_for_workspace
+        schedules, "require_repo_access_for_system", fake_require_repo_access_for_system
     )
     monkeypatch.setattr(
-        repo_access, "require_repo_access_for_workspace", fake_require_repo_access_for_workspace
+        repo_access, "require_repo_access_for_system", fake_require_repo_access_for_system
     )
 
 
@@ -275,13 +271,12 @@ async def _seed(record: dict[str, Any]) -> None:
         trigger = ScheduleTrigger(cron=record.get("schedule") or "0 9 * * *")
         cron_id = record.get("cron_id")
     owner = await User.for_login("github", record.get("created_by") or "")
-    workspace_id = await WORKSPACES.id_for_slug(record.get("workspace") or "default")
     async with transaction() as conn:
         await conn.execute(
             text(
-                "INSERT INTO automation (id, workspace_id, name, prompt, admin_thread, model, "
+                "INSERT INTO automation (id, name, prompt, admin_thread, model, "
                 "effort, base_branch, branch_prefix, enabled, created_by, updated_by, "
-                "user_email, created_by_user_id, system) VALUES (:id, :workspace_id, :name, "
+                "user_email, created_by_user_id, system) VALUES (:id, :name, "
                 ":prompt, :admin_thread, :model, :effort, :base_branch, :branch_prefix, "
                 ":enabled, :created_by, :created_by, :user_email, :created_by_user_id, :system)"
             ),
@@ -289,7 +284,6 @@ async def _seed(record: dict[str, Any]) -> None:
                 "id": uuid.UUID(record["id"]),
                 "created_by_user_id": record.get("created_by_user_id")
                 or (owner.id if owner else None),
-                "workspace_id": workspace_id,
                 "name": record.get("name") or "Automation",
                 "prompt": record["prompt"],
                 "admin_thread": record.get("admin_thread") is True,
@@ -311,7 +305,6 @@ async def test_create_agent_schedule_registers_a_cron_job(
     fake_client: _FakeClient, auth: None, timezone: str
 ) -> None:
     body = ScheduleCreateBody(
-        workspace="default",
         name="Daily report",
         prompt="Summarize merged PRs",
         triggers=[ScheduleTrigger(cron="0 9 * * 1-5", timezone=timezone)],
@@ -337,7 +330,6 @@ async def test_schedule_timezone_survives_updates_and_reenabling(
     created = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Report",
             triggers=[ScheduleTrigger(cron="0 9 * * *")],
         ),
@@ -376,9 +368,8 @@ def test_schedule_rejects_invalid_timezones(timezone: str) -> None:
 
 async def test_create_admin_schedule_requires_admin_session(fake_client, auth) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
-        workspace="default",
         name="Admin cleanup",
-        prompt="Clean up workspace environments",
+        prompt="Clean up instance settings",
         triggers=[ScheduleTrigger(cron="0 9 * * *")],
         admin_thread=True,
     )
@@ -400,7 +391,6 @@ async def test_create_agent_schedule_requires_repo_access(fake_client, auth, mon
         await schedules.create_agent_schedule(
             "alice",
             ScheduleCreateBody(
-                workspace="default",
                 prompt="hello",
                 triggers=[GitHubTrigger(repo="victim/private", events=["issues.opened"])],
             ),
@@ -431,7 +421,6 @@ async def test_a_person_without_github_creates_and_runs_a_scheduled_automation(
     created = await schedules.create_agent_schedule(
         login,
         ScheduleCreateBody(
-            workspace="default",
             prompt="Summarize my work",
             triggers=[ScheduleTrigger(cron="0 9 * * 1-5")],
         ),
@@ -458,7 +447,6 @@ async def test_a_person_without_github_cannot_watch_a_repository(
         await schedules.create_agent_schedule(
             f"user:{owner.id}",
             ScheduleCreateBody(
-                workspace="default",
                 prompt="Triage the issue",
                 triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["issues.opened"])],
             ),
@@ -478,7 +466,6 @@ async def test_a_linked_person_whose_github_token_lapsed_cannot_create_an_automa
         await schedules.create_agent_schedule(
             "alice",
             ScheduleCreateBody(
-                workspace="default",
                 prompt="hello",
                 triggers=[ScheduleTrigger(cron="0 9 * * 1-5")],
             ),
@@ -526,7 +513,6 @@ async def test_each_trigger_runs_in_its_own_repository(
     created = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Triage",
             triggers=[
                 ScheduleTrigger(cron="0 9 * * *"),
@@ -567,9 +553,8 @@ async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
     created = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Triage issues",
-            triggers=[ScheduleTrigger(cron="0 9 * * *", repo="langchain-ai/open-swe")],
+            triggers=[ScheduleTrigger(cron="0 9 * * *")],
         ),
     )
     cron_delete = AsyncMock(side_effect=RuntimeError("job queue unavailable"))
@@ -601,13 +586,9 @@ async def test_a_cron_left_by_a_trigger_switch_deletes_itself_when_it_fires(
     assert fake_client.runs.created[-1]["metadata"]["origin"] == "dashboard"
 
 
-@pytest.mark.parametrize("enabled", [False, True])
 async def test_a_test_run_is_refused_when_repo_access_is_revoked(
-    fake_client, auth, monkeypatch, enabled: bool
+    fake_client, auth, monkeypatch
 ) -> None:  # noqa: ANN001, ARG001
-    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=enabled))
-    if enabled:
-        monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=False))
     record = {
         "id": SCHED_1,
         "name": "Issue responder",
@@ -634,13 +615,9 @@ async def test_a_test_run_is_refused_when_repo_access_is_revoked(
     assert stored["last_error"] == "repository unavailable to the automation owner"
 
 
-@pytest.mark.parametrize("enabled", [False, True])
 async def test_github_issue_automations_match_the_repo_and_run_the_channels_prompt(
-    fake_client, auth, planning, monkeypatch: pytest.MonkeyPatch, enabled: bool
+    fake_client, auth, planning, monkeypatch: pytest.MonkeyPatch
 ) -> None:  # noqa: ANN001, ARG001
-    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=enabled))
-    if enabled:
-        monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=False))
     record = {
         "id": SCHED_1,
         "name": "Issue responder",
@@ -736,7 +713,6 @@ async def test_a_github_automation_call_sent_again_plans_the_same_thread(
     await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Triage issues",
             triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["issues.opened"])],
         ),
@@ -817,7 +793,6 @@ async def test_a_github_automation_whose_planning_failed_plans_again(
     await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Triage issues",
             triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["issues.opened"])],
         ),
@@ -843,7 +818,6 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
     on_close = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Summarize the closed PR",
             triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["pull_request.closed"])],
         ),
@@ -851,7 +825,6 @@ async def test_pull_request_triggers_fire_on_close_and_merge_once_per_delivery(
     on_merge = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Write release notes",
             triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["pull_request.merged"])],
         ),
@@ -894,7 +867,6 @@ async def test_pull_request_triggers_skip_the_branches_they_filter_out(
     docs = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Update the docs",
             triggers=[
                 GitHubTrigger(
@@ -909,7 +881,6 @@ async def test_pull_request_triggers_skip_the_branches_they_filter_out(
     unfiltered = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Backport",
             triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["pull_request.merged"])],
         ),
@@ -1044,27 +1015,6 @@ def _scheduled_record(**overrides: Any) -> dict[str, Any]:
     return {**record, **overrides}
 
 
-@pytest.mark.usefixtures("auth")
-async def test_an_automation_runs_in_its_own_workspace_not_its_repositorys(
-    fake_client: _FakeClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
-    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
-    await _seed(_scheduled_record(workspace="core"))
-
-    assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
-    monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=False))
-    assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "unknown_workspace"
-    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=True))
-    assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
-
-    configurable = fake_client.runs.created[-1]["config"]["configurable"]
-    assert configurable["workspace"] == configurable["environment"] == "core"
-    assert (await schedules.get_agent_schedule(SCHED_1))["workspace"] == "core"
-    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=False))
-    assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "unknown_workspace"
-
-
 async def test_admin_automations_refuse_events_from_public_repositories(
     fake_client: _FakeClient, auth: None, planning: _Planning, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1078,7 +1028,6 @@ async def test_admin_automations_refuse_events_from_public_repositories(
 
     def admin_body(repo: str) -> ScheduleCreateBody:
         return ScheduleCreateBody(
-            workspace="default",
             prompt="Triage",
             admin_thread=True,
             system=True,
@@ -1148,7 +1097,6 @@ async def test_slack_triggers_fire_on_matching_posts_once_and_within_their_limit
     created = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Investigate the alert",
             system=system,
             triggers=[
@@ -1242,7 +1190,6 @@ async def test_a_slack_trigger_needs_a_channel_open_swe_reads(
             await schedules.create_agent_schedule(
                 "alice",
                 ScheduleCreateBody(
-                    workspace="default",
                     prompt="Watch",
                     triggers=[SlackTrigger(channel=channel, events=["message.posted"])],
                 ),
@@ -1250,9 +1197,8 @@ async def test_a_slack_trigger_needs_a_channel_open_swe_reads(
         assert refused.value.status_code == 422
 
 
-@pytest.mark.parametrize("enabled", [False, True])
 async def test_a_linear_automation_runs_once_per_delivery_within_its_hourly_cap(
-    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch, enabled: bool
+    fake_client: _FakeClient, auth: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
     stub_mda_runtime(monkeypatch)
@@ -1262,7 +1208,6 @@ async def test_a_linear_automation_runs_once_per_delivery_within_its_hourly_cap(
     created = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Triage the bug",
             triggers=[
                 LinearTrigger(
@@ -1291,9 +1236,6 @@ async def test_a_linear_automation_runs_once_per_delivery_within_its_hourly_cap(
             )
         )
 
-    await EXECUTION_DEFAULTS.update(ExecutionDefaults(enabled=enabled))
-    if enabled:
-        monkeypatch.setattr(WORKSPACES, "slug_exists", AsyncMock(return_value=False))
     first = await plan("d1")
     assert first is not None
     # A thread of its own, for this automation and delivery; MDA's call sent again gets
@@ -1319,7 +1261,6 @@ async def test_open_swe_events_do_not_trigger_automations(
     await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Review the new pull request",
             triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["pull_request.opened"])],
         ),
@@ -1334,27 +1275,18 @@ async def test_open_swe_events_do_not_trigger_automations(
     assert await _plan_github("pull_request", payload, "d-1") == []
 
 
-async def test_launch_scheduled_agent_run_gates_fable_by_the_automations_workspace(
+async def test_launch_scheduled_agent_run_gates_fable_by_global_settings(
     fake_client, auth, registry_db, monkeypatch
 ) -> None:  # noqa: ANN001, ARG001
-    """Fable is a per-workspace kill switch, so the run's own workspace decides.
-
-    `default` leaves it on here and the automation's workspace does not, so a
-    flag read from `default` would let the Fable model through.
-    """
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
-    await upsert_workspace_overrides("default", WorkspaceSettingsUpdate(fable_enabled=True))
+    await upsert_instance_settings(SettingsUpdate(fable_enabled=False))
     await _seed(
-        _scheduled_record(
-            workspace="oss", model="anthropic:claude-fable-5-1", effort="high", system=True
-        ),
+        _scheduled_record(model="anthropic:claude-fable-5-1", effort="high", system=True),
     )
 
     assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
 
     configurable = fake_client.runs.created[0]["config"]["configurable"]
-    assert configurable["workspace"] == "oss"
     assert (configurable["agent_model_id"], configurable["agent_effort"]) == (
         fable_disabled_fallback("high")
     )
@@ -1409,7 +1341,7 @@ async def test_system_schedule_can_run_without_user_credentials(
         assert runs == []
         assert not planning.adopted
         stored = await schedules.get_agent_schedule(SCHED_SYSTEM)
-        assert stored is not None and "workspace GitHub App" in str(stored["last_error"])
+        assert stored is not None and "GitHub App" in str(stored["last_error"])
         return
 
     [run] = runs
@@ -1426,14 +1358,14 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
 ) -> None:  # noqa: ANN001, ARG001
     from openswe import server
     from openswe.run_config import RunConfig
-    from openswe.tools import automations, organization_skills, workspaces
+    from openswe.tools import automations, organization_skills
     from openswe.users import User
 
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value=None))
     record = {
         "id": ADMIN_SCHEDULE,
-        "prompt": "Manage workspace environments",
+        "prompt": "Manage instance settings",
         "enabled": True,
         "admin_thread": True,
         "system": True,
@@ -1447,14 +1379,14 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     assert await server._admin_thread(run_config, None) is True
     assert RunConfig.from_config(run_config).github_login is None
     assert RunConfig.from_config(run_config).user_email is None
-    monkeypatch.setattr(workspaces.store.WORKSPACES, "list_all", AsyncMock(return_value=[]))
-    assert (await workspaces.list_workspaces())["ok"] is True
+    assert (
+        await organization_skills.save_organization_skill("system-check", "Check", "instructions")
+    )["ok"] is True
     assert (await automations.list_automations())["ok"] is True
-    await organization_skills.save_organization_skill("system-check", "Check", "instructions")
     assert (await organization_skills.delete_organization_skill("system-check"))["ok"] is True
 
     async def no_personal_access(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError("A system admin must use workspace credentials and defaults")
+        raise AssertionError("A system admin must use system credentials and defaults")
 
     for name in (
         "get_valid_access_token",
@@ -1464,8 +1396,7 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     ):
         monkeypatch.setattr(schedules, name, no_personal_access)
     child = await automations.create_automation(
-        "Check workspace repos",
-        workspace="default",
+        "Check repository integrations",
         triggers=[ScheduleTrigger(cron="0 9 * * *")],
         admin_thread=True,
         system=True,
@@ -1490,17 +1421,25 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     ):
         run_config["configurable"] = {**original, **patch}
         assert await server._admin_thread(run_config, None) is False
-        assert (await workspaces.list_workspaces())["ok"] is False
+        assert (
+            await organization_skills.save_organization_skill(
+                "system-check", "Check", "instructions"
+            )
+        )["ok"] is False
 
     run_config["configurable"] = original
     metadata = fake_client.threads.created[0]["metadata"]
     metadata["owner_type"] = "user"
     assert await server._admin_thread(run_config, None) is False
-    assert (await workspaces.list_workspaces())["ok"] is False
+    assert (
+        await organization_skills.save_organization_skill("system-check", "Check", "instructions")
+    )["ok"] is False
     metadata["owner_type"] = "system"
     monkeypatch.setenv("CONFIGURED_ADMINS", "bob")
     assert await server._admin_thread(run_config, None) is False
-    assert (await workspaces.list_workspaces())["ok"] is False
+    assert (
+        await organization_skills.save_organization_skill("system-check", "Check", "instructions")
+    )["ok"] is False
 
 
 @pytest.mark.parametrize(("creator", "admin"), [("alice", True), ("bob", False)])
@@ -1515,7 +1454,7 @@ async def test_a_personal_automation_is_an_admin_thread_only_for_an_admin_creato
     await _seed(
         {
             "id": ADMIN_SCHEDULE,
-            "prompt": "Manage workspace environments",
+            "prompt": "Manage instance settings",
             "enabled": True,
             "admin_thread": True,
             "created_by": creator,
@@ -1667,9 +1606,7 @@ async def test_automation_spend_follows_its_creator_across_a_github_rename(
     alice = await User.sign_in("github", "3001", login="alice", email="alice@example.com")
     created = await schedules.create_agent_schedule(
         "alice",
-        ScheduleCreateBody(
-            workspace="default", prompt="Triage", triggers=[ScheduleTrigger(cron="0 9 * * *")]
-        ),
+        ScheduleCreateBody(prompt="Triage", triggers=[ScheduleTrigger(cron="0 9 * * *")]),
         email="alice@example.com",
     )
     record = await schedules.get_agent_schedule(created["id"])
@@ -1810,7 +1747,6 @@ async def test_one_triggers_confirmation_does_not_cover_another_on_the_same_repo
     await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Triage",
             triggers=[
                 GitHubTrigger(
@@ -1845,7 +1781,6 @@ async def test_a_confirmed_close_trigger_fires_on_a_merge_beside_an_unconfirmed_
     await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Follow up",
             triggers=[
                 GitHubTrigger(
@@ -1890,7 +1825,6 @@ async def test_a_system_automation_needs_no_public_repository_confirmation(
     saved = await schedules.create_agent_schedule(
         "alice",
         ScheduleCreateBody(
-            workspace="default",
             prompt="Triage the issue",
             system=True,
             triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["issues.opened"])],
@@ -1919,7 +1853,6 @@ async def test_a_public_repository_trigger_must_be_confirmed_to_be_saved(
 
     def body(repo: str, *, confirmed: bool = False) -> ScheduleCreateBody:
         return ScheduleCreateBody(
-            workspace="default",
             prompt="Triage the issue",
             triggers=[
                 GitHubTrigger(repo=repo, events=["issues.opened"], allow_public_repo=confirmed)
@@ -1951,67 +1884,6 @@ async def test_a_public_repository_trigger_must_be_confirmed_to_be_saved(
         created["id"], "alice", ScheduleUpdateBody(enabled=False)
     )
     assert paused["enabled"] is False
-
-
-def test_a_new_automation_must_name_its_workspace() -> None:
-    with pytest.raises(ValidationError):
-        ScheduleCreateBody.model_validate(
-            {
-                "prompt": "Triage this issue",
-                "triggers": [{"kind": "github", "repo": "a/b", "events": ["issues.opened"]}],
-            }
-        )
-
-
-async def test_a_new_automation_keeps_the_workspace_it_names(
-    fake_client, auth, registry_db
-) -> None:  # noqa: ANN001, ARG001
-    await WORKSPACES.create(WorkspaceCreate(name="OSS", repos=["langchain-ai/open-swe"]), "alice")
-    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
-    body = ScheduleCreateBody(
-        prompt="Triage this issue",
-        triggers=[GitHubTrigger(repo="langchain-ai/open-swe", events=["issues.opened"])],
-        workspace="Core",
-    )
-
-    result = await schedules.create_agent_schedule("alice", body, email="alice@example.com")
-
-    assert result["workspace"] == "core"
-
-
-async def test_an_automation_cannot_name_a_missing_workspace(
-    fake_client, auth, registry_db
-) -> None:  # noqa: ANN001, ARG001
-    body = ScheduleCreateBody(
-        prompt="Triage",
-        triggers=[GitHubTrigger(repo="a/b", events=["issues.opened"])],
-        workspace="gone",
-    )
-
-    with pytest.raises(HTTPException) as refused:
-        await schedules.create_agent_schedule("alice", body, email="alice@example.com")
-
-    assert refused.value.status_code == 422
-
-
-async def test_an_automation_can_move_to_another_workspace(fake_client, auth, registry_db) -> None:  # noqa: ANN001, ARG001
-    await WORKSPACES.create(WorkspaceCreate(name="Core"), "alice")
-    await _seed(_scheduled_record(workspace="default"))
-
-    moved = await schedules.update_agent_schedule(
-        SCHED_1, "alice", ScheduleUpdateBody(workspace="core")
-    )
-    kept = await schedules.update_agent_schedule(
-        SCHED_1, "alice", ScheduleUpdateBody(name="Renamed")
-    )
-
-    assert moved["workspace"] == "core"
-    assert kept["workspace"] == "core"
-    with pytest.raises(HTTPException) as refused:
-        await schedules.update_agent_schedule(
-            SCHED_1, "alice", ScheduleUpdateBody(workspace="gone")
-        )
-    assert refused.value.status_code == 422
 
 
 async def test_a_scheduler_cron_adopted_again_keeps_the_job_it_moved_to() -> None:
@@ -2067,9 +1939,7 @@ def test_a_schedule_trigger_runs_weekly_in_utc_unless_told_otherwise() -> None:
 async def test_automation_limits_and_ownership(fake_client, auth, monkeypatch) -> None:  # noqa: ANN001, ARG001
     import asyncio
 
-    body = ScheduleCreateBody(
-        workspace="default", prompt="Report", triggers=[ScheduleTrigger(cron="0 9 * * *")]
-    )
+    body = ScheduleCreateBody(prompt="Report", triggers=[ScheduleTrigger(cron="0 9 * * *")])
     results = await asyncio.gather(
         *(schedules.create_agent_schedule("alice", body) for _ in range(4)), return_exceptions=True
     )
@@ -2155,7 +2025,6 @@ async def test_member_automation_runs_on_auto_whatever_model_was_asked_for(
     fake_client, auth
 ) -> None:  # noqa: ANN001, ARG001
     body = ScheduleCreateBody(
-        workspace="default",
         prompt="Report",
         model_id="anthropic:claude-opus-5-5",
         effort="high",

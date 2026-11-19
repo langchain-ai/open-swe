@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException
 
-from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.dashboard.settings import Settings
 from openswe.expedited_review.eligibility import ChangedFile, diff_fingerprint
 from openswe.expedited_review.nomination import ExpeditedReviewNomination
 from openswe.github.codeowners import CodeOwners
@@ -37,8 +37,8 @@ async def test_review_channel_lookup_failure_is_actionable(
     monkeypatch.setattr(routes, "require_repo_access_for_user", AsyncMock(return_value="token"))
     monkeypatch.setattr(HumanReviewRequest, "active_for", AsyncMock(return_value=None))
     monkeypatch.setattr(
-        "openswe.human_review.dashboard.get_workspace_settings",
-        AsyncMock(return_value=WorkspaceSettings({"expedited_review_enabled": expedited})),
+        "openswe.human_review.dashboard.get_settings",
+        AsyncMock(return_value=Settings({"expedited_review_enabled": expedited})),
     )
     monkeypatch.setattr(PullRequestPayload, "read", AsyncMock(return_value=PullRequestPayload()))
     monkeypatch.setattr(
@@ -203,10 +203,8 @@ async def test_dashboard_selects_review_workflow(
     )
     with (
         patch(
-            "openswe.human_review.dashboard.get_workspace_settings",
-            AsyncMock(
-                return_value=WorkspaceSettings({"expedited_review_enabled": case != "disabled"})
-            ),
+            "openswe.human_review.dashboard.get_settings",
+            AsyncMock(return_value=Settings({"expedited_review_enabled": case != "disabled"})),
         ),
         patch.object(
             HumanReviewRequest,

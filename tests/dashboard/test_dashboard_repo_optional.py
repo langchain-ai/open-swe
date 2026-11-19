@@ -124,9 +124,6 @@ async def test_revoked_github_does_not_apply_default_repository(monkeypatch, das
         thread_runs, "get_profile", AsyncMock(return_value={"default_repo": "octo/repo"})
     )
     monkeypatch.setattr(common, "account_link_reason", AsyncMock(return_value="revoked"))
-    monkeypatch.setattr(
-        thread_runs, "_resolve_requested_workspace", AsyncMock(return_value="default")
-    )
     require_repo = AsyncMock()
     monkeypatch.setattr(thread_runs, "require_repo_access_for_user", require_repo)
     create = AsyncMock(return_value={"thread_id": "thread-id"})

@@ -1113,15 +1113,12 @@ async def _open_pull_request(
             "body": body,
             "draft": draft,
         }
-        from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+        from openswe.dashboard.settings_cache import cached_settings
 
         cfg = _configurable()
         if (
             cfg.thread_id
-            and (await cached_workspace_settings(cfg.workspace_slug)).get(
-                "implementation_walkthrough_enabled"
-            )
-            is True
+            and (await cached_settings()).get("implementation_walkthrough_enabled") is True
         ):
             await THREADS.update(
                 cfg.thread_id,

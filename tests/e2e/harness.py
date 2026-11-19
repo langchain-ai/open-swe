@@ -86,7 +86,6 @@ from openswe.dashboard.oauth import COOKIE_NAME, issue_session  # noqa: E402
 from openswe.slack.records import lookup_slack_thread_id  # noqa: E402
 from openswe.users import User  # noqa: E402
 from openswe.utils.dashboard_ui import keep_dashboard_ui_last  # noqa: E402
-from openswe.workspaces.store import WORKSPACES, WorkspaceCreate, WorkspaceUpdate  # noqa: E402
 
 MDA_SERVICE_SECRET = os.environ["MDA_SERVICE_SECRET"]
 SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
@@ -158,52 +157,6 @@ async def _cancel_inflight_runs() -> None:
             continue
 
 
-@app.post("/control/workspaces")
-async def control_seed_workspace(body: WorkspaceCreate) -> JSONResponse:
-    from openswe.workspaces.store import slugify
-
-    slug = slugify(body.name)
-    if await WORKSPACES.get(slug) is None:
-        record = await WORKSPACES.create(body, "alice")
-    else:
-        record = await WORKSPACES.apply_update(
-            slug, WorkspaceUpdate.model_validate(body.model_dump(exclude_unset=True))
-        )
-    return JSONResponse(record.model_dump(mode="json"))
-
-
-@app.delete("/control/workspaces/{slug}")
-async def control_delete_workspace(slug: str) -> JSONResponse:
-    await WORKSPACES.delete(slug)
-    return JSONResponse({"ok": True})
-
-
-@app.post("/control/reset-default-workspace")
-async def control_reset_default_workspace() -> JSONResponse:
-    """Restore the seeded ``default`` workspace for execution-selection fixtures."""
-    from sqlalchemy import text
-
-    from openswe.dashboard.workspace_settings import delete_workspace_settings
-    from openswe.database import postgres
-    from openswe.workspaces import store
-    from openswe.workspaces.refresh import remove_refresh_cron
-
-    record = await store.WORKSPACES.get(store.DEFAULT_WORKSPACE_SLUG)
-    if record is not None:
-        await remove_refresh_cron(record)
-        await store._delete_snapshot(record.snapshot_id)
-        await store.WORKSPACES.delete(store.DEFAULT_WORKSPACE_SLUG)
-    async with postgres.transaction() as connection:
-        await connection.execute(
-            text(
-                "INSERT INTO workspace (id, slug, name, created_by) "
-                "VALUES (gen_random_uuid(), 'default', 'Default', 'open-swe')"
-            )
-        )
-    await delete_workspace_settings(store.DEFAULT_WORKSPACE_SLUG)
-    return JSONResponse({"ok": True})
-
-
 async def _reset_durable_pr_state() -> None:
     """Drop the per-pull-request state that outlives the in-memory fakes.
 
@@ -212,8 +165,7 @@ async def _reset_durable_pr_state() -> None:
     pull request: a baby-sit watch would report "already monitored from another
     agent thread", and a stale approval would block a fresh one.
 
-    ``repository`` stays: ``workspace_repository`` references it, so truncating
-    it cascades away the workspace assignments every routable-repo check needs.
+    ``repository`` stays because integration bindings reference it.
     """
     from openswe.baby_sit import WATCHES, stop_watch
 
@@ -249,7 +201,7 @@ async def control_plans(thread_id: str) -> JSONResponse:
 
 @app.get("/control/snapshots")
 async def control_snapshots() -> JSONResponse:
-    """Snapshot captures/deletes the workspace tools asked the platform for."""
+    """Snapshot captures/deletes requested through the global image lifecycle."""
     return JSONResponse({"captured": fakes.SNAPSHOTS, "deleted": fakes.DELETED_SNAPSHOTS})
 
 
@@ -487,16 +439,9 @@ async def control_collaborator_permission(request: Request) -> JSONResponse:
 
 @app.post("/control/team-settings")
 async def control_team_settings(request: Request) -> JSONResponse:
-    """Patch workspace settings, then drop the factory's TTL cache so the next
-    run sees them instead of a stale snapshot.
-
-    A patch, not a replace: the settings record is one store item shared by
-    every spec and it outlives the dev server, so writing a bare update would
-    reset unrelated fields — the default agent model included, which the
-    dashboard's first-run onboarding reads — for every spec that follows.
-    """
-    from openswe.dashboard.workspace_settings import (
-        WorkspaceSettingsUpdate,
+    """Patch global settings without resetting unrelated defaults between specs."""
+    from openswe.dashboard.settings import (
+        SettingsUpdate,
         get_instance_settings,
         upsert_instance_settings,
     )
@@ -506,10 +451,10 @@ async def control_team_settings(request: Request) -> JSONResponse:
     current = await get_instance_settings()
     patched = {
         key: body.get(key, current.get(key))
-        for key in WorkspaceSettingsUpdate.model_fields
+        for key in SettingsUpdate.model_fields
         if key in body or key in current
     }
-    settings = await upsert_instance_settings(WorkspaceSettingsUpdate.model_validate(patched))
+    settings = await upsert_instance_settings(SettingsUpdate.model_validate(patched))
     ttl_cache.clear()
     return JSONResponse({"ok": True, "settings": settings})
 

@@ -5,13 +5,12 @@ from datetime import timedelta
 from uuid import uuid7
 
 from openswe import event_claims
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.dashboard.settings_cache import cached_settings
 from openswe.jobs import queue
 from openswe.plugins.installed import InstalledPlugin
 from openswe.plugins.manifest import PluginPermission
 from openswe.plugins.records import PluginApps
 from openswe.review_apps.outcomes import ReviewOutcome, ReviewOutcomes
-from openswe.webhooks import common
 
 
 @dataclass(frozen=True)
@@ -35,7 +34,7 @@ class PluginReviews:
         repository = repository.lower()
         owner, repo = repository.split("/", 1)
         config = {"owner": owner, "name": repo}
-        settings = await cached_workspace_settings(await common.workspace_for_repo_config(config))
+        settings = await cached_settings()
         app = self.plugin.installation.plugin
         approved = next(
             (
@@ -48,9 +47,7 @@ class PluginReviews:
             None,
         )
         if approved is None:
-            raise PermissionError(
-                "An administrator must enable this app in the workspace's reviews"
-            )
+            raise PermissionError("An administrator must enable this app in Robin's reviews")
         outcomes = ReviewOutcomes(app, repository, number)
         request_id = str(uuid7())
         checks = await PreviewReady.checks(config)
@@ -60,7 +57,7 @@ class PluginReviews:
                     id=request_id,
                     head_sha=head,
                     status="blocked",
-                    reason="Enable automatic reviews and configure Preview checks in this repository's workspace.",
+                    reason="Enable automatic reviews and configure Preview checks in Robin Defaults.",
                 )
             )
         check = sorted(checks)[0]

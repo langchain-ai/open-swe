@@ -8,6 +8,7 @@ from typing import ClassVar
 from langchain_typesafe import Choice
 
 from openswe.prompts import prompt
+from openswe.routing.store import INTEGRATIONS
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
     add_slack_reaction,
@@ -20,7 +21,6 @@ from openswe.slack.payloads import SlackChannelContext, SlackMessage
 from openswe.slack.records import SlackThread
 from openswe.utils.jev import JEV, JevUnavailable
 from openswe.webhooks import common
-from openswe.workspaces.store import WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ class AskChannelMessage:
             if other_robin is not False:
                 return False
         try:
-            ask_channel = await WORKSPACES.is_ask_channel(channel_id)
+            ask_channel = await INTEGRATIONS.is_ask_channel(channel_id)
         except Exception:
             logger.warning(
                 "Ask channel lookup failed; answering the message as usual",

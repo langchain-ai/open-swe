@@ -18,11 +18,9 @@ from openswe.github.proxy import (
 def _clear_state() -> Generator[None]:
     github_proxy._PROXY_TOKEN_EXPIRY.clear()
     github_proxy._PROXY_BASE_CONFIGS.clear()
-    github_proxy._PROXY_WORKSPACES.clear()
     yield
     github_proxy._PROXY_TOKEN_EXPIRY.clear()
     github_proxy._PROXY_BASE_CONFIGS.clear()
-    github_proxy._PROXY_WORKSPACES.clear()
 
 
 class TestProxyTokenNeedsRefresh:

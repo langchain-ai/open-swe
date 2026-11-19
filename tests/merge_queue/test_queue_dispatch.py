@@ -132,7 +132,7 @@ async def test_dispatch_retries_only_authenticated_preflight_failures(
 
 def test_service_suite_policy_requires_new_revision_and_changes_validation_trust():
     config = QueueConfiguration(
-        workspace_id=uuid7(),
+        routing_id=uuid7(),
         repository="acme/widgets",
         repository_id=42,
         mode="native",

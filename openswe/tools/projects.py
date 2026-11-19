@@ -34,15 +34,11 @@ async def list_projects() -> dict[str, object]:
 @expose_mcp()
 @audit_tool()
 @access(_WRITE)
-async def create_project(
-    name: str, workspace: str | None = None, repo_full_name: str | None = None
-) -> dict[str, object]:
+async def create_project(name: str, repo_full_name: str | None = None) -> dict[str, object]:
     """Implement the `create_project` tool."""
     try:
         user = await PROJECTS.member_for_run(as_json_object(get_config()))
-        project = await PROJECTS.create(
-            user, name, workspace=workspace, repo_full_name=repo_full_name
-        )
+        project = await PROJECTS.create(user, name, repo_full_name=repo_full_name)
     except (ProjectError, ValidationError) as exc:
         return {"ok": False, "error": str(exc)}
     return {"ok": True, "project": project.model_dump(mode="json")}

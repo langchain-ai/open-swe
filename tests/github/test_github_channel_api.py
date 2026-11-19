@@ -82,11 +82,9 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
     monkeypatch.setattr("openswe.github.channel.EventLog.record_once", AsyncMock(return_value=True))
     monkeypatch.setattr(channel.Topic.PULL_REQUESTS, "invalidate", AsyncMock())
-    monkeypatch.setattr(channel, "repo_is_routable", AsyncMock(return_value=True))
     monkeypatch.setattr(channel.schedules, "plan_github_automations", AsyncMock(return_value=[]))
     monkeypatch.setattr(channel.schedules, "github_automation_rules", AsyncMock(return_value=[]))
     monkeypatch.setattr(github_webhooks, "conversation_started", AsyncMock(return_value=False))
-    monkeypatch.setattr(webhook_common, "get_thread_workspace", AsyncMock(return_value="team-a"))
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value="ada@example.com"))
     monkeypatch.setattr(
         webhook_common, "enforce_public_repo_org_gate", AsyncMock(return_value=None)
@@ -105,7 +103,6 @@ def prepared(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
     async def adopt_then_prepare(
         *_args: object,
-        workspace: str | None,
         adopt: Callable[[str], Awaitable[None]] | None = None,
     ) -> object:
         # The real one adopts the thread before it writes the thread's metadata.
@@ -267,8 +264,8 @@ async def test_a_forward_answers_before_picking_the_work_and_a_failed_lookup_kee
     unclaimed, so the delivery, redelivered, runs it."""
     process = AsyncMock()
     monkeypatch.setattr(github_webhooks, "process_github_ci_event", process)
-    routable = AsyncMock(side_effect=RuntimeError("the database is away"))
-    monkeypatch.setattr(channel, "repo_is_routable", routable)
+    claim = AsyncMock(side_effect=RuntimeError("the database is away"))
+    monkeypatch.setattr(channel.event_claims, "claim", claim)
     delivery = GitHubDelivery(
         event="status",
         delivery_id="delivery-1",
@@ -283,8 +280,8 @@ async def test_a_forward_answers_before_picking_the_work_and_a_failed_lookup_kee
         process.assert_not_awaited()
         channel.EventLog.record_once.assert_awaited_once()  # type: ignore[attr-defined]
 
-        routable.side_effect = None
-        routable.return_value = True
+        claim.side_effect = None
+        claim.return_value = True
         await forward_as_mda(client, delivery, SERVICE_SECRET)
 
     process.assert_awaited_once()
@@ -447,8 +444,7 @@ async def test_an_issue_mention_starts_a_run_on_the_channels_thread(
     prepared.assert_awaited_once()
     assert prepared.await_args is not None
     assert prepared.await_args.args[1:] == (str(THREAD),)
-    # A new conversation: the repository's own workspace.
-    assert prepared.await_args.kwargs["workspace"] is None
+    assert "workspace" not in prepared.await_args.kwargs
     # The run completes through the backend's run-complete webhook.
     assert run.webhook == webhook
     channel.adopt_channel_run.assert_awaited_once_with(str(THREAD), "github")  # type: ignore[attr-defined]
@@ -579,7 +575,7 @@ async def test_a_waiting_thread_is_only_asked_whether_open_swe_acts(
     channel.adopt_channel_run.assert_not_awaited()  # type: ignore[attr-defined]
 
 
-async def test_a_follow_up_stays_in_the_workspace_its_thread_started_in(
+async def test_a_follow_up_stays_on_its_existing_thread_without_environment_routing(
     app: FastAPI, prepared: AsyncMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(github_webhooks, "conversation_started", AsyncMock(return_value=True))
@@ -588,7 +584,8 @@ async def test_a_follow_up_stays_in_the_workspace_its_thread_started_in(
 
     assert delivered.issue_run is not None and delivered.issue_run.starts
     assert prepared.await_args is not None
-    assert prepared.await_args.kwargs["workspace"] == "team-a"
+    assert prepared.await_args.args[1:] == (str(THREAD),)
+    assert "workspace" not in prepared.await_args.kwargs
 
 
 async def test_an_issue_run_needs_the_input_the_channel_wrote() -> None:
@@ -614,8 +611,7 @@ async def test_issue_facts_say_who_is_a_user_and_what_the_thread_holds(
 
     assert facts.trusted == ["ada", "carol"]
     assert (facts.conversation_started, facts.sender_email_known) == (started, True)
-    # Only a follow-up reads the workspace its thread started in.
-    assert facts.thread_workspace == ("team-a" if started else None)
+    assert "thread_workspace" not in facts.model_dump()
 
 
 async def test_issue_facts_refuse_a_login_github_cant_spell(app: FastAPI) -> None:

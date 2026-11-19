@@ -193,8 +193,7 @@ function PreviewChecks({
 
 /**
  * Where the browser of a review that works for apps may sign in, and the tool
- * of Robin's bot kit that signs it in. Instance only: they decide where every
- * workspace's reviews sign in, and as whom.
+ * of Robin's bot kit that signs it in. Instance only: they decide where all reviews sign in, and as whom.
  */
 export function ReviewBrowserSettings({
   settings,

@@ -251,7 +251,6 @@ it("reveals a project worker without duplicating its coordinator in Recents", ()
     {
       id: "project-1",
       name: "Example project",
-      workspace: "default",
       repo_full_name: null,
       role: "owner",
       members: [],

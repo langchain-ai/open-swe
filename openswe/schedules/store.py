@@ -1,4 +1,4 @@
-"""Automations: a stored prompt that runs in one workspace whenever one of its triggers fires.
+"""Automations: a stored prompt that runs globally whenever one of its triggers fires.
 
 Records live in PostgreSQL (``automation`` and ``automation_trigger``); each
 schedule trigger owns one LangGraph cron, whose input names the automation.
@@ -38,16 +38,15 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe import event_claims
 from openswe.dashboard.admin import is_admin
-from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS
 from openswe.dashboard.options import gate_fable_model, normalize_model_choice
 from openswe.dashboard.profiles import get_profile, get_valid_access_token
 from openswe.dashboard.repo_access import (
+    repo_config_for_system,
     repo_config_for_user,
-    repo_config_for_workspace,
     repo_is_private,
-    require_repo_access_for_workspace,
+    require_repo_access_for_system,
 )
-from openswe.dashboard.workspace_settings import get_workspace_settings
+from openswe.dashboard.settings import get_settings
 from openswe.database.postgres import transaction
 from openswe.dispatch import create_durable_run
 from openswe.github.http import github_reauth_message
@@ -69,7 +68,6 @@ from openswe.users import User
 from openswe.utils.thread_ops import langgraph_client
 from openswe.utils.time import now_iso, now_ms
 from openswe.webhooks.common import enforce_public_repo_org_gate, repo_private_from_payload
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -281,9 +279,7 @@ class ScheduleCreateBody(BaseModel):
     model_id: str | None = None
     effort: str | None = None
     admin_thread: bool = False
-    # The workspace its runs launch in, always chosen explicitly.
-    workspace: str = Field(min_length=1, max_length=120)
-    # The environment's, not its creator's: admins only, unbounded.
+    # System-owned, not its creator's: admins only, unbounded.
     system: bool = False
 
 
@@ -296,7 +292,6 @@ class ScheduleUpdateBody(BaseModel):
     effort: str | None = None
     enabled: bool | None = None
     admin_thread: bool | None = None
-    workspace: str | None = None
     system: bool | None = None
 
 
@@ -355,8 +350,7 @@ def _schedule_summary(record: dict[str, Any], policy: AutomationPolicy) -> dict[
         "prompt": record.get("prompt"),
         "schedule": schedule,
         "triggers": [{"id": t["id"], **(t.get("config") or {})} for t in triggers],
-        "scope": "workspace",
-        "workspace": _record_workspace(record),
+        "scope": "system",
         "adminThread": record.get("admin_thread") is True,
         "model": record.get("model"),
         "effort": record.get("effort"),
@@ -376,22 +370,6 @@ def _schedule_summary(record: dict[str, Any], policy: AutomationPolicy) -> dict[
     }
 
 
-def _record_workspace(record: dict[str, Any]) -> str:
-    workspace = record.get("workspace")
-    return workspace if isinstance(workspace, str) and workspace else DEFAULT_WORKSPACE_SLUG
-
-
-async def _existing_workspace(value: str) -> str:
-    """``value`` as a workspace slug, refusing one that does not exist."""
-    try:
-        slug = slugify(value)
-    except ValueError as exc:
-        raise HTTPException(422, "workspace must be a workspace name or slug") from exc
-    if not await WORKSPACES.slug_exists(slug):
-        raise HTTPException(422, f"no workspace named {slug!r}")
-    return slug
-
-
 def _iso(value: object) -> str | None:
     return value.isoformat() if isinstance(value, datetime) else None
 
@@ -404,8 +382,7 @@ def _uuid(value: str) -> uuid.UUID | None:
 
 
 _SELECT_AUTOMATIONS = """
-    SELECT a.*, w.slug AS workspace_slug
-    FROM automation a JOIN workspace w ON w.id = a.workspace_id
+    SELECT a.* FROM automation a
 """
 
 
@@ -455,8 +432,6 @@ async def _load_records(
         records.append(
             {
                 "id": str(row["id"]),
-                "workspace_id": row["workspace_id"],
-                "workspace": row["workspace_slug"],
                 "name": row["name"],
                 "prompt": row["prompt"],
                 "admin_thread": row["admin_thread"],
@@ -742,16 +717,16 @@ def _parsed_triggers(record: dict[str, Any]) -> list[TriggerConfig]:
 
 
 async def _checked_triggers(
-    triggers: Sequence[TriggerConfig], login: str, *, use_workspace_credentials: bool
+    triggers: Sequence[TriggerConfig], login: str, *, use_system_credentials: bool
 ) -> list[TriggerConfig]:
     """``triggers`` once whoever configures them can reach every repository they name,
     and Open SWE can read every Slack channel they watch."""
     repos = {trigger.repo for trigger in triggers if isinstance(trigger, GitHubTrigger)}
-    if repos and not use_workspace_credentials and login.startswith("user:"):
+    if repos and not use_system_credentials and login.startswith("user:"):
         raise HTTPException(422, "Link your GitHub account to run an automation on a repository")
     for repo in repos:
-        if use_workspace_credentials:
-            await repo_config_for_workspace(repo)
+        if use_system_credentials:
+            await repo_config_for_system(repo)
         else:
             await repo_config_for_user(login, repo)
     for channel in sorted({t.channel for t in triggers if isinstance(t, SlackTrigger)}):
@@ -778,7 +753,7 @@ async def _refuse_public_events_for_admin(
     """An admin-thread automation never runs on events in a public repository.
 
     Anyone can write the issue or pull request text such an event carries, and
-    an admin thread holds workspace-admin tools.
+    an admin thread holds instance-admin tools.
     """
     if not admin_thread:
         return
@@ -813,14 +788,14 @@ async def create_agent_schedule(
     *,
     email: str | None = None,
     allow_admin_thread: bool = False,
-    use_workspace_credentials: bool = False,
+    use_system_credentials: bool = False,
 ) -> dict[str, Any]:
     creator = await AutomationPolicy.for_login(login)
     policy = creator.as_system(body.system)
     policy.check_kind(creator)
     if body.admin_thread and (not allow_admin_thread or not creator.admin):
         raise HTTPException(403, "admin threads are for automations made by admins")
-    if use_workspace_credentials:
+    if use_system_credentials:
         profile: dict[str, Any] = {}
         run_email = email
     else:
@@ -828,13 +803,9 @@ async def create_agent_schedule(
         profile = await get_profile(login) or {}
         run_email = await resolve_run_email(login, profile) or email
     triggers = await _checked_triggers(
-        body.triggers, login, use_workspace_credentials=use_workspace_credentials
+        body.triggers, login, use_system_credentials=use_system_credentials
     )
     await _refuse_public_events_for_admin(triggers, admin_thread=body.admin_thread)
-    workspace = await _existing_workspace(body.workspace)
-    workspace_id = await WORKSPACES.id_for_slug(workspace)
-    if workspace_id is None:
-        raise HTTPException(422, f"no workspace named {workspace!r}")
     # A system automation runs with no person's credentials, so it needs no confirmation.
     if policy.personal:
         for trigger in triggers:
@@ -854,16 +825,15 @@ async def create_agent_schedule(
             policy.check_creation()
             await conn.execute(
                 text(
-                    "INSERT INTO automation (id, workspace_id, name, prompt, admin_thread, "
+                    "INSERT INTO automation (id, name, prompt, admin_thread, "
                     "model, effort, base_branch, branch_prefix, enabled, created_by, "
                     "updated_by, user_email, created_by_user_id, system) VALUES (:id, "
-                    ":workspace_id, :name, :prompt, :admin_thread, :model, :effort, "
+                    ":name, :prompt, :admin_thread, :model, :effort, "
                     ":base_branch, :branch_prefix, true, :login, :login, :user_email, "
                     ":creator_id, :system)"
                 ),
                 {
                     "id": uuid.UUID(automation_id),
-                    "workspace_id": workspace_id,
                     "name": (body.name or _derive_name(body.prompt)).strip(),
                     "prompt": body.prompt.strip(),
                     "admin_thread": body.admin_thread,
@@ -894,7 +864,7 @@ async def update_agent_schedule(
     *,
     email: str | None = None,
     allow_admin_thread: bool = False,
-    use_workspace_credentials: bool = False,
+    use_system_credentials: bool = False,
 ) -> dict[str, Any]:
     existing = await get_agent_schedule(schedule_id)
     _assert_schedule_exists(existing)
@@ -939,10 +909,6 @@ async def update_agent_schedule(
         # Made personal, it runs as its creator, who may not be an admin.
         if owner.personal and not current.admin:
             columns["admin_thread"] = False
-    if body.workspace is not None:
-        workspace = await _existing_workspace(body.workspace)
-        columns["workspace_id"] = await WORKSPACES.id_for_slug(workspace)
-
     if owner.personal:
         columns["model"], columns["effort"] = "Default", None
 
@@ -954,7 +920,7 @@ async def update_agent_schedule(
         triggers = await _checked_triggers(
             body.triggers,
             existing["created_by"],
-            use_workspace_credentials=use_workspace_credentials,
+            use_system_credentials=use_system_credentials,
         )
 
     was_admin = existing.get("admin_thread") is True
@@ -1117,8 +1083,7 @@ async def _agent_run_metadata(
         "thread_category": "automation",
         "trigger_kind": "schedule_test" if test_run else "schedule",
         "schedule_id": record["id"],
-        "automation_scope": "workspace",
-        "workspace": _record_workspace(record),
+        "automation_scope": "system",
         "owner_type": "system",
         "visibility": "public",
         "schedule_name": record.get("name"),
@@ -1193,15 +1158,12 @@ async def _agent_run_config(
         configurable["user_email"] = await resolve_run_email(login, await get_profile(login) or {})
     if repo:
         configurable["repo"] = repo
-    workspace = _record_workspace(record)
-    configurable["workspace"] = workspace
-    configurable["environment"] = workspace
     if admin_thread:
         configurable["admin_thread"] = True
     model, effort = normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
         model, effort = gate_fable_model(
-            model, effort, fable_enabled=(await get_workspace_settings(workspace)).fable_enabled
+            model, effort, fable_enabled=(await get_settings()).fable_enabled
         )
         configurable["agent_model_id"] = model
         configurable["agent_effort"] = effort
@@ -1239,21 +1201,13 @@ async def _launch_agent_schedule_record(
         return {"status": "disabled", "schedule_id": schedule_id}
 
     policy = await AutomationPolicy.for_record(record)
-    workspace = _record_workspace(record)
-    if not await EXECUTION_DEFAULTS.is_enabled() and not await WORKSPACES.slug_exists(workspace):
-        # Running in another workspace would hand it that workspace's settings
-        # and connections, which nobody chose for it.
-        error = f"saved automation configuration {workspace!r} is unavailable"
-        await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
-        return {"status": "unknown_workspace", "schedule_id": schedule_id, "error": error}
-
     if policy.personal:
         # Auto, even for a row saved while personal automations were pinned to Fast.
         record = {**record, "model": None, "effort": None}
 
     if repo and policy.system:
         try:
-            await require_repo_access_for_workspace(repo)
+            await require_repo_access_for_system(repo)
         except HTTPException as exc:
             await _put_run_state(
                 record,
@@ -1572,19 +1526,12 @@ async def _planned_github_automation(
     prompt: str,
     token_repositories: list[str] | None,
 ) -> GitHubThreadRun | None:
-    """The automation's run in ``repo``; ``None`` when its workspace can't run it there."""
+    """The automation's run in ``repo``; ``None`` when its credentials cannot reach it."""
     from openswe.github.channel import CHANNEL as GITHUB_CHANNEL
 
-    workspace = _record_workspace(record)
-    if not await EXECUTION_DEFAULTS.is_enabled() and not await WORKSPACES.slug_exists(workspace):
-        # Running in another workspace would hand it that workspace's settings
-        # and connections, which nobody chose for it.
-        error = f"saved automation configuration {workspace!r} is unavailable"
-        await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
-        return None
     try:
         if record.get("system") is True:
-            await require_repo_access_for_workspace(repo)
+            await require_repo_access_for_system(repo)
         else:
             creator = await User.automation_creator(record)
             if creator is None:
@@ -1834,12 +1781,6 @@ async def plan_linear_automation(request: PlanLinearAutomation) -> LinearAutomat
     )
     if not claimed and not await event_claims.held(_DELIVERY_CLAIM_SCOPE, claim_key):
         return None
-    workspace = _record_workspace(record)
-    if not await EXECUTION_DEFAULTS.is_enabled() and not await WORKSPACES.slug_exists(workspace):
-        error = f"saved automation configuration {workspace!r} is unavailable"
-        await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
-        await event_claims.release(_DELIVERY_CLAIM_SCOPE, claim_key)
-        return None
     try:
         return await _planned_linear_automation(record, request)
     except HTTPException as exc:
@@ -2005,9 +1946,5 @@ async def trigger_agent_schedule(
         raise HTTPException(
             status_code if isinstance(status_code, int) else 403,
             result.get("error") or "automation repository unavailable",
-        )
-    if status == "unknown_workspace":
-        raise HTTPException(
-            409, result.get("error") or "saved automation configuration is unavailable"
         )
     raise HTTPException(502, result.get("error") or "failed to start automation test")

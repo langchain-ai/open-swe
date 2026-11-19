@@ -1,10 +1,11 @@
-"""Agent threads listening for event log rows in their workspace."""
+"""Authorized agent threads listening for event log rows."""
 
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Self
 from uuid import UUID, uuid7
 
+from fastapi import HTTPException
 from langgraph_sdk.errors import NotFoundError
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 from sqlalchemy import (
@@ -23,6 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from openswe.config import ENV
+from openswe.credential_scope import GitHubCredentialScope
+from openswe.dashboard.repo_access import (
+    require_repo_access_for_system,
+    require_repo_access_for_user,
+)
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.github.comments import fence_github_comment_body
@@ -32,8 +38,9 @@ from openswe.github.repositories import Repository
 from openswe.input_messages import Fields
 from openswe.jobs import queue
 from openswe.prompts import prompt
+from openswe.run_config import RunConfig
 from openswe.webhooks.event_log import ADMIN_ONLY_SOURCES, LoggedEvent, WebhookSource
-from openswe.webhooks.event_matches import EventMatch, MultitaskStrategy
+from openswe.webhooks.event_matches import EventAudience, EventMatch, MultitaskStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -177,8 +184,8 @@ class EventSummary(BaseModel):
                 status=event.event_type,
                 trusted=True,
             )
-        if event.source == "workspace":
-            return cls._workspace(event, payload)
+        if event.source == "robin":
+            return cls._robin(event)
         return cls._linear(event, _LinearDelivery.model_validate(payload))
 
     @classmethod
@@ -260,13 +267,10 @@ class EventSummary(BaseModel):
         )
 
     @classmethod
-    def _workspace(cls, event: LoggedEvent, payload: dict[str, JsonValue]) -> Self:
-        """Open SWE's own workspace activity, e.g. a snapshot refresh settling."""
-        slug = payload.get("workspace_slug")
+    def _robin(cls, event: LoggedEvent) -> Self:
         return cls(
-            source="workspace",
+            source="robin",
             event_type=event.event_type,
-            target=slug if isinstance(slug, str) else "",
             status=event.event_type.partition(".")[2],
             trusted=True,
         )
@@ -290,7 +294,6 @@ class EventSubscription(Base):
     __tablename__ = "event_subscription"
 
     thread_id: Mapped[str]
-    workspace_id: Mapped[UUID]
     multitask_strategy: Mapped[MultitaskStrategy] = mapped_column(Text)
     run_config: Mapped[dict[str, JsonValue]] = mapped_column(JSONB)
     expires_at: Mapped[datetime]
@@ -314,7 +317,7 @@ class EventSubscription(Base):
     def target(self) -> str:
         if self.pull_request:
             return self.pull_request.url
-        return self.repository.full_name if self.repository else "workspace"
+        return self.repository.full_name if self.repository else "Robin events"
 
     async def create(self) -> Self:
         cls = type(self)
@@ -356,7 +359,7 @@ class EventSubscription(Base):
         match = EventMatch(
             thread_id=thread_id,
             subscription_id=UUID(str(job.payload["subscription_id"])),
-            source="workspace",
+            source="subscription_timeout",
             delivery_id=f"event_subscription_timeout:{job.id}",
             content=str(job.payload["content"]),
             run_config=config,
@@ -405,8 +408,6 @@ class EventSubscription(Base):
     @classmethod
     async def deliver(cls, event: LoggedEvent) -> bool:
         """Wake listeners; False means matching failed and the event should be retried."""
-        if event.workspace_id is None:
-            return True
         try:
             summary = EventSummary.of(event)
         except ValidationError:
@@ -493,7 +494,6 @@ class EventSubscription(Base):
         async with postgres.session() as session:
             rows = await session.scalars(
                 select(cls).where(
-                    cls.workspace_id == event.workspace_id,
                     cls.created_at <= event.received_at,
                     ~cls._expired(),
                     cls.sources.contains([event.source])
@@ -516,33 +516,73 @@ class EventSubscription(Base):
             )
             return list(rows.unique())
 
-    async def sees(self, event: LoggedEvent, summary: EventSummary) -> bool:
-        """Check restricted audiences against the thread's current access before delivery."""
-        if event.visibility != "public":
-            from openswe.run_config import RunConfig
-            from openswe.threads.identity import ThreadIdentity
-            from openswe.tools.access import resolve_access
+    @staticmethod
+    async def require_access(cfg: RunConfig, repository: str | None) -> None:
+        from openswe.threads.store import THREADS
+        from openswe.threads.summary import repo_config_from_metadata
+        from openswe.tools.access import resolve_access
 
-            cfg = RunConfig.from_config({"configurable": self.run_config})
-            access = await resolve_access(cfg)
-            if event.visibility == "admin":
-                if not access.admin_thread or self.workspace_id != event.workspace_id:
-                    return False
-            else:
-                if not access.private or not access.owner:
-                    return False
-                user = await ThreadIdentity(
-                    f"user:{cfg.user_id}" if cfg.user_id else cfg.github_login or ""
-                ).user()
-                if user is None or user.id != event.visible_to_user_id:
-                    return False
-        if summary.source in ADMIN_ONLY_SOURCES:
-            return self.run_config.get("admin_thread") is True
+        thread = await THREADS.get(cfg.thread_id) if cfg.thread_id else None
+        if thread is None:
+            raise HTTPException(403, "The listening thread no longer exists")
+        access = await resolve_access(cfg)
+        if repository is None:
+            if not access.admin_thread:
+                raise HTTPException(
+                    403, "Only admin threads can listen across repositories and services"
+                )
+            return
+        scope = await GitHubCredentialScope.for_thread({"configurable": cfg.dump()})
+        if scope.login is not None:
+            await require_repo_access_for_user(scope.login, repository)
+            return
+        saved_repo = repo_config_from_metadata(thread.metadata)
+        current = f"{saved_repo.get('owner', '')}/{saved_repo.get('name', '')}"
+        if not access.admin_thread and current.lower() != repository.lower():
+            raise HTTPException(
+                403, "Listen in a private thread you own or the repository's thread"
+            )
+        await require_repo_access_for_system(repository)
+
+    async def sees(self, event: LoggedEvent, summary: EventSummary) -> bool:
+        """Recheck the thread, repository and restricted audience before delivery."""
+        from openswe.tools.access import resolve_access
+
+        cfg = RunConfig.from_config({"configurable": self.run_config})
+        if cfg.thread_id != self.thread_id:
+            return False
+        if self.repository_id is not None and self.repository_id != event.repository_id:
+            return False
+        repository = (
+            self.repository.full_name
+            if self.repository
+            else self.pull_request.repo_full_name
+            if self.pull_request
+            else None
+        )
+        try:
+            if not await EventAudience(
+                repository=repository,
+                visibility=event.visibility,
+                visible_to_user_id=event.visible_to_user_id,
+            ).allows(cfg):
+                return False
+        except (HTTPException, PermissionError, RuntimeError) as exc:
+            if isinstance(exc, HTTPException) and (
+                exc.status_code == 429 or exc.status_code >= 500
+            ):
+                raise
+            logger.info(
+                "Event subscription access refused", extra={"event_subscription_id": str(self.id)}
+            )
+            return False
+        if summary.source in ADMIN_ONLY_SOURCES and not (await resolve_access(cfg)).admin_thread:
+            return False
         if summary.source != "slack":
             return True
         from openswe.slack.channels import SlackChannel
 
-        channel = await SlackChannel.load(summary.slack_channel_id)
+        channel = await SlackChannel.load(summary.slack_channel_id, use_cache=False)
         return channel is not None and channel.details.publishes_events
 
     async def match(self, event: LoggedEvent, summary: EventSummary) -> bool:
@@ -568,7 +608,21 @@ class EventSubscription(Base):
             source=event.source,
             delivery_id=event.delivery_id,
             content=content,
-            run_config=self.run_config,
+            run_config={
+                **self.run_config,
+                "_event_audience": EventAudience(
+                    repository=self.repository.full_name
+                    if self.repository
+                    else self.pull_request.repo_full_name
+                    if self.pull_request
+                    else None,
+                    visibility=event.visibility,
+                    visible_to_user_id=event.visible_to_user_id,
+                    slack_channel_id=summary.slack_channel_id
+                    if summary.source == "slack"
+                    else None,
+                ).model_dump(mode="json"),
+            },
         )
         try:
             async with postgres.session() as session:

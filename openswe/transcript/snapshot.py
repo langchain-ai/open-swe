@@ -424,9 +424,12 @@ async def load_snapshot(
                 ORDER BY requested_at DESC, turn_id DESC
                 LIMIT 1
             )
-            SELECT DISTINCT ON (event.payload ->> 'kind')
+            SELECT DISTINCT ON (kind)
                    event.turn_id,
-                   event.payload ->> 'kind' AS kind,
+                   CASE event.payload ->> 'kind'
+                       WHEN 'workspace_stale' THEN 'execution_stale'
+                       ELSE event.payload ->> 'kind'
+                   END AS kind,
                    event.payload -> 'data' AS data
             FROM thread_event AS event
             JOIN newest_turn ON newest_turn.turn_id = event.turn_id
@@ -439,7 +442,7 @@ async def load_snapshot(
                   event.payload ->> 'kind' <> 'conversation_offloading'
                   OR newest_turn.state IN ('requested', 'running')
               )
-            ORDER BY event.payload ->> 'kind', event.version DESC
+            ORDER BY kind, event.version DESC
             """,
             {"thread_id": thread_id},
         )

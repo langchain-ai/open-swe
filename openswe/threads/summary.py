@@ -145,7 +145,7 @@ def thread_is_unlisted(metadata: Mapping[str, Any]) -> bool:
 def thread_is_readable(
     metadata: Mapping[str, Any], login: str | None = None, email: str | None = None
 ) -> bool:
-    """Private threads are visible to their immutable owner and to workspace admins.
+    """Private threads are visible to their immutable owner and to instance admins.
 
     A review chat is readable only by the user it belongs to, so its sidebar row
     can be pinned, archived and marked read.
@@ -668,8 +668,6 @@ async def _thread_summary(
         "ownerLogin": metadata.get("owner_login"),
         "ownerId": owner_id,
         "continuedFromThreadId": metadata.get("continued_from_thread_id"),
-        "environment": metadata.get("environment"),
-        "workspace": metadata.get("workspace") or metadata.get("environment"),
         "projectId": _metadata_string(metadata, "project_id"),
         "planStatus": metadata.get("plan_status"),
         "source": thread_source(metadata),

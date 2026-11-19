@@ -897,6 +897,42 @@ async def test_outbox_keeps_results_when_checkpoint_messages_cannot_restore_them
         assert orphaned.carried({"messages": [], OUTBOX_KEY: saved}) == dict.fromkeys(saved)
 
 
+async def test_a_legacy_execution_notice_survives_checkpoint_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rt.outbox import OUTBOX_KEY, Outbox
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = _run_backend()
+    taking = AsyncMock(return_value=ReportsTaken(replies=[{}]).model_dump(mode="json"))
+    monkeypatch.setattr(backend, "post", taking)
+    restored = Outbox(backend)
+    restored.adopt(
+        {
+            OUTBOX_KEY: {
+                "run-1:run_started": {
+                    "order": 1,
+                    "item": {
+                        "key": "run-1:run_started",
+                        "endpoint": "run_started",
+                        "request": {
+                            "run_id": "run-1",
+                            "notices": [{"kind": "workspace_stale", "data": {"outdated": True}}],
+                        },
+                    },
+                }
+            }
+        }
+    )
+    await restored.drain()
+
+    taking.assert_awaited_once()
+    [report] = Reports.model_validate(taking.call_args.args[1]).items
+    assert report.request.model_dump(mode="json")["notices"] == [
+        {"kind": "execution_stale", "data": {"outdated": True}}
+    ]
+
+
 class _RecordingAnthropic(ChatAnthropic):
     sent: list[BaseMessage] = []
 
@@ -1030,14 +1066,14 @@ class _PayloadOpenAI(ChatOpenAI):
 
 @pytest.mark.parametrize(
     ("model", "marked"),
-    [("gpt-6.1-sol", ["You are Open SWE.", "The workspace's part."]), ("gpt-5.5", [])],
+    [("gpt-6.1-sol", ["You are Open SWE.", "Robin-wide execution instructions."]), ("gpt-5.5", [])],
 )
 async def test_an_openai_model_caches_the_prompt_every_thread_shares(
     monkeypatch: pytest.MonkeyPatch, model: str, marked: list[str]
 ) -> None:
     """GPT-5.6 and later cache only up to a breakpoint, and the implicit one ends the
     request, which no other thread's request starts with: the shared prompt and the
-    workspace's each end in an explicit one. Earlier models reject the field."""
+    execution instructions each end in an explicit one. Earlier models reject the field."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
     named = _PayloadOpenAI(
@@ -1052,8 +1088,8 @@ async def test_an_openai_model_caches_the_prompt_every_thread_shares(
         monkeypatch,
         backend,
         _preparing(
-            rendered_system_prompt="You are Open SWE.\n\nThe workspace's part.\n\nThis thread is yours.",
-            rendered_workspace_prompt="The workspace's part.",
+            rendered_system_prompt="You are Open SWE.\n\nRobin-wide execution instructions.\n\nThis thread is yours.",
+            rendered_execution_prompt="Robin-wide execution instructions.",
             rendered_thread_prompt="This thread is yours.",
         ),
     )

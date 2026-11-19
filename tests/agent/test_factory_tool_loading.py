@@ -10,7 +10,7 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
-from openswe.dashboard.workspace_settings import WorkspaceSettings
+from openswe.dashboard.settings import Settings
 from openswe.mcp.runtime import MCPTools
 from openswe.sandboxes.state import SANDBOX_BACKENDS
 from openswe.sandboxes.tool_runtime import ToolSurface
@@ -88,9 +88,9 @@ async def test_mcp_tools_load_for_non_admins_with_legacy_plan_state(
             return_value="/workspace",
         ),
         patch(
-            "openswe.server.cached_workspace_settings",
+            "openswe.server.cached_settings",
             new_callable=AsyncMock,
-            return_value=WorkspaceSettings(_MODEL_DEFAULTS),
+            return_value=Settings(_MODEL_DEFAULTS),
         ),
         patch("openswe.server.load_profile", new_callable=AsyncMock, return_value=None),
         patch("openswe.server.load_thread_settings", new_callable=AsyncMock, return_value={}),

@@ -3,9 +3,8 @@
 Three kinds of principal reach the thread API. A person signs in, or presents a
 LangSmith personal access token, and gets their own threads. The bot (a
 LangSmith service key with ``workspaces:manage`` in Robin's LangSmith workspace)
-and a federated GitHub
-Actions workflow are machines: they start threads that belong to a workspace
-rather than to anyone, and they may read back only what they themselves started,
+and a federated GitHub Actions workflow are machines: they start system-owned
+threads rather than person-owned ones, and read back only what they themselves started,
 because none of the dashboard's ownership rules describe them.
 
 Which kind of thread a request creates is never inferred from who asked. The
@@ -35,12 +34,12 @@ from openswe.federation.github_oidc import (
     looks_federated,
     verify,
 )
+from openswe.routing.store import INTEGRATIONS
 from openswe.threads.identity import ThreadIdentity
 from openswe.threads.summary import _assert_thread_postable, assert_thread_readable
 from openswe.users.models import User
 from openswe.utils.json_types import JsonObject
 from openswe.utils.timing import RequestTimings, phase
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +59,9 @@ BOT_NAME = "Robin bot"
 
 @dataclass(frozen=True, kw_only=True)
 class Principal:
-    """One authenticated principal. Machines carry a workspace; people carry a login."""
+    """One authenticated principal. Machines carry a starter identity; people carry a login."""
 
     kind: PrincipalKind
-    workspace: str = ""
     login: str | None = None
     email: str | None = None
     admin: bool = False
@@ -76,12 +74,11 @@ class Principal:
     token_repositories: tuple[str, ...] | None = None
 
     @classmethod
-    def of_bot(cls, key: LangSmithApiKey, workspace: str = DEFAULT_WORKSPACE_SLUG) -> Principal:
-        """The workspace's bot. Every service key is the same bot, so a rotated key
+    def of_bot(cls, key: LangSmithApiKey) -> Principal:
+        """The deployment's bot. Every service key is the same bot, so a rotated key
         still reads the threads the old one started."""
         return cls(
             kind="bot",
-            workspace=workspace,
             started_by_id=f"bot:{key.workspace_id}",
             started_by_name=BOT_NAME,
             created_by="bot",
@@ -103,7 +100,6 @@ class Principal:
                 enrichments=AuditLogEnrichments(
                     actor_kind="api_key",
                     actor_login=principal.started_by_id,
-                    workspace=principal.workspace,
                 ),
             )
             return principal
@@ -129,10 +125,9 @@ class Principal:
         return cls.of_login(user.session_login, key.email or user.email or None)
 
     @classmethod
-    def of_workflow(cls, claims: GitHubActionsClaims, workspace: str) -> Principal:
+    def of_workflow(cls, claims: GitHubActionsClaims) -> Principal:
         return cls(
             kind="github_actions",
-            workspace=workspace,
             started_by_id=f"github_actions:{claims.repository.lower()}",
             started_by_name=f"{claims.repository} ({claims.workflow or 'workflow'})",
             created_by=claims.repository,
@@ -214,7 +209,7 @@ def _bearer(request: Request) -> str:
 
 
 async def _federated_principal(token: str) -> Principal:
-    """The workflow behind a GitHub token, if a workspace lets that repository in."""
+    """The workflow behind a GitHub token, if routing permits that repository."""
     try:
         claims = await verify(token)
     except InvalidFederatedToken as exc:
@@ -222,22 +217,20 @@ async def _federated_principal(token: str) -> Principal:
         raise HTTPException(
             401, "invalid federated token", headers={"WWW-Authenticate": "Bearer"}
         ) from exc
-    workspace = await WORKSPACES.thread_starter_of_repo(claims.repository)
-    if workspace is None:
+    if not await INTEGRATIONS.repository_may_start_threads(claims.repository):
         logger.info(
             "A verified workflow is not allowed to start threads",
             extra={"repository": claims.repository, "workflow_ref": claims.workflow_ref},
         )
-        raise HTTPException(403, "this repository may not start threads in any workspace")
+        raise HTTPException(403, "this repository may not start threads")
     logger.info(
         "A federated workflow authenticated",
         extra={
             "repository": claims.repository,
             "workflow_ref": claims.workflow_ref,
-            "workspace": workspace,
         },
     )
-    return Principal.of_workflow(claims, workspace)
+    return Principal.of_workflow(claims)
 
 
 async def require_principal(request: Request) -> Principal:
@@ -259,7 +252,6 @@ async def require_principal(request: Request) -> Principal:
                 enrichments=AuditLogEnrichments(
                     actor_kind="github_actions",
                     actor_login=principal.started_by_id,
-                    workspace=principal.workspace,
                 ),
             )
             return principal

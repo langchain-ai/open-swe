@@ -64,7 +64,6 @@ def handoff(monkeypatch: pytest.MonkeyPatch) -> Handoff:
     monkeypatch.setattr(server, "get_sandbox_metadata", AsyncMock(return_value={}))
     for name in (
         "resolve_triggering_user_identity",
-        "load_workspace",
         "_resolve_prompt_default_repo",
         "_resolve_user_custom_instructions",
     ):

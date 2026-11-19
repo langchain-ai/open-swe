@@ -176,13 +176,13 @@ async def test_controller_rejects_changed_trusted_inputs(
         monkeypatch.delenv("MERGE_QUEUE_DISPATCH_SECRET", raising=False)
     repository = Repository(full_name="acme/widgets")
     queue = MergeQueue(
-        workspace_id=uuid7(), repository_id=repository.id, target_branch="main", mode=mode
+        routing_id=uuid7(), repository_id=repository.id, target_branch="main", mode=mode
     )
     workflow = b"reviewed workflow"
     controller = QueueController(
         QueueConfiguration(
             mode=mode,
-            workspace_id=queue.workspace_id,
+            routing_id=queue.bound_routing_id,
             repository="acme/widgets",
             repository_id=42,
             dispatch_url="https://dispatcher.example/queue" if mode == "custom" else None,

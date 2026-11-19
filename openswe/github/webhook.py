@@ -68,7 +68,6 @@ from openswe.threads.store import THREADS
 from openswe.users import User
 from openswe.walkthrough.record import Walkthrough
 from openswe.webhooks import common
-from openswe.workspaces.routing import repo_is_routable
 
 
 async def _trusted_authors(*logins: str, comments: Iterable[dict[str, Any]] = ()) -> frozenset[str]:
@@ -453,9 +452,8 @@ async def _dispatch_first_review_from_pr_payload(payload: dict[str, Any], *, sou
 
 async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
     """Plan open PRs, including drafts, independently of automatic assessment."""
-    from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+    from openswe.dashboard.settings_cache import cached_settings
     from openswe.review_scout.launch import ReviewScoutTarget
-    from openswe.workspaces.store import WORKSPACES
 
     event = PullRequestEvent.parse(payload)
     if event is None or event.identity is None:
@@ -464,8 +462,7 @@ async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
     pull = event.pull_request
     if pull.state == "closed" or not pull.head_sha or not pull.base_sha:
         return
-    workspace = await WORKSPACES.owner_of_repo(f"{owner}/{repo}")
-    settings = await cached_workspace_settings(workspace)
+    settings = await cached_settings()
     if settings.get("implementation_walkthrough_enabled") is True:
         stored = await PullRequest.get(owner, repo, number)
         if stored is not None:
@@ -494,7 +491,6 @@ async def process_github_pr_walkthrough(payload: dict[str, object]) -> None:
         pr_title=pull.title,
         base_sha=pull.base_sha,
         head_sha=pull.head_sha,
-        workspace_slug=workspace,
     )
     try:
         if await target.walkthrough() is None:
@@ -507,7 +503,7 @@ async def process_github_pr_ready(payload: dict[str, Any]) -> None:
     """Auto-review a PR that has just been opened or marked ready-for-review.
 
     Drafts are gated by the PR author's ``review_draft_prs`` profile flag
-    (with the workspace's setting as a fallback).
+    (with the instance setting as a fallback).
     """
     pull_request = payload.get("pull_request", {})
     is_draft = bool(pull_request.get("draft"))
@@ -987,7 +983,7 @@ class PreviewReady:
     A preview can deploy before Robin has reviewed the pull request, or while it's a
     draft, so the job looks again every ``WAIT``, up to ``MOST_WAITS`` times.
 
-    GitHub doesn't send a missed completion again, so in a workspace that names preview
+    GitHub doesn't send a missed completion again, so when Robin names preview
     checks, a pull request opening or changing also starts a watch on its head
     (``RECONCILE``): every ``LOOK`` until ``WINDOW`` after,
     it queues the job of each configured check that passed there, unless that commit's work
@@ -1014,34 +1010,26 @@ class PreviewReady:
         """The repository's preview checks, or just ``named``, while its reviews work for
         apps and run automatically. The name is matched on cached settings before the
         database lookups, since most CI deliveries name another check."""
-        from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+        from openswe.dashboard.settings_cache import cached_settings
 
         if not common.is_repo_allowed(repo_config):
             return frozenset()
-        settings = await cached_workspace_settings(
-            await common.workspace_for_repo_config(repo_config)
-        )
+        settings = await cached_settings()
         checks = settings.review_app_preview_checks if settings.review_app_releases else frozenset()
         if named is not None:
             checks &= {named, named.rsplit(" / ", 1)[-1]}
-        if (
-            not checks
-            or not await repo_is_routable(repo_config["owner"], repo_config["name"])
-            or not await common.is_repo_auto_review_enabled(repo_config)
-        ):
+        if not checks or not await common.is_repo_auto_review_enabled(repo_config):
             return frozenset()
         return checks
 
     @staticmethod
     async def _watched(repo_config: dict[str, str]) -> bool:
-        """Whether the repository's workspace names preview checks for its apps, read so a
+        """Whether the instance names preview checks for its apps, read so a
         failure raises instead of reading as none; true when it can't be read."""
-        from openswe.dashboard.workspace_settings import load_workspace_settings
-        from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, WORKSPACES
+        from openswe.dashboard.settings import load_instance_settings
 
         try:
-            owner = await WORKSPACES.owner_of_repo(f"{repo_config['owner']}/{repo_config['name']}")
-            settings = await load_workspace_settings(owner or DEFAULT_WORKSPACE_SLUG)
+            settings = await load_instance_settings()
         except Exception:
             common.logger.warning("Reading preview checks failed; watching anyway", exc_info=True)
             return True
@@ -1296,19 +1284,17 @@ class PreviewReady:
             await cls.request_status(
                 job,
                 "blocked",
-                "The workspace no longer enables this preview check or automatic reviews.",
+                "Robin no longer enables this preview check or automatic reviews.",
             )
             return
         requested_app = payload.get("app")
         if isinstance(requested_app, str):
-            from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+            from openswe.dashboard.settings_cache import cached_settings
 
-            settings = await cached_workspace_settings(
-                await common.workspace_for_repo_config(repo_config)
-            )
+            settings = await cached_settings()
             if UUID(requested_app) not in settings.review_app_releases:
                 await cls.request_status(
-                    job, "blocked", "This app is no longer approved for workspace reviews."
+                    job, "blocked", "This app is no longer approved for instance reviews."
                 )
                 return
         repo_private = payload.get("repo_private")
@@ -2320,7 +2306,6 @@ async def prepare_github_issue_run(
     payload: dict[str, Any],
     thread_id: str,
     *,
-    workspace: str | None,
     adopt: Callable[[str], Awaitable[None]] | None = None,
 ) -> dict[str, Any] | None:
     """Index the thread an issue mention starts its run on, and the run's configurable.
@@ -2328,8 +2313,7 @@ async def prepare_github_issue_run(
     MDA's GitHub channel writes the run's input; this checks the issue and its
     sender, and writes the thread's metadata. ``thread_id`` is the issue's thread,
     which the channel owns. ``adopt`` indexes it as the channel's before its
-    metadata is written, so the write doesn't create it. ``workspace`` is the one
-    the thread started in, for a follow-up; ``None`` for the repository's own.
+    metadata is written, so the write doesn't create it.
     ``None`` when the run can't start.
     """
     issue = payload.get("issue", {})
@@ -2349,7 +2333,6 @@ async def prepare_github_issue_run(
         return None
     # The thread's App token, cached for the backend's own GitHub calls on it.
     await common.get_or_resolve_thread_github_token(thread_id, "")
-    workspace = workspace or await common.workspace_for_repo_config(repo_config)
     title = issue.get("title", "No title")
     github_issue = {
         "id": issue_id,
@@ -2367,7 +2350,6 @@ async def prepare_github_issue_run(
         github_login=github_login,
         title=title or f"Issue #{issue_number}",
         source_context=SourceContext.parse({"github_issue": github_issue}),
-        workspace=workspace,
         token_repositories=token_repositories,
     )
     if not persisted and token_repositories is not None:
@@ -2382,8 +2364,6 @@ async def prepare_github_issue_run(
         "github_user_id": payload.get("sender", {}).get("id"),
         "repo": repo_config,
         "github_issue": github_issue,
-        "workspace": workspace,
-        "environment": workspace,
     }
 
 

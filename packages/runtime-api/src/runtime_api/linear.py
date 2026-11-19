@@ -8,7 +8,7 @@ answers only what needs its data or its signing key:
   takes at most two calls. ``record_linear_delivery`` logs one that asks nothing else.
 - ``linear_session_facts``, then ``plan_linear_session``: what Open SWE knows about
   a session turn's author, thread and repositories, from which the channel picks
-  the repository and workspace; then the backend checks that choice again, indexes
+  the repository; then the backend checks that choice again, indexes
   the thread and signs the run's context.
 - ``linear_automation_rules``, then ``plan_linear_automations``: a team's Linear
   automations, which the channel matches against an issue event and writes each
@@ -106,8 +106,6 @@ AuthorStanding = Literal["signed_in", "sign_in", "sign_in_again"]
 
 class RepositoryChoice(BaseModel):
     repository: str = Field(pattern=REPOSITORY_PATTERN)
-    # The workspace whose default chose it; ``None`` for a default that applies to all.
-    workspace: str | None = None
 
 
 class RepositoryPolicy(BaseModel):
@@ -128,8 +126,7 @@ class LinearSessionFacts(BaseModel):
     settings_url: str | None = None
     # What the session's thread already works in, from its earlier turns.
     thread_repository: str | None = None
-    thread_workspace: str | None = None
-    # The author's default for the thread's workspace, else their global one.
+    # The author's default repository.
     personal_default: RepositoryChoice | None = None
     # The instance's default repository.
     instance_default: str | None = None
@@ -141,8 +138,6 @@ class PlanLinearSession(BaseModel):
 
     turn: LinearSessionTurn
     repository: str = Field(pattern=REPOSITORY_PATTERN)
-    # The workspace the turn runs in; ``None`` for the one that owns the repository.
-    workspace: str | None = None
 
 
 class LinearSessionRun(BaseModel):

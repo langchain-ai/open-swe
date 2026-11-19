@@ -86,7 +86,6 @@ class ReviewSession(BaseModel):
         title: str,
         url: str,
         state: PullRequestState,
-        workspace: str | None,
         walkthrough_ready: bool,
         requested_at_ms: int,
     ) -> None:
@@ -118,7 +117,6 @@ class ReviewSession(BaseModel):
                 "title": thread_title,
                 **await participant_metadata({}, login=self.login),
                 "thread_category": "review",
-                "workspace": workspace,
                 "pr_url": url,
                 "pr_title": title,
                 "pr_state": state,

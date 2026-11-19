@@ -4,98 +4,98 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 
-import { api, type WorkspaceOption, type WorkspaceRecord } from "@/lib/api"
+import type { RoutingSettings as RoutingData } from "@/lib/api"
 import { RoutingSettings } from "./RoutingSettings"
-
-vi.mock("@/lib/profile", () => ({
-  useRepos: () => ({
-    data: {
-      repositories: ["acme/api", "acme/web", "acme/new"].map((full_name) => ({
-        full_name,
-        private: true,
-      })),
-    },
-  }),
-}))
-vi.mock("@/lib/slack-channels", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/slack-channels")>()),
-  useSlackChannelDirectory: () => ({
-    data: {
-      channels: [
-        { id: "CTEAM01", name: "team" },
-        { id: "COTHER1", name: "other" },
-      ].map((channel) => ({
-        ...channel,
-        is_member: true,
-        is_private: false,
-        is_ext_shared: false,
-        num_members: 4,
-      })),
-      refreshing: false,
-    },
-    isLoading: false,
-    isError: false,
-    isRefreshing: false,
-    refresh: vi.fn(),
-  }),
-}))
 
 afterEach(() => {
   cleanup()
+  localStorage.clear()
   vi.restoreAllMocks()
 })
 
 class RoutingSettingsServer {
-  records: Array<WorkspaceOption> = [
-    {
-      slug: "default",
-      name: "Default legacy name",
-      repos: ["acme/api"],
-      default_repo: null,
-      slack_channel_ids: ["CTEAM01"],
-      kitchen_channel_ids: ["CTEAM01"],
-      ask_channel_ids: [],
-      is_default: true,
-      has_snapshot: false,
-    },
-    {
-      slug: "oss",
-      name: "OSS legacy name",
-      repos: ["acme/web"],
-      default_repo: null,
-      slack_channel_ids: ["COTHER1"],
-      kitchen_channel_ids: [],
-      ask_channel_ids: ["COTHER1"],
-      is_default: false,
-      has_snapshot: false,
-    },
-  ]
-  render() {
-    const records = this.records
-    vi.spyOn(api, "listWorkspaceOptions").mockResolvedValue({
-      execution_defaults_enabled: false,
-      default_slug: "default",
-      workspaces: records,
+  routing: RoutingData = {
+    repos: [
+      { repo: "acme/api", may_start_threads: false },
+      { repo: "acme/web", may_start_threads: false },
+    ],
+    slack_channels: [
+      { channel_id: "CTEAM0001", mode: "kitchen" },
+      { channel_id: "COTHER001", mode: "ask" },
+    ],
+  }
+  writes: Array<{ path: string; method: string; body: unknown }> = []
+  pending: Promise<void> | undefined
+  release: (() => void) | undefined
+  failure: string | null = null
+
+  holdNextSave() {
+    this.pending = new Promise((resolve) => {
+      this.release = resolve
     })
-    vi.spyOn(api, "listWorkspaceRepositories").mockImplementation(
-      async (slug) =>
-        records
-          .find((record) => record.slug === slug)!
-          .repos.map((repo) => ({ repo, may_start_threads: false }))
-    )
-    const get = vi
-      .spyOn(api, "getWorkspace")
-      .mockImplementation(async (slug): Promise<WorkspaceRecord> => ({
-        ...records.find((record) => record.slug === slug)!,
-        prompt: "keep",
-      }))
-    const update = vi
-      .spyOn(api, "updateWorkspace")
-      .mockImplementation(async (slug, changes) => ({
-        ...records.find((record) => record.slug === slug)!,
-        prompt: "keep",
-        ...changes,
-      }))
+  }
+
+  async request(input: RequestInfo | URL, init?: RequestInit) {
+    const url = input instanceof Request ? input.url : String(input)
+    const path = url.replace(/^.*\/dashboard\/api/, "")
+    if (path === "/me") return Response.json({ login: "admin", is_admin: true })
+    if (path === "/repos")
+      return Response.json({
+        installations: [],
+        repositories: ["acme/api", "acme/web", "acme/new"].map((full_name) => ({
+          full_name,
+          private: true,
+        })),
+      })
+    if (path === "/slack/channels")
+      return Response.json({
+        channels: [
+          { id: "CTEAM0001", name: "team" },
+          { id: "COTHER001", name: "other" },
+        ].map((channel) => ({
+          ...channel,
+          is_member: true,
+          is_private: false,
+          is_ext_shared: false,
+          num_members: 4,
+        })),
+        refreshing: false,
+      })
+    if (path === "/routing") return Response.json(this.routing)
+    if (!path.startsWith("/routing/"))
+      throw new Error(`Unexpected request: ${url}`)
+    const method = init?.method ?? "GET"
+    const body = init?.body ? JSON.parse(String(init.body)) : null
+    this.writes.push({ path, method, body })
+    const pending = this.pending
+    this.pending = undefined
+    await pending
+    if (this.failure) {
+      const detail = this.failure
+      this.failure = null
+      return Response.json({ detail }, { status: 422 })
+    }
+    if (path.startsWith("/routing/repositories/")) {
+      const repo = path.slice("/routing/repositories/".length)
+      this.routing.repos = this.routing.repos.filter((row) => row.repo !== repo)
+      if (method === "PUT")
+        this.routing.repos.push({
+          repo,
+          may_start_threads: body.may_start_threads,
+        })
+    } else {
+      const channel_id = path.slice("/routing/slack-channels/".length)
+      this.routing.slack_channels = this.routing.slack_channels.filter(
+        (row) => row.channel_id !== channel_id
+      )
+      if (method === "PUT")
+        this.routing.slack_channels.push({ channel_id, mode: body.mode })
+    }
+    return Response.json({})
+  }
+
+  render() {
+    vi.spyOn(globalThis, "fetch").mockImplementation(this.request.bind(this))
     const client = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -109,116 +109,121 @@ class RoutingSettingsServer {
         </TooltipProvider>
       </QueryClientProvider>
     )
-    return { records, get, update }
   }
 }
 
-it("keeps permission writes on the existing owner, locks concurrent changes, and rolls back failures", async () => {
-  let rejectSave: (error: Error) => void = () => {}
-  const configure = vi
-    .spyOn(api, "configureWorkspaceRepository")
-    .mockImplementation(
-      () =>
-        new Promise((_resolve, reject) => {
-          rejectSave = reject
-        })
-    )
+it("optimistically changes Actions permission, locks concurrent writes, and rolls back failure", async () => {
   const server = new RoutingSettingsServer()
+  server.failure = "Permission save refused"
+  server.holdNextSave()
   server.render()
   const web = await screen.findByRole("switch", {
     name: "Let acme/web start threads",
   })
-  await vi.waitFor(() => expect(web.hasAttribute("data-disabled")).toBe(false))
-  expect(screen.queryByText("OSS legacy name")).toBeNull()
   fireEvent.click(web)
   await vi.waitFor(() =>
-    expect(configure).toHaveBeenCalledWith("oss", "acme/web", {
-      may_start_threads: true,
-    })
+    expect(server.writes).toEqual([
+      {
+        path: "/routing/repositories/acme/web",
+        method: "PUT",
+        body: { may_start_threads: true },
+      },
+    ])
   )
+  expect(web.getAttribute("aria-checked")).toBe("true")
+  expect(web.hasAttribute("data-disabled")).toBe(true)
   const apiToggle = screen.getByRole("switch", {
     name: "Let acme/api start threads",
   })
-  expect(web.getAttribute("aria-checked")).toBe("true")
-  expect(web.hasAttribute("data-disabled")).toBe(true)
   expect(apiToggle.hasAttribute("data-disabled")).toBe(true)
   fireEvent.click(apiToggle)
-  expect(configure).toHaveBeenCalledTimes(1)
-  rejectSave(new Error("Permission save refused"))
-  expect((await screen.findByRole("alert")).textContent).toContain(
+  expect(server.writes).toHaveLength(1)
+  server.release?.()
+  expect((await screen.findByRole("alert")).textContent).toBe(
     "Permission save refused"
   )
   await vi.waitFor(() => expect(web.getAttribute("aria-checked")).toBe("false"))
 })
 
-it("adds routing only to the existing default record and preserves freshly added unrelated repositories", async () => {
+it("adds a repository with Actions permission off without rewriting unrelated bindings", async () => {
   const server = new RoutingSettingsServer()
-  const { get, update, records } = server.render()
-  get.mockResolvedValue({
-    ...records[0]!,
-    prompt: "keep",
-    repos: ["acme/api", "acme/concurrent"],
-  })
+  server.render()
   const choose = await screen.findByRole("button", {
     name: "Choose repositories",
   })
-  await vi.waitFor(() => expect(choose.hasAttribute("disabled")).toBe(false))
   fireEvent.click(choose)
   fireEvent.click(await screen.findByRole("checkbox", { name: "new" }))
   fireEvent.click(screen.getByRole("button", { name: "Save 3 repositories" }))
   await vi.waitFor(() =>
-    expect(update).toHaveBeenCalledWith("default", {
-      repos: ["acme/api", "acme/concurrent", "acme/new"],
-    })
+    expect(server.writes).toEqual([
+      {
+        path: "/routing/repositories/acme/new",
+        method: "PUT",
+        body: { may_start_threads: false },
+      },
+    ])
   )
-  expect(get).toHaveBeenCalledWith("default")
-  expect(update).toHaveBeenCalledTimes(1)
+  expect(
+    await screen.findByRole("switch", { name: "Let acme/new start threads" })
+  ).toBeTruthy()
 })
 
-it("removes only the chosen channel and its modes without losing fresh unrelated bindings", async () => {
+it("removes only the chosen channel binding", async () => {
   const server = new RoutingSettingsServer()
-  const { get, update, records } = server.render()
-  get.mockResolvedValue({
-    ...records[0]!,
-    prompt: "keep",
-    slack_channel_ids: ["CTEAM01", "CCONCURRENT"],
-    kitchen_channel_ids: ["CTEAM01", "CCONCURRENT"],
-  })
-  const choose = await screen.findByRole("button", { name: "Choose channels" })
-  await vi.waitFor(() => expect(choose.hasAttribute("disabled")).toBe(false))
-  fireEvent.click(choose)
+  server.render()
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Choose channels" })
+  )
   fireEvent.click(await screen.findByRole("checkbox", { name: "#team" }))
   fireEvent.click(screen.getByRole("button", { name: "Save 1 channel" }))
   await vi.waitFor(() =>
-    expect(update).toHaveBeenCalledWith("default", {
-      slack_channel_ids: ["CCONCURRENT"],
-      kitchen_channel_ids: ["CCONCURRENT"],
-      ask_channel_ids: [],
-    })
+    expect(server.writes).toEqual([
+      {
+        path: "/routing/slack-channels/CTEAM0001",
+        method: "DELETE",
+        body: null,
+      },
+    ])
   )
-  expect(update).toHaveBeenCalledTimes(1)
+  await vi.waitFor(() =>
+    expect(
+      screen.queryByRole("combobox", { name: "Channel type for #team" })
+    ).toBeNull()
+  )
+  expect(
+    screen.getByRole("combobox", { name: "Channel type for #other" })
+      .textContent
+  ).toContain("Ask")
 })
 
-it("changes a channel mode on its existing owner without changing other modes or bindings", async () => {
+it("rolls back a failed channel mode and retries without changing other bindings", async () => {
   const server = new RoutingSettingsServer()
-  const { get, update, records } = server.render()
-  get.mockResolvedValue({
-    ...records[0]!,
-    prompt: "keep",
-    kitchen_channel_ids: ["CTEAM01", "CCONCURRENT"],
-    ask_channel_ids: ["COTHERASK"],
-  })
+  server.failure = "Channel mode refused"
+  server.holdNextSave()
+  server.render()
   const mode = await screen.findByRole("combobox", {
     name: "Channel type for #team",
   })
   fireEvent.click(mode)
-  const ask = await screen.findByRole("option", { name: "Ask" })
-  fireEvent.pointerDown(ask)
-  fireEvent.click(ask)
-  await vi.waitFor(() =>
-    expect(update).toHaveBeenCalledWith("default", {
-      kitchen_channel_ids: ["CCONCURRENT"],
-      ask_channel_ids: ["COTHERASK", "CTEAM01"],
-    })
+  fireEvent.click(await screen.findByRole("option", { name: "Ask" }))
+  await vi.waitFor(() => expect(server.writes).toHaveLength(1))
+  expect(mode.textContent).toContain("Ask")
+  server.release?.()
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Channel mode refused"
   )
+  await vi.waitFor(() => expect(mode.textContent).toContain("Kitchen"))
+  fireEvent.click(mode)
+  fireEvent.click(await screen.findByRole("option", { name: "Ask" }))
+  await vi.waitFor(() =>
+    expect(server.routing.slack_channels).toEqual([
+      { channel_id: "COTHER001", mode: "ask" },
+      { channel_id: "CTEAM0001", mode: "ask" },
+    ])
+  )
+  expect(server.writes[1]).toEqual({
+    path: "/routing/slack-channels/CTEAM0001",
+    method: "PUT",
+    body: { mode: "ask" },
+  })
 })

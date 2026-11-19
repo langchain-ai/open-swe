@@ -3,7 +3,7 @@
 import logging
 
 from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs.context import current_audit_log
@@ -11,45 +11,20 @@ from openswe.audit_logs.middleware import audit_endpoint
 from openswe.audit_logs.models import SettingsChange
 from openswe.dashboard.deps import ADMIN_DEP
 from openswe.dashboard.settings_records import SettingsRecords
+from openswe.sandboxes.configuration import ExecutionConfiguration
 from openswe.ui_invalidations import Topic
 from openswe.utils.json_types import JsonObject
-from openswe.workspaces.store import WorkspaceUpdate
 
 logger = logging.getLogger(__name__)
 
 
-class ExecutionDefaults(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = Field(
-        default=False,
-        strict=True,
-        description="Use Robin-wide defaults for future work instead of legacy environment settings.",
-    )
-    prompt: str = ""
-    repos: list[str] = Field(default_factory=list)
-    setup_script: str = ""
-    update_script: str = ""
-    snapshot_id: str | None = None
-    snapshot_name: str | None = None
-    base_snapshot_id: str | None = None
-    vcpus: int | None = Field(default=None, gt=0)
-    mem_bytes: int | None = Field(default=None, gt=0)
-    fs_capacity_bytes: int | None = Field(default=None, gt=0)
-    create_params: dict[str, JsonValue] = Field(default_factory=dict)
-
+class ExecutionDefaults(ExecutionConfiguration):
     @model_validator(mode="before")
     @classmethod
-    def normalize(cls, value: object) -> object:
-        if not isinstance(value, dict):
-            return value
-        normalized = WorkspaceUpdate.model_validate(value).model_dump(exclude_unset=True)
-        return {**value, **normalized}
-
-    @field_validator("snapshot_id", "base_snapshot_id")
-    @classmethod
-    def normalize_snapshot(cls, value: str | None) -> str | None:
-        return (value or "").strip() or None
+    def historical_enabled(cls, value: object) -> object:
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != "enabled"}
+        return value
 
 
 class ExecutionDefaultsStore:
@@ -58,9 +33,6 @@ class ExecutionDefaultsStore:
 
     async def load(self, *, session: AsyncSession | None = None) -> ExecutionDefaults:
         return ExecutionDefaults.model_validate(await self.records.get(session=session) or {})
-
-    async def is_enabled(self, *, session: AsyncSession | None = None) -> bool:
-        return (await self.load(session=session)).enabled
 
     async def update(self, update: ExecutionDefaults) -> ExecutionDefaults:
         changes: JsonObject = update.model_dump(mode="json", exclude_unset=True)
@@ -76,18 +48,13 @@ class ExecutionDefaultsStore:
                 if before.get(field) != value
             }
         settings = ExecutionDefaults.model_validate(saved)
-        if before.get("enabled", False) != settings.enabled:
-            from openswe.dashboard.workspace_settings_cache import forget_cached_settings
+        await Topic.SETTINGS.invalidate()
+        from openswe.execution_images import EXECUTION_IMAGES
 
-            await forget_cached_settings()
-            await Topic.WORKSPACES.invalidate()
-        if settings.enabled:
-            from openswe.execution_images import EXECUTION_IMAGES
-
-            try:
-                await EXECUTION_IMAGES.ensure_refresh_cron()
-            except Exception:
-                logger.warning("Could not schedule the Robin-wide image refresh", exc_info=True)
+        try:
+            await EXECUTION_IMAGES.ensure_refresh_cron()
+        except Exception:
+            logger.warning("Could not schedule the Robin-wide image refresh", exc_info=True)
         return settings
 
 

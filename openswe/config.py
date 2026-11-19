@@ -498,7 +498,7 @@ ENV.var("ANALYTICS_RECEIPT_DAYS", "Ingestion-receipt retention.", default="90")
 ENV.var("LLM_MODEL_ID", "Default model in provider:model form.")
 ENV.var(
     "LLM_REASONING_EFFORT",
-    "Reasoning effort for the default model (low, medium, high, max) when no workspace or profile setting applies.",
+    "Reasoning effort for the default model (low, medium, high, max) when no global or profile setting applies.",
 )
 ENV.var("LLM_FALLBACK_MODEL_ID", "Fallback model in provider:model form.")
 ENV.var("EXA_API_KEY", "Exa API key enabling web search.", secret=True)
@@ -518,38 +518,44 @@ ENV.var(
 ENV.var("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "Client-side grace past a command's own timeout.")
 ENV.var("SANDBOX_CREATE_EXTRA_JSON", "JSON object merged into the sandbox create body.")
 ENV.var(
-    "WORKSPACE_SNAPSHOT_PREFIX",
-    "Prefix for workspace snapshot names.",
+    "EXECUTION_SNAPSHOT_PREFIX",
+    "Prefix for execution image snapshot names.",
     default="openswe",
-    aliases=("ENVIRONMENT_SNAPSHOT_PREFIX",),
-)
-ENV.var(
-    "OPEN_SWE_UNASSIGNED_REPO_WORKSPACE",
-    "Where GitHub events for a repository no workspace owns go: 'default' routes them to the "
-    "default workspace, 'ignore' drops them.",
-    default="default",
+    aliases=(
+        "WORKSPACE_SNAPSHOT_PREFIX",
+        "ENVIRONMENT_SNAPSHOT_PREFIX",
+    ),
 )
 ENV.var(
     "OPENSWE_SCRIPT_ROOT",
-    "Where a workspace's setup/update scripts and their logs live inside a sandbox. "
+    "Where setup/update scripts and their logs live inside a sandbox. "
     "The default assumes a sandbox where the agent is root; the E2E's stand-in sandboxes "
     "run on a developer's own machine, whose filesystem root is not writable.",
     default="/open-swe/environment",
 )
 ENV.var(
-    "WORKSPACE_REFRESH_TIMEOUT_SECONDS",
-    "Deadline for a workspace's setup script on a builder sandbox.",
-    aliases=("ENVIRONMENT_REFRESH_TIMEOUT_SECONDS",),
+    "EXECUTION_REFRESH_TIMEOUT_SECONDS",
+    "Deadline for the setup script on a builder sandbox.",
+    aliases=(
+        "WORKSPACE_REFRESH_TIMEOUT_SECONDS",
+        "ENVIRONMENT_REFRESH_TIMEOUT_SECONDS",
+    ),
 )
 ENV.var(
-    "WORKSPACE_UPDATE_TIMEOUT_SECONDS",
-    "Deadline for a workspace's update script on a builder sandbox.",
-    aliases=("ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",),
+    "EXECUTION_UPDATE_TIMEOUT_SECONDS",
+    "Deadline for the update script on a builder sandbox.",
+    aliases=(
+        "WORKSPACE_UPDATE_TIMEOUT_SECONDS",
+        "ENVIRONMENT_UPDATE_TIMEOUT_SECONDS",
+    ),
 )
 ENV.var(
-    "WORKSPACE_CAPTURE_TIMEOUT_SECONDS",
-    "Deadline for capturing a builder sandbox as a workspace's snapshot.",
-    aliases=("ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",),
+    "EXECUTION_CAPTURE_TIMEOUT_SECONDS",
+    "Deadline for capturing a builder sandbox as an execution image.",
+    aliases=(
+        "WORKSPACE_CAPTURE_TIMEOUT_SECONDS",
+        "ENVIRONMENT_CAPTURE_TIMEOUT_SECONDS",
+    ),
 )
 
 # --- Object storage ----------------------------------------------------------------------------

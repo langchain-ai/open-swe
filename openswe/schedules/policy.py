@@ -15,8 +15,8 @@ from openswe.users import User
 class AutomationPolicy:
     """Who an automation belongs to, and so what it may do.
 
-    A system automation belongs to the environment: only admins manage it, and its runs
-    run on the workspace's default model. A personal one belongs to its creator, admin or
+    A system automation belongs to the deployment: only admins manage it, and its runs
+    run on the global default model. A personal one belongs to its creator, admin or
     not: it runs as them and is billed to them, on Auto model routing, with no cap on how
     many they keep or how much each spends. A viewer's policy is their own, personal.
     """
@@ -78,7 +78,7 @@ class AutomationPolicy:
         if not isinstance(schedule_id, str) or not schedule_id:
             return cls(None)
         record = await get_agent_schedule(schedule_id)
-        if record is None or record.get("workspace") != metadata.get("workspace"):
+        if record is None:
             return cls(None)
         policy = await cls.for_record(record)
         creator = metadata.get("created_by")

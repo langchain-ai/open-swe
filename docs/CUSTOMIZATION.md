@@ -25,9 +25,11 @@ Managed Deep Agents creates it; the backend connects to it through `openswe/sand
 
 ### Using a custom sandbox snapshot
 
-New sandboxes boot from LangSmith's root snapshot unless the workspace they run in has its own snapshot.
-Build a snapshot in LangSmith (UI or `SandboxClient.create_snapshot`) from your Docker image and set it as a workspace's base snapshot from the **Workspaces** page.
-Workspace setup and update scripts receive the selected repository names in the space-delimited `OPENSWE_WORKSPACE_REPOS` environment variable.
+New sandboxes use Robin's global execution image, falling back to the configured base or LangSmith's root snapshot when no image is set.
+Admins configure the base snapshot, shared instructions, preloads, scripts, and resources under **Defaults** (`/settings`) or with `configure_execution_defaults`.
+Use `rebuild_execution_image` to build the image or `publish_execution_image()` to capture an explicitly provisioned thread sandbox; saving configuration alone does neither.
+Setup and update scripts receive space-delimited preload repository names in `OPENSWE_REPOS`; `OPENSWE_WORKSPACE_REPOS` remains only an alias for already-stored scripts.
+See [Defaults, routing, and sandbox images](reference/execution.md) for authorization and build details.
 
 Per-sandbox resources are configured on the deployment:
 
@@ -57,8 +59,8 @@ Every thread's sandbox is a LangSmith sandbox that Managed Deep Agents creates w
 The backend never creates a thread's sandbox: it connects to the one MDA opened, configures its GitHub proxy and git identity, and runs the backend's tools in it.
 A thread bridged to its owner's machine runs there instead.
 
-Sandbox provisioning, connection, proxy configuration, and workspace snapshot captures use the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
-A workspace's base snapshot must exist in that LangSmith workspace.
+Sandbox provisioning, connection, proxy configuration, and global image captures use the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
+The configured base snapshot must exist in that LangSmith workspace.
 
 ## 2. Model
 
@@ -76,7 +78,7 @@ Either variable can be set independently.
 When only the model is set, `medium` is used if supported, otherwise that model's catalog default effort is used.
 The model must be an allowed default in `openswe/dashboard/options.py`; unsupported models or incompatible efforts raise a configuration error when defaults are resolved.
 
-These defaults apply below explicit run, thread, workspace, and instance selections, including inherited reviewer and subagent defaults.
+These defaults apply below explicit run, thread, and global selections, including inherited reviewer and subagent defaults.
 Existing selections are not overwritten.
 Restart the backend after changing its environment.
 
@@ -130,7 +132,7 @@ Adaptive model routing is optional; provider calls always use the gateway.
 The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
 Jev receives the latest human task text (up to 8,000 characters).
-Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (thread override or workspace default), the same model used when routing is off.
+Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (thread override or global default), the same model used when routing is off.
 The confidence cutoff is an initial heuristic, not a calibrated correctness probability.
 Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
 
@@ -426,7 +428,7 @@ The shared utility `extract_repo_from_text()` in `openswe/utils/repo.py` handles
 
 ### Customizing Linear routing
 
-Linear comments use the triggering user's dashboard default repository, then the workspace default repository.
+Linear comments use the triggering user's dashboard default repository, then the global default repository.
 Users can override either on a per-comment basis by including `repo:owner/name` in their `@robin` comment (legacy mention aliases remain supported).
 
 ### Customizing Slack routing
@@ -437,7 +439,7 @@ Slack repo resolution (`get_slack_repo_config` in `openswe/webapp.py`) checks, i
 1. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description").
    This lets a channel be pinned to a repo without anyone repeating it per-message.
 1. The triggering user's dashboard `default_repo`.
-1. The workspace's default repository (its own override, else the instance's).
+1. The global default repository.
 1. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
 
 Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent).

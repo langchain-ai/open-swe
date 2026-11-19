@@ -19,11 +19,6 @@ const mocks = vi.hoisted(() => ({
     private: boolean
     archived: boolean
   }>,
-  workspaces: [
-    { slug: "default", name: "Default", repos: [], is_default: true },
-    { slug: "oss", name: "OSS", repos: ["acme/oss"], is_default: false },
-    { slug: "core", name: "Core", repos: [], is_default: false },
-  ],
 }))
 
 vi.mock("@tanstack/react-router", () => ({
@@ -49,9 +44,6 @@ vi.mock("@/features/agents/lib/queries", () => ({
   useTriggerAgentSchedule: () => ({
     isPending: mocks.triggerPending,
     mutate: mocks.triggerMutate,
-  }),
-  useWorkspaceOptions: () => ({
-    data: { default_slug: "default", workspaces: mocks.workspaces },
   }),
 }))
 vi.mock("@/features/agents/lib/provider/useModelOptions", () => ({
@@ -133,8 +125,7 @@ const SCHEDULE = {
   prompt: "Check dependencies",
   schedule: "0 9 * * *",
   triggers: [{ id: "trigger_1", kind: "schedule" as const, cron: "0 9 * * *" }],
-  scope: "workspace" as const,
-  workspace: "default",
+  scope: "system" as const,
   adminThread: false,
   model: "Default",
   enabled: false,
@@ -285,58 +276,6 @@ describe("AutomationEditor", () => {
     expect(memberMarkup).not.toContain("Save changes")
   })
 
-  it("keeps an existing legacy context hidden and unchanged on unrelated edits", () => {
-    signInAsAdmin()
-    render(
-      <AutomationEditor
-        mode="edit"
-        schedule={{ ...SCHEDULE, workspace: "core" }}
-      />,
-      { wrapper: TooltipProvider }
-    )
-    expect(screen.queryByRole("button", { name: "Environment" })).toBeNull()
-    fireEvent.change(screen.getByLabelText("Automation name"), {
-      target: { value: "Renamed" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
-    expect(mocks.updateMutate.mock.calls[0]?.[0].body).not.toHaveProperty(
-      "workspace"
-    )
-  })
-
-  it("starts a new automation in the hidden default context", () => {
-    signInAsAdmin()
-    render(<AutomationEditor mode="create" template={TEMPLATE} />, {
-      wrapper: TooltipProvider,
-    })
-    expect(screen.queryByRole("button", { name: "Environment" })).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "Create" }))
-    expect(mocks.createMutate.mock.calls[0]?.[0]).toMatchObject({
-      workspace: "default",
-    })
-  })
-
-  it("allows the server to resolve a deleted legacy context without retargeting the saved schedule", () => {
-    signInAsAdmin()
-    render(
-      <AutomationEditor
-        mode="edit"
-        schedule={{ ...SCHEDULE, workspace: "gone" }}
-      />,
-      { wrapper: TooltipProvider }
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Run now" }))
-    expect(mocks.triggerMutate.mock.calls[0]?.[0]).toBe("sched_1")
-    fireEvent.change(screen.getByLabelText("Automation name"), {
-      target: { value: "Renamed" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
-    expect(mocks.updateMutate.mock.calls[0]?.[0].body).not.toHaveProperty(
-      "workspace"
-    )
-    expect(screen.queryByRole("button", { name: "Environment" })).toBeNull()
-  })
-
   it("saves a GitHub trigger with its own repository and branch filters beside the schedule", () => {
     signInAsAdmin()
     render(
@@ -348,8 +287,7 @@ describe("AutomationEditor", () => {
           prompt: "Check dependencies",
           schedule: "0 9 * * *",
           triggers: [{ id: "trigger_1", kind: "schedule", cron: "0 9 * * *" }],
-          scope: "workspace",
-          workspace: "default",
+          scope: "system",
           adminThread: false,
           model: "Default",
           enabled: true,
@@ -437,8 +375,7 @@ describe("AutomationEditor", () => {
               base_branches: ["main"],
             },
           ],
-          scope: "workspace",
-          workspace: "default",
+          scope: "system",
           adminThread: false,
           model: "Default",
           enabled: true,
@@ -482,8 +419,7 @@ describe("AutomationEditor", () => {
               events: ["pull_request.merged"],
             },
           ],
-          scope: "workspace",
-          workspace: "default",
+          scope: "system",
           adminThread: false,
           model: "Default",
           enabled: true,

@@ -34,7 +34,7 @@ async def _identity() -> tuple[str, str | None] | None:
 def _error(exc: Exception) -> dict[str, Any]:
     if isinstance(exc, HTTPException):
         return {"ok": False, "error": str(exc.detail)}
-    logger.exception("Workspace automation operation failed")
+    logger.exception("Automation operation failed")
     return {"ok": False, "error": str(exc)}
 
 
@@ -57,7 +57,6 @@ async def list_automations(all_users: bool = False) -> dict[str, Any]:
 @access(_WRITE)
 async def create_automation(
     prompt: str,
-    workspace: str,
     triggers: list[schedules.TriggerConfig],
     name: str | None = None,
     model_id: str | None = None,
@@ -80,12 +79,11 @@ async def create_automation(
                 model_id=model_id,
                 effort=effort,
                 admin_thread=admin_thread,
-                workspace=workspace,
                 system=system,
             ),
             email=email,
             allow_admin_thread=await actor_is_admin(configurable()),
-            use_workspace_credentials=(
+            use_system_credentials=(
                 configurable().source == "schedule"
                 and not configurable().github_login
                 and configurable().github_linked
@@ -108,7 +106,6 @@ async def update_automation(
     effort: str | None = None,
     enabled: bool | None = None,
     admin_thread: bool | None = None,
-    workspace: str | None = None,
     system: bool | None = None,
 ) -> dict[str, Any]:
     """Implement the `update_automation` tool."""
@@ -123,7 +120,6 @@ async def update_automation(
         "effort": effort,
         "enabled": enabled,
         "admin_thread": admin_thread,
-        "workspace": workspace,
         "system": system,
     }
     values = {key: value for key, value in values.items() if value is not None}
@@ -134,7 +130,7 @@ async def update_automation(
             schedules.ScheduleUpdateBody(**values),
             email=identity[1],
             allow_admin_thread=await actor_is_admin(configurable()),
-            use_workspace_credentials=(
+            use_system_credentials=(
                 configurable().source == "schedule"
                 and not configurable().github_login
                 and configurable().github_linked

@@ -7,8 +7,8 @@ from pydantic import HttpUrl, TypeAdapter, ValidationError
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.repo_access import (
+    require_repo_access_for_system,
     require_repo_access_for_user,
-    require_repo_access_for_workspace,
 )
 from openswe.database import session
 from openswe.github.pull_requests import PullRequest
@@ -20,16 +20,13 @@ from openswe.tasks.store import TaskMembership
 from openswe.tasks.suggestions import SuggestedTask, SuggestedTaskContent
 from openswe.tools.access import direct_user_run
 from openswe.users import User
-from openswe.workspaces.routing import workspace_for_repo
-from openswe.workspaces.store import WORKSPACES
 
 
-@audit_tool(target_workspace="workspace")
+@audit_tool()
 async def suggest_task(
     summary: str,
     details: str,
     repo: str,
-    workspace: str = "",
     context_links: list[str] | None = None,
 ) -> dict[str, object]:
     """Implement the `suggest_task` tool."""
@@ -45,21 +42,13 @@ async def suggest_task(
     # A shadow review is an experiment nobody on the pull request knows of.
     if cfg.review_shadow:
         return {"success": True, "dry_run": True, "suggested_task_id": None}
-    owner, name = full_name.split("/", 1)
-    target_workspace = workspace or await workspace_for_repo(owner, name) or cfg.workspace_slug
-    if not target_workspace:
-        return {"success": False, "error": "Specify the target workspace"}
-    workspace_id = await WORKSPACES.id_for_slug(target_workspace)
-    if workspace_id is None:
-        return {"success": False, "error": "The target workspace no longer exists"}
     try:
         if (
             cfg.repo
             and f"{cfg.repo.owner}/{cfg.repo.name}".lower() == full_name.lower()
-            and cfg.workspace_slug == target_workspace
             and (cfg.source == "github" or not cfg.github_login)
         ):
-            await require_repo_access_for_workspace(full_name)
+            await require_repo_access_for_system(full_name)
         elif cfg.github_login:
             await require_repo_access_for_user(cfg.github_login, full_name)
         else:
@@ -97,7 +86,6 @@ async def suggest_task(
     suggestion = await SuggestedTask(
         summary=content.summary,
         details=content.details,
-        workspace_id=workspace_id,
         repository_id=repository_id,
         thread_id=cfg.thread_id,
         task_id=task.task.id if task else None,

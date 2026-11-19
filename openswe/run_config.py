@@ -136,8 +136,6 @@ class RunConfig(BaseModel):
     # What started this run, which can differ from source; see RunOrigin.
     origin: RunOrigin | None = None
     task: str | None = None
-    environment: str | None = None
-    workspace: str | None = None
     execution: str | None = None
 
     # Actor
@@ -399,13 +397,6 @@ class RunConfig(BaseModel):
         if self.slack_ask_mode:
             return bool(self.slack_thread.channel_id.strip())
         return bool(self.slack_thread.channel_id.strip() and self.slack_thread.thread_ts.strip())
-
-    @property
-    def workspace_slug(self) -> str | None:
-        for value in (self.workspace, self.environment):
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        return None
 
     async def automation_creator(self) -> User | None:
         """Resolve the saved personal automation creator for spend attribution."""

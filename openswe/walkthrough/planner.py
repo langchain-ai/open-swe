@@ -19,7 +19,7 @@ from typing import Self
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from openswe.dashboard.workspace_settings_cache import cached_workspace_settings
+from openswe.dashboard.settings_cache import cached_settings
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest
@@ -123,7 +123,7 @@ class PlanWorkspace:
         """Pin a linked PR in its implementation thread's existing checkout."""
         if not cfg.thread_id:
             raise PlannerUnavailableError("an implementation thread is required")
-        settings = await cached_workspace_settings(cfg.workspace_slug)
+        settings = await cached_settings()
         if settings.get("implementation_walkthrough_enabled") is not True:
             raise PlannerUnavailableError("implementation walkthroughs are disabled")
         ref = parse_github_pr_url(pr_url)
@@ -136,7 +136,7 @@ class PlanWorkspace:
             raise PlannerUnavailableError("the pull request must be linked to this thread first")
         async with PullRequestClient.as_app(ref.owner, ref.repo, ref.number) as pull:
             head_sha = await pull.head_sha()
-        backend = await ensure_sandbox_for_thread(cfg.thread_id, workspace_slug=cfg.workspace_slug)
+        backend = await ensure_sandbox_for_thread(cfg.thread_id)
         checkout = await PinnedCheckout.locate(backend, ref.repo)
         await checkout.pin(
             full_name=f"{ref.owner}/{ref.repo}", pr_number=ref.number, head_sha=head_sha

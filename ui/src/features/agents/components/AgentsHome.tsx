@@ -16,10 +16,7 @@ import { toast } from "sonner"
 
 import type { DesktopProjectRef, DesktopWorkspaceMode } from "@/desktop"
 import type { AgentThread } from "@/features/agents/lib/types"
-import {
-  pickComposerRepo,
-  pickComposerWorkspace,
-} from "@/features/agents/lib/composerWorkspace"
+import { pickComposerRepo } from "@/features/agents/lib/composerRepo"
 import { composerRepoSelection } from "@/features/agents/lib/composerRepoSelection"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import type { RunTarget } from "@/features/agents/components/composer/RunTargetSelector"
@@ -37,7 +34,6 @@ import {
   optimisticThread,
   seedAgentThreadLists,
   useAgentSkills,
-  useWorkspaceOptions,
 } from "@/features/agents/lib/queries"
 import {
   persistModelSelection,
@@ -129,19 +125,6 @@ export function AgentsHome({
   >(null)
   const visibility =
     visibilityOverride ?? preferences.data?.default_visibility ?? "private"
-  const workspaceOptionsQuery = useWorkspaceOptions(cloudEnabled)
-  const workspaces = useMemo(
-    () => workspaceOptionsQuery.data?.workspaces ?? [],
-    [workspaceOptionsQuery.data]
-  )
-  // undefined = untouched, so the run falls back to the repo's own workspace,
-  // then the default one.
-  const [workspaceOverride, setWorkspaceOverride] = useState<string | null>(
-    null
-  )
-  const defaultWorkspaceSlug = workspaceOptionsQuery.data?.default_slug ?? null
-  const robinWideDefaults =
-    workspaceOptionsQuery.data?.execution_defaults_enabled === true
   const { projects, isPending: projectsPending } = useProjects({
     enabled: cloudEnabled,
   })
@@ -150,7 +133,7 @@ export function AgentsHome({
   const [projectId, setProjectId] = useState<string | null>(
     initialProject ?? null
   )
-  // A project brings its workspace and repository; picking a repository leaves it.
+  // A project brings its repository; picking a repository leaves it.
   const selectedProject = projects.find((project) => project.id === projectId)
   const { entries, submissionId } = usePendingThreadStarts()
   const startingThread = entries.find(
@@ -208,7 +191,7 @@ export function AgentsHome({
   const reposQuery = useRepos()
   const profileQuery = useProfile()
   const skills = useAgentSkills({ enabled: cloudEnabled })
-  // undefined = untouched (the workspace decides); null = explicitly "no repo".
+  // undefined uses defaults; null explicitly selects no repository.
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
     initialNoRepo ? null : initialRepo
   )
@@ -234,46 +217,15 @@ export function AgentsHome({
         : restoredRepo
   const userDefaultRepo = profileQuery.data?.default_repo ?? null
 
-  // Workspace first: an explicit pick, else the workspace preferring a
-  // repository named from outside (a link or the profile default), else the
-  // user's default, then the instance default.
-  const preferredWorkspace = pickComposerWorkspace({
-    override: workspaceOverride ?? selectedProject?.workspace ?? null,
-    repoWorkspace: null,
-    userDefault: preferences.data?.default_workspace,
-    instanceDefault: defaultWorkspaceSlug,
-    workspaces,
-  })
-  const personalWorkspaceRepo =
-    !robinWideDefaults && preferredWorkspace
-      ? profileQuery.data?.workspace_default_repos?.[preferredWorkspace]
-      : undefined
-  const namedRepo = (
-    repoSelection === undefined
-      ? personalWorkspaceRepo
-        ? null
-        : userDefaultRepo
-      : repoSelection
-  )?.toLowerCase()
-  const selectedWorkspace = pickComposerWorkspace({
-    override: workspaceOverride ?? selectedProject?.workspace ?? null,
-    repoWorkspace: namedRepo
-      ? (workspaces.find((workspace) =>
-          workspace.repos.some((r) => r.toLowerCase() === namedRepo)
-        )?.slug ?? null)
-      : null,
-    userDefault: preferences.data?.default_workspace,
-    instanceDefault: defaultWorkspaceSlug,
-    workspaces,
-  })
   const {
     cloudFirstDesktopEnabled,
     models,
+    defaultRepo,
     defaultSelection,
     modelSelectionEnabled,
     isLoading: modelsLoading,
     isError: modelsError,
-  } = useModelOptions(selectedWorkspace)
+  } = useModelOptions()
   const runTarget: RunTarget = cloudFirstDesktopEnabled
     ? "cloud"
     : isDesktop
@@ -281,11 +233,10 @@ export function AgentsHome({
         ? (runTargetOverride ?? desktopThreadSource)
         : "local"
       : "cloud"
-  // Then the repository: every workspace can work in every accessible one.
   const accessibleRepos = reposQuery.data?.repositories
   // Memoized: a fresh array fed straight into the pick below reads as a
   // mutation to the React Compiler and costs the component its optimization.
-  const workspaceRepos = useMemo(() => accessibleRepos ?? [], [accessibleRepos])
+  const repositories = useMemo(() => accessibleRepos ?? [], [accessibleRepos])
   // Working in a repository needs GitHub; until it is linked the picker asks
   // for it, and runs go to a task folder whatever was remembered or linked.
   const gitHubLinkUser =
@@ -293,20 +244,12 @@ export function AgentsHome({
   const pickedRepo = pickComposerRepo({
     override: repoSelection,
     userDefault: userDefaultRepo,
-    userWorkspaceDefault:
-      !robinWideDefaults && selectedWorkspace
-        ? profileQuery.data?.workspace_default_repos?.[selectedWorkspace]
-        : undefined,
-    workspaceDefault:
-      workspaces.find((workspace) => workspace.slug === selectedWorkspace)
-        ?.default_repo ?? null,
-    offered: workspaceRepos,
+    defaultRepo,
+    offered: repositories,
   })
   const repo = gitHubLinkUser ? null : pickedRepo
   const selectProject = (next: string | null) => {
     setProjectId(next)
-    // The new project's own workspace and repository apply again.
-    setWorkspaceOverride(null)
     setRepoOverride(undefined)
   }
   // The name typed in the picker, while the create dialog is open.
@@ -314,13 +257,8 @@ export function AgentsHome({
   const selectRepo = (value: string | null) => {
     setRepoOverride(value)
     composerRepoSelection.write(userId, value)
-    // Picking from the list pins the workspace it was offered under, so the
-    // pick cannot drag the composer into whichever workspace owns it.
-    if (!workspaceOverride) setWorkspaceOverride(selectedWorkspace)
   }
 
-  // The picker offers the workspace being composed in its own models and
-  // default, not the deployment default's.
   const activeSelection =
     !modelSelectionEnabled || autoSelected
       ? null
@@ -583,7 +521,6 @@ export function AgentsHome({
       if (!repo) configurable.repo_explicitly_none = true
       configurable.thread_type =
         visibility === "private" ? "private" : "workspace"
-      if (selectedWorkspace) configurable.workspace = selectedWorkspace
     }
     const threadId = crypto.randomUUID()
     const thread: AgentThread = {
@@ -810,15 +747,14 @@ export function AgentsHome({
                 modelSelectionEnabled={modelSelectionEnabled}
                 selection={activeSelection}
                 onSelectionChange={handleSelectionChange}
-                repos={workspaceRepos}
+                repos={repositories}
                 selectedRepo={repo}
                 targetPending={
                   (cloudEnabled &&
-                    (projectsPending ||
-                      workspaceOptionsQuery.isPending ||
-                      preferences.isPending)) ||
+                    (projectsPending || preferences.isPending)) ||
                   profileQuery.isLoading ||
-                  reposQuery.isLoading
+                  reposQuery.isLoading ||
+                  modelsLoading
                 }
                 onRepoChange={startingThread ? undefined : selectRepo}
                 gitHubLinkUser={gitHubLinkUser}
@@ -883,7 +819,6 @@ export function AgentsHome({
             if (!open) setCreatingProject(null)
           }}
           initialName={creatingProject}
-          workspace={selectedWorkspace}
           onCreated={(project) => selectProject(project.id)}
         />
       )}

@@ -1,29 +1,17 @@
-"""Selectable models and the defaults a workspace resolves to, offered to the profile editor."""
+"""Selectable models and global defaults offered to the profile editor."""
 
-from typing import Any
-
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
 from openswe.dashboard.options import available_requested_models, gate_fable_model
-from openswe.dashboard.workspace_settings import get_workspace_settings
-from openswe.workspaces.store import DEFAULT_WORKSPACE_SLUG, slugify
+from openswe.dashboard.settings import get_settings
 
 router = APIRouter(tags=["options"])
 
 
 @router.get("/options")
-async def options(workspace: str = DEFAULT_WORKSPACE_SLUG) -> dict[str, Any]:
-    """The models and defaults a composer may offer for ``workspace``.
-
-    Model defaults and the Fable flag resolve per workspace (the instance record
-    plus the workspace's overrides), so a picker that asked without one would
-    advertise the default workspace's values wherever the run will not land there.
-    """
-    try:
-        workspace = slugify(workspace)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    settings = await get_workspace_settings(workspace)
+async def options() -> dict[str, object]:
+    """The selectable models and effective global defaults."""
+    settings = await get_settings()
     agent_model, agent_effort = settings.default_model("agent")
     subagent_model, subagent_effort = settings.default_subagent_model("agent")
     fable_enabled = settings.fable_enabled
@@ -37,6 +25,7 @@ async def options(workspace: str = DEFAULT_WORKSPACE_SLUG) -> dict[str, Any]:
         subagent_model, subagent_effort, fable_enabled=fable_enabled
     )
     return {
+        "default_repo": settings.get("default_repo"),
         "models": list(available_requested_models(fable_enabled=fable_enabled).values()),
         "cloud_first_desktop_enabled": settings.get("cloud_first_desktop_enabled") is True,
         "model_selection_enabled": settings.get("model_selection_enabled") is True,

@@ -9,7 +9,6 @@ from datetime import UTC, datetime
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS
 from openswe.dashboard.settings_records import SettingsRecords
@@ -17,10 +16,8 @@ from openswe.database import postgres
 from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
 from openswe.utils.json_types import JsonObject
 from openswe.utils.time import parse_iso
-from openswe.workspaces.store import load_workspace
 
 _profile: ContextVar[ExecutionProfile | None] = ContextVar("execution_profile", default=None)
-_mode: ContextVar[bool | None] = ContextVar("execution_defaults_mode", default=None)
 _records = SettingsRecords("execution")
 
 
@@ -43,7 +40,7 @@ class PendingReplacement(ReplacementPin):
 
 
 class ExecutionProfile(BaseModel):
-    """The instructions and creation authority a run started with, without scripts or logs."""
+    """Pinned run data whose historical serialization stays frozen for digest verification."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -58,38 +55,25 @@ class ExecutionProfile(BaseModel):
     replacement: ReplacementPin | None = None
 
     @classmethod
-    async def resolve(cls, workspace_slug: str | None, *, thread_id: str | None = None) -> Self:
+    async def resolve(cls, *, thread_id: str | None = None) -> Self:
+        from openswe.execution_images import EXECUTION_IMAGES
         from openswe.sandboxes.lifecycle import SandboxCreateConfig
 
         defaults = await EXECUTION_DEFAULTS.load()
         pending = await SANDBOX_EXECUTION.pending(thread_id) if thread_id else None
-        replacement = pending.pin() if pending else None
-        if defaults.enabled:
-            from openswe.execution_images import EXECUTION_IMAGES
-
-            image = await EXECUTION_IMAGES.state()
-            return cls(
-                uses_defaults=True,
-                create=SandboxCreateConfig.from_defaults(defaults).langsmith_options(),
-                instructions=defaults.prompt,
-                repos=defaults.repos,
-                captured_at=image.captured_at(defaults.snapshot_id),
-                refresh_enabled=bool(defaults.update_script),
-                replacement=replacement,
-            )
-        workspace = await load_workspace(workspace_slug)
-        config = await SandboxCreateConfig.legacy(workspace_slug)
+        image = await EXECUTION_IMAGES.state()
         return cls(
-            create=config.langsmith_options(),
-            name=workspace.name if workspace else None,
-            instructions=(workspace.instructions or "") if workspace else "",
-            repos=workspace.repos if workspace else [],
-            refresh_workspace=config.workspace.slug if config.workspace else None,
-            replacement=replacement,
+            uses_defaults=True,
+            create=SandboxCreateConfig.from_defaults(defaults).langsmith_options(),
+            instructions=defaults.prompt,
+            repos=defaults.repos,
+            captured_at=image.captured_at(defaults.snapshot_id),
+            refresh_enabled=bool(defaults.update_script),
+            replacement=pending.pin() if pending else None,
         )
 
     def stale(self, *, interval_seconds: int = 8 * 60 * 60) -> bool:
-        if not self.uses_defaults or not self.refresh_enabled or not self.create.snapshot_id:
+        if not self.refresh_enabled or not self.create.snapshot_id:
             return False
         captured = parse_iso(self.captured_at)
         return (
@@ -125,27 +109,18 @@ class ExecutionProfile(BaseModel):
         return _profile.get()
 
     @classmethod
-    async def use_defaults(cls, *, session: AsyncSession | None = None) -> bool:
-        pinned = _mode.get()
-        return (
-            pinned if pinned is not None else await EXECUTION_DEFAULTS.is_enabled(session=session)
-        )
-
-    @classmethod
     @contextmanager
     def bind(cls, profile: ExecutionProfile | None) -> Iterator[None]:
         profile_token = _profile.set(profile)
-        mode_token = _mode.set(profile.uses_defaults if profile else False)
         try:
             yield
         finally:
-            _mode.reset(mode_token)
             _profile.reset(profile_token)
 
-    def workspace_prompt(self) -> str:
+    def prompt(self) -> str:
         from openswe.prompt import SystemPrompt
 
-        return SystemPrompt.execution_section(self.name, self.instructions, self.repos)
+        return SystemPrompt.execution_section(self.instructions, self.repos)
 
 
 class SandboxExecutionBindings:
