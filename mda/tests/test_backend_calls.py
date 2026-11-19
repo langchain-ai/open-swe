@@ -1682,6 +1682,8 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     assert reconciled[root_id]["LANGSMITH_AGENT_VERSION"] == "backend-sha"
     assert reconciled[root_id]["environment"] == "production"
     assert "created_by" not in reconciled[root_id]
+    # The thread's first run, which charts count its threads by.
+    assert reconciled[root_id]["thread_start"] is True
     assert parent.metadata["created_by"] == "system"
     root_tags = next(patch["tags"] for run_id, patch in updates if run_id == root_id)
     assert isinstance(root_tags, list)
@@ -1702,6 +1704,32 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         )
     await backend.run.trace.ended()
     assert all(run_id not in created for run_id, _ in updates[previous_update_count:])
+    # A later run on the thread doesn't start it again.
+    assert not any(
+        _run_metadata(patch).get("thread_start") for _, patch in updates[previous_update_count:]
+    )
+    if next_trace_available:
+        # A Slack branch is a new thread seeded with its source's state, prepared marks
+        # included; its first run starts it.
+        source = (await graph.aget_state(config)).values
+        branch_update_count = len(updates)
+        with tracing_context(enabled=True, parent=parent):
+            await graph.ainvoke(
+                {
+                    "messages": [("user", "branch")],
+                    "open_swe_prepared_for": source["open_swe_prepared_for"],
+                    "open_swe_thread": source["open_swe_thread"],
+                },
+                {
+                    **config,
+                    "configurable": {"thread_id": "branch"},
+                    "metadata": {"invocation_id": "branch-turn"},
+                },
+            )
+        await backend.run.trace.ended()
+        assert any(
+            _run_metadata(patch).get("thread_start") for _, patch in updates[branch_update_count:]
+        )
 
 
 @pytest.mark.parametrize("creator", ["system", "known-creator", None])

@@ -157,6 +157,8 @@ class RunState(AgentState):
     open_swe_outbox: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput, carry]]
     open_swe_call: NotRequired[Annotated[dict[str, JsonValue], OmitFromOutput]]
     open_swe_prepared_for: NotRequired[Annotated[str, OmitFromOutput]]
+    # The thread the state was prepared on: a Slack branch starts with its source's.
+    open_swe_thread: NotRequired[Annotated[str, OmitFromOutput]]
 
 
 class _RunConfigurable(BaseModel):
@@ -403,6 +405,23 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         spec = self._backend.run.planned.sandbox
         return self._open_sandbox is not None and spec is not None and spec.bind_after_prepare
 
+    @staticmethod
+    def _thread_id() -> str | None:
+        thread_id = get_config().get("configurable", {}).get("thread_id")
+        return thread_id if isinstance(thread_id, str) and thread_id else None
+
+    def _starts_thread(self, state: RunState) -> bool:
+        """Whether this is the first run on its thread.
+
+        A Slack branch starts with its source thread's state, which names the source as
+        the thread it was prepared on. State prepared before threads were named names
+        none, and was prepared at all only if its thread had run.
+        """
+        prepared_on = state.get("open_swe_thread")
+        if prepared_on is None:
+            return "open_swe_prepared_for" not in state
+        return prepared_on != self._thread_id()
+
     async def _before_agent(
         self, state: RunState, runtime: Runtime
     ) -> tuple[dict[str, object] | None, bool]:
@@ -411,6 +430,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         trace = self._backend.run.trace
         trace.start()
         trace.update(self._trace_metadata())
+        if self._starts_thread(state):
+            # Charts count threads by their first run, since they can count runs but not
+            # the distinct threads they belong to.
+            trace.update({"thread_start": True})
         trace.tag(self._backend.run.catalog.trace_tags)
         if self._backend.awaiting_adoption:
             # A worker never acts on its grant: it has no identity until it adopts one.
@@ -488,6 +511,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         update = _apply(prepared.model_copy(update={"update": {**starting, **prepared.update}}))
         self._backend.outbox.notify(RUN_STARTED, self._started(state, prepared))
         update = {**update, "open_swe_prepared_for": invocation}
+        if (thread_id := self._thread_id()) is not None:
+            update["open_swe_thread"] = thread_id
         if opened.workspace_lost:
             messages = update.get("messages", [])
             update["messages"] = [
