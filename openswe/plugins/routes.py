@@ -38,7 +38,7 @@ from pydantic import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.dashboard.deps import SESSION_DEP
+from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.database import postgres
 from openswe.github.http import (
@@ -292,6 +292,22 @@ class ListedBody(BaseModel):
     listed: bool
 
 
+class MoveInstallsBody(BaseModel):
+    release: int | None = Field(default=None, ge=1)
+    """The release's number; the app's newest without one."""
+
+
+class InstallsMovedModel(BaseModel):
+    """Everyone's installs of an app after an admin moved them to ``release``."""
+
+    release: int
+    moved: int
+    current: int
+    waiting: int
+    """Installs whose own release lacked a permission ``release`` asks for, left for their
+    person to approve."""
+
+
 class RepositoriesBody(BaseModel):
     repositories: list[str] = Field(min_length=1, max_length=50)
 
@@ -392,6 +408,24 @@ async def api_list_app(app_id: UUID, body: ListedBody, viewer: ViewerDep) -> Res
     with _as_http():
         await PluginApps.set_listed(app_id, viewer.id, body.listed)
     return Response(status_code=204)
+
+
+@router.post("/apps/{app_id}/installs/upgrade")
+@audit_endpoint
+async def api_upgrade_app_installs(
+    app_id: UUID,
+    body: MoveInstallsBody,
+    viewer: ViewerDep,
+    _admin: dict[str, object] = ADMIN_DEP,
+) -> InstallsMovedModel:
+    """Move every install of the app a person added or changed to one of its releases,
+    never back from a newer one; admins only."""
+    with _as_http():
+        version = await PluginApps.numbered_release(app_id, body.release)
+        moved = await PluginInstallations.move_all(version, by=viewer.id)
+    return InstallsMovedModel(
+        release=version.number, moved=moved.moved, current=moved.current, waiting=moved.waiting
+    )
 
 
 @router.post("", status_code=201)

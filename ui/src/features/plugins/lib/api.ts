@@ -84,6 +84,15 @@ export interface App {
   latest: AppVersion | null
 }
 
+/** Everyone's installs of an app after an admin moved them to `release`. */
+export interface InstallsMoved {
+  release: number
+  moved: number
+  current: number
+  /** Installs whose own release lacked a permission `release` asks for, left for their person to approve. */
+  waiting: number
+}
+
 export interface InstalledPlugin {
   id: string
   /** The app's id, shared by every install of it; keys its documents' topics. */
@@ -386,6 +395,12 @@ export const pluginsApi = {
       headers: { "Content-Type": "text/html" },
       body: html,
     }),
+  /** Admins only: move every person's install of the app to a release, its newest by default. */
+  upgradeInstalls: (appId: string, release?: number) =>
+    agentsRequest<InstallsMoved>(
+      `/plugins/apps/${segment(appId)}/installs/upgrade`,
+      { method: "POST", ...json({ release: release ?? null }) }
+    ),
   setListed: (appId: string, listed: boolean) =>
     agentsRequest<void>(`/plugins/apps/${segment(appId)}`, {
       method: "PATCH",

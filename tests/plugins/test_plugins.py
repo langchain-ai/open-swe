@@ -40,6 +40,7 @@ from openswe.plugins.records import (
     DocumentScope,
     Installation,
     InstallationNotFound,
+    InstallsMoved,
     PluginApps,
     PluginChat,
     PluginChats,
@@ -500,6 +501,34 @@ async def test_an_app_featured_for_everyone_follows_the_admins_approvals(
     await FeaturedApps.add_for(bob)
     assert await PluginInstallations.visible_to(bob.id) == []
     assert not await PluginInstallations.robin_added(bob.id)
+
+
+async def test_an_admin_moves_everyones_installs_only_to_permissions_they_approved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ada, bob = await _people(monkeypatch)
+    first = await PluginApps.publish(ada.id, _bundle(), origin={})
+    await PluginApps.set_listed(first.app, ada.id, True)
+    await PluginInstallations.install(first, user_id=ada.id)
+    await _Admin.feature((first, []))
+    await FeaturedApps.add_for(bob)
+    second = await PluginApps.publish(ada.id, _bundle(), origin={})
+    more = await PluginApps.publish(
+        ada.id, _bundle(permissions=["storage", "github:read"]), origin={}
+    )
+
+    # Ada never approved what the newest release asks for, so it waits for her.
+    assert await PluginInstallations.move_all(more, by=ada.id) == InstallsMoved(0, 0, 1)
+    assert await PluginInstallations.move_all(second, by=ada.id) == InstallsMoved(1, 0, 0)
+    assert await PluginInstallations.move_all(second, by=ada.id) == InstallsMoved(0, 1, 0)
+    # An older release never moves her back.
+    assert await PluginInstallations.move_all(first, by=ada.id) == InstallsMoved(0, 1, 0)
+    [hers] = await PluginInstallations.visible_to(ada.id)
+    assert hers.version.id == second.id
+    # Robin's install follows the featured release, which would only move it back.
+    await FeaturedApps.add_for(bob)
+    [robins] = await PluginInstallations.visible_to(bob.id)
+    assert (robins.version.id, robins.added_by_robin) == (first.id, True)
 
 
 async def test_the_apps_list_loads_when_featuring_fails(monkeypatch: pytest.MonkeyPatch) -> None:

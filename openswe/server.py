@@ -292,6 +292,7 @@ from openswe.tools.task_threads import (
     message_task_thread,
     task_status,
 )
+from openswe.tools.upgrade_app_installs import upgrade_app_installs
 from openswe.users import User
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import (
@@ -791,6 +792,7 @@ AGENT_TOOLS: Final = (
     manage_review_approval_mode,
     manage_review_shadow,
     manage_review_repos,
+    upgrade_app_installs,
     list_slack_bots,
     allow_slack_bot,
     remove_slack_bot,

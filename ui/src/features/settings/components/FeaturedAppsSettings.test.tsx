@@ -1,7 +1,13 @@
 /** @vitest-environment jsdom */
 
 import type { PluginPermission } from "@openswe/plugin-sdk"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 
 import type { App } from "@/features/plugins/lib/api"
@@ -10,8 +16,10 @@ import type { FeaturedApp } from "@/lib/api"
 import { FeaturedAppsSettings } from "./FeaturedAppsSettings"
 
 const apps = vi.hoisted(() => ({ data: [] as Array<App> }))
+const upgrade = vi.hoisted(() => ({ mutate: vi.fn() }))
 vi.mock("@/features/plugins/lib/queries", () => ({
   useApps: () => ({ data: apps.data, isPending: false }),
+  useUpgradeAppInstalls: () => ({ mutate: upgrade.mutate, isPending: false }),
   // The approved release, as the app's newest but one when there is one.
   useAppVersion: (id: string | undefined) => ({
     data: apps.data
@@ -156,4 +164,22 @@ it("asks the admin to approve what a newer release adds before everyone gets it"
   expect(save).toHaveBeenCalledWith({
     featured_apps: [{ app: "a", release: "a-2", repositories: [] }],
   })
+})
+
+it("moves everyone's installs of an app to its newest release once the admin confirms", () => {
+  apps.data = [app("a", "design-qa", true, 4)]
+  render(<FeaturedAppsSettings settings={scoped([])} editable />)
+
+  fireEvent.click(screen.getByRole("button", { name: "Upgrade everyone" }))
+  expect(upgrade.mutate).not.toHaveBeenCalled()
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Upgrade everyone",
+    })
+  )
+
+  expect(upgrade.mutate).toHaveBeenCalledWith(
+    { app: "a", release: 4 },
+    expect.anything()
+  )
 })

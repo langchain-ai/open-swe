@@ -255,6 +255,19 @@ class AppNotFound(LookupError):
         super().__init__("app not found")
 
 
+@dataclass(frozen=True, slots=True)
+class InstallsMoved:
+    """What moving everyone's installs of an app to one release did."""
+
+    moved: int
+    """Installs moved to the release."""
+    current: int
+    """Installs already on it or a newer release, which it never moves back."""
+    waiting: int
+    """Installs left as they were: the release asks for a permission theirs didn't, which
+    only their person can approve."""
+
+
 class PreviewHeldByAnother(PermissionError):
     """A thread runs one preview, and another person's agent started it."""
 
@@ -458,6 +471,24 @@ class PluginApps:
                 )
                 apps.append(App(app.id, app.owner, app.name, app.listed, version))
             return apps
+
+    @staticmethod
+    async def numbered_release(app_id: UUID, number: int | None = None) -> AppVersion:
+        """The app's release numbered ``number``, or its newest without one."""
+        async with postgres.session() as session:
+            row = await session.scalar(
+                select(PluginVersionRow)
+                .where(
+                    PluginVersionRow.plugin == app_id,
+                    PluginVersionRow.preview_of.is_(None),
+                    *([] if number is None else [PluginVersionRow.number == number]),
+                )
+                .order_by(PluginVersionRow.number.desc())
+                .limit(1)
+            )
+        if row is None:
+            raise AppNotFound
+        return AppVersion.of(row)
 
     @staticmethod
     async def newest_release(app_id: UUID) -> AppVersion | None:
@@ -770,6 +801,77 @@ class PluginInstallations:
                 .values(version=version.id, updated_at=func.clock_timestamp(), updated_by=by)
             )
             await cls._drop_unused(session, version.app)
+
+    @classmethod
+    async def move_all(
+        cls, version: AppVersion, *, by: UUID, session: AsyncSession | None = None
+    ) -> InstallsMoved:
+        """Move every install of ``version``'s app a person added or changed to it, as an
+        admin asks.
+
+        Only installs on older releases move, so none goes back to an older release, and
+        only where ``version`` asks for no permission its own release didn't, since only its
+        person approves more. One Robin added for a featured app
+        nobody changed follows the release an admin features (``feature``) instead, which
+        would move it straight back.
+        """
+        wanted = set(version.manifest.permissions)
+        theirs = (
+            PluginInstallationRow.plugin == version.app,
+            PluginInstallationRow.preview_of.is_(None),
+            or_(
+                PluginInstallationRow.created_by.is_not(None),
+                PluginInstallationRow.updated_by.is_not(None),
+            ),
+        )
+        async with postgres.session(session) as session:
+            # One read of each release's installs and permissions, so a release cleanup
+            # deletes meanwhile can't leave a count without its permissions.
+            rows = (
+                await session.execute(
+                    select(
+                        PluginVersionRow.id,
+                        PluginVersionRow.number,
+                        PluginVersionRow.manifest,
+                        func.count(),
+                    )
+                    .join(
+                        PluginInstallationRow, PluginInstallationRow.version == PluginVersionRow.id
+                    )
+                    .where(*theirs)
+                    .group_by(PluginVersionRow.id)
+                )
+            ).all()
+            older = [
+                (found, manifest, count)
+                for found, number, manifest, count in rows
+                if number < version.number
+            ]
+            movable = [
+                found
+                for found, manifest, _ in older
+                if wanted <= set(PluginManifest.model_validate(manifest).permissions)
+            ]
+            moved = 0
+            if movable:
+                moved = len(
+                    (
+                        await session.scalars(
+                            update(PluginInstallationRow)
+                            .where(*theirs, PluginInstallationRow.version.in_(movable))
+                            .values(
+                                version=version.id,
+                                updated_at=func.clock_timestamp(),
+                                updated_by=by,
+                            )
+                            .returning(PluginInstallationRow.id)
+                        )
+                    ).all()
+                )
+                await cls._drop_unused(session, version.app)
+        current = sum(count for *_, count in rows) - sum(count for *_, count in older)
+        waiting = sum(count for found, _, count in older if found not in movable)
+        return InstallsMoved(moved=moved, current=current, waiting=waiting)
 
     @classmethod
     async def preview(

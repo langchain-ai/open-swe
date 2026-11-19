@@ -111,6 +111,18 @@ export function usePublishApp() {
   })
 }
 
+/** Admins move every person's install of an app to a release; the sidebar reloads. */
+export function useUpgradeAppInstalls() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { app: string; release?: number }) =>
+      pluginsApi.upgradeInstalls(vars.app, vars.release),
+    meta: { errorTitle: "Couldn't upgrade everyone's installs" },
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: pluginKeys.all }),
+  })
+}
+
 export function useSetAppListed() {
   const queryClient = useQueryClient()
   return useMutation({

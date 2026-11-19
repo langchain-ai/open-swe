@@ -1,5 +1,6 @@
 import type { PluginPermission } from "@openswe/plugin-sdk"
 import { useState } from "react"
+import { toast } from "sonner"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   Dialog,
@@ -13,7 +14,11 @@ import { Switch } from "@langchain/macaw-components/Switch"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
 import { PermissionList } from "@/features/plugins/components/PluginsSettings"
 import type { App } from "@/features/plugins/lib/api"
-import { useApps, useAppVersion } from "@/features/plugins/lib/queries"
+import {
+  useApps,
+  useAppVersion,
+  useUpgradeAppInstalls,
+} from "@/features/plugins/lib/queries"
 import {
   useInstanceSettings,
   type InstanceSettings,
@@ -74,7 +79,7 @@ export function FeaturedAppsSettings({
   return (
     <SettingsSection
       title="Apps for everyone"
-      description="Add a listed app to everyone's sidebar, its permissions approved for them. People can't remove it while it's on, and it stays on the release you turned on until you update it. Turning it off takes it back from everyone who never changed it."
+      description="Add a listed app to everyone's sidebar, its permissions approved for them. People can't remove it while it's on, and it stays on the release you turned on until you update it. Turning it off takes it back from everyone who never changed it. Upgrade everyone moves the installs people added or changed themselves to an app's newest release."
     >
       <div className="divide-y divide-default">
         {offered.map((app) => {
@@ -144,6 +149,8 @@ function FeaturedAppRow({
   const [asking, setAsking] = useState<ReadonlyArray<PluginPermission> | null>(
     null
   )
+  const [upgrading, setUpgrading] = useState(false)
+  const upgrade = useUpgradeAppInstalls()
   const latest = app.latest
   const behind =
     entry !== undefined && latest !== null && entry.release !== latest.id
@@ -186,6 +193,18 @@ function FeaturedAppRow({
                 Update
               </Button>
             )}
+            {app.listed && latest && (
+              <Button
+                size="xs"
+                color="secondary"
+                variant="outlined"
+                onClick={() => setUpgrading(true)}
+                disabled={!editable}
+                loading={upgrade.isPending}
+              >
+                Upgrade everyone
+              </Button>
+            )}
             <Switch
               aria-label={`Add ${app.name} for everyone`}
               checked={entry !== undefined}
@@ -210,6 +229,57 @@ function FeaturedAppRow({
           onSave={onRepositories}
         />
       )}
+      <Dialog open={upgrading} onOpenChange={setUpgrading}>
+        <DialogContent
+          childrenClassName="gap-space-4 p-space-6"
+          showClose={false}
+        >
+          <DialogTitle>
+            {`Move everyone's ${name} to release ${latest?.number}?`}
+          </DialogTitle>
+          <DialogDescription>
+            {`Every install people added or changed themselves moves. Anyone whose release didn't have a permission this one asks for keeps theirs until they approve it.${entry ? " Installs added for everyone follow the release turned on here; use Update for those." : ""}`}
+          </DialogDescription>
+          <div className="flex justify-end gap-space-2">
+            <Button
+              size="sm"
+              variant="outlined"
+              onClick={() => setUpgrading(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                setUpgrading(false)
+                upgrade.mutate(
+                  { app: app.id, release: latest?.number },
+                  {
+                    onSuccess: (result) =>
+                      toast.success(
+                        `Moved ${result.moved} install${result.moved === 1 ? "" : "s"} to release ${result.release}`,
+                        {
+                          description: [
+                            result.current
+                              ? `${result.current} already had it.`
+                              : null,
+                            result.waiting
+                              ? `${result.waiting} wait for their person to approve new permissions.`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" "),
+                        }
+                      ),
+                  }
+                )
+              }}
+            >
+              Upgrade everyone
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={asking !== null}
         onOpenChange={(open) => !open && setAsking(null)}

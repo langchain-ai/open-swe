@@ -55,7 +55,7 @@ Past it, requests fail with status 429.
   Where it was built, such as a repository and commit or a thread, is kept only to show.
   Open SWE keeps every version someone runs, the newest five releases besides, and each thread's newest preview.
 - **An install** is one person adding an app to their sidebar, pinned to a version.
-  It moves only when they press **Update**, and a version asking for more permissions waits for them to approve them.
+  It moves when they press **Update**, or when an admin presses **Upgrade everyone** under **Defaults → Apps for everyone** (or calls `upgrade_app_installs`), which moves every install of the app people added or changed themselves to its newest release, or a numbered one, never moving an install back from a newer release; a version asking for more permissions than an install's release waits for its person to approve them, and an install Robin added for a featured app follows the featured release instead.
   An instance admin can add a listed app to everyone's sidebar instead, under **Defaults → Apps for everyone**, approving its permissions for them and naming repositories it reads for each person who can read them on GitHub.
   Such an install follows the release the admin approves until the person updates it themselves, and they can't remove it while it stays featured.
   Every install of a featured app, one a person added themselves included, reads the repositories the admin names, and nobody stops sharing those while it's featured.

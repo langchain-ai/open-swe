@@ -3644,6 +3644,35 @@
         "title": "InstallBody",
         "type": "object"
       },
+      "InstallsMovedModel": {
+        "description": "Everyone's installs of an app after an admin moved them to ``release``.",
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "integer"
+          },
+          "moved": {
+            "title": "Moved",
+            "type": "integer"
+          },
+          "release": {
+            "title": "Release",
+            "type": "integer"
+          },
+          "waiting": {
+            "title": "Waiting",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "release",
+          "moved",
+          "current",
+          "waiting"
+        ],
+        "title": "InstallsMovedModel",
+        "type": "object"
+      },
       "IntegrationSettings": {
         "properties": {
           "repos": {
@@ -4379,6 +4408,24 @@
           "lost"
         ],
         "type": "string"
+      },
+      "MoveInstallsBody": {
+        "properties": {
+          "release": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release"
+          }
+        },
+        "title": "MoveInstallsBody",
+        "type": "object"
       },
       "NewServer": {
         "description": "A remote MCP server a person registers for themselves alone.",
@@ -15554,6 +15601,66 @@
           }
         ],
         "summary": "Api List App",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/apps/{app_id}/installs/upgrade": {
+      "post": {
+        "description": "Move every install of the app a person added or changed to one of its releases,\nnever back from a newer one; admins only.",
+        "operationId": "api_upgrade_app_installs_dashboard_api_plugins_apps__app_id__installs_upgrade_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "app_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "App Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveInstallsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstallsMovedModel"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Upgrade App Installs",
         "tags": [
           "dashboard",
           "plugins"
