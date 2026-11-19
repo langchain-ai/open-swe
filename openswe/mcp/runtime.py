@@ -316,6 +316,14 @@ def _wrap_tool(
             fresh = await as_langchain_tool(definition, _client(record))
             if not isinstance(fresh, StructuredTool) or fresh.coroutine is None:
                 raise ToolException("MCP tool has no async implementation")
+            if (
+                namespace[:1] == ("managed_tools",)
+                and definition.name == "slack_user_slack_search_public_and_private"
+                and arguments.get("context_channel_id") == ""
+                and "context_channel_id" not in definition.input_schema.get("required", ())
+                and "allOf" not in definition.input_schema
+            ):
+                del arguments["context_channel_id"]
             # Call the coroutine directly so remote arguments LangChain reserves pass through.
             with tracing_context(enabled=False):
                 try:

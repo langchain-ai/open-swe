@@ -187,6 +187,58 @@ async def test_a_private_owner_never_sees_the_slack_bot_built_in(monkeypatch, lm
     assert await alice.unconnected(["slack"]) == []
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "channel", "required", "expected"),
+    [
+        ("slack_user_slack_search_public_and_private", "", [], {"query": "deploys"}),
+        (
+            "slack_user_slack_search_public_and_private",
+            "C123",
+            [],
+            {"query": "deploys", "context_channel_id": "C123"},
+        ),
+        (
+            "slack_user_slack_search_public_and_private",
+            "",
+            ["context_channel_id"],
+            {"query": "deploys", "context_channel_id": ""},
+        ),
+        ("linear_update_issue", "", [], {"query": "deploys", "context_channel_id": ""}),
+    ],
+)
+async def test_only_the_optional_slack_search_channel_filter_omits_an_empty_string(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_name: str,
+    channel: str,
+    required: list[str],
+    expected: dict[str, str],
+) -> None:
+    from langchain_core.tools import StructuredTool
+
+    schema = {
+        "type": "object",
+        "properties": {"query": {"type": "string"}, "context_channel_id": {"type": "string"}},
+        "required": ["query", *required],
+    }
+    definition = Tool(name=tool_name, input_schema=schema)
+    sent: list[dict[str, str]] = []
+
+    async def call(**arguments: str) -> tuple[str, None]:
+        sent.append(arguments)
+        return "ok", None
+
+    remote = StructuredTool.from_function(
+        coroutine=call, name=tool_name, description="Remote tool", args_schema=schema
+    )
+    private_thread(monkeypatch, "alice")
+    monkeypatch.setattr(runtime, "_discover_tools", AsyncMock(return_value=[definition]))
+    monkeypatch.setattr(runtime, "as_langchain_tool", AsyncMock(return_value=remote))
+    [tool] = await runtime.load_mcp_tools(managed.PersonalTools("alice").source())
+
+    assert await tool.ainvoke({"query": "deploys", "context_channel_id": channel}) == "ok"
+    assert sent == [expected]
+
+
 async def test_a_change_to_the_kit_relists_only_when_robin_refreshes_it(monkeypatch, lmt):
     """A run never waits on the kit's slow listing because a service changed: its cached
     list stays under the same key, and Robin lists it again when it makes the change."""
