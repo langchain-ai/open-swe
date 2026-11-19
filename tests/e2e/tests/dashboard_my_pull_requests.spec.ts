@@ -297,7 +297,7 @@ test.describe("my pull requests", () => {
       page.getByRole("textbox", { name: "Search pull requests" }),
     ).toHaveValue("no-matches");
     await expect(page).toHaveURL((url) => !url.searchParams.has("pr"));
-    await page.getByRole("link", { name: "Back to threads" }).click();
+    await page.getByRole("button", { name: "Back to threads" }).click();
     await expect(page).toHaveURL(/\/agents$/);
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(pullRequests).toBeVisible();

@@ -29,7 +29,7 @@ class NavigationScenario {
     this.ready = this.router.load()
   }
 
-  options(kind: "review" | "settings" = "review") {
+  options(kind: Parameters<ContextNavigation["returnOptions"]>[0] = "review") {
     return this.navigation.returnOptions(kind, this.router.state.location)
   }
 
@@ -41,7 +41,9 @@ class NavigationScenario {
     await this.router.navigate({ href, state })
   }
 
-  async back(kind: "review" | "settings" = "review") {
+  async back(
+    kind: Parameters<ContextNavigation["returnOptions"]>[0] = "review"
+  ) {
     this.options(kind).returnToOrigin()
     await this.router.load()
   }
@@ -54,6 +56,19 @@ it("returns to the exact filtered list history entry", async () => {
   expect(scenario.options().label).toBe("Back to pull requests")
   await scenario.back()
   expect(scenario.router.state.location.href).toBe(list)
+  expect(scenario.router.state.location.state.__TSR_index).toBe(0)
+})
+
+it("returns to the original chat after closing PR details", async () => {
+  const chat = "/agents/thread-1"
+  const list = "/agents/reviews?tab=mine"
+  const scenario = new NavigationScenario(chat)
+  await scenario.open(list)
+  await scenario.open(`${list}&pr=acme%2Fapi%231`)
+  await scenario.open(list)
+  expect(scenario.options("review-exit").label).toBe("Back to thread")
+  await scenario.back("review-exit")
+  expect(scenario.router.state.location.href).toBe(chat)
   expect(scenario.router.state.location.state.__TSR_index).toBe(0)
 })
 

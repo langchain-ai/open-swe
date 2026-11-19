@@ -1,9 +1,10 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { ArrowLeftIcon } from "@langchain/macaw-components/icons"
 import { Text } from "@langchain/macaw-components/Text"
-import { createFileRoute, Link, redirect } from "@tanstack/react-router"
+import { createFileRoute, redirect } from "@tanstack/react-router"
 import { useEffect } from "react"
 
+import { useContextReturn } from "@/lib/contextNavigation"
 import { pageTitle } from "@/lib/pageTitle"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -71,6 +72,7 @@ const tabs = [
 
 function ReviewsPage() {
   const session = useSession()
+  const returnNavigation = useContextReturn("review-exit")
   const filters = Route.useSearch()
   const navigate = Route.useNavigate()
   const tab = filters.tab ?? "mine"
@@ -108,14 +110,14 @@ function ReviewsPage() {
       )}
     >
       <Button
-        as={<Link to="/agents" />}
         size="sm"
         color="secondary"
         variant="plain"
         leftDecorator={ArrowLeftIcon}
         className="border-0"
+        onClick={returnNavigation.returnToOrigin}
       >
-        Back to threads
+        {returnNavigation.label}
       </Button>
       <Text as="h1" variant="h3" weight="medium" color="primary">
         Pull Requests

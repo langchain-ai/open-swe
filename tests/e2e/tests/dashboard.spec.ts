@@ -152,6 +152,25 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
         page.getByTestId("pr-hover-card-fakeorg/demo-1"),
       ).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 20_000 });
+
+    const threadUrl = page.url();
+    const transcript = page.locator("[data-transcript-scroll]");
+    await pullRequestLink.evaluate((link) => {
+      link.scrollIntoView({ block: "center", behavior: "instant" });
+    });
+    const scrollTop = await transcript.evaluate((element) => element.scrollTop);
+    expect(scrollTop).toBeGreaterThan(0);
+    await pullRequestLink.click();
+    await expect(
+      page.getByRole("heading", { name: "Pull Requests" }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Back to thread", exact: true })
+      .click();
+    await expect(page).toHaveURL(threadUrl);
+    await expect
+      .poll(() => transcript.evaluate((element) => element.scrollTop))
+      .toBeCloseTo(scrollTop, 0);
   });
 
   test("shows an optimistic message while the send is in flight", async ({

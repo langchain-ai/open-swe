@@ -76,8 +76,8 @@ export class ContextNavigation {
   }
 
   private kind(href: string): ContextKind | null {
-    if (this.review(href)) return "review"
     const pathname = new URL(href, "https://robin.invalid").pathname
+    if (this.under(pathname, "/agents/reviews")) return "review"
     return SETTINGS_ROOTS.some((root) => this.under(pathname, root))
       ? "settings"
       : null
@@ -137,16 +137,24 @@ export class ContextNavigation {
     let origin: Origin | null = null
     const kind = this.kind(to.href)
     if (kind && from) {
+      const fromKind = this.kind(from.href)
+      const selectedPR = this.review(to.href)
+      const inherit =
+        fromKind === "settings" ||
+        (kind === "review" &&
+          fromKind === "review" &&
+          (!selectedPR ||
+            selectedPR === this.review(from.href) ||
+            from.state.__TSR_index >= index))
       origin =
         to.state.contextNavigationOrigin !== undefined
           ? to.state.contextNavigationOrigin
-          : (kind === "settings" && this.kind(from.href) === "settings") ||
-              (kind === "review" &&
-                (this.review(from.href) === this.review(to.href) ||
-                  this.kind(from.href) === "settings"))
+          : inherit
             ? previous
             : this.origin(from)
-      if (origin?.href === to.href) origin = null
+      if (origin?.href === to.href) {
+        origin = kind === "review" ? this.reviewExit(origin) : null
+      }
     }
     this.entries.set(key, { index, origin })
     while (this.entries.size > MAX_ENTRIES) {
@@ -211,12 +219,25 @@ export class ContextNavigation {
     }
   }
 
-  returnOptions(kind: ContextKind, location: ParsedLocation) {
-    const origin = this.entries.get(this.key(location) ?? "")?.origin ?? null
+  private reviewExit(origin: Origin | null): Origin | null {
+    while (origin && this.kind(origin.href) === "review") {
+      const earlier = this.entries.get(origin.key)?.origin
+      origin = earlier && earlier.index < origin.index ? earlier : null
+    }
+    return origin
+  }
+
+  returnOptions(kind: ContextKind | "review-exit", location: ParsedLocation) {
+    const previous = this.entries.get(this.key(location) ?? "")?.origin ?? null
+    const origin = kind === "review-exit" ? this.reviewExit(previous) : previous
     return {
       label:
         origin?.label ??
-        (kind === "review" ? "Pull requests" : "Close settings"),
+        (kind === "review-exit"
+          ? "Back to threads"
+          : kind === "review"
+            ? "Pull requests"
+            : "Close settings"),
       back: origin !== null,
       state: { contextNavigationOrigin: origin },
       returnToOrigin: () => {
@@ -228,7 +249,11 @@ export class ContextNavigation {
           }
         }
         const fallback =
-          kind === "review" ? "/agents/reviews" : getLastAppLocation()
+          kind === "settings"
+            ? getLastAppLocation()
+            : kind === "review"
+              ? "/agents/reviews"
+              : "/agents"
         const href = origin?.href ?? fallback
         void this.router.navigate({
           href: this.safe(href) ? href : "/agents",
@@ -239,7 +264,7 @@ export class ContextNavigation {
   }
 }
 
-export function useContextReturn(kind: ContextKind) {
+export function useContextReturn(kind: ContextKind | "review-exit") {
   const router = useRouter()
   const location = useRouterState({ select: (state) => state.location })
   return ContextNavigation.for(router).returnOptions(kind, location)
