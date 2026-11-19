@@ -47,6 +47,7 @@ from rt.auto_review import PATH_ARGUMENTS
 from rt.backend import OpenSweBackend, RunLocal
 from rt.git_evidence import OBSERVED_TOOLS, turn_git
 from rt.middleware import reported
+from rt.prompts import prompt
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
 from rt.sandbox_setup import sandbox_setup
 from rt.subdir_agents import SubdirAgentsReadMiddleware
@@ -68,6 +69,8 @@ _QUOTING: Final = re.compile(r"\\\n|[\"'\\]")
 # As the backend's sandbox: the client gives up on a command the sandbox never
 # answers 30 seconds past its own timeout.
 _EXECUTE_GRACE_SECONDS: Final = 30
+# The longest an ``execute`` may hold the turn; longer work goes to ``background_execute``.
+_FOREGROUND_SECONDS: Final = 600
 # A sandbox call rejected before it started cannot have run, so it is sent again.
 _TRANSIENT_BACKOFF_SECONDS: Final = (0.5, 1.0, 2.0)
 # What git, the GitHub CLI and the REST API print when GitHub refuses the token the
@@ -234,6 +237,21 @@ class FileToolsMiddleware(AgentMiddleware):
     async def _screened_run(
         self, request: ToolCallRequest, handler: Handler
     ) -> ToolMessage | Command:
+        timeout = request.tool_call["args"].get("timeout")
+        # 0 turns a command's timeout off, so it is past the limit too.
+        if (
+            request.tool_call["name"] == "execute"
+            and isinstance(timeout, int)
+            and not 0 < timeout <= _FOREGROUND_SECONDS
+        ):
+            return ToolMessage(
+                content=prompt(
+                    "tools/foreground-limit", timeout=timeout, limit=_FOREGROUND_SECONDS
+                ),
+                tool_call_id=request.tool_call.get("id") or "",
+                name="execute",
+                status="error",
+            )
         screened = await self._screened(request)
         if isinstance(screened, ToolMessage):
             return screened

@@ -2014,6 +2014,45 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     assert recorded.content == "pr_creation_fallback_blocked"
 
 
+@pytest.mark.parametrize("timeout", [1500, 0])
+async def test_a_foreground_command_past_the_limit_is_sent_to_the_background(
+    monkeypatch: pytest.MonkeyPatch, timeout: int
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = _run_backend(catalog=Catalog(sandbox=_IN_SANDBOX))
+    monkeypatch.setattr(backend.outbox, "started", MagicMock())
+    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
+    request = ToolCallRequest(
+        tool_call={
+            "name": "execute",
+            "args": {"command": "make build", "timeout": timeout},
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        tool=None,
+        state={"messages": []},
+        runtime=ToolRuntime(
+            state={"messages": []},
+            context=None,
+            config={},
+            stream_writer=lambda event: None,
+            tool_call_id="call-1",
+            store=None,
+        ),
+    )
+    in_sandbox = AsyncMock()
+    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+
+    refused = await files.awrap_tool_call(request, in_sandbox)
+    await backend.outbox.drain()
+
+    in_sandbox.assert_not_awaited()
+    assert isinstance(refused, ToolMessage) and refused.status == "error"
+    assert "background_execute" in str(refused.content)
+
+
 @pytest.mark.parametrize(
     ("command", "output", "refreshed"),
     [
