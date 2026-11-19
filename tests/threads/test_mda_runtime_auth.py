@@ -1,11 +1,14 @@
 """The backend reads MDA as LangSmith Studio does, and writes only as itself."""
 
 import asyncio
+import time
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import httpx
 import httpx2
 import pytest
+from httpcore2._async import http11
 
 from openswe.threads import runtimes
 from openswe.utils.http_pool import close_pool
@@ -151,10 +154,18 @@ async def test_mda_pools_reuse_isolated_connections_until_shutdown(
             await writer.wait_closed()
             closed.put_nowait(None)
 
+    # httpx2's connections measure their idle time by this clock.
+    idle = SimpleNamespace(seconds=0.0)
+    monkeypatch.setattr(
+        http11, "time", SimpleNamespace(monotonic=lambda: time.monotonic() + idle.seconds)
+    )
+
     async with await asyncio.start_server(serve, "127.0.0.1", 0) as server:
         runtime = runtimes.MdaRuntime(f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}")
         try:
-            for _ in range(2):
+            # The second round comes after httpx2's own 5 s keep-alive would have closed them.
+            for seconds in (0.0, 10.0):
+                idle.seconds = seconds
                 async with runtime.http as client:
                     assert (await client.get("/")).status_code == 200
                 async with runtime.read_http as client:

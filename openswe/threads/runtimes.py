@@ -50,7 +50,7 @@ from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
 from openswe.threads.start_request import RunRefused, StartRequest
 from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS, RunOrigin
-from openswe.utils.http_pool import pooled_transport
+from openswe.utils.http_pool import KEEPALIVE_SECONDS, pooled_transport
 from openswe.utils.langsmith import resolve_tenant_id
 from openswe.utils.startup_trace import apm_span
 
@@ -322,7 +322,11 @@ class MdaRuntime:
             headers=headers,
             timeout=httpx2.Timeout(30.0, read=None),
             transport=pooled_transport(
-                f"mda-{pool}", limits=httpx2.Limits(max_connections=max_connections), proxy=proxy
+                f"mda-{pool}",
+                limits=httpx2.Limits(
+                    max_connections=max_connections, keepalive_expiry=KEEPALIVE_SECONDS
+                ),
+                proxy=proxy,
             ),
         )
 

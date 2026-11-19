@@ -19,12 +19,12 @@ import httpx2
 
 # httpx2 drops idle connections after 5 s; an agent's calls to the same host are
 # often further apart than that.
-_KEEPALIVE_SECONDS = 30.0
+KEEPALIVE_SECONDS = 30.0
 _MAX_CONNECTIONS = 200
 _LIMITS = httpx2.Limits(
     max_connections=_MAX_CONNECTIONS,
     max_keepalive_connections=50,
-    keepalive_expiry=_KEEPALIVE_SECONDS,
+    keepalive_expiry=KEEPALIVE_SECONDS,
 )
 # Each isolated-loop worker thread runs its own loop, and a connection belongs to
 # the loop that opened it.
@@ -96,7 +96,7 @@ def pooled_connector() -> aiohttp.TCPConnector:
     connector = _CONNECTORS.get(loop)
     if connector is None or connector.closed:
         connector = _CONNECTORS[loop] = aiohttp.TCPConnector(
-            limit=_MAX_CONNECTIONS, keepalive_timeout=_KEEPALIVE_SECONDS
+            limit=_MAX_CONNECTIONS, keepalive_timeout=KEEPALIVE_SECONDS
         )
     return connector
 
