@@ -181,6 +181,13 @@ html.dark,
     border: 1px solid var(--border-subtle);
     box-shadow: var(--shadow-md);
   }
+
+  /* Macaw's plain secondary button sets dark:hover:bg-elevated-hover/40, which
+     bleeds through hover:bg-transparent in components like ChatToolCallAccordion
+     that omit dark:hover:bg-transparent. */
+  .dark .lc-button.hover\:bg-transparent:hover {
+    background-color: transparent;
+  }
 }
 
 @layer base {
