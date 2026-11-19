@@ -1414,6 +1414,10 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
                 routing=RoutingRules(shadow=True), model_experiment="performance"
             )
 
+    async def private_thread(thread_id: str) -> dict[str, object]:
+        return {"thread_id": thread_id, "metadata": {"visibility": "private"}}
+
+    monkeypatch.setattr("openswe.agent_api.run_catalog.read_thread", private_thread)
     parts = Coordinator()
     started = await (await RunCatalog.of(parts, RUN)).start()
     catalog = started.catalog.model_dump(mode="json")
@@ -1422,6 +1426,8 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     metadata = catalog["trace_metadata"]
     assert isinstance(metadata, dict)
     assert metadata["LANGSMITH_AGENT_VERSION"] == "current-backend-sha"
+    # Traces split by the thread's visibility.
+    assert metadata["visibility"] == "private"
     # The trace records the model its person picked, and the experiment's tier.
     assert (metadata["user_model_choice"], metadata["user_effort_choice"]) == (
         "anthropic:claude-opus-5-5",
@@ -2312,3 +2318,40 @@ async def test_langsmith_cloud_run_delegates_to_credential_isolated_sandbox(
     assert result == "managed-cloud"
     assert create.call_args.args[0] == "cloud-thread"
     assert create.call_args.kwargs["allow_github"] is False
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ({"visibility": "private"}, "private"),
+        ({"visibility": "public"}, "public"),
+        ({}, "public"),
+        ({"visibility": "shared"}, "public"),
+    ],
+)
+async def test_a_runs_trace_names_its_threads_visibility(
+    monkeypatch: pytest.MonkeyPatch, metadata: dict[str, object], expected: str
+) -> None:
+    """A thread that names no visibility is public, as access checks treat it."""
+    from openswe.agent_api import run_catalog
+
+    async def thread(thread_id: str) -> dict[str, object]:
+        return {"thread_id": thread_id, "metadata": metadata}
+
+    monkeypatch.setattr(run_catalog, "read_thread", thread)
+
+    assert await run_catalog.RunCatalog.thread_visibility("t") == expected
+
+
+async def test_an_unindexed_threads_run_names_no_visibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A thread that can't be read leaves the trace without a visibility, not a guess."""
+    from openswe.agent_api import run_catalog
+
+    async def missing(thread_id: str) -> dict[str, object]:
+        raise LookupError(thread_id)
+
+    monkeypatch.setattr(run_catalog, "read_thread", missing)
+
+    assert await run_catalog.RunCatalog.thread_visibility("t") is None

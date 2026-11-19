@@ -8,6 +8,7 @@ the context names only: every tool is kept by digest (``run_tool_sets``), which
 """
 
 import asyncio
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
@@ -53,8 +54,11 @@ from openswe.server import (
 )
 from openswe.threads.access import agent_version_metadata
 from openswe.trace_metadata import RunOrigin
+from openswe.utils.json_types import thread_metadata
 from openswe.utils.startup_trace import apm_span
-from openswe.utils.thread_reads import shared_thread_reads
+from openswe.utils.thread_reads import read_thread, shared_thread_reads
+
+logger = logging.getLogger(__name__)
 
 # The model a person picked, which the planner records on the run's config.
 _ROUTING_TRACE_KEYS: Final = ("user_model_choice", "user_effort_choice")
@@ -99,12 +103,14 @@ class RunCatalog:
         surface: ToolSurface,
         config: RunnableConfig,
         execution: ExecutionProfile | None = None,
+        visibility: str | None = None,
     ) -> None:
         self.kind = kind
         self.run = run
         self.surface = surface
         self.config = config
         self.execution = execution
+        self.visibility = visibility
 
     @classmethod
     async def of(cls, kind: RunKind, run: RemoteRun) -> RunCatalog:
@@ -121,7 +127,26 @@ class RunCatalog:
             async with shared_thread_reads():
                 await kind.catalog(config, surface)
                 await surface.prepare()
-        return cls(kind, run, surface, config, execution)
+                visibility = await cls.thread_visibility(run.thread_id)
+        return cls(kind, run, surface, config, execution, visibility)
+
+    @staticmethod
+    async def thread_visibility(thread_id: str) -> str | None:
+        """Whether the run's thread is ``public`` or ``private``, so traces split by it.
+
+        A thread that names none is public, as everywhere else that checks it; one that
+        can't be read leaves the trace without it rather than guessing.
+        """
+        try:
+            thread = await read_thread(thread_id)
+        except LookupError:
+            logger.warning(
+                "Run trace has no visibility: its thread is not indexed",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )
+            return None
+        return "private" if thread_metadata(thread).get("visibility") == "private" else "public"
 
     async def start(self) -> RunStart:
         """What MDA builds the run from, and the settings its calls read."""
@@ -306,6 +331,7 @@ class RunCatalog:
                     ).value,
                     **agent_version_metadata(),
                     **{key: metadata[key] for key in _ROUTING_TRACE_KEYS if key in metadata},
+                    **({"visibility": self.visibility} if self.visibility else {}),
                     # The tags' values again, so traces group by them too.
                     "model_routing": catalog.loop.routing_arm,
                     **(
