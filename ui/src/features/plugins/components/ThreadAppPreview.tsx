@@ -5,7 +5,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@langchain/macaw-components/Dialog"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { ShieldCheckIcon } from "@phosphor-icons/react/dist/ssr/ShieldCheck"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"

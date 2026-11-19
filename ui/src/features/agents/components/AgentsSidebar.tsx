@@ -16,7 +16,7 @@ import {
   DropdownMenuSubContent,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { Spinner, SpinnerIcon } from "@langchain/macaw-components/Spinner"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/ssr/DownloadSimple"

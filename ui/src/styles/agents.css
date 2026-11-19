@@ -58,3 +58,36 @@
     background-position: calc(100% + 4.5rem) 0;
   }
 }
+
+/*
+ * Skeletons sweep a highlight across the block instead of pulsing, like
+ * LangSmith's. Unlayered, so it replaces Macaw's `animate-pulse`; the sweep is
+ * fixed to the viewport so stacked placeholders shimmer as one surface.
+ */
+.skeleton-shimmer {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  .skeleton-shimmer {
+    background-image: linear-gradient(
+      100deg,
+      transparent 40%,
+      var(--skeleton-highlight) 50%,
+      transparent 60%
+    );
+    background-size: 200vw 100%;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes skeleton-shimmer {
+  from {
+    background-position: -120vw 0;
+  }
+  to {
+    background-position: 20vw 0;
+  }
+}

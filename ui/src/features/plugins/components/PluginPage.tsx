@@ -1,7 +1,7 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { ErrorState } from "@langchain/macaw-components/ErrorState"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { ArrowsOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowsOut"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { PuzzlePieceIcon } from "@phosphor-icons/react/dist/ssr/PuzzlePiece"

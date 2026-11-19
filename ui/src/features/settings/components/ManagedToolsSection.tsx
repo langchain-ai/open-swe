@@ -10,7 +10,11 @@ import { Select } from "@langchain/macaw-components/Select"
 import { Text } from "@langchain/macaw-components/Text"
 import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
 
-import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import {
+  SettingsRow,
+  SettingsRowsSkeleton,
+  SettingsSection,
+} from "@/components/AppShell"
 import { api, managedToolConnectUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
 import type {
@@ -370,9 +374,7 @@ export function ManagedToolsSection() {
   if (view.isPending) {
     return (
       <SettingsSection title="Managed Tools">
-        <p role="status" className="p-space-4 text-sm text-secondary">
-          Loading tools…
-        </p>
+        <SettingsRowsSkeleton rows={3} label="Loading tools" />
       </SettingsSection>
     )
   }
@@ -510,7 +512,7 @@ export function BotToolsSection() {
       description="The services in Robin's bot kit. Shared threads, Slack channels and automations use them with the API keys stored on the bot's LangSmith Managed Tools profile."
     >
       {view.isLoading ? (
-        <p className="p-space-4 text-xs text-secondary">Loading…</p>
+        <SettingsRowsSkeleton rows={3} label="Loading managed tools" />
       ) : view.isError ? (
         <p role="alert" className="p-space-4 text-xs text-error-secondary">
           {view.error.message}

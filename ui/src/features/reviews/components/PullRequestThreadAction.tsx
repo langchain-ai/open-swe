@@ -1,4 +1,3 @@
-import { Button } from "@langchain/macaw-components/Button"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
@@ -6,6 +5,7 @@ import { api, type OpenPullRequest } from "@/lib/api"
 import { expiresInBrowser } from "@/lib/query"
 import { pullRequestTopic } from "../lib/cache"
 import { fixUpAction } from "../lib/threadActions"
+import { PullRequestActionButton } from "./PullRequestActionButton"
 
 type PullRequestThreadStatus = Awaited<
   ReturnType<typeof api.pullRequestThreadStatus>
@@ -73,26 +73,17 @@ export function PullRequestThreadAction({
               ? labels.retry
               : labels.idle
   return (
-    <div>
-      <Button
-        size="sm"
-        color="secondary"
-        variant="outlined"
-        disabled={
-          thread.isPending ||
-          thread.isError ||
-          thread.data?.running === true ||
-          run.isPending
-        }
-        onClick={() => run.mutate()}
-      >
-        {label}
-      </Button>
-      {thread.error && (
-        <p role="alert" className="mt-space-1 text-error-secondary">
-          {thread.error.message}
-        </p>
-      )}
-    </div>
+    <PullRequestActionButton
+      label={label}
+      disabled={
+        thread.isPending ||
+        thread.isError ||
+        thread.data?.running === true ||
+        run.isPending
+      }
+      loading={run.isPending}
+      onClick={() => run.mutate()}
+      errors={[thread.error]}
+    />
   )
 }

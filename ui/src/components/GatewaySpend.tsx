@@ -3,7 +3,7 @@ import { Card } from "@langchain/macaw-components/Card"
 import { Button } from "@langchain/macaw-components/Button"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { ProgressBar } from "@langchain/macaw-components/ProgressBar"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { Text } from "@langchain/macaw-components/Text"
 
 import { api } from "@/lib/api"

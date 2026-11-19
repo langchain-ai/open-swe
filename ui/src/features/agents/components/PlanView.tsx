@@ -3,7 +3,7 @@ import { useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Button } from "@langchain/macaw-components/Button"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { useIsHydrated } from "@/lib/hydration"
 
 import { PlanReview } from "@/features/agents/components/PlanReview"

@@ -144,10 +144,13 @@ html.dark,
     --bg-user-message: var(--neutral-200);
     --border-default: var(--neutral-300);
     --border-subtle: var(--neutral-200);
+    --skeleton-highlight: var(--bg-surface-level-4);
 }
 
 :root {
     --bg-user-message: var(--bg-surface-level-2);
+    /* The shimmer swept over skeletons: a step lighter than their fill. */
+    --skeleton-highlight: var(--bg-surface-level-1);
     /* Compact control geometry — keep semantic so chat controls, menus, and
        tooltips cannot quietly drift apart. */
     --control-radius: var(--radius-md);

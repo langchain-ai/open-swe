@@ -1,7 +1,7 @@
 import { XIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import {
   TabGroup,
   TabLabel,

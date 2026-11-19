@@ -21,7 +21,7 @@ export function ClosePullRequest({
     onDone: onClosed,
   })
   return (
-    <div>
+    <div className="flex">
       <TextPopover
         trigger={
           <Button

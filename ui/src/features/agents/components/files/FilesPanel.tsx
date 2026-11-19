@@ -16,7 +16,10 @@ import {
   DownloadFallback,
   DownloadOnError,
 } from "@/features/agents/components/files/previews/DownloadFallback"
-import { PreviewMessage } from "@/features/agents/components/files/previews/PreviewMessage"
+import {
+  PreviewLoading,
+  PreviewMessage,
+} from "@/features/agents/components/files/previews/PreviewMessage"
 import {
   DIFF_UNSAFE_CSS,
   DIFF_VIRTUALIZER_CONFIG,
@@ -133,7 +136,7 @@ function TextFile(props: {
   if (error) return <PreviewMessage error>{error.message}</PreviewMessage>
   // Without its link (an older desktop app), Markdown still renders, minus relative images.
   if (!data || (props.markdown && props.link.isPending))
-    return <PreviewMessage>Loading…</PreviewMessage>
+    return <PreviewLoading />
   if (data.kind !== "file") return <PreviewMessage>Not a file.</PreviewMessage>
   if (data.binary)
     return (
@@ -190,7 +193,7 @@ function RenderedPreview(props: {
   // The link a media element failed to play: its contents don't match its extension.
   const [unplayable, setUnplayable] = useState<string | null>(null)
   if (error) return <PreviewMessage error>{error.message}</PreviewMessage>
-  if (!data) return <PreviewMessage>Loading…</PreviewMessage>
+  if (!data) return <PreviewLoading />
   if (unplayable === data.url)
     return (
       <DownloadFallback
@@ -208,7 +211,7 @@ function RenderedPreview(props: {
         target={props.target}
         relativePath={props.relativePath}
       >
-        <Suspense fallback={<PreviewMessage>Loading…</PreviewMessage>}>
+        <Suspense fallback={<PreviewLoading />}>
           <Viewer
             url={data.url}
             path={props.relativePath}

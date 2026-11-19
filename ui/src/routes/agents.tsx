@@ -12,7 +12,7 @@ import { AgentsShell } from "@/features/agents/components/AgentsSidebar"
 import { PluginTabs } from "@/features/plugins/components/PluginTabs"
 import { parsePullRequestSelection } from "@/features/reviews/search"
 import { reviewChatQuery } from "@/features/reviews/lib/reviewKeys"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { AppLoading } from "@/components/AppLoading"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useSession } from "@/lib/session"
 import { rememberAppLocation } from "@/lib/appLocation"
@@ -52,11 +52,7 @@ function AgentsLayout() {
   }, [location.href])
 
   if (session.isLoading) {
-    return (
-      <main className="agents-ui flex h-svh items-center justify-center bg-surface-level-1 p-space-5">
-        <Skeleton className="h-40 w-full max-w-md" />
-      </main>
-    )
+    return <AppLoading />
   }
 
   if (!session.data) return <RequireLogin />

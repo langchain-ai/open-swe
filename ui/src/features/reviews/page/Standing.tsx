@@ -5,7 +5,7 @@ import {
   CheckCircleFillIcon,
 } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"

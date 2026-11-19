@@ -4,12 +4,10 @@ import {
   ArrowUpIcon,
   MagnifyingGlassRegularIcon,
 } from "@langchain/macaw-components/icons"
-import { Spinner } from "@langchain/macaw-components/Spinner"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Button } from "@langchain/macaw-components/Button"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { Input } from "@langchain/macaw-components/Input"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { Icon } from "@langchain/macaw-components/Icon"
 import { Text } from "@langchain/macaw-components/Text"
 import { Typeahead } from "@langchain/macaw-components/Typeahead"
@@ -29,7 +27,10 @@ import {
 } from "./components/PullRequestCard"
 import { PullRequestWorkspace } from "./PullRequestWorkspace"
 import { reviewKeys } from "./lib/reviewKeys"
-import { PullRequestList } from "./components/PullRequestList"
+import {
+  PullRequestList,
+  PullRequestListSkeleton,
+} from "./components/PullRequestList"
 import { PullRequestReview } from "./components/PullRequestReview"
 import {
   leftOpenList,
@@ -512,7 +513,7 @@ export function OpenPullRequests({
             </p>
           )}
           {query.isLoading ? (
-            <Skeleton className="h-56 w-full" />
+            <PullRequestListSkeleton compact={railed} />
           ) : incomplete ? (
             <p
               role="status"
@@ -529,13 +530,10 @@ export function OpenPullRequests({
                   detailsLoading ||
                   query.isFetchingNextPage ||
                   descriptionSearch.isSearching ? (
-                    <div
-                      role="status"
-                      aria-label="Loading matching PRs"
-                      className="flex justify-center rounded-lg border border-default py-space-8"
-                    >
-                      <Spinner size="sm" />
-                    </div>
+                    <PullRequestListSkeleton
+                      compact={railed}
+                      label="Loading matching PRs"
+                    />
                   ) : (
                     <EmptyState
                       size="sm"

@@ -3,7 +3,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 
 import { EditorScreen } from "@/components/EditorScreen"
 import { TextEditor } from "@/components/TextEditor"

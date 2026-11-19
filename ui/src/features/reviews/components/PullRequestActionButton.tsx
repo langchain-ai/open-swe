@@ -3,6 +3,7 @@ import type { ReactNode } from "react"
 import { Button } from "@langchain/macaw-components/Button"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { Spinner } from "@langchain/macaw-components/Spinner"
+import { Text } from "@langchain/macaw-components/Text"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
 
 /** The shared shape of every per-pull-request action: button, label, errors. */
@@ -48,7 +49,10 @@ export function PullRequestActionButton({
           onClick={onClick}
         >
           {loading && <Spinner size="xxs" />}
-          {label}
+          {/* Button sizes only a bare string label; Text keeps that size beside the spinner. */}
+          <Text as="span" variant="xs" weight="normal">
+            {label}
+          </Text>
         </Button>
       </div>
       {errors.map(

@@ -3,7 +3,7 @@ import { useEffect, useMemo } from "react"
 
 import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { Text } from "@langchain/macaw-components/Text"
 
 import { LogoMark } from "@/components/Branding"

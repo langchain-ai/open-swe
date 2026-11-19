@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { SkeletonLines } from "@/components/Skeleton"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 
 import type { AnnouncementSummary } from "@/lib/api"
@@ -131,7 +131,8 @@ function AnnouncementHistory({
   failed: boolean
   items: Array<AnnouncementSummary>
 }) {
-  if (loading) return <Skeleton className="h-16" />
+  if (loading)
+    return <SkeletonLines lines={3} label="Loading past announcements" />
   if (failed) {
     return (
       <div role="alert">

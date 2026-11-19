@@ -113,6 +113,10 @@
                   "ContextMenuItem"
                 ],
                 "message": "Import menu rows from @/components/MenuItem so leading icons get the standard gap."
+              },
+              {
+                "name": "@langchain/macaw-components/Skeleton",
+                "message": "Import from @/components/Skeleton so placeholders shimmer like the rest of the dashboard."
               }
             ],
             "patterns": [

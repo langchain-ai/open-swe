@@ -2,7 +2,7 @@ import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Select } from "@langchain/macaw-components/Select"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { SkeletonLines } from "@/components/Skeleton"
 import { Text } from "@langchain/macaw-components/Text"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -126,7 +126,14 @@ export function ReviewStylesPanel() {
   })
 
   if (styles.isLoading) {
-    return <Skeleton className="h-40" />
+    return (
+      <SkeletonLines
+        lines={4}
+        label="Loading review styles"
+        className="gap-space-1"
+        lineClassName="h-8 rounded-md"
+      />
+    )
   }
 
   const configured = new Set((styles.data ?? []).map((s) => s.full_name))

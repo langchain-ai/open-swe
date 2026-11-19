@@ -1,3 +1,4 @@
+import { SkeletonLines } from "@/components/Skeleton"
 import { FuzzySearch } from "@/lib/fuzzySearch"
 import {
   MagnifyingGlassRegularIcon,
@@ -339,7 +340,12 @@ export function OwnershipPicker({
               </p>
             )}
             {loading && (
-              <p className="p-space-3 text-xs text-secondary">Loading…</p>
+              <SkeletonLines
+                lines={4}
+                label="Loading options"
+                className="gap-space-3 p-space-3"
+                lineClassName="h-4"
+              />
             )}
             {loadError && (
               <p

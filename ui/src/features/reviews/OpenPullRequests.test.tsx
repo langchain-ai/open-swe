@@ -1107,7 +1107,8 @@ describe("My PRs", () => {
       ],
     })
     mount()
-    expect(await screen.findByRole("status")).toHaveProperty(
+    // The loading placeholder is a named status; the timeout notice is not.
+    expect(await screen.findByRole("status", { name: "" })).toHaveProperty(
       "textContent",
       expect.stringContaining("Filter by repository")
     )

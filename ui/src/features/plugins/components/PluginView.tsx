@@ -1,5 +1,5 @@
 import { ErrorState } from "@langchain/macaw-components/ErrorState"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffectEvent } from "react"
 

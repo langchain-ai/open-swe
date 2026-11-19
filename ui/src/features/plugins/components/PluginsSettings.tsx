@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from "@langchain/macaw-components/Dialog"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockwise"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"

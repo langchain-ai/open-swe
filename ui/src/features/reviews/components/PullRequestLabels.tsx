@@ -1,3 +1,4 @@
+import { SkeletonLines } from "@/components/Skeleton"
 import { FuzzySearch } from "@/lib/fuzzySearch"
 import {
   MagnifyingGlassRegularIcon,
@@ -110,7 +111,12 @@ export function PullRequestLabels({
             onChange={setSearch}
           />
           {catalog.isPending && (
-            <p className="p-space-2 text-xs text-secondary">Loading labels…</p>
+            <SkeletonLines
+              lines={4}
+              label="Loading labels"
+              className="gap-space-3 p-space-2"
+              lineClassName="h-4"
+            />
           )}
           {catalog.error && (
             <p role="alert" className="p-space-2 text-xs text-error-secondary">

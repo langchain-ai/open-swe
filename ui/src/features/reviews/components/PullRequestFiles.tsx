@@ -20,6 +20,7 @@ import type {
   SelectedLineRange,
 } from "@pierre/diffs"
 
+import { SkeletonLines } from "@/components/Skeleton"
 import { SubmitShortcut } from "@/components/SubmitShortcut"
 import type {
   PreviewFile,
@@ -248,9 +249,11 @@ export function PullRequestFiles({
             {open && (
               <div className="mt-space-1 mb-space-2 overflow-hidden rounded-md border border-default">
                 {diff.isPending ? (
-                  <p className="p-space-3 text-xs text-secondary">
-                    Loading diff…
-                  </p>
+                  <SkeletonLines
+                    lines={6}
+                    label="Loading diff"
+                    className="p-space-3"
+                  />
                 ) : diff.error ? (
                   <p
                     role="alert"

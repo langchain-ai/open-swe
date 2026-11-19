@@ -1,3 +1,4 @@
+import { Skeleton } from "@/components/Skeleton"
 import { cn } from "@/lib/utils"
 import { Button } from "@langchain/macaw-components/Button"
 import { XIcon } from "@langchain/macaw-components/icons"
@@ -73,10 +74,10 @@ export function ChangesToolbar({ pr }: { pr: PullRequestRef }) {
             )}
             {viewedCount > 0 && ` · ${viewedCount} viewed`}
           </span>
+        ) : diff.isError ? (
+          <span className="text-xs text-secondary">Unavailable</span>
         ) : (
-          <span className="text-xs text-secondary">
-            {diff.isError ? "Unavailable" : "Loading…"}
-          </span>
+          <Skeleton className="h-3 w-32" />
         )}
         {diff.data && fileFilter.trim() && (
           <span className="flex items-center gap-space-1 rounded-md bg-brand-subtle py-0.5 pr-0.5 pl-space-1 text-xs text-brand-primary tabular-nums">

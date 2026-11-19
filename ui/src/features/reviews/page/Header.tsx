@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@langchain/macaw-components/DropdownMenu"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { ChatsCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatsCircle"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"

@@ -9,7 +9,7 @@ import { Card } from "@langchain/macaw-components/Card"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
@@ -91,6 +91,7 @@ export function AutomationsList({
     )
   })
 
+  const loading = schedulesQuery.isLoading
   const total = schedules.length
   const active = schedules.filter((schedule) => schedule.enabled).length
   const paused = total - active
@@ -126,21 +127,26 @@ export function AutomationsList({
         ) : (
           <>
             <div className="mt-space-5 grid grid-cols-2 gap-space-3 sm:grid-cols-4">
-              <StatCard label="Total" value={total} />
-              <StatCard label="Active" value={active} />
-              <StatCard label="Paused" value={paused} />
+              <StatCard label="Total" value={total} loading={loading} />
+              <StatCard label="Active" value={active} loading={loading} />
+              <StatCard label="Paused" value={paused} loading={loading} />
               <StatCard
                 label="Needs attention"
                 value={issues}
+                loading={loading}
                 highlight={issues > 0}
               />
             </div>
 
-            <div className="mt-space-6 flex items-center justify-between">
+            <div className="mt-space-6 flex min-h-8 items-center justify-between">
               <div className="flex items-center gap-space-3">
-                <span className="text-xs font-medium text-secondary">
-                  {total} {total === 1 ? "automation" : "automations"}
-                </span>
+                {loading ? (
+                  <Skeleton className="h-3 w-20" />
+                ) : (
+                  <span className="text-xs font-medium text-secondary">
+                    {total} {total === 1 ? "automation" : "automations"}
+                  </span>
+                )}
                 {isAdmin && (
                   <GroupedTabs
                     value={filter}
@@ -149,14 +155,20 @@ export function AutomationsList({
                   />
                 )}
               </div>
-              {canManage && <NewAutomationButton />}
+              {/* The empty state carries its own button, so this one is for adding more. */}
+              {canManage && !loading && total > 0 && <NewAutomationButton />}
             </div>
 
             <div className="mt-space-3">
-              {schedulesQuery.isLoading ? (
-                <div className="space-y-space-2">
-                  <Skeleton className="h-16 w-full rounded-xl" />
-                  <Skeleton className="h-16 w-full rounded-xl" />
+              {loading ? (
+                <div
+                  role="status"
+                  aria-label="Loading automations"
+                  className="space-y-space-2"
+                >
+                  <AutomationRowSkeleton />
+                  <AutomationRowSkeleton />
+                  <AutomationRowSkeleton />
                 </div>
               ) : total === 0 ? (
                 <EmptyState
@@ -194,12 +206,8 @@ export function AutomationsList({
 
 function NewAutomationButton() {
   return (
-    <Button
-      as={<Link to="/agents/automations/new" />}
-      size="md"
-      leftDecorator={PlusIcon}
-    >
-      New Automation
+    <Button as={<Link to="/agents/automations/new" />} leftDecorator={PlusIcon}>
+      New automation
     </Button>
   )
 }
@@ -207,24 +215,48 @@ function NewAutomationButton() {
 function StatCard({
   label,
   value,
+  loading,
   highlight,
 }: {
   label: string
   value: number
+  loading: boolean
   highlight?: boolean
 }) {
   return (
     <Card className="px-space-4 py-space-3">
       <div className="text-xs text-tertiary">{label}</div>
-      <div
-        className={cn(
-          "mt-space-1 text-lg font-medium",
-          highlight ? "text-error-secondary" : "text-primary"
-        )}
-      >
-        {value}
-      </div>
+      {loading ? (
+        <div className="mt-space-1 flex h-7 items-center">
+          <Skeleton className="h-5 w-8" />
+        </div>
+      ) : (
+        <div
+          className={cn(
+            "mt-space-1 text-lg font-medium",
+            highlight ? "text-error-secondary" : "text-primary"
+          )}
+        >
+          {value}
+        </div>
+      )}
     </Card>
+  )
+}
+
+/** The shape of an `AutomationRow`: status dot, name, trigger line, actions. */
+function AutomationRowSkeleton() {
+  return (
+    <div className="flex items-center gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3">
+      <Skeleton className="size-2 shrink-0 rounded-full" />
+      <div className="min-w-0 flex-1 space-y-space-2 py-space-1">
+        <Skeleton className="h-3.5 w-48 max-w-full" />
+        <Skeleton className="h-3 w-72 max-w-full" />
+        <Skeleton className="h-3 w-56 max-w-full" />
+      </div>
+      <Skeleton className="h-8 w-24 shrink-0 rounded-md" />
+      <Skeleton className="size-8 shrink-0 rounded-md" />
+    </div>
   )
 }
 

@@ -24,9 +24,6 @@ const stream = vi.hoisted(() => ({
 }))
 
 vi.mock("@/features/agents/components/AgentThreadView", () => ({
-  ConversationLoading: () => (
-    <div role="status" aria-label="Loading conversation" />
-  ),
   AgentThreadView: ({
     thread,
     retry,

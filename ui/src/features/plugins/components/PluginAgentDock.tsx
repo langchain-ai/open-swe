@@ -1,5 +1,5 @@
 import { Banner } from "@langchain/macaw-components/Banner"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { useQuery } from "@tanstack/react-query"
 import {
   useEffect,

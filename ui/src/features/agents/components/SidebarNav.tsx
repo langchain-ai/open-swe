@@ -1,4 +1,4 @@
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { useScrollIntoView } from "@/lib/useScrollIntoView"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { useQuery } from "@tanstack/react-query"

@@ -1,4 +1,4 @@
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import type { OpenPullRequest } from "@/lib/api"
 
 export function Diffstat({ pr }: { pr: OpenPullRequest }) {

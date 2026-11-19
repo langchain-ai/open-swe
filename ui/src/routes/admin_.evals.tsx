@@ -7,7 +7,7 @@ import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { Input } from "@langchain/macaw-components/Input"
 import { Select } from "@langchain/macaw-components/Select"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 
 import type {
   ReviewerEvalConfig,

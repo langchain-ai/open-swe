@@ -8,7 +8,7 @@ import {
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
 import { ProgressBar } from "@langchain/macaw-components/ProgressBar"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { useQuery } from "@tanstack/react-query"
 import {
   memo,

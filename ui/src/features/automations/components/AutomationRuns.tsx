@@ -5,6 +5,7 @@ import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Spinner } from "@langchain/macaw-components/Spinner"
+import { Skeleton } from "@/components/Skeleton"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 
@@ -40,10 +41,21 @@ export function AutomationRuns({
     return (
       <div
         role="status"
-        className="flex items-center justify-center gap-space-2 rounded-xl border border-dashed border-default px-space-5 py-space-8 text-xs text-secondary"
+        aria-label="Loading automation runs"
+        className="space-y-space-2"
       >
-        <Spinner size="xs" />
-        Loading automation runs…
+        {Array.from({ length: 4 }, (_, index) => (
+          <div
+            key={index}
+            className="flex items-center gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3"
+          >
+            <Skeleton className="size-2.5 shrink-0 rounded-full" />
+            <div className="min-w-0 flex-1 space-y-space-2 py-space-1">
+              <Skeleton className="h-3.5 w-64 max-w-full" />
+              <Skeleton className="h-3 w-40 max-w-full" />
+            </div>
+          </div>
+        ))}
       </div>
     )
   }

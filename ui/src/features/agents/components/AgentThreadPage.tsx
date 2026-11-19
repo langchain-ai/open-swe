@@ -1,13 +1,10 @@
 import { useContext, useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { CatchBoundary } from "@tanstack/react-router"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
-import {
-  AgentThreadView,
-  ConversationLoading,
-} from "@/features/agents/components/AgentThreadView"
+import { AgentThreadView } from "@/features/agents/components/AgentThreadView"
+import { ConversationLoading } from "@/features/agents/components/ConversationLoading"
 import { SubagentThreadView } from "@/features/agents/components/subagents/SubagentThreadView"
 import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
 import { readStoredPanelCollapsed } from "@/features/agents/lib/gitPanelPreferences"
@@ -183,11 +180,7 @@ function AgentThreadContent({
   }, [active, ownsTitle, title])
 
   const awaitingSummary = threadQuery.isPending && !timedOut
-  const skeleton = (
-    <main className="flex min-w-0 flex-1 items-center justify-center p-space-5">
-      <Skeleton className="h-40 w-full max-w-md" />
-    </main>
-  )
+  const skeleton = <AgentThreadLoading threadId={threadId} />
   if (awaitingSummary && !streamFirst) return skeleton
 
   if (!awaitingSummary && !threadQuery.data) {
@@ -229,6 +222,28 @@ function AgentThreadContent({
         )}
       </ThreadSourceProvider>
     </AgentThreadStreamBoundary>
+  )
+}
+
+/** The thread page's frame with placeholders where its title and transcript go. */
+function AgentThreadLoading({ threadId }: { threadId: string }) {
+  const embedded = useContext(EmbeddedThreadContext)
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {!embedded && (
+        <AgentThreadHeader
+          target="Cloud"
+          panelCollapsed={readStoredPanelCollapsed(threadId)}
+          loading
+        />
+      )}
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <ConversationLoading />
+        <AgentComposerDock>
+          <AgentPromptBar compact disabled placeholder="Loading…" />
+        </AgentComposerDock>
+      </div>
+    </div>
   )
 }
 

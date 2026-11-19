@@ -1,5 +1,6 @@
 import { Button } from "@langchain/macaw-components/Button"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { LinearProgress } from "@langchain/macaw-components/LinearProgress"
+import { Skeleton } from "@/components/Skeleton"
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/ssr/GitPullRequest"
 import {
   keepPreviousData,
@@ -75,16 +76,32 @@ export function ReviewedPullRequests({
         className="mt-space-3 min-h-0 flex-1 overflow-y-auto rounded-lg border border-default bg-surface-level-1"
       >
         {reviews.isFetching && reviews.data && (
-          <p
-            role="status"
-            className="border-b border-default px-space-4 py-space-3 text-xs text-secondary"
-          >
-            Loading page {page + 1}…
-          </p>
+          <LinearProgress
+            aria-label={`Loading page ${page + 1}`}
+            className="sticky top-0"
+          />
         )}
         {reviews.isLoading && (
-          <div className="p-space-4">
-            <Skeleton className="h-24 w-full" />
+          <div
+            role="status"
+            aria-label="Loading reviews"
+            className="divide-y divide-default"
+          >
+            {Array.from({ length: 5 }, (_, index) => (
+              <div
+                key={index}
+                className="flex items-center justify-between gap-space-3 px-space-4 py-space-3"
+              >
+                <div className="flex min-w-0 flex-1 items-center gap-space-3">
+                  <Skeleton className="size-4 shrink-0 rounded-sm" />
+                  <div className="min-w-0 flex-1 space-y-space-2">
+                    <Skeleton className="h-3 w-2/3" />
+                    <Skeleton className="h-3 w-48 max-w-full" />
+                  </div>
+                </div>
+                <Skeleton className="h-3 w-16 shrink-0" />
+              </div>
+            ))}
           </div>
         )}
         {reviews.error && (

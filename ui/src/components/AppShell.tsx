@@ -4,7 +4,7 @@ import {
 } from "@langchain/macaw-components/icons"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Card } from "@langchain/macaw-components/Card"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { Text } from "@langchain/macaw-components/Text"
 import { Link, Navigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
@@ -101,8 +101,23 @@ export function SettingsPage({
   const session = useSession()
   if (session.isLoading) {
     return (
-      <main className="p-space-5">
-        <Skeleton className="h-40 w-full" />
+      <main
+        role="status"
+        aria-label="Loading settings"
+        className="mx-auto w-full max-w-3xl px-space-4 pt-space-8 sm:px-space-6"
+      >
+        <Skeleton className="h-7 w-48" />
+        <Skeleton className="mt-space-2 h-3 w-80 max-w-full" />
+        <div className="mt-space-6 flex flex-col gap-space-6">
+          {[3, 2].map((rows) => (
+            <div key={rows} className="flex flex-col gap-space-3">
+              <Skeleton className="h-4 w-32" />
+              <div className="overflow-hidden rounded-lg border border-default">
+                <SettingsRowsSkeleton rows={rows} />
+              </div>
+            </div>
+          ))}
+        </div>
       </main>
     )
   }
@@ -208,6 +223,37 @@ export function SettingsRow({
       <div className={cn("sm:shrink-0", comingSoon && "opacity-50")}>
         {control}
       </div>
+    </div>
+  )
+}
+
+/** Rows shaped like `SettingsRow`, for a section whose data is still loading. */
+export function SettingsRowsSkeleton({
+  rows = 2,
+  label,
+}: {
+  rows?: number
+  /** Announces the placeholder as a loading status with this name. */
+  label?: string
+}) {
+  return (
+    <div
+      role={label ? "status" : undefined}
+      aria-label={label}
+      className="divide-y divide-default"
+    >
+      {Array.from({ length: rows }, (_, index) => (
+        <div
+          key={index}
+          className="flex items-center justify-between gap-space-6 px-space-4 py-space-3"
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-space-2">
+            <Skeleton className="h-3.5 w-32" />
+            <Skeleton className="h-3 w-72 max-w-full" />
+          </div>
+          <Skeleton className="h-7 w-20 shrink-0 rounded-md" />
+        </div>
+      ))}
     </div>
   )
 }

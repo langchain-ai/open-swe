@@ -1,7 +1,7 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { Input } from "@langchain/macaw-components/Input"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { SkeletonLines } from "@/components/Skeleton"
 import { useEffect, useState } from "react"
 
 import type { Skill } from "@/lib/api"
@@ -165,7 +165,14 @@ export function SkillsPage() {
             </Button>
           )}
           <div className="space-y-space-1">
-            {skills.isLoading && <Skeleton className="h-24" />}
+            {skills.isLoading && (
+              <SkeletonLines
+                lines={4}
+                label="Loading skills"
+                className="gap-space-1"
+                lineClassName="h-8 rounded-md"
+              />
+            )}
             {(skills.data ?? []).map((skill) => (
               <Button
                 color="secondary"

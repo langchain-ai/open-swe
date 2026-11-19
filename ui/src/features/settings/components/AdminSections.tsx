@@ -9,7 +9,7 @@ import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { Input } from "@langchain/macaw-components/Input"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton, SkeletonLines } from "@/components/Skeleton"
 
 import type { AdminUser } from "@/lib/api"
 import { SettingsSection } from "@/components/AppShell"
@@ -140,7 +140,12 @@ export function RunningAgentsSection() {
         </div>
 
         {threads.isLoading ? (
-          <Skeleton className="h-20" />
+          <SkeletonLines
+            lines={3}
+            label="Loading running agents"
+            lineClassName="h-5"
+            className="gap-space-3"
+          />
         ) : running.length ? (
           <div className="flex flex-col">
             {running.map((thread) => (
@@ -312,7 +317,11 @@ export function UsersSection({ enabled }: { enabled: boolean }) {
         />
         <div className="flex flex-col gap-0.5">
           {users.isLoading ? (
-            <Skeleton className="h-32" />
+            <SkeletonLines
+              lines={5}
+              label="Loading users"
+              lineClassName="h-8 rounded-md"
+            />
           ) : users.isError ? (
             <div role="alert">
               <Banner

@@ -1,6 +1,6 @@
 import { ImagePreviewDialog } from "@langchain/macaw-components/ImagePreviewDialog"
 import { FileTextIcon } from "@phosphor-icons/react/dist/ssr/FileText"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { useEffect, useState } from "react"
 
 import { cn } from "@/lib/utils"

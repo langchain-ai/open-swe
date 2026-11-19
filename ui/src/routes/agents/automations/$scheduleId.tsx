@@ -3,7 +3,7 @@ import { Link, createFileRoute } from "@tanstack/react-router"
 import { AutomationEditor } from "@/features/automations/components/AutomationEditor"
 import { Button } from "@langchain/macaw-components/Button"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { CalendarXIcon } from "@phosphor-icons/react/dist/ssr/CalendarX"
 import { useAgentSchedules } from "@/features/agents/lib/queries"
 import { pageTitle } from "@/lib/pageTitle"
@@ -23,9 +23,24 @@ function EditAutomationPage() {
 
   if (schedulesQuery.isLoading) {
     return (
-      <div className="mx-auto w-full max-w-3xl px-space-5 py-space-7">
-        <Skeleton className="h-9 w-64" />
-        <Skeleton className="mt-space-5 h-32 w-full" />
+      <div
+        role="status"
+        aria-label="Loading automation"
+        className="flex min-w-0 flex-1 flex-col"
+      >
+        <div className="flex items-center justify-between gap-space-3 px-space-5 py-space-4 max-md:pt-space-8">
+          <Skeleton className="h-3 w-40" />
+          <div className="flex items-center gap-space-2">
+            <Skeleton className="h-9 w-24 rounded-md" />
+            <Skeleton className="h-9 w-28 rounded-md" />
+          </div>
+        </div>
+        <div className="mx-auto w-full max-w-3xl space-y-space-3 px-space-5 pt-space-2">
+          <Skeleton className="h-10 w-full rounded-md" />
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="mt-space-3 h-32 w-full rounded-xl" />
+          <Skeleton className="h-48 w-full rounded-xl" />
+        </div>
       </div>
     )
   }

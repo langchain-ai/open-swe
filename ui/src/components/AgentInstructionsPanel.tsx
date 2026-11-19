@@ -1,7 +1,7 @@
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Button } from "@langchain/macaw-components/Button"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { SkeletonLines } from "@/components/Skeleton"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
@@ -185,7 +185,12 @@ export function AgentInstructionsPanel() {
             onAdd={handleAdd}
           />
           {instructions.isLoading ? (
-            <Skeleton className="h-24" />
+            <SkeletonLines
+              lines={3}
+              label="Loading repositories"
+              className="gap-space-1"
+              lineClassName="h-8 rounded-md"
+            />
           ) : (instructions.data ?? []).length === 0 ? (
             <p className="text-xs text-secondary">No repositories yet.</p>
           ) : (

@@ -1,6 +1,5 @@
 import { useRightPanelStore } from "@/features/agents/lib/rightPanelStore"
 import { productAnalytics } from "@/lib/analytics"
-import { LogoMark } from "@/components/Branding"
 import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { LaptopRegularIcon } from "@langchain/macaw-components/icons"
 import {
@@ -23,6 +22,7 @@ import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Text } from "@langchain/macaw-components/Text"
 import { Icon } from "@langchain/macaw-components/Icon"
+import { ConversationLoading } from "@/features/agents/components/ConversationLoading"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
 import type {
@@ -113,18 +113,6 @@ interface AgentThreadViewProps {
 
 function plainSubmission(text: string): ComposerSubmission {
   return { text, images: [], replies: [] }
-}
-
-export function ConversationLoading() {
-  return (
-    <div
-      role="status"
-      aria-label="Loading conversation"
-      className="flex flex-1 items-center justify-center px-space-5"
-    >
-      <LogoMark alt="" className="size-12 animate-pulse" />
-    </div>
-  )
 }
 
 /** Paths the agent has edited this thread, newest last, for `@file` mentions. */

@@ -9,7 +9,9 @@ import {
 } from "react"
 
 import type { OpenPullRequest } from "@/lib/api"
+import { cn } from "@/lib/utils"
 import { pullRequestKey } from "../lib/status"
+import { PullRequestCardSkeleton } from "./PullRequestCard"
 
 const estimatedCardHeight = 208
 const estimatedRowHeight = 68
@@ -109,6 +111,30 @@ export function PullRequestList({
         </ul>
       )}
       {footer}
+    </div>
+  )
+}
+
+/** Placeholder cards while the list's first page loads. */
+export function PullRequestListSkeleton({
+  compact,
+  label = "Loading pull requests",
+}: {
+  compact?: boolean
+  label?: string
+}) {
+  return (
+    <div
+      role="status"
+      aria-label={label}
+      className={cn(
+        "min-h-0 flex-1 overflow-hidden",
+        !compact && "space-y-space-3"
+      )}
+    >
+      {Array.from({ length: compact ? 8 : 4 }, (_, index) => (
+        <PullRequestCardSkeleton key={index} compact={compact} />
+      ))}
     </div>
   )
 }

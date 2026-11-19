@@ -1,4 +1,3 @@
-import { LogoMark } from "@/components/Branding"
 import { ArrowLeftIcon } from "@langchain/macaw-components/icons"
 import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
@@ -6,6 +5,7 @@ import { Badge } from "@langchain/macaw-components/Badge"
 import { ChatState } from "@langchain/macaw-components/ChatState"
 
 import { LoadError } from "@/components/LoadError"
+import { ConversationLoading } from "@/features/agents/components/ConversationLoading"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Messages } from "@/features/agents/components/messages"
 import { asString } from "@/features/agents/components/subagents/SubagentCard"
@@ -77,15 +77,7 @@ export function SubagentThreadView({
       />
     )
   } else if (source.isHydrating) {
-    body = (
-      <div
-        role="status"
-        aria-label="Loading subagent"
-        className="flex flex-1 items-center justify-center px-space-5"
-      >
-        <LogoMark alt="" className="size-12 animate-pulse" />
-      </div>
-    )
+    body = <ConversationLoading label="Loading subagent" />
   } else if (!task) {
     body = (
       <LoadError

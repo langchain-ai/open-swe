@@ -5,7 +5,7 @@ import {
   CheckIcon,
 } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
-import { Skeleton } from "@langchain/macaw-components/Skeleton"
+import { Skeleton } from "@/components/Skeleton"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"

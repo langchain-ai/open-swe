@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react"
 
+import { Skeleton } from "@/components/Skeleton"
 import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { dateLabel } from "../lib/dateLabel"
@@ -227,6 +228,45 @@ export function PullRequestCard({
           onSettled={onSettled}
           onReady={onReady}
         />
+      </div>
+    </div>
+  )
+}
+
+/** A placeholder shaped like `PullRequestCard`, in the same density. */
+export function PullRequestCardSkeleton({ compact }: { compact?: boolean }) {
+  if (compact) {
+    return (
+      <div className="flex gap-space-3 py-space-2 pr-space-2 pl-space-2">
+        <span aria-hidden="true" className="w-0.5 shrink-0" />
+        <div className="min-w-0 flex-1 space-y-space-2 py-0.5">
+          <Skeleton className="h-3 w-32" />
+          <Skeleton className="h-3 w-4/5" />
+          <Skeleton className="h-4 w-20 rounded-full" />
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="rounded-lg border border-default bg-surface-level-1 p-space-4">
+      <div className="space-y-space-3">
+        <div className="space-y-space-2">
+          <div className="flex items-center gap-space-2">
+            <Skeleton className="h-3 w-40" />
+            <Skeleton className="h-4 w-16 rounded-full" />
+          </div>
+          <Skeleton className="h-4 w-3/4" />
+        </div>
+        <div className="flex items-center gap-space-5">
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-3 w-24" />
+        </div>
+        <div className="flex items-center gap-space-2">
+          <Skeleton className="h-6 w-14 rounded-sm" />
+          <Skeleton className="h-6 w-20 rounded-sm" />
+          <Skeleton className="h-6 w-12 rounded-sm" />
+        </div>
       </div>
     </div>
   )
