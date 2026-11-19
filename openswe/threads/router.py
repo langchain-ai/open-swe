@@ -66,6 +66,7 @@ from openswe.threads.runtimes import (
     now_ms,
 )
 from openswe.threads.store import READ_ONLY, THREADS, channel_write_refusal, for_mda
+from openswe.threads.succession import RUN_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -474,7 +475,8 @@ class ThreadRouter:
         if not isinstance(copy_id, str):
             raise RuntimeError("The runtime's thread copy returned no thread id")
         made_metadata = made.get("metadata")
-        metadata = dict(made_metadata) if isinstance(made_metadata, dict) else dict(thread.metadata)
+        raw = dict(made_metadata) if isinstance(made_metadata, dict) else dict(thread.metadata)
+        metadata = {key: value for key, value in raw.items() if key not in RUN_KEYS}
         copied = await index.create(
             copy_id, runtime=thread.runtime, metadata=metadata, if_exists="do_nothing"
         )

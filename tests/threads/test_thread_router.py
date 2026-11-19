@@ -1104,8 +1104,14 @@ async def test_a_backend_run_on_mda_settles_through_the_completion_webhook(
 
 async def test_a_copy_of_an_mda_thread_is_indexed_on_mda(monkeypatch: pytest.MonkeyPatch) -> None:
     harness = _Harness(monkeypatch)
-    await index.create(THREAD, runtime="mda", metadata={"title": "source"})
-    await harness.runtimes.mda.create(THREAD, {"title": "source"})
+    source_metadata = {
+        "title": "source",
+        "latest_run_id": "run-source",
+        "latest_run_status": "success",
+        "current_reviewer_run_id": "run-reviewer",
+    }
+    await index.create(THREAD, runtime="mda", metadata=source_metadata)
+    await harness.runtimes.mda.create(THREAD, source_metadata)
 
     status, made = await harness.request("POST", f"/threads/{THREAD}/copy", {})
 

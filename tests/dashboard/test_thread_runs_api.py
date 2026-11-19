@@ -1016,3 +1016,97 @@ async def test_a_command_on_a_channel_thread_it_cant_act_on_is_refused_as_before
     assert response.json().items() >= reply.items()
     assert "linear channel" in str(response.json())
     assert mda.sent("POST", f"/threads/{THREAD}/runs") == []
+
+
+async def test_join_skips_run_preflight_only_for_server_recorded_latest_run(
+    mda: Mda, dashboard: Dashboard
+) -> None:
+    await _thread({**SHARED, "latest_run_id": RUN})
+    dashboard.login = "bob"
+
+    joined = await dashboard.request(
+        "GET",
+        f"/threads/{THREAD}/runs/{RUN}/stream",
+        headers={"Last-Event-ID": "1724342400000-0"},
+    )
+    other = await dashboard.request(
+        "GET",
+        f"/threads/{THREAD}/runs/{OTHER_THREADS_RUN}/stream",
+        headers={"Last-Event-ID": "1724342400000-0"},
+    )
+
+    assert joined.status_code == 200
+    assert joined.content == EVENTS
+    assert mda.sent("GET", f"/threads/{THREAD}/runs/{RUN}") == []
+    assert len(mda.sent("GET", f"/threads/{THREAD}/runs/{RUN}/stream")) == 1
+    assert other.status_code == 404
+    assert len(mda.sent("GET", f"/threads/{THREAD}/runs/{OTHER_THREADS_RUN}")) == 1
+    assert mda.sent("GET", f"/threads/{THREAD}/runs/{OTHER_THREADS_RUN}/stream") == []
+
+
+async def test_user_routes_cannot_forge_latest_run_id(
+    monkeypatch: pytest.MonkeyPatch, mda: Mda, dashboard: Dashboard, people: None
+) -> None:
+    from types import SimpleNamespace
+
+    from openswe.threads import handlers
+
+    await _thread(SHARED)
+    monkeypatch.setattr(handlers, "langgraph_client", lambda: SimpleNamespace(threads=mda.copies))
+    monkeypatch.setattr(handlers, "mirror_thread_metadata", AsyncMock())
+    monkeypatch.setattr(
+        handlers,
+        "_authorized_thread",
+        AsyncMock(return_value={"thread_id": THREAD, "metadata": dict(SHARED)}),
+    )
+
+    renamed = await dashboard.request(
+        "PATCH",
+        f"/threads/{THREAD}",
+        json={"title": "Renamed", "metadata": {"latest_run_id": OTHER_THREADS_RUN}},
+    )
+    assert renamed.status_code == 200
+    saved = await index.get(THREAD)
+    assert saved is not None and saved.metadata.get("latest_run_id") is None
+
+    started = await dashboard.request(
+        "POST",
+        f"/threads/{THREAD}/runs",
+        json={
+            "input": {"messages": [{"type": "human", "content": "hi"}]},
+            "metadata": {"latest_run_id": OTHER_THREADS_RUN},
+        },
+    )
+    assert started.status_code == 200
+    saved = await index.get(THREAD)
+    assert saved is not None and saved.metadata.get("latest_run_id") == RUN
+
+
+async def test_info_caches_successful_reads_for_five_minutes(
+    monkeypatch: pytest.MonkeyPatch, mda: Mda, dashboard: Dashboard
+) -> None:
+    clock = 1000.0
+    monkeypatch.setattr(runtimes.time, "monotonic", lambda: clock)
+
+    mda.answers[("GET", "/info")] = lambda _: httpx2.Response(503, json={"detail": "busy"})
+    failed = await dashboard.request("GET", "/info")
+    assert failed.status_code == 503
+    assert len(mda.sent("GET", "/info")) == 1
+
+    mda.answers[("GET", "/info")] = lambda _: httpx2.Response(
+        200, json={"flags": {"stream_lifecycle": True, "stream_namespaces": True}}
+    )
+    first = await dashboard.request("GET", "/info")
+    second = await dashboard.request("GET", "/info")
+    assert first.status_code == 200 and second.status_code == 200
+    assert len(mda.sent("GET", "/info")) == 2
+
+    clock += 299.0
+    third = await dashboard.request("GET", "/info")
+    assert third.status_code == 200
+    assert len(mda.sent("GET", "/info")) == 2
+
+    clock += 2.0
+    fourth = await dashboard.request("GET", "/info")
+    assert fourth.status_code == 200
+    assert len(mda.sent("GET", "/info")) == 3

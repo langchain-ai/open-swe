@@ -13,8 +13,8 @@ from openswe.threads import index
 from openswe.utils.thread_ops import langgraph_client
 
 SUCCEEDED_BY_KEY: Final = "succeeded_by"
-# Point at runs on the predecessor, which the successor has none of.
-_RUN_KEYS: Final = frozenset({"latest_run_id", "latest_run_status", "current_reviewer_run_id"})
+# Point at runs on another thread, which a successor or a copy has none of.
+RUN_KEYS: Final = frozenset({"latest_run_id", "latest_run_status", "current_reviewer_run_id"})
 
 
 async def succeed(thread_id: str) -> str:
@@ -29,7 +29,7 @@ async def succeed(thread_id: str) -> str:
             metadata={
                 key: value
                 for key, value in thread.metadata.items()
-                if key not in _RUN_KEYS and key != RUNTIME_METADATA_KEY
+                if key not in RUN_KEYS and key != RUNTIME_METADATA_KEY
             },
             if_exists="do_nothing",
         )

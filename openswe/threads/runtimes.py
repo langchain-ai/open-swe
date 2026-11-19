@@ -88,6 +88,9 @@ _CHANNEL_CONVERSATIONS_LIMIT: Final = 4096
 #: How long a channel thread's conversation is kept before MDA is asked again: a run
 #: may hand its thread to another conversation, a Slack thread it moved to.
 _CHANNEL_CONVERSATION_SECONDS: Final = 60.0
+#: How long MDA's ``/info`` flags are cached in process before refreshing.
+_INFO_TTL_SECONDS: Final = 300.0
+_INFO_RESPONSE_HEADERS: Final = ("content-type", "cache-control")
 # Connections each MDA client holds at once: the short calls, then the streams, which
 # stay open as long as someone watches a thread.
 _MDA_CONNECTIONS: Final = 100
@@ -268,6 +271,33 @@ class MdaRuntime:
         # Each channel thread's conversation on MDA, (provider, key), with when it was read;
         # the most recently used ones.
         self._channel_conversations: OrderedDict[str, tuple[str, str, float]] = OrderedDict()
+        self._info_cache: tuple[int, bytes, dict[str, str], float] | None = None
+        self._info_lock = asyncio.Lock()
+
+    async def info(self) -> tuple[int, bytes, dict[str, str]]:
+        """MDA's ``/info``, cached for 5 minutes once a ``200`` read succeeds."""
+        cached = self._info_cache
+        if cached is not None and time.monotonic() - cached[3] < _INFO_TTL_SECONDS:
+            return cached[0], cached[1], dict(cached[2])
+        async with self._info_lock:
+            cached = self._info_cache
+            if cached is not None and time.monotonic() - cached[3] < _INFO_TTL_SECONDS:
+                return cached[0], cached[1], dict(cached[2])
+            async with self.read_http as client:
+                response = await client.get("/info")
+            headers = {
+                name: value
+                for name in _INFO_RESPONSE_HEADERS
+                if (value := response.headers.get(name)) is not None
+            }
+            if response.status_code == 200:
+                self._info_cache = (
+                    response.status_code,
+                    response.content,
+                    headers,
+                    time.monotonic(),
+                )
+            return response.status_code, response.content, headers
 
     def _client(
         self, extra: Mapping[str, str], *, pool: str, max_connections: int = _MDA_CONNECTIONS

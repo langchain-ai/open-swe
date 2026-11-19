@@ -303,20 +303,27 @@ class ThreadOnRuntime:
         """Rejoin one of the thread's runs, and only one of the thread's, to watch it.
 
         MDA skips its own check that the run is the thread's for a join that sends
-        ``Last-Event-ID``, so the run is read here first. The join never cancels the run
-        when the caller leaves, whatever ``cancel_on_disconnect`` it sent: a caller who may
+        ``Last-Event-ID``, so any run other than the thread's server-recorded
+        ``latest_run_id`` is read here first. The join never cancels the run when the
+        caller leaves, whatever ``cancel_on_disconnect`` it sent: a caller who may
         only read the thread must not stop its run, which the cancel route checks.
         """
         run_path = f"/threads/{self.thread.thread_id}/runs/{run_id}"
-        async with self._client(held=False) as client:
-            try:
-                run = await client.get(run_path)
-            except httpx2.TransportError as exc:
-                raise HTTPException(502, _UNREACHABLE) from exc
-        if run.is_error:
-            return Response(
-                run.content, status_code=run.status_code, headers=self.client_headers(run)
-            )
+        latest_run_id = self.thread.metadata.get("latest_run_id")
+        if not (
+            self.thread.runtime == "mda"
+            and isinstance(latest_run_id, str)
+            and latest_run_id == run_id
+        ):
+            async with self._client(held=False) as client:
+                try:
+                    run = await client.get(run_path)
+                except httpx2.TransportError as exc:
+                    raise HTTPException(502, _UNREACHABLE) from exc
+            if run.is_error:
+                return Response(
+                    run.content, status_code=run.status_code, headers=self.client_headers(run)
+                )
         query = [
             (name, value)
             for name, value in request.query_params.multi_items()

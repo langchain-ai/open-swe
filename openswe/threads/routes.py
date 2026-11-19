@@ -703,16 +703,11 @@ async def api_create_thread_run(
 @router.get("/info")
 async def api_runtime_info(_principal: PrincipalDep) -> Response:
     """MDA's ``/info``: the features the SDK turns on are MDA's, not this deployment's."""
-    async with RUNTIMES.mda_runtime.read_http as client:
-        try:
-            response = await client.get("/info")
-        except httpx2.TransportError as exc:
-            raise HTTPException(502, "the runtime could not be reached") from exc
-    return Response(
-        response.content,
-        status_code=response.status_code,
-        headers=ThreadOnRuntime.client_headers(response),
-    )
+    try:
+        status_code, content, headers = await RUNTIMES.mda_runtime.info()
+    except httpx2.TransportError as exc:
+        raise HTTPException(502, "the runtime could not be reached") from exc
+    return Response(content, status_code=status_code, headers=headers)
 
 
 @router.post("/threads/{thread_id}/runs/stream")
