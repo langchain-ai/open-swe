@@ -71,15 +71,18 @@ describe("preferences saved while repositories were called projects", () => {
 })
 
 describe("sidebar grouping", () => {
-  it.each([undefined, "none", "date", "repo", "workspace"])(
-    "defaults to Recency while preserving saved grouping %s",
-    (organize) => {
-      window.localStorage.setItem(
-        SIDEBAR_PREFS_STORAGE_KEY,
-        JSON.stringify({ organize })
-      )
-      render(<OrganizeAndPins />)
-      expect(screen.getByRole("status").textContent).toBe(organize ?? "none")
-    }
-  )
+  it.each([
+    [undefined, "date"],
+    ["none", "date"],
+    ["date", "date"],
+    ["repo", "repo"],
+    ["workspace", "workspace"],
+  ])("reads saved grouping %s as %s", (organize, expected) => {
+    window.localStorage.setItem(
+      SIDEBAR_PREFS_STORAGE_KEY,
+      JSON.stringify({ organize })
+    )
+    render(<OrganizeAndPins />)
+    expect(screen.getByRole("status").textContent).toBe(expected)
+  })
 })

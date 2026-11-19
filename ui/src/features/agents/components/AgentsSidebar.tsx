@@ -112,7 +112,6 @@ import {
   DEFAULT_SIDEBAR_WORKSPACE_SLUG,
   groupRepoGroupsByWorkspace,
   groupSidebarThreadsByRecency,
-  groupSidebarThreadsByDay,
   sidebarRepoKey,
   sortSidebarThreads,
   sidebarItemContains,
@@ -650,7 +649,6 @@ export function AgentsSidebar({
         value={prefs.organize}
         onChange={(organize) => setView({ organize })}
         options={[
-          { value: "none", label: "Recency" },
           { value: "date", label: "Date" },
           { value: "repo", label: "Project" },
           { value: "workspace", label: "Environment" },
@@ -695,8 +693,7 @@ export function AgentsSidebar({
   )
 
   const threadGroups = (() => {
-    if (prefs.organize === "none") return groupSidebarThreadsByRecency(recents)
-    if (prefs.organize === "date") return groupSidebarThreadsByDay(recents)
+    if (prefs.organize === "date") return groupSidebarThreadsByRecency(recents)
     return []
   })()
   const recentGroups = threadGroups.length

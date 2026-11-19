@@ -5,7 +5,6 @@ import {
   cloudSidebarThread,
   groupRepoGroupsByWorkspace,
   groupSidebarThreadsByRecency,
-  groupSidebarThreadsByDay,
   sortSidebarThreads,
   sidebarRefreshInterval,
 } from "./sidebarThreads"
@@ -274,60 +273,6 @@ describe("groupSidebarThreadsByDate", () => {
       groupSidebarThreadsByRecency([thread], now).map((group) => group.label)
     ).toEqual(["Today"])
     expect(groupSidebarThreadsByRecency([], now)).toEqual([])
-  })
-})
-
-describe("calendar date grouping", () => {
-  it("keeps running and delegated sessions in their calendar days", () => {
-    const now = new Date(2026, 5, 20, 15)
-    const threads = [
-      cloudThread({
-        id: "running",
-        status: "running",
-        updatedAt: new Date(2026, 5, 12).getTime(),
-      }),
-      cloudThread({
-        id: "delegating",
-        status: "idle",
-        waitingForDelegatedWork: true,
-        updatedAt: new Date(2026, 5, 19, 12).getTime(),
-      }),
-      cloudThread({ id: "finished", status: "idle", updatedAt: now.getTime() }),
-    ].map(cloudSidebarThread)
-
-    expect(
-      groupSidebarThreadsByDay(threads, now).map((group) => [
-        group.key,
-        group.threads.map((thread) => thread.id),
-      ])
-    ).toEqual([
-      ["today", ["finished"]],
-      ["yesterday", ["delegating"]],
-      ["2026-06-12", ["running"]],
-    ])
-    expect(groupSidebarThreadsByDay([], now)).toEqual([])
-  })
-
-  it("keeps older calendar days separate instead of merging by recency", () => {
-    const now = new Date(2026, 5, 20, 15)
-    const threads = [12, 11].map((day) =>
-      cloudSidebarThread(
-        cloudThread({
-          id: String(day),
-          updatedAt: new Date(2026, 5, day, 12).getTime(),
-        })
-      )
-    )
-    expect(
-      groupSidebarThreadsByDay(threads, now).map((group) =>
-        group.threads.map((thread) => thread.id)
-      )
-    ).toEqual([["12"], ["11"]])
-    expect(
-      groupSidebarThreadsByRecency(threads, now).map((group) =>
-        group.threads.map((thread) => thread.id)
-      )
-    ).toEqual([["12", "11"]])
   })
 })
 

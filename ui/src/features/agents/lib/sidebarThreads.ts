@@ -302,61 +302,6 @@ export function groupSidebarThreadsByRecency(
   return groups
 }
 
-/** Buckets threads by their local activity day, newest first. */
-export function groupSidebarThreadsByDay(
-  threads: ReadonlyArray<SidebarThreadItem>,
-  now: Date = new Date()
-): Array<SidebarThreadGroup> {
-  const today = new Date(now).setHours(0, 0, 0, 0)
-  const yesterday = new Date(today).setDate(new Date(today).getDate() - 1)
-  const days = new Map<number, Array<SidebarThreadItem>>()
-
-  for (const thread of threads) {
-    const day = new Date(thread.updatedAt).setHours(0, 0, 0, 0)
-    const items = days.get(day) ?? []
-    items.push(thread)
-    days.set(day, items)
-  }
-
-  const groups: Array<SidebarThreadGroup> = [...days.entries()]
-    .sort(([left], [right]) => right - left)
-    .map(([day, items]) => {
-      if (day === today) {
-        return {
-          key: "today",
-          label: "Today",
-          threads: items.sort(byRecency),
-        }
-      }
-
-      if (day === yesterday) {
-        return {
-          key: "yesterday",
-          label: "Yesterday",
-          threads: items.sort(byRecency),
-        }
-      }
-
-      return {
-        // Collapsed sections are saved by key, so Today and Yesterday keep theirs
-        // as the days roll over, and an older day keeps its date.
-        key: new Date(day).toLocaleDateString("en-CA"),
-        label: new Date(day).toLocaleDateString([], {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-          year:
-            new Date(day).getFullYear() === now.getFullYear()
-              ? undefined
-              : "numeric",
-        }),
-        threads: items.sort(byRecency),
-      }
-    })
-
-  return groups
-}
-
 export function threadFamily(thread: AgentThread): Array<AgentThread> {
   return [thread, ...(thread.taskWorkers ?? [])]
 }

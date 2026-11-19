@@ -6,7 +6,7 @@ import type { SidebarFilters } from "./sidebarFilter"
 export const SIDEBAR_PREFS_STORAGE_KEY = "open-swe.agents.sidebar-prefs"
 const STORAGE_KEY = SIDEBAR_PREFS_STORAGE_KEY
 
-const ORGANIZE_MODES = ["none", "date", "repo", "workspace"] as const
+const ORGANIZE_MODES = ["date", "repo", "workspace"] as const
 
 export type OrganizeMode = (typeof ORGANIZE_MODES)[number]
 export type ChatSort = "created" | "updated"
@@ -31,7 +31,7 @@ export const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   expandedRepoKeys: [],
   collapsedSectionKeys: [],
   hiddenNavItems: ["/agents/skills", "/agents/reviews"],
-  organize: "none",
+  organize: "date",
 }
 
 function asStringArray(value: unknown): Array<string> {
@@ -80,11 +80,12 @@ function sanitizeFilters(value: unknown): SidebarFilters {
  * Stored keys predate repositories replacing "projects" in the sidebar: pins
  * and folds were saved under `project:` keys and a `"project"` organize mode.
  * Read them once under their new names so nobody loses their layout. The
- * `"list"` mode grouped by day, which is what `"date"` does now.
+ * `"list"` and `"none"` modes were earlier forms of `"date"`.
  */
 const LEGACY_ORGANIZE_MODES: Record<string, OrganizeMode> = {
   project: "repo",
   list: "date",
+  none: "date",
 }
 
 function migrateRepoKey(key: string): string {
