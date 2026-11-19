@@ -1,6 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { loginAs, SAME_USER } from "./helpers/dashboard";
 
+// A route handler still reading a response when the test ends must not fail it.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 type Shift = { value: number; at: number; nodes: Array<string> };
 
 // Data arriving after first paint (threads, projects, repositories) must not

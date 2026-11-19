@@ -13,6 +13,7 @@ export default defineConfig({
   reporter: [
     ["list"],
     ["html", { outputFolder: "playwright-report/desktop", open: "never" }],
+    ["json", { outputFile: "playwright-report/desktop/results.json" }],
   ],
   use: {
     ...baseConfig.use,

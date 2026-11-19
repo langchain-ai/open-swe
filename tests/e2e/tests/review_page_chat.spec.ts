@@ -8,6 +8,11 @@ import {
   type SeededPullRequest,
 } from "./helpers/dashboard";
 
+// A route handler still reading a response when the test ends must not fail it.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 const OWNER = "fakeorg";
 const REPO = "demo";
 const DESCRIPTION = "Adds the ALPHA and ZETA constant modules.";

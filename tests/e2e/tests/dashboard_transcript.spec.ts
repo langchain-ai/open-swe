@@ -13,6 +13,11 @@ import {
   waitForThreadNotBusy,
 } from "./helpers/dashboard";
 
+// A route handler still reading a response when the test ends must not fail it.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 // Rendering a finished Slack thread in the real dashboard. Driving the whole
 // Slack → implement → PR flow once per assertion dominated the suite, so the
 // tests below share one fixture thread and run in order — the two read-only

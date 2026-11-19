@@ -17,6 +17,11 @@ import {
   waitForThreadIdle,
 } from "./helpers/dashboard";
 
+// A route handler still reading a response when the test ends must not fail it.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 // Drives the REAL built ui/ app (served same-origin from the harness) for the
 // Slack → web handoff. Only the LLM/GitHub/Slack/token boundaries are faked.
 test.describe("Slack → web handoff (real dashboard UI)", () => {

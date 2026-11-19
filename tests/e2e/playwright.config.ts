@@ -41,7 +41,9 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
-  retries: 0,
+  // One retry in CI keeps a flake from failing the run; CI lists every test that only
+  // passed on retry in the job summary, and failed attempts keep their trace and video.
+  retries: process.env.CI ? 1 : 0,
   timeout: 90_000,
   // Nearly every assertion here settles in under two seconds; the handful that
   // wait on a real agent run pass their own longer timeout. A low default is

@@ -12,6 +12,11 @@ import {
   waitForThreadIdle,
 } from "./helpers/dashboard";
 
+// A route handler still reading a response when the test ends must not fail it.
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 const USER = {
   login: "threads-workspace-e2e",
   email: "threads-workspace-e2e@example.com",

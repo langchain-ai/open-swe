@@ -11,6 +11,7 @@ export default defineConfig({
   reporter: [
     ["list"],
     ["html", { outputFolder: "playwright-report/auth", open: "never" }],
+    ["json", { outputFile: "playwright-report/auth/results.json" }],
   ],
   webServer: servers.slice(1).map((server) => ({
     ...server,
