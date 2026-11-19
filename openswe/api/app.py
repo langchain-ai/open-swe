@@ -61,6 +61,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.database.notifications import LISTENER
     from openswe.jobs.kinds import SEGMENT_WORKER, start_jobs
     from openswe.jobs.kinds import WORKER as JOB_WORKER
+    from openswe.jobs.worker import WorkerShutdown
     from openswe.plugins.rooms import ROOMS as PLUGIN_ROOMS
     from openswe.review.styles import delete_analyzer_crons
     from openswe.sandboxes.providers.registry import validate_sandbox_startup_config
@@ -130,14 +131,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Warming the agent build failed", exc_info=True)
     try:
         async with AsyncExitStack() as stack:
+            stack.enter_context(WorkerShutdown(JOB_WORKER, SEGMENT_WORKER))
             stack.enter_context(watch_for_stalls())
             if AGENT_MCP is not None:
                 for mcp_app in AGENT_MCP.apps:
                     await stack.enter_async_context(mcp_app.lifespan(mcp_app))
             yield
     finally:
-        await SEGMENT_WORKER.stop()
-        await JOB_WORKER.stop()
+        await asyncio.gather(SEGMENT_WORKER.stop(), JOB_WORKER.stop())
         await HUB.stop()
         await bridge_listener.stop()
         await PLUGIN_ROOMS.stop()

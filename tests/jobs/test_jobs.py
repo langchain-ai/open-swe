@@ -1,6 +1,8 @@
 import asyncio
+import signal
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import FrameType
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -9,7 +11,7 @@ from sqlalchemy import text
 from openswe.database.postgres import transaction
 from openswe.jobs import queue
 from openswe.jobs.queue import Hold, Job
-from openswe.jobs.worker import JobWorker
+from openswe.jobs.worker import JobWorker, WorkerShutdown
 
 _PAST = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -53,26 +55,39 @@ async def test_a_due_job_runs_once_however_many_workers_poll() -> None:
 
 
 @pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("interruption", ["expired", "released"])
 async def test_a_reclaimed_wakeup_does_not_launch_a_second_run(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, interruption: str
 ) -> None:
     from openswe.jobs import kinds
 
     launched: list[str] = []
+    started = asyncio.Event()
 
     async def wakeup(payload: dict[str, object], *, job_id: str, due_at: datetime) -> str:
         launched.append(job_id)
+        if interruption == "released" and len(launched) == 1:
+            started.set()
+            await asyncio.Event().wait()
         return "run-1"
 
     monkeypatch.setattr(kinds, "run_thread_wakeup", wakeup)
     job = await queue.schedule("thread_wakeup", {"thread_id": "t1"}, due_at=_PAST)
-    [claimed] = await queue.claim_due(1)
-    await kinds._wake_thread(claimed)
-    async with transaction() as conn:
-        await conn.execute(
-            text("UPDATE job SET locked_until = :at WHERE id = :id"),
-            {"at": _PAST, "id": job.id},
-        )
+    if interruption == "released":
+        async with asyncio.timeout(2):
+            running = asyncio.create_task(kinds.WORKER.run_due())
+            await started.wait()
+            running.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await running
+    else:
+        [claimed] = await queue.claim_due(1)
+        await kinds._wake_thread(claimed)
+        async with transaction() as conn:
+            await conn.execute(
+                text("UPDATE job SET locked_until = :at WHERE id = :id"),
+                {"at": _PAST, "id": job.id},
+            )
 
     assert await kinds.WORKER.run_due() == 1
 
@@ -169,20 +184,29 @@ async def test_a_key_replaces_the_job_queued_under_it() -> None:
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_a_job_replaced_while_it_runs_keeps_its_replacement() -> None:
+async def test_a_job_replaced_while_it_runs_keeps_its_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.jobs import worker as worker_module
+
+    monkeypatch.setattr(worker_module, "_HEARTBEAT_SECONDS", 0.01)
     worker = JobWorker()
+    finished: list[bool] = []
 
     @worker.register("probe")
     async def replace_itself(job: Job) -> None:
         await queue.schedule(
             "probe", {"v": "new"}, due_at=datetime.now(UTC) + timedelta(hours=1), key="probe:b"
         )
+        await asyncio.sleep(0.05)
+        finished.append(True)
 
     await queue.schedule("probe", {"v": "old"}, due_at=_PAST, key="probe:b")
     await worker.run_due()
 
     [job] = await queue.find({})
     assert job.payload == {"v": "new"}
+    assert finished == [True]
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -193,6 +217,7 @@ async def test_a_run_that_ends_after_its_job_was_replaced_and_reclaimed_leaves_i
     [second] = await queue.claim_due(1)
 
     await first.finish()
+    await first.release(interrupted=True)
 
     assert await first.hold() == Hold.REPLACED
     assert await second.hold() == Hold.HELD
@@ -233,28 +258,44 @@ async def test_jobs_are_found_and_cancelled_by_metadata() -> None:
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_cancelling_a_running_job_stops_its_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("interruption", ["cancelled", "expired", "reclaimed"])
+async def test_losing_a_running_job_stops_its_handler(
+    monkeypatch: pytest.MonkeyPatch, interruption: str
+) -> None:
     from openswe.jobs import worker as worker_module
 
     monkeypatch.setattr(worker_module, "_HEARTBEAT_SECONDS", 0.05)
-    started = asyncio.Event()
+    started: asyncio.Future[Job] = asyncio.get_running_loop().create_future()
     finished: list[bool] = []
     worker = JobWorker()
 
     @worker.register("probe")
     async def long_running(job: Job) -> None:
-        started.set()
+        started.set_result(job)
         await asyncio.sleep(5)
         finished.append(True)
 
-    job = await queue.schedule("probe", due_at=_PAST)
+    await queue.schedule("probe", due_at=_PAST)
     running = asyncio.create_task(worker.run_due())
-    await started.wait()
-    await queue.cancel(job.id)
+    job = await started
+    replacement: Job | None = None
+    if interruption == "cancelled":
+        await queue.cancel(job.id)
+    else:
+        async with transaction() as conn:
+            await conn.execute(
+                text("UPDATE job SET locked_until = :at WHERE id = :id"),
+                {"at": _PAST, "id": job.id},
+            )
+        job.locked_until = _PAST
+        if interruption == "reclaimed":
+            [replacement] = await queue.claim_due(1)
 
     async with asyncio.timeout(2):
         await running
     assert finished == []
+    if replacement is not None:
+        assert await replacement.hold() == Hold.HELD
 
 
 @pytest.mark.usefixtures("registry_db", "memory_event_claims")
@@ -279,3 +320,169 @@ async def test_an_automation_fire_claimed_again_after_a_crash_launches_once(
     await kinds._agent_schedule(next_fire)
 
     assert launched == ["a1", "a1"]
+
+
+@pytest.mark.usefixtures("registry_db")
+async def test_an_expired_lease_cannot_be_renewed_before_takeover() -> None:
+    await queue.schedule("probe", due_at=_PAST)
+    [first] = await queue.claim_due(1)
+    async with transaction() as conn:
+        await conn.execute(
+            text("UPDATE job SET locked_until = :at WHERE id = :id"),
+            {"at": _PAST, "id": first.id},
+        )
+
+    assert await first.hold() == Hold.LOST
+    [second] = await queue.claim_due(1)
+    await first.release()
+    assert await second.hold() == Hold.HELD
+    await second.release()
+    [third] = await queue.claim_due(1)
+    assert third.lapsed_lease is not None
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("finish_during_drain", [True, False])
+async def test_shutdown_hands_off_only_after_the_handler_stops(
+    monkeypatch: pytest.MonkeyPatch, finish_during_drain: bool
+) -> None:
+    from openswe.jobs import worker as worker_module
+
+    monkeypatch.setattr(worker_module, "_DRAIN_SECONDS", 0.01)
+    started, completing, stopped = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    worker = JobWorker()
+
+    @worker.register("probe")
+    async def probe(job: Job) -> None:
+        started.set()
+        try:
+            await completing.wait()
+        finally:
+            assert await queue.claim_due(1) == []
+            stopped.set()
+
+    await queue.schedule("probe", due_at=_PAST)
+    worker.start()
+    try:
+        async with asyncio.timeout(2):
+            await started.wait()
+            if finish_during_drain:
+                completing.set()
+            await asyncio.gather(worker.stop(), worker.stop())
+        assert stopped.is_set()
+        if finish_during_drain:
+            assert await queue.find({}) == []
+        else:
+            [resumed] = await queue.claim_due(1)
+            assert resumed.attempts == 0
+            assert resumed.lapsed_lease is not None
+    finally:
+        completing.set()
+        await worker.stop()
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("loop_handler", [False, True])
+async def test_sigterm_drains_before_server_lifespan_shutdown_and_preserves_its_handler(
+    monkeypatch: pytest.MonkeyPatch, loop_handler: bool
+) -> None:
+    from openswe.jobs import worker as worker_module
+
+    monkeypatch.setattr(worker_module, "_DRAIN_SECONDS", 0.01)
+    server_signalled, started, stopped = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    worker, segment_worker = JobWorker(), JobWorker()
+    loop = asyncio.get_running_loop()
+    original = signal.getsignal(signal.SIGTERM)
+
+    def server_shutdown(signum: int, frame: FrameType | None) -> None:
+        server_signalled.set()
+
+    if loop_handler:
+        loop.add_signal_handler(signal.SIGTERM, server_signalled.set)
+    else:
+        signal.signal(signal.SIGTERM, server_shutdown)
+    server_handler = signal.getsignal(signal.SIGTERM)
+
+    @worker.register("probe")
+    async def probe(job: Job) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    await queue.schedule("probe", due_at=_PAST)
+    worker.start()
+    segment_worker.start()
+    try:
+        with WorkerShutdown(worker, segment_worker):
+            async with asyncio.timeout(2):
+                await started.wait()
+                signal.raise_signal(signal.SIGTERM)
+                await server_signalled.wait()
+                await stopped.wait()
+                await asyncio.gather(worker.stop(), segment_worker.stop())
+            [resumed] = await queue.claim_due(1)
+            assert resumed.kind == "probe"
+        assert signal.getsignal(signal.SIGTERM) == server_handler
+    finally:
+        await asyncio.gather(worker.stop(), segment_worker.stop())
+        if loop_handler:
+            loop.remove_signal_handler(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, original)
+
+
+@pytest.mark.usefixtures("registry_db")
+@pytest.mark.parametrize("hang", [False, True])
+@pytest.mark.parametrize("recover", [False, True])
+async def test_renewal_failures_retry_only_while_the_confirmed_lease_is_safe(
+    monkeypatch: pytest.MonkeyPatch, hang: bool, recover: bool
+) -> None:
+    from openswe.jobs import worker as worker_module
+
+    monkeypatch.setattr(worker_module, "_HEARTBEAT_SECONDS", 0.01)
+    monkeypatch.setattr(worker_module, "_RENEW_TIMEOUT_SECONDS", 0.01)
+    started, failed, renewed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    stopped: list[bool] = []
+    finished: list[bool] = []
+    hold = Job.hold
+
+    async def failing_hold(job: Job) -> Hold:
+        if started.is_set():
+            if not recover or not failed.is_set():
+                failed.set()
+                if not recover:
+                    job.locked_until = datetime.now(UTC)
+                if hang:
+                    await asyncio.Event().wait()
+                raise OSError("database unavailable")
+            result = await hold(job)
+            renewed.set()
+            return result
+        return await hold(job)
+
+    monkeypatch.setattr(Job, "hold", failing_hold)
+    worker = JobWorker()
+
+    @worker.register("probe")
+    async def probe(job: Job) -> None:
+        started.set()
+        try:
+            await renewed.wait()
+            finished.append(True)
+        finally:
+            assert await queue.claim_due(1) == []
+            stopped.append(True)
+
+    await queue.schedule("probe", due_at=_PAST)
+    async with asyncio.timeout(2):
+        await worker.run_due()
+
+    assert stopped == [True]
+    assert finished == ([True] if recover else [])
+    if recover:
+        assert await queue.find({}) == []
+    else:
+        [resumed] = await queue.claim_due(1)
+        assert resumed.attempts == 0
+        assert resumed.lapsed_lease is not None

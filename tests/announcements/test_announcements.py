@@ -113,10 +113,14 @@ async def test_everyone_on_slack_gets_one_dm_through_rate_limits_and_refusals(
     assert summary["finished_at"] is not None
 
 
-async def test_a_resumed_send_never_redelivers_someone_caught_mid_send(slack: FakeSlack) -> None:
+async def test_a_resumed_send_never_redelivers_sent_or_interrupted_recipients(
+    slack: FakeSlack,
+) -> None:
+    sent = await _person(("slack", "USENT"))
     caught = await _person(("slack", "UCAUGHT"))
     await _person(("slack", "UNEXT"))
     announcement = await Announcement.create("hello", None)
+    await announcement.record(sent.id, "sent")
     await announcement.record(caught.id, "sending")
 
     result = await delivery.deliver_announcement(str(announcement.id))
@@ -124,7 +128,7 @@ async def test_a_resumed_send_never_redelivers_someone_caught_mid_send(slack: Fa
     assert slack.delivered == ["UNEXT"]
     assert result == {"status": "finished", "sent": 1, "failed": 0}
     [summary] = await Announcement.recent()
-    assert summary.failed == 1
+    assert (summary.sent, summary.failed) == (2, 1)
 
 
 async def test_only_admins_announce_and_a_test_reaches_only_the_admin(

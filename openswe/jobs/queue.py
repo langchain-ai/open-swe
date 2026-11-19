@@ -23,13 +23,14 @@ from openswe.database.postgres import transaction
 logger = logging.getLogger(__name__)
 
 # How long a worker holds a claimed job; another replica takes it after that.
-CLAIM_TTL: Final = timedelta(minutes=30)
+CLAIM_TTL: Final = timedelta(minutes=2)
 MAX_ATTEMPTS: Final = 5
 _RETRY_BASE: Final = timedelta(seconds=30)
 _RETRY_CAP: Final = timedelta(hours=1)
 
 _COLUMNS: Final = (
-    "id, kind, payload, due_at, cron, timezone, key, metadata, attempts, created_at, claim_token"
+    "id, kind, payload, due_at, cron, timezone, key, metadata, attempts, created_at, "
+    "claim_token, locked_until"
 )
 
 
@@ -41,9 +42,9 @@ class Hold(Enum):
     """What a running job learns when it renews its claim."""
 
     HELD = "held"
-    # Queued again under its key: this run finishes unrenewed, and the replacement stays.
     REPLACED = "replaced"
     CANCELLED = "cancelled"
+    LOST = "lost"
 
 
 class Job(BaseModel):
@@ -59,6 +60,7 @@ class Job(BaseModel):
     created_at: datetime
     # The claim a worker's run holds this job under; ``None`` while it waits.
     claim_token: uuid.UUID | None = None
+    locked_until: datetime | None = None
     # When this claim took the job over from one whose lease ran out: its worker
     # died or stalled mid-run.
     lapsed_lease: datetime | None = None
@@ -95,20 +97,47 @@ class Job(BaseModel):
 
     async def hold(self) -> Hold:
         """Renew this run's claim, unless the job was replaced or cancelled meanwhile."""
+        replaced = None
         async with transaction() as conn:
-            renewed = (
-                await conn.execute(
+            renewed = await conn.scalar(
+                text(
+                    "UPDATE job SET locked_until = clock_timestamp() + CAST(:ttl AS interval), "
+                    f"{_SYSTEM_WRITE} WHERE id = :id AND claim_token = :token "
+                    "AND locked_until > clock_timestamp() RETURNING locked_until"
+                ),
+                {"id": self.id, "token": self.claim_token, "ttl": CLAIM_TTL},
+            )
+            if renewed is None:
+                replaced = await conn.scalar(
                     text(
-                        "UPDATE job SET locked_until = clock_timestamp() + CAST(:ttl AS interval), "
-                        f"{_SYSTEM_WRITE} WHERE id = :id AND claim_token = :token RETURNING 1"
+                        "SELECT claim_token IS DISTINCT FROM CAST(:token AS uuid) "
+                        "AND coalesce(clock_timestamp() < CAST(:lease_until AS timestamptz), false) "
+                        "FROM job WHERE id = :id"
                     ),
-                    {"id": self.id, "token": self.claim_token, "ttl": CLAIM_TTL},
+                    {"id": self.id, "token": self.claim_token, "lease_until": self.locked_until},
                 )
-            ).first()
-            if renewed is not None:
-                return Hold.HELD
-            exists = await conn.scalar(text("SELECT 1 FROM job WHERE id = :id"), {"id": self.id})
-        return Hold.REPLACED if exists else Hold.CANCELLED
+        if renewed is not None:
+            self.locked_until = renewed
+            return Hold.HELD
+        if replaced is None:
+            return Hold.CANCELLED
+        return Hold.REPLACED if replaced else Hold.LOST
+
+    async def release(self, *, interrupted: bool = False) -> None:
+        """Release this claim, preserving recovery state when work may have started."""
+        async with transaction() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE job SET locked_until = CASE WHEN :interrupted "
+                    "THEN clock_timestamp() ELSE NULL END, claim_token = NULL, "
+                    f"{_SYSTEM_WRITE} WHERE id = :id AND claim_token = :token"
+                ),
+                {
+                    "id": self.id,
+                    "token": self.claim_token,
+                    "interrupted": interrupted or self.lapsed_lease is not None,
+                },
+            )
 
     async def finish(self) -> None:
         """Delete a one-shot job, or move a cron job to its next fire time."""
