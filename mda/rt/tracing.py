@@ -143,6 +143,17 @@ class TurnTrace:
         if self.root is not None:
             self.root.metadata["model"] = model_id
 
+    @staticmethod
+    def record_output_limit(stop_reason: str) -> None:
+        try:
+            if (root := TurnTrace.current_root()) is not None:
+                tags = root.tags or []
+                if "model_output_limit" not in tags:
+                    root.tags = [*tags, "model_output_limit"]
+                root.metadata["model_output_limit"] = stop_reason
+        except Exception:
+            logger.warning("Could not tag the turn trace for a cut-off reply", exc_info=True)
+
     def record_tool(self, *, errored: bool, nonzero_shell_exit: bool) -> None:
         """Count a tool call the turn finished on its root.
 

@@ -20,6 +20,7 @@ from langchain.agents.middleware.types import (
     ModelResponse,
 )
 from langchain_anthropic import ChatAnthropic
+from langchain_core.exceptions import ModelRefusalError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -32,6 +33,7 @@ from langchain_core.messages import (
 from langchain_core.tools import tool
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
+from langsmith.run_trees import RunTree
 from pydantic import SecretStr
 from rt.backend import Run, RunContext
 from rt.gateway import RUN_GATEWAY
@@ -40,6 +42,7 @@ from rt.model_calls import (
     MODEL_OUTAGE_MESSAGE,
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,
+    OutputLimitMiddleware,
     ReplayableHistoryMiddleware,
     call_with_fallback,
     model_call_guards,
@@ -47,6 +50,7 @@ from rt.model_calls import (
 from rt.model_retries import ModelRetriesMiddleware
 from rt.models import ModelSpec, build_model
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
+from rt.tracing import TurnTrace
 from runtime_api.catalog import Catalog, LoopRules, RoutingRules, RunModels
 from runtime_api.loop import GatewayCredential
 from runtime_api.model_errors import is_model_failure_reply
@@ -270,6 +274,50 @@ async def test_a_provider_timeout_is_not_reported_as_budget_exhaustion() -> None
         )
 
     assert raised.value is error
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"stop_reason": "max_tokens"},
+        {"finish_reason": "length"},
+        {"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}},
+    ],
+)
+@pytest.mark.parametrize("written", ["", "The first half of the answer"])
+async def test_a_subagent_reply_cut_off_at_the_output_limit_says_so(
+    metadata: dict[str, object], written: str
+) -> None:
+    reply = AIMessage(content=written, response_metadata=metadata)
+    handler = AsyncMock(return_value=ModelResponse(result=[reply]))
+    request = cast(ModelRequest, MagicMock())
+
+    subagent = await OutputLimitMiddleware(subagent=True).awrap_model_call(request, handler)
+    agent = await OutputLimitMiddleware().awrap_model_call(request, handler)
+
+    answer = subagent.result[-1]
+    assert answer.text.startswith(written)
+    assert "cut off at the model's output limit" in answer.text
+    assert agent.result == [reply]
+
+
+async def test_main_agent_cutoffs_tag_the_turn_once_without_changing_replies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = RunTree(name="turn", run_type="chain", tags=["existing"])
+    monkeypatch.setattr(TurnTrace, "current_root", lambda: root)
+    reply = AIMessage(content="Partial", response_metadata={"finish_reason": "length"})
+    handler = AsyncMock(return_value=ModelResponse(result=[reply]))
+    request = ModelRequest(model=_OPENAI, messages=[])
+    middleware = OutputLimitMiddleware()
+
+    for _ in range(2):
+        assert (await middleware.awrap_model_call(request, handler)).result == [reply]
+    assert root.tags == ["existing", "model_output_limit"]
+    assert root.metadata["model_output_limit"] == "length"
+
+    monkeypatch.setattr(TurnTrace, "current_root", MagicMock(side_effect=RuntimeError))
+    assert (await middleware.awrap_model_call(request, handler)).result == [reply]
 
 
 @pytest.mark.parametrize("with_image", [True, False])
@@ -529,6 +577,60 @@ async def test_a_lasting_outage_ends_with_a_message_instead_of_failing_the_run()
     assert response.result[0].content == MODEL_OUTAGE_MESSAGE
     assert is_model_failure_reply(response.result[0])
     assert attempts.models == [_ANTHROPIC, _OPENAI, _ANTHROPIC, _OPENAI]
+
+
+def _refusal(written: str) -> ModelRefusalError:
+    return ModelRefusalError(
+        "Model refused to produce the requested output",
+        raw_message=AIMessage(
+            content=[
+                *([{"type": "text", "text": written}] if written else []),
+                {"type": "refusal", "refusal": "I can't help with that."},
+            ]
+        ),
+    )
+
+
+async def test_a_refused_reply_goes_once_to_the_fallback() -> None:
+    attempts = _Attempts(_refusal(""))
+
+    response = await _fallback_call(attempts)
+
+    assert response.result[0].content == "answered"
+    assert attempts.models == [_ANTHROPIC, _OPENAI]
+
+
+@pytest.mark.parametrize("fallback", [None, lambda: _OPENAI])
+@pytest.mark.parametrize("written", ["", "Here is the first half"])
+async def test_a_refused_reply_ends_the_run_saying_so_and_keeps_what_was_written(
+    fallback: Callable[[], BaseChatModel] | None, written: str
+) -> None:
+    attempts = _Attempts(_refusal(written), _refusal(written), _refusal(written))
+
+    answer = await call_with_fallback(
+        ModelRequest(model=_ANTHROPIC, messages=[]),
+        attempts,
+        fallback,
+        backoff_schedule=(0.0, 0.0, 0.0),
+    )
+
+    reply = answer.result[0]
+    assert is_model_failure_reply(reply)
+    assert "provider blocked" in reply.text
+    assert reply.text.startswith(written)
+    assert attempts.models == ([_ANTHROPIC] if fallback is None else [_ANTHROPIC, _OPENAI])
+
+
+async def test_a_refused_reply_survives_a_transient_failure_on_failover() -> None:
+    attempts = _Attempts(_refusal("Here is the first half"), TimeoutError("stalled"))
+
+    answer = await _fallback_call(attempts)
+
+    reply = answer.result[0]
+    assert is_model_failure_reply(reply)
+    assert reply.text.startswith("Here is the first half")
+    assert "provider blocked" in reply.text
+    assert attempts.models == [_ANTHROPIC, _OPENAI]
 
 
 async def test_a_model_the_workspace_cannot_use_says_so() -> None:
