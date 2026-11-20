@@ -19,7 +19,9 @@ from openswe.webhooks.event_log import (
 router = APIRouter(tags=["event-log"], dependencies=[Depends(admin_session)])
 
 
-@router.get("/admin/event-log")
+# EasyPrivacy blocks every URL containing "/event-log?", so the search sits one level
+# down or content blockers drop the request before it leaves the browser.
+@router.get("/admin/event-log/search")
 async def api_search_event_log(
     start_time: AwareDatetime,
     end_time: AwareDatetime,

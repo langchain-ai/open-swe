@@ -11604,9 +11604,9 @@
         ]
       }
     },
-    "/dashboard/api/admin/event-log": {
+    "/dashboard/api/admin/event-log/search": {
       "get": {
-        "operationId": "api_search_event_log_dashboard_api_admin_event_log_get",
+        "operationId": "api_search_event_log_dashboard_api_admin_event_log_search_get",
         "parameters": [
           {
             "in": "query",

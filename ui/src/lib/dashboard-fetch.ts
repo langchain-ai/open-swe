@@ -64,7 +64,10 @@ export class DashboardRequestError extends Error {
 /** Wraps a fetch rejection so a request that never reached the server keeps its ID. */
 export function networkError(cause: unknown, requestId: string): unknown {
   if (cause instanceof DOMException && cause.name === "AbortError") return cause
-  return new DashboardRequestError(0, "Couldn't reach the server.", requestId, {
-    cause,
-  })
+  return new DashboardRequestError(
+    0,
+    "Couldn't reach the server. An ad or content blocker may have blocked the request.",
+    requestId,
+    { cause }
+  )
 }

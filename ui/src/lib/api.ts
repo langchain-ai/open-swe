@@ -1717,7 +1717,7 @@ export const api = {
   searchEventLog: (filters: EventLogFilters, cursor?: string) => {
     const params = new URLSearchParams({ ...filters, limit: "50" })
     if (cursor) params.set("cursor", cursor)
-    return request<EventLogPage>(`/admin/event-log?${params}`)
+    return request<EventLogPage>(`/admin/event-log/search?${params}`)
   },
   searchEventLogUsers: (q: string) =>
     request<EventLogUser[]>(
