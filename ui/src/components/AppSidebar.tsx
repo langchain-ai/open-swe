@@ -71,8 +71,8 @@ const NAV: Array<NavGroup> = [
         icon: PuzzlePieceIcon,
       },
       {
-        to: "/my-settings/experiments",
-        label: "Experiments",
+        to: "/my-settings/feature-flags",
+        label: "Feature flags",
         icon: FlaskIcon,
       },
     ],

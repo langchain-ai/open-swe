@@ -39,6 +39,7 @@ import { Route as MySettingsAboutRouteImport } from './routes/my-settings_.about
 import { Route as MySettingsAgentRouteImport } from './routes/my-settings_.agent'
 import { Route as MySettingsConnectionsRouteImport } from './routes/my-settings_.connections'
 import { Route as MySettingsExperimentsRouteImport } from './routes/my-settings_.experiments'
+import { Route as MySettingsFeatureFlagsRouteImport } from './routes/my-settings_.feature-flags'
 import { Route as MySettingsGitRouteImport } from './routes/my-settings_.git'
 import { Route as MySettingsInstructionsRouteImport } from './routes/my-settings_.instructions'
 import { Route as MySettingsPluginsRouteImport } from './routes/my-settings_.plugins'
@@ -204,6 +205,11 @@ const MySettingsExperimentsRoute = MySettingsExperimentsRouteImport.update({
   path: '/my-settings/experiments',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MySettingsFeatureFlagsRoute = MySettingsFeatureFlagsRouteImport.update({
+  id: '/my-settings_/feature-flags',
+  path: '/my-settings/feature-flags',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MySettingsGitRoute = MySettingsGitRouteImport.update({
   id: '/my-settings_/git',
   path: '/my-settings/git',
@@ -306,6 +312,7 @@ export interface FileRoutesByFullPath {
   '/my-settings/agent': typeof MySettingsAgentRoute
   '/my-settings/connections': typeof MySettingsConnectionsRoute
   '/my-settings/experiments': typeof MySettingsExperimentsRoute
+  '/my-settings/feature-flags': typeof MySettingsFeatureFlagsRoute
   '/my-settings/git': typeof MySettingsGitRoute
   '/my-settings/instructions': typeof MySettingsInstructionsRoute
   '/my-settings/plugins': typeof MySettingsPluginsRoute
@@ -350,6 +357,7 @@ export interface FileRoutesByTo {
   '/my-settings/agent': typeof MySettingsAgentRoute
   '/my-settings/connections': typeof MySettingsConnectionsRoute
   '/my-settings/experiments': typeof MySettingsExperimentsRoute
+  '/my-settings/feature-flags': typeof MySettingsFeatureFlagsRoute
   '/my-settings/git': typeof MySettingsGitRoute
   '/my-settings/instructions': typeof MySettingsInstructionsRoute
   '/my-settings/plugins': typeof MySettingsPluginsRoute
@@ -397,6 +405,7 @@ export interface FileRoutesById {
   '/my-settings_/agent': typeof MySettingsAgentRoute
   '/my-settings_/connections': typeof MySettingsConnectionsRoute
   '/my-settings_/experiments': typeof MySettingsExperimentsRoute
+  '/my-settings_/feature-flags': typeof MySettingsFeatureFlagsRoute
   '/my-settings_/git': typeof MySettingsGitRoute
   '/my-settings_/instructions': typeof MySettingsInstructionsRoute
   '/my-settings_/plugins': typeof MySettingsPluginsRoute
@@ -445,6 +454,7 @@ export interface FileRouteTypes {
     | '/my-settings/agent'
     | '/my-settings/connections'
     | '/my-settings/experiments'
+    | '/my-settings/feature-flags'
     | '/my-settings/git'
     | '/my-settings/instructions'
     | '/my-settings/plugins'
@@ -489,6 +499,7 @@ export interface FileRouteTypes {
     | '/my-settings/agent'
     | '/my-settings/connections'
     | '/my-settings/experiments'
+    | '/my-settings/feature-flags'
     | '/my-settings/git'
     | '/my-settings/instructions'
     | '/my-settings/plugins'
@@ -535,6 +546,7 @@ export interface FileRouteTypes {
     | '/my-settings_/agent'
     | '/my-settings_/connections'
     | '/my-settings_/experiments'
+    | '/my-settings_/feature-flags'
     | '/my-settings_/git'
     | '/my-settings_/instructions'
     | '/my-settings_/plugins'
@@ -577,6 +589,7 @@ export interface RootRouteChildren {
   MySettingsAgentRoute: typeof MySettingsAgentRoute
   MySettingsConnectionsRoute: typeof MySettingsConnectionsRoute
   MySettingsExperimentsRoute: typeof MySettingsExperimentsRoute
+  MySettingsFeatureFlagsRoute: typeof MySettingsFeatureFlagsRoute
   MySettingsGitRoute: typeof MySettingsGitRoute
   MySettingsInstructionsRoute: typeof MySettingsInstructionsRoute
   MySettingsPluginsRoute: typeof MySettingsPluginsRoute
@@ -797,6 +810,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MySettingsExperimentsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/my-settings_/feature-flags': {
+      id: '/my-settings_/feature-flags'
+      path: '/my-settings/feature-flags'
+      fullPath: '/my-settings/feature-flags'
+      preLoaderRoute: typeof MySettingsFeatureFlagsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/my-settings_/git': {
       id: '/my-settings_/git'
       path: '/my-settings/git'
@@ -971,6 +991,7 @@ const rootRouteChildren: RootRouteChildren = {
   MySettingsAgentRoute: MySettingsAgentRoute,
   MySettingsConnectionsRoute: MySettingsConnectionsRoute,
   MySettingsExperimentsRoute: MySettingsExperimentsRoute,
+  MySettingsFeatureFlagsRoute: MySettingsFeatureFlagsRoute,
   MySettingsGitRoute: MySettingsGitRoute,
   MySettingsInstructionsRoute: MySettingsInstructionsRoute,
   MySettingsPluginsRoute: MySettingsPluginsRoute,

@@ -1,43 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router"
-
-import { SettingsPage, SettingsSection } from "@/components/AppShell"
-import { StreamPreference } from "@/features/settings/components/StreamPreference"
-import { ProfileSwitchRow } from "@/features/settings/components/ProfileSwitchRow"
-import { pageTitle } from "@/lib/pageTitle"
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/my-settings_/experiments")({
-  component: ExperimentsPage,
-  head: () => ({ meta: [{ title: pageTitle("Experiments") }] }),
+  component: () => <Navigate to="/my-settings/feature-flags" replace />,
 })
-
-function ExperimentsPage() {
-  return (
-    <SettingsPage
-      title="Experiments"
-      description="Features under test. They may change or go away."
-    >
-      <SettingsSection title="Interface">
-        <StreamPreference />
-      </SettingsSection>
-      <SettingsSection title="Slack">
-        <ProfileSwitchRow
-          field="concierge_mode"
-          label="Concierge mode"
-          description="Your whole DM with Robin becomes one private thread it always answers in, instead of a new thread per message."
-        />
-      </SettingsSection>
-      <SettingsSection title="Agent">
-        <ProfileSwitchRow
-          field="experimental_classify"
-          label="Classify tool"
-          description="Robin can classify text or JSON from code mode with TypeSafe's System One model: fast, typed decisions with calibrated confidence."
-        />
-        <ProfileSwitchRow
-          field="experimental_background_callbacks"
-          label="Background command callbacks"
-          description="Background commands you start report completion from the sandbox instead of being polled every minute."
-        />
-      </SettingsSection>
-    </SettingsPage>
-  )
-}
