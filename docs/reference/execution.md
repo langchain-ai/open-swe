@@ -52,8 +52,8 @@ A configured setup script runs in a throwaway builder for nightly full builds; n
 Updates do not retrofit an existing sandbox.
 A failed build leaves the previous good image in place.
 
-Scripts receive space-delimited preload names through `OPENSWE_REPOS` and clone them under `/workspace/<repo>`.
-`OPENSWE_WORKSPACE_REPOS` is an alias only for compatibility with already-stored scripts; use `OPENSWE_REPOS` in new scripts.
+Scripts receive space-delimited preload names through `ROBIN_REPOS` and clone them under `/workspace/<repo>`.
+`OPENSWE_REPOS` and `OPENSWE_WORKSPACE_REPOS` are aliases for compatibility with already-stored scripts; use `ROBIN_REPOS` in new scripts.
 Preloads are an intended image inventory, not proof that an existing sandbox contains a checkout.
 Do not write secrets into captured files.
 

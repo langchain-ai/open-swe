@@ -164,6 +164,7 @@ async def test_global_publication_requires_the_original_definition_and_live_queu
         == f"tag:{tag}"
     )
     command = backend.aexecute.call_args_list[0].args[0]
+    assert "ROBIN_REPOS=acme/preload" in command
     assert "OPENSWE_REPOS=acme/preload" in command
     assert "OPENSWE_WORKSPACE_REPOS=acme/preload" in command
     release.assert_awaited_once_with("sb-builder")

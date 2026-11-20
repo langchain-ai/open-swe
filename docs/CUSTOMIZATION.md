@@ -28,7 +28,7 @@ Managed Deep Agents creates it; the backend connects to it through `openswe/sand
 New sandboxes use Robin's global execution image, falling back to the configured base or LangSmith's root snapshot when no image is set.
 Admins configure the base snapshot, shared instructions, preloads, scripts, and resources under **Defaults** (`/settings`) or with `configure_execution_defaults`.
 Use `rebuild_execution_image` to build the image or `publish_execution_image()` to capture an explicitly provisioned thread sandbox; saving configuration alone does neither.
-Setup and update scripts receive space-delimited preload repository names in `OPENSWE_REPOS`; `OPENSWE_WORKSPACE_REPOS` remains only an alias for already-stored scripts.
+Setup and update scripts receive space-delimited preload repository names in `ROBIN_REPOS`; `OPENSWE_REPOS` and `OPENSWE_WORKSPACE_REPOS` remain aliases for already-stored scripts.
 See [Defaults, routing, and sandbox images](reference/execution.md) for authorization and build details.
 
 Per-sandbox resources are configured on the deployment:

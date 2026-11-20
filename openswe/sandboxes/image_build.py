@@ -33,8 +33,7 @@ REFRESH_LOG_TAIL_CHARS = 6_000
 LIVE_LOG_MAX_BYTES = 6_000
 LIVE_LOG_READ_TIMEOUT_SECONDS = 10
 DEFAULT_SCRIPT_ROOT = "/open-swe/environment"
-REPOS_ENV_VAR = "OPENSWE_REPOS"
-LEGACY_REPOS_ENV_VAR = "OPENSWE_WORKSPACE_REPOS"
+REPOS_ENV_VARS = ("ROBIN_REPOS", "OPENSWE_REPOS", "OPENSWE_WORKSPACE_REPOS")
 SNAPSHOT_TAG = "latest"
 
 
@@ -159,6 +158,7 @@ class SnapshotBuild:
         log_path = SnapshotBuild.script_log_path(label)
         encoded = base64.b64encode(script.encode()).decode()
         repositories = shlex.quote(" ".join(repos))
+        environment = " ".join(f"{name}={repositories}" for name in REPOS_ENV_VARS)
         commands = []
         if label == "update":
             for repo in repos:
@@ -173,7 +173,7 @@ class SnapshotBuild:
         return (
             f"mkdir -p {shlex.quote(f'{root}/logs')} "
             f"&& printf %s {shlex.quote(encoded)} | base64 -d > {shlex.quote(path)} "
-            f"&& {{ {REPOS_ENV_VAR}={repositories} {LEGACY_REPOS_ENV_VAR}={repositories} "
+            f"&& {{ {environment} "
             f"GIT_TERMINAL_PROMPT=0 bash -xc {invocation} > {shlex.quote(log_path)} 2>&1; }}; "
             f"rc=$?; cat {shlex.quote(log_path)} 2>/dev/null; exit $rc"
         )

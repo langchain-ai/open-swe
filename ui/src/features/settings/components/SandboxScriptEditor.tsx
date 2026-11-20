@@ -14,7 +14,7 @@ function PreloadedReposPopover({ repos }: { repos: string[] }) {
   return (
     <Popover>
       <PopoverTrigger className="cursor-pointer rounded-sm font-mono underline decoration-dotted underline-offset-4 hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none">
-        OPENSWE_REPOS
+        ROBIN_REPOS
       </PopoverTrigger>
       <PopoverContent
         align="start"
@@ -25,7 +25,7 @@ function PreloadedReposPopover({ repos }: { repos: string[] }) {
           Expanded value
         </p>
         <pre className="mt-space-2 max-h-60 overflow-auto rounded-md bg-surface-level-2 p-space-3 font-mono text-xs break-all whitespace-pre-wrap text-primary">
-          <code>{`OPENSWE_REPOS="${repos.join(" ")}"`}</code>
+          <code>{`ROBIN_REPOS="${repos.join(" ")}"`}</code>
         </pre>
       </PopoverContent>
     </Popover>

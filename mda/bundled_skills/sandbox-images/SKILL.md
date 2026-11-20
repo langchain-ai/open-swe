@@ -75,8 +75,8 @@ Genuinely missing dependencies still follow repository setup and approval rules.
 When present, a nightly full build runs it on a throwaway builder and publishes only after success.
 With no setup script, there is no nightly full build; saving configuration still does not provision anything.
 Write non-interactive, repeatable scripts starting with `set -euo pipefail`.
-Clone preloads listed in `OPENSWE_REPOS` under `/workspace/<repo>`; install required tools, dependencies, and caches without writing secrets to disk.
-`OPENSWE_WORKSPACE_REPOS` remains an alias only for already-stored scripts; use `OPENSWE_REPOS` in new scripts.
+Clone preloads listed in `ROBIN_REPOS` under `/workspace/<repo>`; install required tools, dependencies, and caches without writing secrets to disk.
+`OPENSWE_REPOS` and `OPENSWE_WORKSPACE_REPOS` remain aliases for already-stored scripts; use `ROBIN_REPOS` in new scripts.
 
 `update_script` is optional, typically a fast Git/dependency sync.
 It runs after a full build, and stale new boots can trigger an hourly update refresh from the current image.
