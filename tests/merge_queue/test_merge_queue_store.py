@@ -1764,6 +1764,7 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
         "rejected_dispatch_cleanup",
         "report_policy_mismatch",
         "policy_discovery",
+        "policy_requires_recovery",
         "policy_adoption_after_success",
         "policy_adoption_with_main_advance",
         "policy_revokes_main_advance",
@@ -1851,6 +1852,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
                     "repository_id": config.repository_id,
                     "workflow_digest": service_digest,
                     "workflow_policy_revision": policy_revision,
+                    "allow_test_exceptions": fault == "policy_requires_recovery",
                     "validation_suite": "services",
                     "dispatch_actor_id": 123,
                     "check_app_id": 456,
@@ -1915,7 +1917,7 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         yield repo
 
     async def reconcile() -> None:
-        if fault == "policy_discovery":
+        if fault in {"policy_discovery", "policy_requires_recovery"}:
             monkeypatch.setenv("MERGE_QUEUE_DISPATCH_SECRET", "s" * 32)
             monkeypatch.setattr(QueueController, "open_repo", lambda self, queue: open_repo(queue))
             controller = QueueController(config)
@@ -1933,6 +1935,11 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         )
         await worker.reconcile(QueueJob(queue_id=queue.id, routing_id=queue.bound_routing_id))
 
+    if fault == "policy_requires_recovery":
+        await reconcile()
+        assert await QueueConfiguration.load(queue.bound_routing_id) == config
+        assert sent == []
+        return
     if fault in {"issuer", "capacity", "timeout", "allgreen"}:
         rules = repo.branch_rules.return_value
         if fault == "issuer":
@@ -2460,6 +2467,55 @@ class TestNativeRecovery:
             reason="Transient runner failure",
         )
         return policy, lease, operator, snapshot, work, proposal
+
+    async def test_test_exception_preserves_failure_and_cannot_follow_main(self, queue):
+        _, lease, _, snapshot, work, retry = await self.failed(queue, allow_main_advance=True)
+        await queue.record_evidence(work.attempt.id, "validation-run", {"run_id": 42}, lease)
+        proposal = retry.model_copy(
+            update={
+                "action": "except_tests",
+                "tests": ("cloud-tests/example.spec.ts: loads",),
+                "reason": "The assertion expects a field removed by the documented API contract.",
+                "suggested_fix": "Use the documented replacement field.",
+            }
+        )
+        with pytest.raises(ValueError, match="enabled policy"):
+            await queue.decide_native_recovery(
+                proposal, "recovery-thread", snapshot, lease, trust="trusted-policy"
+            )
+        saved = await queue.decide_native_recovery(
+            proposal,
+            "recovery-thread",
+            snapshot,
+            lease,
+            trust="trusted-policy",
+            allow_test_exceptions=True,
+        )
+        restarted = await MergeQueue.load(queue.id, queue.bound_routing_id)
+        assert restarted is not None
+        work = (await restarted.native_validation_history(lease))[0]
+        assert work.run_id == 42 and work.attempt.state == "succeeded"
+        assert work.test_exception is not None
+        assert proposal.reason in work.test_exception
+        history = await restarted.history(work.batch.id)
+        assert next(e.reference for e in history.evidence if e.key == "validation-result") == {
+            "error": "test fixture failure"
+        }
+        assert (
+            await restarted.decide_native_recovery(
+                proposal,
+                "recovery-thread",
+                snapshot,
+                lease,
+                trust="trusted-policy",
+                allow_test_exceptions=True,
+            )
+            == saved
+        )
+        advanced = snapshot.model_copy(update={"main_sha": "e" * 40})
+        assert not await restarted.authorize_native_result(
+            work, advanced, lease, main_advance_from=work.batch.base_sha
+        )
 
     async def test_retry_is_fresh_idempotent_and_keeps_budgets(self, queue):
         policy, lease, _, snapshot, work, proposal = await self.failed(queue)

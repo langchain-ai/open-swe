@@ -26,6 +26,7 @@ class QueueConfiguration(BaseModel):
     sync_workflow_policy: bool = False
     workflow_policy_revision: int = Field(default=0, ge=0, strict=True)
     allow_main_advance: bool = Field(default=False, exclude_if=lambda value: not value)
+    allow_test_exceptions: bool = Field(default=False, exclude_if=lambda value: not value)
     check_app_id: int | None = Field(default=None, gt=0, strict=True)
     operator_emails: frozenset[str] = Field(min_length=1)
     policy: QueuePolicy = Field(default_factory=lambda: QueuePolicy(checks={}))
@@ -78,6 +79,7 @@ class QueueConfiguration(BaseModel):
                         "workflow_digest",
                         "check_app_id",
                         "allow_main_advance",
+                        "allow_test_exceptions",
                     },
                 ),
                 **(
@@ -118,26 +120,28 @@ class QueueConfiguration(BaseModel):
                 approved.workflow_digest != self.workflow_digest
                 or approved.validation_suite != validation.suite
                 or approved.allow_main_advance != self.allow_main_advance
+                or approved.allow_test_exceptions != self.allow_test_exceptions
             )
         ):
             raise ValueError("Workflow policy revision is stale or was reused")
-        return self.model_copy(
-            update={
+        return self.model_validate(
+            {
+                **self.model_dump(),
                 "workflow_digest": approved.workflow_digest,
                 "workflow_policy_revision": approved.workflow_policy_revision,
                 "allow_main_advance": approved.allow_main_advance,
-                "policy": self.policy.model_copy(
-                    update={
-                        "validation": validation.model_copy(
-                            update={"suite": approved.validation_suite}
-                        )
-                    }
-                ),
+                "allow_test_exceptions": approved.allow_test_exceptions,
+                "policy": {
+                    **self.policy.model_dump(),
+                    "validation": {**validation.model_dump(), "suite": approved.validation_suite},
+                },
             }
         )
 
     @model_validator(mode="after")
     def validate_controller(self) -> Self:
+        if self.allow_test_exceptions and (not self.sync_workflow_policy or self.recovery is None):
+            raise ValueError("Test exceptions require synchronized policy and recovery")
         if self.allow_main_advance and not self.sync_workflow_policy:
             raise ValueError("Main advancement requires synchronized gateway policy")
         if self.recovery is not None and (self.mode != "native" or self.check_app_id is None):

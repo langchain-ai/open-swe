@@ -1,6 +1,6 @@
 """Bounded recovery proposals; only the controller may bind their thread or execute them."""
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -51,15 +51,21 @@ class RecoveryProposal(BaseModel):
     batch_id: UUID
     attempt_id: UUID
     candidate_sha: SHA
-    action: Literal["retry", "defer", "pause", "escalate"]
+    action: Literal["retry", "defer", "pause", "escalate", "except_tests"]
     reason: str = Field(min_length=1, max_length=4000)
     suggested_fix: str = Field(default="", max_length=2000)
     member: RecoveryMember | None = None
+    tests: tuple[Annotated[str, Field(min_length=1, max_length=500)], ...] = Field(
+        default=(), max_length=20
+    )
+    responsible_login: str = Field(default="", max_length=100, pattern=r"^[A-Za-z0-9_-]*$")
 
     @model_validator(mode="after")
     def member_required_only_for_deferral(self) -> Self:
         if (self.action == "defer") != (self.member is not None):
             raise ValueError("Only deferral requires an exact queue member")
+        if (self.action == "except_tests") != bool(self.tests):
+            raise ValueError("Only test exceptions require affected tests")
         return self
 
 

@@ -150,6 +150,7 @@ class NativeWork:
     members: tuple[RecoveryMember, ...] = ()
     accepted_candidates: tuple[str, ...] = ()
     dispatch_deferred: bool = False
+    test_exception: str | None = None
 
     async def replacement(
         self, snapshot: NativeQueueSnapshot, *, main_advance_from: str | None
@@ -165,6 +166,7 @@ class NativeWork:
             or self.request.workflow_sha == snapshot.main_sha
             or self.attempt.number <= superseded
             or self.dispatch_deferred
+            or self.test_exception is not None
             or self.attempt.state not in {"running", "succeeded", "failed"}
             or not self.members
         ):
@@ -202,6 +204,9 @@ class NativeWork:
             members=members,
             accepted_candidates=accepted,
             dispatch_deferred="dispatch-policy-deferred" in references,
+            test_exception=TypeAdapter(str).validate_python(references["test-exception"]["summary"])
+            if "test-exception" in references
+            else None,
         )
 
 
@@ -1715,6 +1720,7 @@ class MergeQueue(Record):
         lease: Lease,
         *,
         trust: str,
+        allow_test_exceptions: bool = False,
     ) -> RecoveryDecision:
         """Caller supplies the authenticated thread; a proposal cannot grant its own authority."""
         async with self._locked(lease) as (session, queue, now):
@@ -1768,6 +1774,29 @@ class MergeQueue(Record):
             )
             session.add(recorded)
             await session.flush()
+            if proposal.action == "except_tests":
+                if (
+                    not allow_test_exceptions
+                    or attempt.state != "failed"
+                    or attempt.deadline <= now
+                ):
+                    raise ValueError("Test exceptions require enabled policy and a failed attempt")
+                run = await session.scalar(
+                    select(Evidence).where(
+                        Evidence.attempt_id == attempt.id, Evidence.key == "validation-run"
+                    )
+                )
+                if run is None or type(run.reference.get("run_id")) is not int:
+                    raise ValueError("No workflow run is bound to this failed attempt")
+                await self._save_evidence(
+                    session,
+                    attempt,
+                    "test-exception",
+                    {
+                        "summary": f"{proposal.reason}\nTests: {', '.join(proposal.tests)}\nSuggested fix: {proposal.suggested_fix}"
+                    },
+                )
+                attempt.state = "succeeded"
             if proposal.action == "retry":
                 batch.policy = {**batch.policy, "superseded_attempts": attempt.number}
             elif proposal.action == "pause":

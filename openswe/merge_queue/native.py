@@ -232,7 +232,11 @@ class NativeQueueRuntime:
                     workflow_digest=workflow_digest,
                     members=work.members,
                     acceptance=acceptance,
+                    test_exception=work.test_exception,
                 )
+
+            if work.test_exception is not None:
+                await queue.record_evidence(work.attempt.id, "test-exception-published", {}, lease)
 
     async def _main_advance_from(
         self, repo: RepoClient, snapshot: NativeQueueSnapshot, batch: Batch

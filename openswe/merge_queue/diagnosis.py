@@ -208,6 +208,15 @@ class QueueRecovery:
             and (saved := RecoveryDecision.model_validate(d.plan)).status
             in {"applied", "escalated", "superseded"}
             and saved.proposal.action != "retry"
+            and (
+                saved.proposal.action != "except_tests"
+                or history.batch.state != "active"
+                or any(
+                    e.attempt_id == saved.proposal.attempt_id
+                    and e.key == "test-exception-published"
+                    for e in history.evidence
+                )
+            )
         }
         resumed = history.batch.policy.get("recovery_resumes", {})
         if isinstance(resumed, dict):
@@ -283,6 +292,7 @@ class QueueRecovery:
         selection = NativeSelection.model_validate(history.batch.candidate)
         return {
             "repository": self.config.repository,
+            "allow_test_exceptions": self.config.allow_test_exceptions,
             "conversation": {"channel_id": state.settings.channel_id, "thread_ts": state.thread_ts},
             "batch_id": str(history.batch.id),
             "state": history.batch.state,
@@ -346,6 +356,30 @@ class QueueRecovery:
                 text = (
                     f"{prefix}<@{operator.slack_user_id}> human action required.\n"
                     f"{reason}\n{escape(decision.detail)}\nNext step: {next_step or reason}"
+                )
+            elif proposal.action == "except_tests":
+                published = any(
+                    e.attempt_id == proposal.attempt_id and e.key == "test-exception-published"
+                    for e in history.evidence
+                )
+                user = (
+                    await User.for_login("github", proposal.responsible_login)
+                    if proposal.responsible_login
+                    else None
+                )
+                who = (
+                    f"<@{user.slack_user_id}>"
+                    if user and user.slack_user_id
+                    else f"{escape(proposal.responsible_login or 'Test owner unknown')} (<@{operator.slack_user_id}> please route this notice)"
+                )
+                outcome = (
+                    "allowed the batch to merge despite failing tests. The original workflow remains red"
+                    if published
+                    else "test exception was not confirmed before the batch ended"
+                )
+                text = (
+                    f"{prefix}{outcome}.\n{who}\nTests: {escape(', '.join(proposal.tests))}\n"
+                    f"{reason}\nSuggested fix: {fix}"
                 )
             elif proposal.action == "pause":
                 impact = (
@@ -537,10 +571,11 @@ class QueueRecovery:
             if proposal.batch_id != history.batch.id:
                 raise PermissionError("Proposal belongs to another recovery sequence")
             if not proposal.reason.strip() or (
-                proposal.action in {"defer", "escalate"} and not proposal.suggested_fix.strip()
+                proposal.action in {"defer", "escalate", "except_tests"}
+                and not proposal.suggested_fix.strip()
             ):
                 raise ValueError(
-                    "Give evidence and, for deferral or escalation, a concrete next step"
+                    "Give evidence and, for deferral, escalation or test exceptions, a concrete fix"
                 )
             snapshot = await repo.native_queue(self.queue.target_branch)
             if snapshot.repository_id != self.config.repository_id:
@@ -551,6 +586,7 @@ class QueueRecovery:
                 snapshot,
                 lease,
                 trust=self.config.native_trust,
+                allow_test_exceptions=self.config.allow_test_exceptions,
             )
         await self.schedule(history.batch.id)
         return decision.model_dump(mode="json")

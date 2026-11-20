@@ -239,3 +239,6 @@ Never run two queue owners concurrently.
 Keep deployment identifiers, credentials, rulesets and live evidence in private infrastructure tooling.
 Native mode delegates eventual merging to GitHub and must not enable a custom promotion executor.
 Neither mode grants the agent-accessible App queue bypass.
+
+When `allow_test_exceptions` is enabled, Robin can authorize the original failed candidate after diagnosing a test-only failure.
+The existing recovery Slack thread reports the reasoning, suspected owner and suggested fix after queue acceptance.

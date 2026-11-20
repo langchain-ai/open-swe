@@ -43,6 +43,7 @@ class WorkflowPolicy(BaseModel):
     dispatch_actor_id: int = Field(gt=0, strict=True)
     check_app_id: int = Field(gt=0, strict=True)
     allow_main_advance: bool = Field(default=False, exclude_if=lambda value: not value)
+    allow_test_exceptions: bool = Field(default=False, exclude_if=lambda value: not value)
     validation_suite: Literal["smoke", "services"] = Field(
         default="smoke", exclude_if=lambda value: value == "smoke"
     )
@@ -159,6 +160,7 @@ class DispatchGateway:
         workflow_digest: str | None = None,
         members: tuple[RecoveryMember, ...] = (),
         acceptance: CandidateAcceptance | None = None,
+        test_exception: str | None = None,
     ) -> None:
         envelope = DispatchEnvelope(
             contract=contract,
@@ -172,6 +174,7 @@ class DispatchGateway:
             state=state,
             run_id=run_id,
             acceptance=acceptance,
+            test_exception=test_exception,
         )
         body = report.model_dump_json(exclude_none=True).encode()
         signature = self._signature(body, b"check-report:")
@@ -247,6 +250,7 @@ class CheckReport(BaseModel):
     state: Literal["in_progress", "recovering", "cancelled", "success"]
     run_id: int | None = None
     acceptance: CandidateAcceptance | None = None
+    test_exception: str | None = None
 
 
 class DeferralRequest(RecoveryMember):

@@ -109,7 +109,7 @@ class TestRecoveryDelivery:
     @staticmethod
     async def setup(monkeypatch):
         settings = RecoverySettings(channel_id="C123456", operator_id=uuid7())
-        config = Mock(spec=QueueConfiguration, recovery=settings)
+        config = Mock(spec=QueueConfiguration, recovery=settings, allow_test_exceptions=False)
         service = QueueRecovery(config, Mock(spec=MergeQueue))
         state = RecoveryThread(settings=settings, thread_id="bound-thread", thread_ts="123.000")
         slack = SlackDelivery()
@@ -242,6 +242,46 @@ class TestRecoveryDelivery:
         assert "github.com/acme/widgets/pull/7" in message
         assert "The PR remains open" in message
         assert proposal.suggested_fix in message
+
+    async def test_exception_notice_waits_for_publication_and_tags_owner(self, monkeypatch):
+        service, state, _ = await self.setup(monkeypatch)
+        service.operator = AsyncMock(return_value=Mock(slack_user_id="UOPERATOR"))
+        monkeypatch.setattr(
+            diagnosis.User, "for_login", AsyncMock(return_value=Mock(slack_user_id="UAUTHOR"))
+        )
+        proposal = RecoveryProposal(
+            request_key=uuid7(),
+            batch_id=uuid7(),
+            attempt_id=uuid7(),
+            candidate_sha="a" * 40,
+            action="except_tests",
+            tests=("cloud-tests/example.spec.ts: loads",),
+            reason="Obsolete test assertion; the documented API confirms the intended behavior.",
+            suggested_fix="Use the documented replacement field.",
+            responsible_login="developer",
+        )
+        decision = RecoveryDecision(
+            proposal=proposal,
+            thread_id=state.thread_id,
+            members=(),
+            generation=None,
+            status="applied",
+        )
+        row = Mock(id=uuid7(), plan=decision.model_dump(mode="json"))
+        history = Mock(
+            decisions=[row],
+            evidence=[],
+            batch=Mock(id=proposal.batch_id, state="active", policy={}),
+        )
+        assert await service.notices(history, state) == {}
+        history.evidence = [Mock(attempt_id=proposal.attempt_id, key="test-exception-published")]
+        key = f"decision:{row.id}:applied"
+        message = (await service.notices(history, state))[key]
+        assert "<@UAUTHOR>" in message and "allowed the batch to merge" in message
+        assert proposal.tests[0] in message and proposal.suggested_fix in message
+        assert proposal.reason in message and "workflow remains red" in message
+        state = state.model_copy(update={"notices": {key: "123.456"}})
+        assert await service.notices(history, state) == {}
 
     @pytest.mark.parametrize(
         "requested,busy,paused,outcome",
