@@ -116,18 +116,22 @@ class RunCatalog:
     async def of(cls, kind: RunKind, run: RemoteRun) -> RunCatalog:
         # Resolved from the run as dispatch stamped it, never from the settings it decides.
         config = run_config(run, settled=False)
-        execution = await ExecutionProfile.resolve()
-        config["configurable"] = {
-            **(config.get("configurable") or {}),
-            "execution": await execution.keep(),
-        }
+        with apm_span("start_run.catalog.execution", {}):
+            execution = await ExecutionProfile.resolve()
+            config["configurable"] = {
+                **(config.get("configurable") or {}),
+                "execution": await execution.keep(),
+            }
         surface = ToolSurface()
         # The kind's lookups consult the thread's ownership and access many times over.
         with ExecutionProfile.bind(execution):
             async with shared_thread_reads():
-                await kind.catalog(config, surface)
-                await surface.prepare()
-                visibility = await cls.thread_visibility(run.thread_id)
+                with apm_span("start_run.catalog.kind", {}):
+                    await kind.catalog(config, surface)
+                with apm_span("start_run.catalog.prepare", {}):
+                    await surface.prepare()
+                with apm_span("start_run.catalog.visibility", {}):
+                    visibility = await cls.thread_visibility(run.thread_id)
         return cls(kind, run, surface, config, execution, visibility)
 
     @staticmethod

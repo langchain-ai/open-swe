@@ -23,6 +23,7 @@ from langgraph.types import Command
 
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
+from openswe.utils.startup_trace import apm_span
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,8 @@ class DynamicToolMiddleware(OpenSWEMiddleware[DynamicToolState]):
             if resolved.done:
                 return resolved.tools
             try:
-                tools = await self._groups[group].load()
+                with apm_span("start_run.catalog.integration", {"integration": group}):
+                    tools = await self._groups[group].load()
             except Exception:
                 logger.warning("Failed to load %s integration tools", group, exc_info=True)
                 tools = []
