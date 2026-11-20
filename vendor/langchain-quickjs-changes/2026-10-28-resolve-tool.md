@@ -7,7 +7,7 @@
 ## What
 
 `CodeInterpreterMiddleware(resolve_tool=...)` takes a `ToolResolver`, `Callable[[str], BaseTool | None]`.
-With one, `globalThis.tools` is a `Proxy` over the installed tools: `tools.<name>` for a name `ptc` installed none by asks the resolver, with the camelCase name, and calls the tool it returns as it calls an installed one (the same call budget, injected runtime and outer loop).
+With one, upstream's `globalThis.tools` proxy also asks the resolver, with the camelCase name, about a name `ptc` installed none by (`__tools_resolves`), and `__tools_call` calls the tool it returns as it calls an installed one (the same call budget, injected runtime and outer loop).
 A name it returns `None` for throws `TypeError: tools.<name> is not a function` in JavaScript.
 A resolver that can only find out by calling something returns a tool that looks itself up when called; that tool raises `UnresolvedToolError` for a name that turns out to name nothing, and the call throws `TypeError` with its message.
 `then` and `toJSON` stay undefined, so `await tools` is not taken for a promise and `JSON.stringify(tools)` calls no tool.

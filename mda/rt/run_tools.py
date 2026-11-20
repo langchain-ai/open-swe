@@ -11,7 +11,7 @@ model, and the run's limit on model calls, are the run's too.
 import asyncio
 import logging
 import uuid
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 from typing import Final
@@ -359,6 +359,8 @@ class RunSubagentMiddleware(AgentMiddleware):
 @dataclass
 class _CodeToolsListing:
     tools: tuple[BaseTool, ...] = ()
+    # The API reference the interpreter appends to its prompt, and the message listing it.
+    reference: str = ""
     text: str = ""
 
 
@@ -390,7 +392,6 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         self._active = active
         self._listed_in_messages = listed_in_messages
         self._listings = RunLocal(_CodeToolsListing)
-        self._slots: dict[str, asyncio.Lock] = {}
         super().__init__(
             ptc=[],
             subagents=subagents,
@@ -398,24 +399,10 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
             resolve_tool=None if backend_tools is None else backend_tools.tool,
         )
 
-    def __del__(self) -> None:
-        """The invocation owns cleanup; transient middleware copies share the registry."""
-
-    def _slot_id(self, state: Mapping[str, object]) -> str:
-        slot_id = super()._slot_id(state)
-        if slot_id not in self._slots:
-            on_run_exit(partial(self._close_slot, slot_id))
-            self._slots[slot_id] = asyncio.Lock()
-        return slot_id
-
     async def _close_slot(self, slot_id: str) -> None:
-        async with self._slots[slot_id]:
-            try:
-                await self._registry.aevict(slot_id)
-            finally:
-                self._ptc_tools_by_slot.pop(slot_id, None)
-                self._ptc_prompt_by_slot.pop(slot_id, None)
-                self._slots.pop(slot_id, None)
+        """Free a finished run's interpreter: each run evals on a slot of its own, never reused."""
+        self._drop_slot_caches(slot_id)
+        await self._registry.aclose_context(slot_id, self._slot_config)
 
     @property
     def _ptc(self) -> list[str | BaseTool]:
@@ -439,14 +426,14 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
             return None
         update = self._slot_update_for_runtime()
         prepared: REPLState = {**state, "_quickjs_slot_id": update["_quickjs_slot_id"]}
-        self._slot_id(prepared)
+        on_run_exit(partial(self._close_slot, update["_quickjs_slot_id"]))
         restored = await super().abefore_agent(prepared, runtime)
         return {**update, **(restored or {})} or None
 
     async def abefore_model(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
         if not self._listed_in_messages or not await self._runs_code():
             return None
-        listing = self._listing()
+        listing = self._listing().text
         if not listing or listing == latest_with_id(visible_messages(state), _CODE_TOOLS):
             return None
         message = harness_message(
@@ -457,23 +444,23 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         )
         return {"messages": [message]}
 
-    def _listing(self) -> str:
+    def _listing(self) -> _CodeToolsListing:
         """The tools code mode calls, as the message that lists them."""
         exposed = tuple(filter_tools_for_ptc([], self._ptc, self_tool_name=self._tool_name))
         cached = self._listings.get(current_run())
         if len(cached.tools) == len(exposed) and all(
             previous is tool for previous, tool in zip(cached.tools, exposed, strict=True)
         ):
-            return cached.text
-        reference = render_ptc_prompt(exposed, tool_name=self._tool_name).strip()
-        body = reference.replace("]]>", "]]]]><![CDATA[>")
+            return cached
+        reference = render_ptc_prompt(exposed, tool_name=self._tool_name)
+        body = reference.strip().replace("]]>", "]]]]><![CDATA[>")
         text = (
             f'<dynamic-context kind="run" id="code-tools"><![CDATA[\n{body}\n]]></dynamic-context>'
-            if reference
+            if body
             else ""
         )
-        cached.tools, cached.text = exposed, text
-        return text
+        cached.tools, cached.reference, cached.text = exposed, reference, text
+        return cached
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
         if not await self._runs_code():
@@ -482,9 +469,9 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         if not self._listed_in_messages:
             return await super().awrap_model_call(request, handler)
         prompt = self._prepare_for_call(request)
-        listed = self._ptc_prompt_by_slot.get(self._slot_id(request.state))
-        if listed is not None:
-            prompt = prompt.removesuffix(listed[1]).replace(
+        reference = self._listing().reference
+        if reference:
+            prompt = prompt.removesuffix(reference).replace(
                 "documented in the API reference below.",
                 'listed in the latest `<dynamic-context kind="run" id="code-tools">` message.',
             )
@@ -492,77 +479,10 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
             request.override(system_message=self._extend(request.system_message, prompt))
         )
 
-    @staticmethod
-    def _cancelled(error: BaseException) -> bool:
-        pending = [error]
-        seen: set[int] = set()
-        while pending:
-            current = pending.pop()
-            if id(current) in seen:
-                continue
-            seen.add(id(current))
-            if isinstance(current, asyncio.CancelledError):
-                return True
-            if isinstance(current, BaseExceptionGroup):
-                pending.extend(current.exceptions)
-            for cause in (current.__cause__, current.__context__):
-                if cause is not None:
-                    pending.append(cause)
-        return False
-
-    async def awrap_tool_call(
-        self, request: ToolCallRequest, handler: ToolHandler
-    ) -> ToolMessage | Command:
-        if not await self._runs_code():
-            return await handler(request)
-        if request.tool_call["name"] != _EVAL_TOOL:
-            return await handler(request)
-        slot_id = self._slot_id(request.state)
-        async with self._slots[slot_id]:
-            try:
-                return await handler(request)
-            except ValueError as exc:
-                task = asyncio.current_task()
-                if (task is not None and task.cancelling()) or self._cancelled(exc):
-                    raise asyncio.CancelledError() from exc
-                repl = self._registry.get_if_exists(slot_id)
-                if repl is None or not repl.is_closed:
-                    raise
-                logger.warning("QuickJS slot closed during eval", exc_info=True)
-            await self._registry.aevict(slot_id)
-            return ToolMessage(
-                content=self._closed_eval_message(request.state),
-                tool_call_id=request.tool_call["id"],
-                name=_EVAL_TOOL,
-                status="error",
-            )
-
-    def _closed_eval_message(self, state: Mapping[str, object]) -> str:
-        """Tell the model what its next eval starts from after the interpreter closed."""
-        if self._snapshot_for_eval(state) is None:
-            starts = (
-                "Your next eval starts a new interpreter with empty JavaScript state: "
-                "every variable from before the crash is lost."
-            )
-        else:
-            starts = (
-                "Your next eval starts a new interpreter that first tries to restore the "
-                "JavaScript state saved at the end of an earlier run, rolling back every "
-                "variable defined or changed since that save, including in this run. "
-                "If that restore fails, that eval says so and does not run its code."
-            )
-        return (
-            f"Error: the code interpreter closed during eval. {starts} The code may have "
-            "partially executed, and host-tool calls are not retried: external actions may "
-            "already have happened, so verify their effects before repeating any of them."
-        )
-
     async def aafter_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
         if not await self._runs_code():
             return None
-        slot_id = self._slot_id(state)
-        async with self._slots[slot_id]:
-            return await super().aafter_agent(state, runtime)
+        return await super().aafter_agent(state, runtime)
 
 
 class RunModelCallLimit(ModelCallLimitMiddleware):

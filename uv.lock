@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.14"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -1689,7 +1689,7 @@ wheels = [
 
 [[package]]
 name = "langchain-quickjs"
-version = "0.3.12"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bsdiff4" },
@@ -1699,9 +1699,9 @@ dependencies = [
     { name = "langgraph" },
     { name = "quickjs-rs" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6a/a1/2632830366c768327419c7a9c607c4836d144d9ef32afb131ac9ad40d720/langchain_quickjs-0.3.12.tar.gz", hash = "sha256:78a3fa0c1f7a1548fa21639addd44c5db15a43a8c7614baefeb793f82950e57f", size = 248006, upload-time = "2026-11-07T05:00:02.436Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8a/82/dc408f1a978a76e918895d3dd09af56debdc941d52b8bd722e71a7ccd4be/langchain_quickjs-0.4.0.tar.gz", hash = "sha256:08da632ffa454183929eec8c74d77d1ce9ccfa3f1ab2dada3531539069214cc5", size = 270943, upload-time = "2026-11-19T23:25:50.675Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/cf/78dd9cb6b3d89d1f1acac92658815b8d212b1e581971c54a15ccff5a84c5/langchain_quickjs-0.3.12-py3-none-any.whl", hash = "sha256:95725ab5ecbc138dd194905dcc64752e717d02b11b10dd8ceffa43613ba205bf", size = 50262, upload-time = "2026-11-07T05:00:01.209Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/ab/1cc1b72ace7ca0bb2e703b0d7b8102c2f563e6c717bb42317ea15bfd1962/langchain_quickjs-0.4.0-py3-none-any.whl", hash = "sha256:064a5fea187cc8ab7d464c24498615b9242c9d177ee76fc5b50d614d0feeae17", size = 59354, upload-time = "2026-11-19T23:25:49.581Z" },
 ]
 
 [[package]]
@@ -2296,7 +2296,7 @@ requires-dist = [
     { name = "langchain-fireworks", specifier = ">=1.7.3" },
     { name = "langchain-google-genai", specifier = ">=4.5.2" },
     { name = "langchain-openai", specifier = ">=1.8.5,<2.0.0" },
-    { name = "langchain-quickjs", specifier = "==0.3.12" },
+    { name = "langchain-quickjs", specifier = "==0.4.0" },
     { name = "langchain-typesafe", specifier = "==0.1.0" },
     { name = "langgraph", specifier = ">=1.2.24" },
     { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'dev'", specifier = ">=0.4.43" },
@@ -2998,14 +2998,14 @@ wheels = [
 
 [[package]]
 name = "quickjs-rs"
-version = "0.2.6"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "wasmtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/35/d8/5a2a8180f9688a8e9b7d3f00d31c21d257bc69f3254f3cd6b4a35379f734/quickjs_rs-0.2.6.tar.gz", hash = "sha256:fd1de1fb4c2a6828408e09f7109d468f66cc998668120b31a1ce5392134fadd0", size = 831928, upload-time = "2026-10-20T23:42:09.593Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/71/91/aa950f4793469efa22e15c7ebe229378d2fbcad2abb2fb44a49b05cfb000/quickjs_rs-0.3.0.tar.gz", hash = "sha256:b4bbac38250cc47af13d57bb4b13ebfe9eb716c45748504e807463b12e4cd7b9", size = 839967, upload-time = "2026-11-17T15:45:09.077Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/df/127d9fe8b3d822dd3ee5838fd598155876e6018872d7105406388b8678f3/quickjs_rs-0.2.6-py3-none-any.whl", hash = "sha256:3591faae7eef58f41e01f50071795679f2b53042e40a64f3784546a6bde35339", size = 802659, upload-time = "2026-10-20T23:42:07.754Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/d6/fbe8a0d925ddf1f0277cad24ed55292cd2a8fcd9ae00ddb6253a60f29f6a/quickjs_rs-0.3.0-py3-none-any.whl", hash = "sha256:a6d18a3cb7fabefb52fb507a33d262a300bfde76d42ce906467259b12af85060", size = 811226, upload-time = "2026-11-17T15:45:07.317Z" },
 ]
 
 [[package]]

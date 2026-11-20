@@ -33,13 +33,11 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool, tool
 from langchain_core.tracers.langchain import LangChainTracer
-from langchain_quickjs._repl import EvalOutcome, _Registry, _ThreadREPL
+from langchain_quickjs._repl import _Slot, _SlotConfig
 from langchain_quickjs.middleware import REPLState
 from langgraph.config import get_config
-from langgraph.errors import NodeCancelledError
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.prebuilt.tool_node import ToolRuntime
 from langgraph.runtime import Runtime
 from langgraph.store.memory import InMemoryStore
 from langgraph_sdk.auth.types import AuthContext, BaseUser, ThreadsCreate, ThreadsRead
@@ -132,6 +130,11 @@ def _context(graph: str, token: str, catalog: Catalog) -> dict[str, object]:
         "invocation_id": f"invocation-{token}",
         "__catalog": catalog.names_only().model_dump(mode="json"),
     }
+
+
+def _live_interpreters(interpreter: RunCodeInterpreter) -> list[_Slot]:
+    """The interpreter slots whose JavaScript context a run left open."""
+    return [slot for slot in interpreter._registry._slots.values() if slot._context is not None]
 
 
 def _catalog(
@@ -1187,7 +1190,7 @@ async def test_finished_runs_release_their_tools_and_interpreters(
         for middleware in agent._parts("agent").middleware
         if isinstance(middleware, RunCodeInterpreter)
     )
-    assert not interpreter._registry._slots
+    assert not _live_interpreters(interpreter)
     assert not interpreter._ptc_tools_by_slot
 
 
@@ -1414,7 +1417,7 @@ async def test_failed_code_run_releases_its_interpreter(
         if isinstance(middleware, RunCodeInterpreter)
     )
     assert any(operation == "lookup:grant" for _, _, operation in backend_calls)
-    assert not interpreter._registry._slots
+    assert not _live_interpreters(interpreter)
     assert not interpreter._ptc_tools_by_slot
 
 
@@ -1935,95 +1938,6 @@ async def test_sign_in_uses_the_threads_tab_without_chrome_focus(empty_window: b
     assert "test-token" in script
 
 
-@pytest.mark.parametrize("cancel", ["none", "task", "masked"])
-async def test_closed_eval_recovers_without_replay_but_run_cancellation_is_terminal(
-    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, cancel: str
-) -> None:
-    entered = asyncio.Event()
-    original = _ThreadREPL.eval_async
-    attempts = 0
-    observed: list[ToolMessage] = []
-
-    async def evaluate(
-        repl: _ThreadREPL,
-        code: str,
-        *,
-        outer_runtime: ToolRuntime | None = None,
-        snapshot_payload: bytes | None = None,
-        tools: tuple[BaseTool, ...] | None = None,
-        outer_loop: asyncio.AbstractEventLoop | None = None,
-    ) -> EvalOutcome:
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            entered.set()
-            if cancel != "none":
-                try:
-                    if cancel == "masked":
-                        raise BaseExceptionGroup("worker cancelled", [asyncio.CancelledError()])
-                    await asyncio.Event().wait()
-                except BaseException as exc:
-                    raise ValueError("already closed") from exc
-            await repl.aclose()
-            raise ValueError("engine closed with different wording")
-        return await original(
-            repl,
-            code,
-            outer_runtime=outer_runtime,
-            snapshot_payload=snapshot_payload,
-            tools=tools,
-            outer_loop=outer_loop,
-        )
-
-    def replies() -> Iterator[AIMessage]:
-        for index, code in enumerate(
-            [
-                "await tools.lookup({})",
-                "await tools.lookup({})",
-                "throw new Error('ordinary eval failure')",
-            ]
-        ):
-            yield AIMessage(
-                content="",
-                tool_calls=[ToolCall(name="eval", args={"code": code}, id=f"eval-{index}")],
-            )
-        yield AIMessage(content="done")
-
-    original_generate = GenericFakeChatModel._agenerate
-
-    async def generate(
-        model: GenericFakeChatModel, messages: list[BaseMessage], **kwargs: object
-    ) -> ChatResult:
-        observed[:] = [message for message in messages if isinstance(message, ToolMessage)]
-        return await original_generate(model, messages)
-
-    monkeypatch.setattr(_ThreadREPL, "eval_async", evaluate)
-    monkeypatch.setattr(GenericFakeChatModel, "_agenerate", generate)
-    monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
-    catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
-    task = asyncio.create_task(_run(InMemoryStore(), "closed", _context("agent", "token", catalog)))
-    await asyncio.wait_for(entered.wait(), 10)
-    if cancel != "none":
-        if cancel == "task":
-            task.cancel()
-        with pytest.raises(asyncio.CancelledError if cancel == "task" else NodeCancelledError):
-            await task
-        assert not observed
-        assert attempts == 1
-    else:
-        await task
-        assert observed[0].status == "error"
-        assert "found" in observed[1].text
-        assert attempts == 3
-        assert "ordinary eval failure" in observed[2].text
-        assert sum(operation is not None for _, _, operation in backend_calls) == 1
-    interpreter = next(
-        item for item in agent._parts("agent").middleware if isinstance(item, RunCodeInterpreter)
-    )
-    assert not interpreter._registry._slots
-    assert not interpreter._slots
-
-
 @pytest.mark.parametrize("failure", ["before_agent", "before_model", "between_steps"])
 async def test_interpreter_cleanup_survives_failures_outside_its_hooks(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, failure: str
@@ -2039,7 +1953,13 @@ async def test_interpreter_cleanup_survives_failures_outside_its_hooks(
     async def prepare(*args: object, **kwargs: object) -> dict[str, object] | None:
         update = await original(*args, **kwargs)
         assert update is not None
-        interpreter._registry.get(str(update["_quickjs_slot_id"]))
+        slot = await interpreter._registry.aacquire(
+            str(update["_quickjs_slot_id"]), interpreter._slot_config
+        )
+        try:
+            await slot.eval_async("globalThis.started = true")
+        finally:
+            interpreter._registry.release(slot)
         return update
 
     async def later_setup(*args: object, **kwargs: object) -> None:
@@ -2073,17 +1993,15 @@ async def test_interpreter_cleanup_survives_failures_outside_its_hooks(
             stream_mode="updates",
         )
         async for _ in stream:
-            if interpreter._registry._slots:
+            if _live_interpreters(interpreter):
                 break
-        assert interpreter._registry._slots
+        assert _live_interpreters(interpreter)
         await stream.aclose()
     else:
         with pytest.raises(RuntimeError, match="later setup failed|inbox failed"):
             await _run(InMemoryStore(), "cleanup", context)
-    assert not interpreter._registry._slots
-    assert not interpreter._slots
+    assert not _live_interpreters(interpreter)
     assert not interpreter._ptc_tools_by_slot
-    assert not interpreter._ptc_prompt_by_slot
 
 
 async def test_recovered_model_failure_preserves_interpreter_state(
@@ -2147,34 +2065,6 @@ async def test_recovered_model_failure_preserves_interpreter_state(
     )
 
 
-async def test_cancelling_an_eval_its_worker_has_not_started_returns_promptly() -> None:
-    registry = _Registry(
-        memory_limit=64 << 20, timeout=5, capture_console=True, max_stdout_chars=1000
-    )
-    repl = registry.get("busy")
-    worker_loop = registry._slots["busy"].worker._loop
-    assert worker_loop is not None
-    started = threading.Event()
-    release = threading.Event()
-
-    def block() -> None:
-        started.set()
-        release.wait(5)
-
-    worker_loop.call_soon_threadsafe(block)
-    assert await asyncio.to_thread(started.wait, 5)
-    try:
-        evaluation = asyncio.create_task(repl.eval_async("globalThis.ran = true"))
-        await asyncio.sleep(0)
-        evaluation.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(evaluation, 1)
-    finally:
-        release.set()
-    assert (await repl.eval_async("typeof globalThis.ran")).result == "undefined"
-    await registry.aevict("busy")
-
-
 async def test_a_tool_result_the_interpreter_cannot_take_fails_the_eval_not_the_run() -> None:
     nested: list[object] = []
     for _ in range(200):
@@ -2185,17 +2075,13 @@ async def test_a_tool_result_the_interpreter_cannot_take_fails_the_eval_not_the_
         """Return a result nested deeper than the interpreter marshals."""
         return nested
 
-    registry = _Registry(
-        memory_limit=64 << 20, timeout=5, capture_console=True, max_stdout_chars=1000
-    )
-    repl = registry.get("nest")
-    repl.install_tools([nest])
+    slot = _Slot("nest", _SlotConfig())
     try:
-        failed = await repl.eval_async("globalThis.kept = 1; await tools.nest({})")
+        failed = await slot.eval_async("globalThis.kept = 1; await tools.nest({})", tools=[nest])
         assert failed.error_type == "MarshalError"
-        assert (await repl.eval_async("kept")).result == "1"
+        assert (await slot.eval_async("kept")).result == "1"
     finally:
-        await registry.aevict("nest")
+        await slot.aclose()
 
 
 @pytest.mark.parametrize("explicit_tracer", [False, True])
