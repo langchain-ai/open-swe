@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from openswe.dashboard.settings import Settings
 from openswe.expedited_review.eligibility import ChangedFile, diff_fingerprint
-from openswe.expedited_review.nomination import ExpeditedReviewNomination
+from openswe.expedited_review.nomination import ExpeditedReviewNomination, PulledRequest
 from openswe.github.codeowners import CodeOwners
 from openswe.github.http import GitHubClient, RepoFileUnreadableError
 from openswe.github.pull_request_status import PullRequestClient
@@ -42,6 +42,7 @@ async def test_review_channel_lookup_failure_is_actionable(
         AsyncMock(return_value=Settings({"expedited_review_enabled": expedited})),
     )
     monkeypatch.setattr(PullRequestPayload, "read", AsyncMock(return_value=PullRequestPayload()))
+    monkeypatch.setattr(PulledRequest, "read", AsyncMock(return_value=PulledRequest({}, [])))
     monkeypatch.setattr(
         "openswe.human_review.dashboard.review_blockers", AsyncMock(return_value=[])
     )
@@ -233,7 +234,7 @@ async def test_dashboard_selects_review_workflow(
             "openswe.human_review.dashboard.request_review",
             AsyncMock(return_value=RequestResult(success=True, request_id="standard")),
         ) as standard,
-        patch.object(PullRequestClient, "pull", AsyncMock(side_effect=read_pull)),
+        patch.object(PullRequestClient, "pull", AsyncMock(side_effect=read_pull)) as pulls,
         patch.object(ChangedFile, "of_pull", AsyncMock(side_effect=read_files)),
         patch(
             "openswe.expedited_review.nomination.latest_review_states",
@@ -358,3 +359,8 @@ async def test_dashboard_selects_review_workflow(
         assert result.request_id == "standard"
         post.assert_not_awaited()
         standard.assert_awaited_once()
+    if case in {"eligible", "large"}:
+        # Expedited review, and the standard review it falls back to, use the one read.
+        pulls.assert_awaited_once()
+    if case == "large":
+        assert standard.call_args.kwargs["snapshot"] is not None

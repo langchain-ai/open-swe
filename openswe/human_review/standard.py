@@ -411,10 +411,12 @@ async def request_review(
     supplementary_review: str = "",
     supplementary_review_reason: str = "",
     supplementary_review_area: str = "",
+    snapshot: PullRequestPayload | None = None,
 ) -> RequestResult:
     """Post a standard review card for ``pr_ref``, or return the one already open.
 
     ``inline_summary`` is the card's summary; ``None`` shows the start of the PR description.
+    ``snapshot`` is the pull request as the caller just read it, so it is not read again.
     """
     try:
         async with PullRequestClient.as_app(pr_ref.owner, pr_ref.repo, pr_ref.number) as pull:
@@ -428,6 +430,7 @@ async def request_review(
                 supplementary_review=supplementary_review,
                 supplementary_review_reason=supplementary_review_reason,
                 supplementary_review_area=supplementary_review_area,
+                snapshot=snapshot,
             )
     except GitHubAppUnavailable:
         result = _failure("Robin cannot reach this repository's GitHub App installation.")
@@ -463,6 +466,7 @@ async def _request_review(
     supplementary_review: str = "",
     supplementary_review_reason: str = "",
     supplementary_review_area: str = "",
+    snapshot: PullRequestPayload | None = None,
 ) -> RequestResult:
     if bool(supplementary_review.strip()) != bool(supplementary_review_reason.strip()):
         return _failure("Pass supplementary_review and supplementary_review_reason together.")
@@ -494,8 +498,9 @@ async def _request_review(
     if supplementary_review and not inline_summary:
         return _failure("A supplementary review needs an open review request or an inline_summary.")
     span_tags = {"pull_request.url": pr_ref.url}
-    with apm_span("human_review.read_pull_request", span_tags):
-        snapshot = await PullRequestPayload.read(pull)
+    if snapshot is None:
+        with apm_span("human_review.read_pull_request", span_tags):
+            snapshot = await PullRequestPayload.read(pull)
     with apm_span("human_review.blockers", span_tags):
         blockers = None if snapshot is None else await review_blockers(pull, snapshot)
     if blockers is None:

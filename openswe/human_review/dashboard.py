@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from openswe.dashboard.settings import get_settings
-from openswe.expedited_review.nomination import ExpeditedReviewIneligible, ExpeditedReviewNomination
+from openswe.expedited_review.nomination import (
+    ExpeditedReviewIneligible,
+    ExpeditedReviewNomination,
+    PulledRequest,
+)
 from openswe.github.http import GitHubAppUnavailable
 from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequestPayload
@@ -77,11 +81,16 @@ class DashboardReviewRequest:
                 permalink=await approval.permalink(self.origin.requester),
                 auto_merge=approval.auto_merge,
             )
+        # Read once here, the pull request serves the standard review this falls back to.
+        snapshot: PullRequestPayload | None = None
         if active is None and (await get_settings()).expedited_review_enabled:
             try:
                 async with PullRequestClient.as_app(pr.owner, pr.repo, pr.number) as pull:
                     with apm_span("human_review.read_pull_request", span_tags):
-                        snapshot = await PullRequestPayload.read(pull)
+                        # The changed files too, which expedited review reads next.
+                        pulled = await PulledRequest.read(pull)
+                    if pulled.pull is not None:
+                        snapshot = PullRequestPayload.model_validate(pulled.pull)
                     with apm_span("human_review.blockers", span_tags):
                         blockers = (
                             None if snapshot is None else await review_blockers(pull, snapshot)
@@ -94,7 +103,7 @@ class DashboardReviewRequest:
                         with apm_span("human_review.expedited", span_tags):
                             try:
                                 result = await ExpeditedReviewNomination(
-                                    pr, self.origin, self.token, read_as_app=True
+                                    pr, self.origin, self.token, read_as_app=True, pulled=pulled
                                 ).start(
                                     target.id,
                                     inline_summary=inline_summary,
@@ -113,7 +122,11 @@ class DashboardReviewRequest:
                                     extra={"pr_url": pr.url, "reason": str(result["error"])},
                                 )
                                 return await request_review(
-                                    pr, self.origin, channel=channel, inline_summary=inline_summary
+                                    pr,
+                                    self.origin,
+                                    channel=channel,
+                                    inline_summary=inline_summary,
+                                    snapshot=snapshot,
                                 )
                             approval = await HumanReviewRequest.get(UUID(result["approval_id"]))
                             return RequestResult(
@@ -131,5 +144,5 @@ class DashboardReviewRequest:
                 return RequestResult(success=False, error=_APP_UNAVAILABLE)
         with apm_span("human_review.standard", span_tags):
             return await request_review(
-                pr, self.origin, channel=channel, inline_summary=inline_summary
+                pr, self.origin, channel=channel, inline_summary=inline_summary, snapshot=snapshot
             )

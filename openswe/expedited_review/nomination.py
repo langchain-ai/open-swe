@@ -6,6 +6,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import Self
 from uuid import UUID
 
 from openswe.audit_logs.context import current_audit_log
@@ -28,6 +29,7 @@ from openswe.expedited_review.readiness import latest_review_states
 from openswe.github.codeowners import CodeOwners
 from openswe.github.comments import derive_pr_state
 from openswe.github.http import GitHubClient, RepoFileUnreadableError, or_none
+from openswe.github.pull_request_status import PullRequestClient
 from openswe.github.pull_requests import PullRequest, PullRequestPayload
 from openswe.github.repo_files import RepoSettings
 from openswe.human_review.deadlines import BROADCAST_STEP, schedule
@@ -52,6 +54,22 @@ class ExpeditedReviewIneligible(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class PulledRequest:
+    """A pull request and its changed files as GitHub gave them, read together once for
+    a request that may try expedited review and then fall back to standard review."""
+
+    pull: JsonObject | None
+    files: list[ChangedFile] | None
+
+    @classmethod
+    async def read(cls, pull: PullRequestClient) -> Self:
+        payload, files = await asyncio.gather(
+            or_none(pull.pull()), ChangedFile.of_pull(pull, max_pages=FILE_PAGES)
+        )
+        return cls(payload, files)
+
+
+@dataclass(frozen=True, slots=True)
 class ExpeditedReviewNomination:
     pr_ref: GitHubPrRef
     origin: Origin
@@ -60,6 +78,8 @@ class ExpeditedReviewNomination:
     # the requester can read the repository, so a token their own dashboard tabs pushed
     # over GitHub's secondary rate limit can't hold the request up for a minute.
     read_as_app: bool = False
+    # What the caller already read of the pull request for this request; read here if not.
+    pulled: PulledRequest | None = None
 
     def failure(self, error: str) -> JsonObject:
         return {"success": False, "error": error}
@@ -245,9 +265,8 @@ class ExpeditedReviewNomination:
         ) as github:
             pull = github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number)
             with apm_span("expedited_review.read_pull_request", span_tags):
-                pr, files = await asyncio.gather(
-                    or_none(pull.pull()), ChangedFile.of_pull(pull, max_pages=FILE_PAGES)
-                )
+                pulled = self.pulled or await PulledRequest.read(pull)
+            pr, files = pulled.pull, pulled.files
             if not replace_standard and pr:
                 if files is None:
                     raise ExpeditedReviewIneligible("The diff needs standard review.")
