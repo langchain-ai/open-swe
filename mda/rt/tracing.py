@@ -270,13 +270,13 @@ class RootAgentTraceMiddleware(AgentMiddleware):
     summaries that restart its history. Installed innermost, it leaves out the summary's
     model call and the calls a tool makes. A call whose trace already names an agent type
     keeps it, as deepagents tags a forked subagent ``subagent``. An async worker's calls
-    are tagged ``subagent`` while its run is nested in the coordinator's trace, so they
-    stay out of the coordinator's conversation; a run on a worker thread that has its own
-    trace is that trace's root agent.
+    are ``subagent`` while its run is nested in the coordinator's trace, so they stay out
+    of the coordinator's conversation (MDA tags the whole run so); a run on a worker thread
+    that has its own trace is that trace's root agent.
 
-    A nested worker's calls also carry whom the worker bills to, from ``attribution``:
-    deepagents starts its run with none, and the backend settles it only as the worker
-    adopts its run token, after its run's metadata is fixed.
+    A nested worker's calls also carry whom the worker bills to, from ``attribution``,
+    though MDA already tagged them: deepagents starts its run with none, and the backend
+    settles it only as the worker adopts its run token, after its run's metadata is fixed.
     """
 
     # Whom a call bills to, as the backend names it in a run's trace metadata.
@@ -297,10 +297,10 @@ class RootAgentTraceMiddleware(AgentMiddleware):
     ) -> ModelResponse:
         tracing = get_tracing_context()
         metadata = tracing["metadata"] or {}
-        if "ls_agent_type" in metadata:
-            return await handler(request)
         if self.is_nested_worker(ensure_config()):
             tracing["metadata"] = {**metadata, **self._billing(), "ls_agent_type": "subagent"}
+        elif "ls_agent_type" in metadata:
+            return await handler(request)
         else:
             tracing["metadata"] = {**metadata, "ls_agent_type": "root"}
         with tracing_context(**tracing):
@@ -323,7 +323,8 @@ class RootAgentTraceMiddleware(AgentMiddleware):
         deepagents sends the lead thread as ``configurable.deepagents_parent``; the Agent
         Server also copies the task thread's ``parent_thread_id`` into every run on it,
         including runs deepagents didn't start. Only a run deepagents marked to nest under
-        its launching call is inside the coordinator's trace.
+        its launching call is inside the coordinator's trace, and a run on the lead's own
+        thread is the lead's.
         """
         configurable = config.get("configurable")
         if not isinstance(configurable, Mapping):
@@ -337,7 +338,7 @@ class RootAgentTraceMiddleware(AgentMiddleware):
             return False
         reference = configurable.get("deepagents_parent")
         metadata = config.get("metadata")
-        return bool(
-            (isinstance(reference, Mapping) and reference.get("thread_id"))
-            or (isinstance(metadata, Mapping) and metadata.get("parent_thread_id"))
+        lead = (isinstance(reference, Mapping) and reference.get("thread_id")) or (
+            isinstance(metadata, Mapping) and metadata.get("parent_thread_id")
         )
+        return bool(lead) and lead != configurable.get("thread_id")

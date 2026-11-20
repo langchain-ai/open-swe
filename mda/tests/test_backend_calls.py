@@ -3171,6 +3171,7 @@ async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_
         ("dashboard", nested, {}),
         ("launched", {**nested, "deepagents_parent": {"thread_id": "lead"}}, {}),
         ("forwarded context", nested, {"parent_thread_id": "lead"}),
+        ("lead's own", nested, {"parent_thread_id": "worker"}),
         ("resumed worker", {}, {"parent_thread_id": "lead"}),
         ("own", {}, {}),
     ]:
@@ -3211,11 +3212,12 @@ async def test_an_agents_own_calls_are_its_root_agent_and_a_launched_runs_are_a_
         "dashboard": [(True, "root", None)] * 2,
         "launched": [(True, "subagent", worker)] * 2,
         "forwarded context": [(True, "subagent", worker)] * 2,
+        "lead's own": [(True, "root", None)] * 2,
         "resumed worker": [(False, "root", None)] * 2,
         "own": [(False, "root", None)] * 2,
     }
-    # The worker's type stays on its model calls; a run-wide tag splits the trace by node.
-    assert in_tool == [None] * 5
+    # MDA tags a nested worker's whole run, so the calls its tools make are subagent's too.
+    assert in_tool == [None, "subagent", "subagent", None, None, None]
 
 
 async def test_a_subagent_keeps_its_own_tag_though_it_inherits_the_root_agent_middleware() -> None:

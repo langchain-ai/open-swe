@@ -7,7 +7,7 @@ from functools import cached_property
 from typing import Any, Self, cast
 from uuid import UUID
 
-from langchain_core.callbacks import AsyncCallbackManager
+from langchain_core.callbacks import AsyncCallbackManager, BaseCallbackHandler
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tracers.langchain import LangChainTracer
 from langchain_core.tracers.schemas import Run
@@ -147,22 +147,32 @@ class ManagedTurnTracer(LangChainTracer):
     def for_run(cls, config: RunnableConfig) -> RunnableConfig:
         """Preserve tracing destinations and parents while isolating invocation lifecycle."""
         manager = AsyncCallbackManager.configure(inheritable_callbacks=config.get("callbacks"))
-        for handler in list(manager.handlers):
+        # Tracing-context metadata makes ``configure`` give each list its own copy of a
+        # tracer; the copies share a run map. Both lists get the same replacement, or the
+        # graph's node runs inherit a copy that never saw the graph run and become roots.
+        tracers: dict[int, ManagedTurnTracer] = {}
+
+        def managed(handler: BaseCallbackHandler) -> BaseCallbackHandler:
             if not isinstance(handler, LangChainTracer):
-                continue
-            tracer = cls(
-                example_id=handler.example_id,
-                project_name=handler.project_name,
-                address=handler.address,
-                client=handler.client,
-                tags=handler.tags,
-                metadata=handler.tracing_metadata,
-                run_map=dict(handler.run_map),
-                order_map=dict(handler.order_map),
-                _external_run_ids=dict(handler._external_run_ids),  # noqa: SLF001
-            )
-            manager.remove_handler(handler)
-            manager.add_handler(tracer)
+                return handler
+            if (tracer := tracers.get(id(handler.run_map))) is None:
+                tracer = tracers[id(handler.run_map)] = cls(
+                    example_id=handler.example_id,
+                    project_name=handler.project_name,
+                    address=handler.address,
+                    client=handler.client,
+                    tags=handler.tags,
+                    metadata=handler.tracing_metadata,
+                    run_map=dict(handler.run_map),
+                    order_map=dict(handler.order_map),
+                    _external_run_ids=dict(handler._external_run_ids),  # noqa: SLF001
+                )
+            return tracer
+
+        manager.handlers = [managed(handler) for handler in manager.handlers]
+        manager.inheritable_handlers = [
+            managed(handler) for handler in manager.inheritable_handlers
+        ]
         return {**config, "callbacks": manager}
 
 

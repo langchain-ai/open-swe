@@ -2016,9 +2016,11 @@ async def test_a_tool_result_the_interpreter_cannot_take_fails_the_eval_not_the_
 
 @pytest.mark.parametrize("explicit_tracer", [False, True])
 @pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("worker", [False, True])
 async def test_a_distributed_parent_keeps_graph_nodes_under_the_graph_run(
-    monkeypatch: pytest.MonkeyPatch, explicit_tracer: bool, managed: bool
+    monkeypatch: pytest.MonkeyPatch, explicit_tracer: bool, managed: bool, worker: bool
 ) -> None:
+    """A worker's run is also tagged ``subagent`` run-wide, which must not split its trace."""
     from langchain_core.runnables import RunnableConfig
     from managed_deepagents._run_input import ManagedCompiledAgent
 
@@ -2030,6 +2032,7 @@ async def test_a_distributed_parent_keeps_graph_nodes_under_the_graph_run(
         "configurable": {
             "langsmith-trace": parent.dotted_order,
             "langsmith-metadata": {"ls_nest_under_parent": True},
+            **({"deepagents_parent": {"thread_id": "lead"}} if worker else {}),
         },
     }
     if explicit_tracer:
@@ -2053,11 +2056,13 @@ async def test_a_distributed_parent_keeps_graph_nodes_under_the_graph_run(
     with tracing_context(enabled=True), mda_runtime._parent_trace(config):
         assert await compiled.ainvoke(State(), config) == {"answer": "donedone"}
 
-    runs = {call.kwargs["id"]: call.kwargs for call in client.create_run.call_args_list}
+    # Every post counts: a tracer that never saw the graph run posts a node again as a root.
+    created = [call.kwargs for call in client.create_run.call_args_list]
+    runs = {run["id"]: run for run in created}
     [root] = [run for run in runs.values() if run["name"] == "LangGraph"]
     assert root["parent_run_id"] == parent.id
     assert {run["name"] for run in runs.values()} >= {"first", "second"}
-    for run in runs.values():
+    for run in created:
         assert run["trace_id"] == parent.trace_id
         ancestor = run
         while ancestor["id"] != root["id"]:
