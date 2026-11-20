@@ -1,0 +1,52 @@
+[
+  {
+    "id": "thr_5be0c1d2",
+    "user": "bkowalski",
+    "name": "Bartek Kowalski",
+    "email": "bartek@widgets.dev",
+    "title": "Why does the HTTP client retry 4 times?",
+    "updated_at": "2026-11-12T16:02:11Z",
+    "opened_prs": [],
+    "messages": ["How many retries does the client do?", "Four, from DEFAULT_RETRIES."]
+  },
+  {
+    "id": "thr_8d41a7e9",
+    "user": "ang",
+    "name": "Alice Ng",
+    "email": "alice@widgets.dev",
+    "title": "Review PR #4812 (retry budget)",
+    "updated_at": "2026-11-14T10:41:56Z",
+    "opened_prs": [],
+    "messages": ["Can you review #4812?", "Reviewed #4812; one nit on the budget reset."]
+  },
+  {
+    "id": "thr_3c7e2f90",
+    "user": "ang",
+    "name": "Alice Ng",
+    "email": "alice@widgets.dev",
+    "title": "Cap the retry budget per client",
+    "updated_at": "2026-11-13T18:20:03Z",
+    "opened_prs": ["https://github.com/widgets/widgets/pull/4812"],
+    "messages": ["Cap retries per client so one host can't burn the budget.", "Opened #4812."]
+  },
+  {
+    "id": "thr_77b2d0aa",
+    "user": "ang",
+    "name": "Alice Ng",
+    "email": "alice@widgets.dev",
+    "title": "Fix flaky retry test",
+    "updated_at": "2026-11-11T09:15:47Z",
+    "opened_prs": ["https://github.com/widgets/widgets/pull/4790"],
+    "messages": ["test_retry_backoff is flaky.", "Opened #4790."]
+  },
+  {
+    "id": "thr_0f9e6b13",
+    "user": "bkowalski",
+    "name": "Bartek Kowalski",
+    "email": "bartek@widgets.dev",
+    "title": "Follow-up to #4812: docs for the retry budget",
+    "updated_at": "2026-11-15T12:00:30Z",
+    "opened_prs": ["https://github.com/widgets/widgets/pull/4821"],
+    "messages": ["Document the budget from #4812.", "Opened #4821."]
+  }
+]

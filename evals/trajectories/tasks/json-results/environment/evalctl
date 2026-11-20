@@ -1,0 +1,20 @@
+#!/bin/sh
+# Serves the nightly eval runs: `evalctl list`, then `evalctl show <run-id>` for one run's
+# raw JSON, as the eval service returns it.
+set -eu
+runs=/var/lib/evalctl
+case "${1:-}" in
+    list) cat "$runs/index.json" ;;
+    show)
+        if [ -f "$runs/${2:-}.json" ]; then
+            cat "$runs/$2.json"
+        else
+            echo "Error: no run ${2:-}" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "usage: evalctl list | evalctl show <run-id>" >&2
+        exit 2
+        ;;
+esac

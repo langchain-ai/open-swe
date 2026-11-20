@@ -1,0 +1,10 @@
+[project]
+name = "widgets"
+version = "0.4.0"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

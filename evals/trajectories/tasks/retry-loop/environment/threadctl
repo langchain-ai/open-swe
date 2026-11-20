@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Stands in for Robin's thread tools, as in d09.
+
+`search` is the all-users search that timed out 14 times in a row: here it always does,
+after 20s, whatever the arguments. `list --user` and `get` answer at once. Each call is
+logged, so the grader can count how often the agent repeated the failing search.
+"""
+
+import argparse
+import json
+import sys
+import time
+from pathlib import Path
+
+STATE = Path("/var/lib/threadctl")
+THREADS = json.loads((STATE / "threads.json").read_text())
+
+
+def log(argv: list[str]) -> None:
+    with (STATE / "calls.log").open("a") as out:
+        out.write(json.dumps({"at": time.time(), "argv": argv}) + "\n")
+
+
+def summary(thread: dict) -> dict:
+    return {key: thread[key] for key in ("id", "user", "title", "updated_at", "opened_prs")}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="threadctl", description="Read Robin's threads.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    search = commands.add_parser("search", help="search every user's threads (scans all threads)")
+    search.add_argument("--pr", help="a PR number or URL the thread mentions")
+    search.add_argument("--query", help="text in the thread title")
+    search.add_argument("--limit", type=int, default=50)
+    listing = commands.add_parser("list", help="one user's threads, newest first")
+    listing.add_argument("--user", required=True, help="login, name or email")
+    get = commands.add_parser("get", help="one thread")
+    get.add_argument("thread_id")
+    args = parser.parse_args()
+    log(sys.argv[1:])
+
+    if args.command == "search":
+        time.sleep(20)
+        print("Error: list_threads timed out after 20s", file=sys.stderr)
+        return 1
+    if args.command == "list":
+        needle = args.user.lower().lstrip("@")
+        found = [
+            summary(t)
+            for t in THREADS
+            if needle in (t["user"].lower(), t["name"].lower(), t["email"].lower())
+        ]
+        print(json.dumps(sorted(found, key=lambda t: t["updated_at"], reverse=True), indent=2))
+        return 0
+    for thread in THREADS:
+        if thread["id"] == args.thread_id:
+            print(json.dumps(thread, indent=2))
+            return 0
+    print(f"Error: no thread {args.thread_id}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

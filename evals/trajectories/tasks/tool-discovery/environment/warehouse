@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""The analytics warehouse, read-only: what the team queries instead of raw exports."""
+
+import argparse
+import sqlite3
+import sys
+
+DB = "file:/opt/warehouse/warehouse.db?mode=ro"
+DESCRIPTIONS = {
+    "finance_arr_daily": "ARR by plan and day, as finance reports it (internal workspaces excluded)",
+    "dim_workspaces": "one row per workspace; is_internal marks our own workspaces",
+}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="warehouse", description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("tables", help="list tables")
+    describe = commands.add_parser("describe", help="a table's columns")
+    describe.add_argument("table")
+    query = commands.add_parser("query", help="run a read-only SQL query (SQLite dialect)")
+    query.add_argument("sql")
+    args = parser.parse_args()
+    db = sqlite3.connect(DB, uri=True)
+    if args.command == "tables":
+        for name, description in DESCRIPTIONS.items():
+            print(f"{name}\t{description}")
+        return 0
+    if args.command == "describe":
+        columns = db.execute(f"PRAGMA table_info({args.table!r})").fetchall()
+        if not columns:
+            print(f"Error: no table {args.table}", file=sys.stderr)
+            return 1
+        for column in columns:
+            print(f"{column[1]}\t{column[2]}")
+        return 0
+    try:
+        cursor = db.execute(args.sql)
+    except sqlite3.Error as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+    print("\t".join(c[0] for c in cursor.description or ()))
+    for row in cursor:
+        print("\t".join(str(v) for v in row))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

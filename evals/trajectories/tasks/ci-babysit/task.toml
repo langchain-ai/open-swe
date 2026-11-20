@@ -1,0 +1,14 @@
+version = "1.3"
+
+[metadata]
+source = "robin-slow-trajectories"
+failure_mode = "babysit-blocking-watch"
+task_type = "ops_monitoring"
+linear = "RBN-214"
+traces = ["d01", "d02", "d03"]
+
+[agent]
+timeout_sec = 900
+
+[verifier]
+timeout_sec = 120

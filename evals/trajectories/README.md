@@ -37,6 +37,10 @@ Each has an instruction, a Docker environment, a `tests/test.sh` grader and a re
 | `long-build` | Blocking on a ~6 min build (RBN-212) | Fixes the bug, runs the build in the background and checks back |
 | `repo-search` | `grep -r` over vendored code and a generated patch (RBN-227) | Uses `rg`/`git grep`; decoys in ignored files give a wrong answer |
 | `answer-first` | Slow setup before a simple question (RBN-220) | Answers from the code without running `make setup` |
+| `retry-loop` | Retrying a search that always times out (RBN-219) | Stops after a failure or two and finds the thread through the PR's author; more than 3 searches scores 0 |
+| `json-results` | Handling large JSON as text, as in code-mode stalls (RBN-215) | Parses each run and its double-encoded payload; text matching counts a decoy case |
+| `ci-babysit` | Blocking on a CI watch while a job has already failed (RBN-214) | Polls CI, fixes the early lint failure, reruns, and reports once the rerun is green; a blocking watch runs out of time |
+| `tool-discovery` | Brute-forcing instead of finding a better tool (RBN-225) | Finds the `warehouse` CLI from the repo docs; replaying the raw exports gives a wrong total |
 
 Each task runs in a LangSmith sandbox of its own, which the `robin` CLI attaches to the deployed agent (`robin run --sandbox`), using the Terminal-Bench adapter (`evals/terminal_bench/harbor_adapter.py`).
 Point it at a deployment with a service key (`lsv2_sk_…`) from the deployment's workspace, which both creates the sandboxes and starts the threads:

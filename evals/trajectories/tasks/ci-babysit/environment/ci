@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""A local CI with the timing of d01: lint fails in under a minute, the tests take 8.
+
+Run 1 starts on the first `ci` call. Each run checks the code as it is when the run
+starts and reveals each job's result when that job's time is up. `ci watch` blocks
+until every job is done, like `gh pr checks --watch`, unless given `--fail-fast`.
+"""
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+STATE = Path("/var/lib/ci")
+APP = Path("/app")
+# Seconds from a run's start until each job finishes.
+JOBS = {"lint": 45, "build": 180, "test": 480}
+
+
+def check(job: str) -> dict:
+    if job == "build":
+        return {"passed": True, "log": "built wheel widgets-0.4.0"}
+    command = ["ruff", "check", "src", "tests"] if job == "lint" else ["pytest", "-q", "tests"]
+    done = subprocess.run(command, cwd=APP, capture_output=True, text=True, check=False)
+    return {"passed": done.returncode == 0, "log": done.stdout + done.stderr}
+
+
+def runs() -> list[dict]:
+    return [json.loads(p.read_text()) for p in sorted(STATE.glob("run-*.json"))]
+
+
+def start() -> dict:
+    number = len(runs()) + 1
+    run = {
+        "number": number,
+        "started_at": time.time(),
+        "commit": subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=APP, capture_output=True, text=True
+        ).stdout.strip(),
+        "jobs": {job: check(job) for job in JOBS},
+    }
+    (STATE / f"run-{number:03d}.json").write_text(json.dumps(run))
+    return run
+
+
+def find(number: int | None) -> dict:
+    all_runs = runs() or [start()]
+    if number is None:
+        return all_runs[-1]
+    for run in all_runs:
+        if run["number"] == number:
+            return run
+    sys.exit(f"Error: no run {number}")
+
+
+def status(run: dict) -> dict[str, str]:
+    elapsed = time.time() - run["started_at"]
+    return {
+        job: ("pass" if run["jobs"][job]["passed"] else "fail") if elapsed >= due else "pending"
+        for job, due in JOBS.items()
+    }
+
+
+def show(run: dict) -> None:
+    elapsed = int(time.time() - run["started_at"])
+    print(f"run {run['number']} (commit {run['commit']}, started {elapsed}s ago)")
+    for job, state in status(run).items():
+        print(f"  {job:<6} {state}")
+
+
+def main() -> int:
+    STATE.mkdir(parents=True, exist_ok=True)
+    parser = argparse.ArgumentParser(prog="ci", description="This repo's CI.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("list", help="every run, newest last")
+    show_cmd = commands.add_parser("status", help="a run's jobs (default: the latest run)")
+    show_cmd.add_argument("run", type=int, nargs="?")
+    watch = commands.add_parser("watch", help="block until a run's jobs are all done")
+    watch.add_argument("run", type=int, nargs="?")
+    watch.add_argument("--fail-fast", action="store_true", help="return on the first failure")
+    logs = commands.add_parser("logs", help="a finished job's log")
+    logs.add_argument("run", type=int)
+    logs.add_argument("job", choices=sorted(JOBS))
+    commands.add_parser("rerun", help="start a new run on the code as it is now")
+    args = parser.parse_args()
+
+    if args.command == "list":
+        find(None)
+        for run in runs():
+            states = status(run)
+            print(f"run {run['number']}: " + ", ".join(f"{j} {s}" for j, s in states.items()))
+    elif args.command == "status":
+        show(find(args.run))
+    elif args.command == "watch":
+        run = find(args.run)
+        while True:
+            show(run)
+            states = status(run).values()
+            if "pending" not in states or (args.fail_fast and "fail" in states):
+                return 1 if "fail" in states else 0
+            time.sleep(20)
+    elif args.command == "logs":
+        run = find(args.run)
+        if status(run)[args.job] == "pending":
+            print(f"{args.job} is still running")
+            return 1
+        print(run["jobs"][args.job]["log"])
+    else:
+        show(start())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
