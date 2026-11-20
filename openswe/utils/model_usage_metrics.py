@@ -93,12 +93,19 @@ class ModelUsageMetrics:
         )
         if not reply.usage_metadata:
             return
+        input_tokens = sum(counts.values())
+        large_context_miss = (
+            position == "followup" and input_tokens >= 100_000 and cache_read * 5 < input_tokens
+        )
         cls._send(
             [
                 f"{METRIC}:{count}|c|#token_type:{token_type},{tagged}"
                 for token_type, count in counts.items()
             ]
-            + [f"openswe_model_usage_calls:1|c|#{tagged}"]
+            + [
+                f"openswe_model_usage_calls:1|c|#{tagged}",
+                f"openswe_model_large_context_cache_misses:{int(large_context_miss)}|c|#{tagged}",
+            ]
         )
 
     @classmethod

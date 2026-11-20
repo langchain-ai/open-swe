@@ -26,12 +26,18 @@ def dogstatsd(monkeypatch: pytest.MonkeyPatch) -> Iterator[socket.socket]:
 
 
 @pytest.mark.parametrize(
-    ("position", "input_tokens", "cache_read", "cache_creation"),
+    ("position", "input_tokens", "cache_read", "cache_creation", "large_context_miss"),
     [
-        ("first", 30_000, 20_000, 4_000),
-        ("followup", 366_991, 0, 0),
-        ("followup", 377_821, 366_992, 0),
-        ("followup", 381_309, 377_822, 0),
+        ("first", 30_000, 20_000, 4_000, 0),
+        ("followup", 366_991, 0, 0, 1),
+        ("followup", 377_821, 366_992, 0, 0),
+        ("followup", 381_309, 377_822, 0, 0),
+        ("followup", 663_361, 32_731, 630_626, 1),
+        ("followup", 99_999, 0, 99_999, 0),
+        ("followup", 100_000, 19_999, 80_001, 1),
+        ("followup", 100_000, 20_000, 80_000, 0),
+        ("first", 100_000, 0, 100_000, 0),
+        ("subagent", 100_000, 0, 100_000, 0),
     ],
 )
 def test_a_reply_counts_its_uncached_input_apart_from_the_cache(
@@ -41,6 +47,7 @@ def test_a_reply_counts_its_uncached_input_apart_from_the_cache(
     input_tokens: int,
     cache_read: int,
     cache_creation: int,
+    large_context_miss: int,
 ) -> None:
     """``input_tokens`` includes the cache's tokens: the uncached part is what is left."""
     caplog.set_level(logging.INFO, logger="openswe.utils.model_usage_metrics")
@@ -76,6 +83,7 @@ def test_a_reply_counts_its_uncached_input_apart_from_the_cache(
         f"openswe_model_usage_tokens:{cache_read}|c|#token_type:cache_read,{tags}",
         f"openswe_model_usage_tokens:{cache_creation}|c|#token_type:cache_creation,{tags}",
         f"openswe_model_usage_calls:1|c|#{tags}",
+        f"openswe_model_large_context_cache_misses:{large_context_miss}|c|#{tags}",
     ]
     observed = [r for r in caplog.records if r.message == "Model usage observed"]
     assert len(observed) == 2
@@ -120,6 +128,7 @@ def test_an_uncached_reply_still_counts_zero_cache_tokens(
         f"openswe_model_usage_tokens:0|c|#token_type:cache_read,{tags}",
         f"openswe_model_usage_tokens:0|c|#token_type:cache_creation,{tags}",
         f"openswe_model_usage_calls:1|c|#{tags}",
+        f"openswe_model_large_context_cache_misses:0|c|#{tags}",
     ]
 
 
