@@ -4,10 +4,12 @@ import shlex
 import shutil
 from pathlib import Path
 from typing import cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
+from openswe.review.diff import materialize_review_diff
 from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
 
 
@@ -248,3 +250,47 @@ async def test_reused_checkout_fetches_only_the_pull_requests_commits(tmp_path: 
         f"{{ git cat-file -e {other} 2>/dev/null && echo fetched-other || echo skipped-other; }}"
     )
     assert result.output.split() == [head, "skipped-other"]
+
+
+@pytest.mark.parametrize("fetchable", [True, False])
+async def test_recovered_checkout_fetches_previous_commit_or_reviews_full_diff(
+    tmp_path: Path, fetchable: bool
+) -> None:
+    shell = _ShellBackend()
+    source, checkout = tmp_path / "source", tmp_path / "checkout"
+    commit = "git -c user.name=Test -c user.email=test@example.com commit -qam"
+    setup = await shell.aexecute(
+        f"git init -qb main {shlex.quote(str(source))} && cd {shlex.quote(str(source))} && "
+        f"printf 'base\\n' > app.py && git add app.py && {commit} base && git rev-parse HEAD && "
+        f"printf 'previous\\n' > app.py && {commit} previous && git rev-parse HEAD && "
+        f"git reset -q --hard HEAD~ && printf 'current\\n' > app.py && {commit} current && "
+        f"git rev-parse HEAD && git clone -q --no-local --single-branch "
+        f"{shlex.quote(str(source))} {shlex.quote(str(checkout))}"
+    )
+    assert setup.exit_code == 0, setup.output
+    base, previous, head = setup.output.splitlines()
+    missing = await shell.aexecute(f"git -C {shlex.quote(str(checkout))} cat-file -e {previous}")
+    assert missing.exit_code != 0
+    if not fetchable:
+        changed = await shell.aexecute(
+            f"git -C {shlex.quote(str(checkout))} remote set-url origin {tmp_path / 'missing'}"
+        )
+        assert changed.exit_code == 0, changed.output
+    backend = MagicMock(
+        aexecute=shell.aexecute,
+        adownload_files=AsyncMock(return_value=[]),
+        aupload_files=AsyncMock(return_value=[]),
+    )
+    diff = await materialize_review_diff(
+        backend,
+        work_dir=str(checkout),
+        base_ref=previous,
+        head_ref=head,
+        merge_base=False,
+        fallback_base_ref=base,
+    )
+    assert diff.merge_base is not fetchable
+    assert diff.base_ref == (previous if fetchable else base)
+    assert "-previous" in diff.diff_text if fetchable else "-base" in diff.diff_text
+    assert "+current" in diff.diff_text
+    assert backend.aupload_files.await_args.args[0] == [(diff.path, diff.diff_text.encode())]

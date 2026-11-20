@@ -389,3 +389,19 @@ async def test_a_thread_linked_later_never_replaces_the_one_that_opened_the_pr(s
         thread = await pr_fixes.start_pull_request_thread("acme", "app", 12, "alice", intent=intent)
         assert thread.thread_id == "opener"
     pr_fixes.create_dashboard_thread_record.assert_not_awaited()
+
+
+async def test_fix_up_keeps_findings_owned_by_the_recovered_reviewer(monkeypatch):
+    from openswe.thread_ids import mda_successor_thread_id, reviewer_thread_id
+
+    original = reviewer_thread_id("acme", "app", 12)
+    successor = mda_successor_thread_id(original)
+    findings = [{"id": "f-recovered", "status": "open"}]
+    monkeypatch.setattr(pr_fixes.index, "current_thread_id", AsyncMock(return_value=successor))
+    monkeypatch.setattr(
+        pr_fixes,
+        "list_findings",
+        AsyncMock(side_effect=lambda thread: findings if thread == successor else []),
+    )
+
+    assert await pr_fixes._open_findings("acme", "app", 12) == findings

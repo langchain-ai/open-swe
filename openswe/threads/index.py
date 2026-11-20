@@ -445,10 +445,12 @@ async def get(
 
 async def live_thread_id(thread_id: str) -> str:
     """Where new activity for ``thread_id`` goes: the thread itself, or for a ``local``
-    thread, which takes none, the thread on Managed Deep Agents that succeeds it."""
-    thread = await get(thread_id)
-    if thread is not None and thread.runtime == "local":
-        return mda_successor_thread_id(thread_id)
+    thread, which takes none, or a recovered review, its deterministic successor."""
+    while (thread := await get(thread_id)) is not None:
+        successor = mda_successor_thread_id(thread_id)
+        if thread.runtime != "local" and thread.metadata.get("succeeded_by") != successor:
+            break
+        thread_id = successor
     return thread_id
 
 

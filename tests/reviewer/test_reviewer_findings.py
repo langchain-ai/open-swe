@@ -295,9 +295,20 @@ async def test_concurrent_identical_findings_are_idempotent() -> None:
 
 
 @pytest.mark.usefixtures("registry_db")
-async def test_a_successor_reviewer_thread_takes_over_its_predecessors_findings() -> None:
-    successor = mda_successor_thread_id("tid")
-    with patch("openswe.review.findings.get_client", return_value=_metadata_client()):
+@pytest.mark.parametrize("generations", [1, 2])
+async def test_a_successor_reviewer_thread_takes_over_its_predecessors_findings(
+    generations: int,
+) -> None:
+    successor = "tid"
+    for _ in range(generations):
+        successor = mda_successor_thread_id(successor)
+    with (
+        patch("openswe.review.findings.get_client", return_value=_metadata_client()),
+        patch(
+            "openswe.review.findings.thread_index.current_thread_id",
+            new=AsyncMock(return_value=successor),
+        ),
+    ):
         await append_finding("tid", _f(id="f_a"))
         carried = await list_findings(successor)
         await append_finding(successor, _f(id="f_b", description="b"))

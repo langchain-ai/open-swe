@@ -116,4 +116,5 @@ async def test_fetch_review_diff_uses_incremental_range_for_re_review() -> None:
         "base_ref": "b" * 40,
         "head_ref": "c" * 40,
         "merge_base": False,
+        "fallback_base_ref": "a" * 40,
     }

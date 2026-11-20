@@ -19,6 +19,7 @@ from openswe.input_messages import SystemIdentity, build_run_input
 from openswe.prompts import prompt
 from openswe.review.findings import Finding, ReviewerThreadMissingError, list_findings
 from openswe.thread_ids import reviewer_thread_id
+from openswe.threads import index
 from openswe.threads.access import _ensure_dashboard_github_token
 from openswe.threads.index import IndexedThread
 from openswe.threads.runs import (
@@ -397,7 +398,9 @@ async def _link_pr_thread(owner: str, repo: str, number: int, thread_id: str) ->
 
 async def _open_findings(owner: str, repo: str, number: int) -> list[Finding]:
     try:
-        return await list_findings(reviewer_thread_id(owner, repo, number))
+        return await list_findings(
+            await index.current_thread_id(reviewer_thread_id(owner, repo, number))
+        )
     except ReviewerThreadMissingError:
         return []
 

@@ -44,6 +44,7 @@ async def fetch_review_diff(
             base_ref=base_ref,
             head_ref=head_ref,
             merge_base=merge_base,
+            fallback_base_ref=cfg.base_sha,
         )
     except (RuntimeError, ValueError) as exc:
         return {"success": False, "error": str(exc)}

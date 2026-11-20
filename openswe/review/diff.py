@@ -16,6 +16,7 @@ import functools
 import hashlib
 import logging
 import re
+import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -315,6 +316,7 @@ async def materialize_review_diff(
     head_ref: str,
     merge_base: bool,
     diff_text: str | None = None,
+    fallback_base_ref: str | None = None,
 ) -> MaterializedReviewDiff:
     """Idempotently write a review diff to the sandbox."""
     path = review_diff_path(work_dir, base_ref, head_ref, merge_base)
@@ -331,13 +333,34 @@ async def materialize_review_diff(
                 merge_base=merge_base,
                 cached=True,
             )
-        diff_text = await compute_diff_in_sandbox(
-            sandbox_backend,
-            work_dir,
-            base_ref,
-            head_ref,
-            merge_base=merge_base,
-        )
+        try:
+            diff_text = await compute_diff_in_sandbox(
+                sandbox_backend, work_dir, base_ref, head_ref, merge_base=merge_base
+            )
+        except RuntimeError:
+            if merge_base or not fallback_base_ref:
+                raise
+            logger.warning("Incremental review diff unavailable; fetching its base", exc_info=True)
+            await sandbox_backend.aexecute(
+                f"cd {shlex.quote(work_dir)} && "
+                f"git fetch --quiet --no-tags origin {shlex.quote(base_ref)}",
+                timeout=60,
+            )
+            try:
+                diff_text = await compute_diff_in_sandbox(
+                    sandbox_backend, work_dir, base_ref, head_ref
+                )
+            except RuntimeError:
+                logger.warning(
+                    "Incremental review base unavailable; using full diff", exc_info=True
+                )
+                return await materialize_review_diff(
+                    sandbox_backend,
+                    work_dir=work_dir,
+                    base_ref=fallback_base_ref,
+                    head_ref=head_ref,
+                    merge_base=True,
+                )
 
     responses = await sandbox_backend.aupload_files([(path, diff_text.encode())])
     response = responses[0] if responses else None

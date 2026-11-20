@@ -4,7 +4,7 @@ import hmac
 import importlib
 import uuid
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
 import pytest
@@ -405,6 +405,7 @@ async def test_github_webhook_ignores_untagged_comment_on_pr_agent_did_not_open(
 
 
 def test_process_github_review_finding_reply_dispatches_sanitized_reply_body(monkeypatch) -> None:
+    monkeypatch.setattr(github_webhooks.index, "get", AsyncMock(return_value=None))
     captured: dict[str, object] = {}
 
     async def fake_get_thread_metadata_safe(_thread_id: str) -> dict[str, object]:
@@ -508,6 +509,7 @@ def test_trigger_pr_review_from_ref_refuses_draft(monkeypatch) -> None:
 
 @pytest.mark.parametrize("review_source", ["slack", "dashboard"])
 def test_trigger_pr_review_from_ref_creates_reviewer_run(monkeypatch, review_source: str) -> None:
+    monkeypatch.setattr(github_webhooks.index, "get", AsyncMock(return_value=None))
     dashboard_draft = review_source == "dashboard"
     captured: dict[str, object] = {}
     metadata: dict[str, object] = {
@@ -921,3 +923,33 @@ def test_a_new_issue_thread_on_a_public_repository_records_a_single_repository_s
 
     assert captured["token_repositories"] == scope
     assert (configurable is not None) is prepared
+
+
+async def test_review_resolution_targets_recovered_findings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.thread_ids import mda_successor_thread_id, reviewer_thread_id
+
+    original = reviewer_thread_id("acme", "app", 12)
+    successor = mda_successor_thread_id(original)
+    monkeypatch.setattr(
+        github_webhooks.index, "current_thread_id", AsyncMock(return_value=successor)
+    )
+    monkeypatch.setattr(
+        webhook_common, "get_thread_metadata_safe", AsyncMock(return_value={"kind": "reviewer"})
+    )
+    github = MagicMock()
+    connection = MagicMock()
+    connection.__aenter__.return_value = github
+    monkeypatch.setattr(github_webhooks.GitHubClient, "as_app", lambda *_: connection)
+    reconcile = AsyncMock()
+    monkeypatch.setattr(github_webhooks, "reconcile_linked_findings", reconcile)
+
+    await github_webhooks.process_github_review_thread(
+        {
+            "repository": {"owner": {"login": "acme"}, "name": "app"},
+            "pull_request": {"number": 12},
+        }
+    )
+
+    reconcile.assert_awaited_once_with(successor, github.repo().pull_request())

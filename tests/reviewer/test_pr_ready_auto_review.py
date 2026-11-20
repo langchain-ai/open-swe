@@ -49,6 +49,7 @@ def _pr_payload(
 
 
 def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: MagicMock) -> AsyncMock:
+    monkeypatch.setattr(github_webhooks.index, "get", AsyncMock(return_value=None))
     monkeypatch.setattr(
         webhook_common,
         "get_github_app_installation_token_with_expiry",
@@ -68,6 +69,7 @@ def _patch_dispatch_deps(monkeypatch: pytest.MonkeyPatch, fake_client: MagicMock
 async def test_pr_ready_public_repo_uses_scoped_reviewer_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(github_webhooks.index, "get", AsyncMock(return_value=None))
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
     get_token = AsyncMock(return_value=("scoped-token", "expires"))

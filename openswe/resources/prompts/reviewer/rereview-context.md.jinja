@@ -20,5 +20,10 @@
 {{ existing_threads }}
 
 {% endif %}
+{% if full_review %}
+The incremental diff is unavailable.
+Review the full pull request diff returned by `fetch_review_diff`.
+{% else %}
 Review only the changes since the previous reviewed SHA.
+{% endif %}
 Reconcile each open finding and add net-new findings introduced by this range, following the system prompt; skip anything already covered by an existing PR review thread above, whether from you, another reviewer, or a human reply.

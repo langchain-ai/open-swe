@@ -259,6 +259,7 @@ def _build_re_review_context(
     pr_title: str = "",
     pr_body: str = "",
     existing_threads_block: str = "",
+    full_review: bool = False,
 ) -> str:
     return prompt(
         "reviewer/rereview-context",
@@ -271,6 +272,7 @@ def _build_re_review_context(
         overview=_format_pr_overview(pr_title, pr_body),
         existing_findings=existing_findings_block,
         existing_threads=existing_threads_block,
+        full_review=full_review,
     )
 
 
@@ -671,6 +673,7 @@ async def prepare_reviewer_run(
     pr_url = cfg.pr_url or ""
     last_reviewed_sha = cfg.last_reviewed_sha or ""
     is_re_review = bool(cfg.re_review)
+    full_review = False
     reviewer_event = cfg.reviewer_event or ""
     reviewer_eval = cfg.is_eval
     if reviewer_eval:
@@ -680,6 +683,7 @@ async def prepare_reviewer_run(
     )
 
     async def _fetch_diff_context() -> tuple[str, dict[str, dict[str, set[int]]] | None]:
+        nonlocal full_review
         if not can_fetch_pr or github_token is None or not isinstance(pr_number, int):
             return "", None
         fetched_diff: str | None = None
@@ -707,10 +711,18 @@ async def prepare_reviewer_run(
                 head_ref=diff_head,
                 merge_base=merge_base,
                 diff_text=fetched_diff,
+                fallback_base_ref=base_sha,
             )
+            if materialized.merge_base:
+                full_review = True
             diff_text = materialized.diff_text
         except RuntimeError, ValueError:
             logger.exception("Failed to materialize review diff")
+            if fetched_diff is None:
+                fetched_diff = await fetch_pr_diff(
+                    owner=repo_owner, repo=repo_name, pr_number=pr_number, token=github_token
+                )
+                full_review = True
             if fetched_diff is None:
                 return "", None
             diff_text = fetched_diff
@@ -921,6 +933,7 @@ async def prepare_reviewer_run(
                 pr_number=pr_number,
                 last_reviewed_sha=last_reviewed_sha,
                 head_sha=head_sha,
+                full_review=full_review,
                 existing_findings_block=_format_existing_findings(existing_findings),
                 pr_title=pr_title,
                 pr_body=pr_body,

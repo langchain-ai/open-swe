@@ -970,7 +970,15 @@ async def test_a_run_queued_on_a_successor_thread_is_cancelled_where_it_runs(
 ) -> None:
     preview = _Preview(monkeypatch)
     # The review thread is from before Managed Deep Agents: the run goes to its successor.
-    monkeypatch.setattr(thread_succession, "succeed", AsyncMock(return_value="successor"))
+    monkeypatch.setattr(
+        thread_succession,
+        "succeed",
+        AsyncMock(
+            side_effect=lambda thread_id, *, restart_deleted=False: (
+                "successor" if restart_deleted else thread_id
+            )
+        ),
+    )
     mda_runs = Mock(cancel=AsyncMock())
     monkeypatch.setattr(
         type(thread_runtimes.RUNTIMES),
