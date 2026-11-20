@@ -331,7 +331,9 @@ class DiffImageRenderer:
         for file, rows in flowed:
             y = self._draw_file(draw, file, rows, y, width, gutter, digits)
         buffer = BytesIO()
-        image.save(buffer, format="PNG", optimize=True)
+        # Not ``optimize=True``: its search for a smaller encoding took most of the render
+        # and saved under 2% of the size.
+        image.save(buffer, format="PNG")
         return buffer.getvalue()
 
     def _flow(self, file: DiffFile) -> list[Row]:

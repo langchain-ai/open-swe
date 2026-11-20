@@ -116,8 +116,11 @@ class ReviewCard:
             )
             return None
 
-    async def _diff_image_id(self, files: list[ChangedFile]) -> str | None:
-        """A hosted-but-unposted PNG of the diff, which the card renders inline."""
+    async def _diff_image_id(
+        self, files: list[ChangedFile], hosting: asyncio.Future[str | None] | None = None
+    ) -> str | None:
+        """A hosted-but-unposted PNG of the diff, which the card renders inline; ``hosting``
+        is that PNG's upload, if the caller already started it."""
         request = self.request
         shown = ExpeditedDiff(files, request.excluded_hunks).shown
         fingerprint = hashlib.sha256(
@@ -125,9 +128,13 @@ class ReviewCard:
         ).hexdigest()
         image_key = [request.head_sha, fingerprint, request.slack_diff_file_id]
         if request.slack_diff_file_id and request.run_config.get("slack_diff_image") == image_key:
+            if hosting is not None:
+                hosting.cancel()
             return request.slack_diff_file_id
-        file_id = await SlackDiffImage(shown, f"diff-{request.head_sha[:12]}.png").upload(
-            self._span_tags
+        file_id = await (
+            hosting
+            if hosting is not None
+            else SlackDiffImage(shown, f"diff-{request.head_sha[:12]}.png").upload(self._span_tags)
         )
         request.run_config = {
             **request.run_config,
@@ -149,8 +156,15 @@ class ReviewCard:
         text, blocks = card
         return f"{text}\n{warning}", [context(warning), *blocks]
 
-    async def post_expedited(self, *, title: str, files: list[ChangedFile]) -> str:
-        """Post an expedited card and return its timestamp."""
+    async def post_expedited(
+        self,
+        *,
+        title: str,
+        files: list[ChangedFile],
+        diff_image: asyncio.Future[str | None] | None = None,
+    ) -> str:
+        """Post an expedited card and return its timestamp; ``diff_image`` is its diff
+        image's upload, if the caller started it early."""
         approval = self.request
         if approval.awaiting_ready:
             raise SlackRequestError("draft card is author-only")
@@ -159,7 +173,7 @@ class ReviewCard:
         # Hosting the diff image takes seconds (render, upload, then Slack's processing),
         # so the card's other lookups run meanwhile.
         diff_image_id, choices, (warning, prefix) = await asyncio.gather(
-            self._diff_image_id(files),
+            self._diff_image_id(files, diff_image),
             self._initial_channel_choices(),
             self._warn_target(("", [])),
         )

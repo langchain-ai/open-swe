@@ -19,6 +19,7 @@ from openswe.expedited_review.eligibility import (
     EligibleDiff,
     ExcludedHunk,
     Exclusion,
+    ExpeditedDiff,
     Ineligible,
     assess_eligibility,
     fingerprint_matches,
@@ -37,6 +38,7 @@ from openswe.review.approvals import AUTO_APPROVE_RULES_DIR, ApprovalPolicy
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import GitHubPrRef, delete_slack_message
+from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
@@ -235,7 +237,7 @@ class ExpeditedReviewNomination:
         own_channel, own_thread = origin.slack_channel_id, origin.slack_thread_ts
         coverage: tuple[ApprovalCondition | None, list[ExcludedHunk]] | None = None
         author_registered = False
-        span_tags = {"pull_request.url": pr_ref.url}
+        span_tags: dict[str, object] = {"pull_request.url": pr_ref.url}
         async with (
             GitHubClient.as_app(self.pr_ref.owner, self.pr_ref.repo)
             if self.read_as_app
@@ -435,7 +437,16 @@ class ExpeditedReviewNomination:
             },
             requested_by_user_id=requester.id if requester is not None else None,
         )
+        diff_image: asyncio.Future[str | None] | None = None
         try:
+            if not payload.draft:
+                # Hosting the card's diff image takes seconds, so it runs while the request
+                # is saved; every way out below that posts no card cancels it.
+                diff_image = asyncio.ensure_future(
+                    SlackDiffImage(
+                        ExpeditedDiff(files, exclusions).shown, f"diff-{head_sha[:12]}.png"
+                    ).upload(span_tags)
+                )
             with apm_span("expedited_review.save_request", span_tags):
                 approval = await approval.save()
             if approval.awaiting_ready:
@@ -465,15 +476,19 @@ class ExpeditedReviewNomination:
                 }
             with apm_span("expedited_review.post_card", span_tags):
                 message_ts = await ReviewCard(approval).post_expedited(
-                    title=payload.title, files=files
+                    title=payload.title, files=files, diff_image=diff_image
                 )
             approval.slack_message_ts = message_ts
             with apm_span("expedited_review.save_request", span_tags):
                 card = ReviewCard(await approval.save())
         except SlackRequestError as exc:
+            if diff_image is not None:
+                diff_image.cancel()
             await self.rollback(approval, displaced)
             return self.failure(f"Could not post the approval card in Slack: {exc.code}")
         except BaseException:
+            if diff_image is not None:
+                diff_image.cancel()
             await self.rollback(approval, displaced)
             raise
         # Copying the card to the review channel and clearing older ones read GitHub and

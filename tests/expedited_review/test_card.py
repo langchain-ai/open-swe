@@ -1,6 +1,8 @@
+import asyncio
 import json
 from html import unescape
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -456,3 +458,34 @@ def test_send_controls_are_buttons_trigger_server_forwards() -> None:
     # Required: Trigger Server answers Slack, so the backend can't send errors back.
     assert picker["element"]["type"] == "conversations_select"
     assert not picker.get("optional")
+
+
+_DRAWN = [ChangedFile(filename="x.py", additions=1, patch="@@ -0,0 +1 @@\n+x = 1")]
+
+
+async def test_a_diff_image_upload_started_early_is_used_instead_of_a_new_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    upload = AsyncMock(return_value="F_LATE")
+    monkeypatch.setattr("openswe.human_review.lifecycle.SlackDiffImage.upload", upload)
+    hosting = asyncio.get_running_loop().create_future()
+    hosting.set_result("F_EARLY")
+    approval = HumanReviewRequest(pull_request_id=uuid4(), head_sha="abc123", kind="expedited")
+
+    assert await ReviewCard(approval)._diff_image_id(_DRAWN, hosting) == "F_EARLY"
+    upload.assert_not_awaited()
+    assert approval.run_config["slack_diff_image"][2] == "F_EARLY"
+
+
+async def test_an_early_diff_image_upload_is_cancelled_when_the_card_has_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "openswe.human_review.lifecycle.SlackDiffImage.upload", AsyncMock(return_value="F_1")
+    )
+    approval = HumanReviewRequest(pull_request_id=uuid4(), head_sha="abc123", kind="expedited")
+    approval.slack_diff_file_id = await ReviewCard(approval)._diff_image_id(_DRAWN) or ""
+    hosting = asyncio.get_running_loop().create_future()
+
+    assert await ReviewCard(approval)._diff_image_id(_DRAWN, hosting) == "F_1"
+    assert hosting.cancelled()

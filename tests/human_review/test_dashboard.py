@@ -22,6 +22,7 @@ from openswe.human_review.standard import Origin, RequestResult
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.slack.channels import ChannelLookupUnavailable, SlackChannel
 from openswe.slack.client import GitHubPrRef
+from openswe.slack.diff_image import SlackDiffImage
 from openswe.slack.http import SlackRequestError
 from openswe.users import User
 from openswe.users.models import UserIdentity
@@ -75,6 +76,7 @@ async def test_review_channel_lookup_failure_is_actionable(
     "case",
     [
         "eligible",
+        "record_failed",
         "custom_summary",
         "large",
         "unregistered",
@@ -100,6 +102,14 @@ async def test_review_channel_lookup_failure_is_actionable(
 async def test_dashboard_selects_review_workflow(
     case: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    uploads: list[asyncio.Future[str | None]] = []
+
+    def hosting(_: SlackDiffImage, tags: dict[str, object]) -> asyncio.Future[str | None]:
+        """A diff image upload that is still running."""
+        uploads.append(asyncio.get_running_loop().create_future())
+        return uploads[-1]
+
+    monkeypatch.setattr(SlackDiffImage, "upload", hosting)
     pr_ref = GitHubPrRef(owner="lc", repo="repo", number=7, url="https://github.com/lc/repo/pull/7")
     requester = User(identities=[UserIdentity(provider="slack", external_id="U1")])
     pr = PullRequest(owner="lc", repo="repo", number=7, author_user_id=requester.id)
@@ -240,7 +250,14 @@ async def test_dashboard_selects_review_workflow(
         ),
         patch.object(RepoSettings, "cached", AsyncMock(return_value=RepoSettings())),
         patch.object(PullRequest, "load", AsyncMock(return_value=pr)),
-        patch.object(PullRequest, "save", AsyncMock(return_value=pr)),
+        patch.object(
+            PullRequest,
+            "save",
+            AsyncMock(
+                return_value=pr,
+                side_effect=RuntimeError("record failed") if case == "record_failed" else None,
+            ),
+        ),
         patch.object(
             HumanReviewRequest,
             "save",
@@ -263,9 +280,17 @@ async def test_dashboard_selects_review_workflow(
         ),
         patch("openswe.slack.dm.post_dm", AsyncMock()) as dm,
     ):
+        if case == "record_failed":
+            with pytest.raises(RuntimeError, match="record failed"):
+                await DashboardReviewRequest(pr_ref, Origin(requester=requester), "token").request()
+            # Hosting the diff image begins only once the request is about to be saved.
+            assert uploads == []
+            return
         if case in {"active_save_failed", "active_timestamp_failed", "active_cleanup_failed"}:
             with pytest.raises(RuntimeError, match="save failed"):
                 await DashboardReviewRequest(pr_ref, Origin(requester=requester), "token").request()
+            # No card was posted, so the diff image hosted for it is not left behind.
+            assert [upload.cancelled() for upload in uploads] == [True]
             discard.assert_awaited_once()
             reopen.assert_awaited_once()
             if case == "active_save_failed":
@@ -284,6 +309,7 @@ async def test_dashboard_selects_review_workflow(
     if case == "active_post_failed":
         assert not result.success
         assert "post_failed" in result.error
+        assert [upload.cancelled() for upload in uploads] == [True]
         discard.assert_awaited_once()
         reopen.assert_awaited_once()
         standard.assert_not_awaited()
@@ -299,6 +325,8 @@ async def test_dashboard_selects_review_workflow(
         assert result.channel == "C1"
         assert result.permalink == "https://slack/card"
         post.assert_awaited_once()
+        # The card is handed the diff image's upload, begun before the request was saved.
+        assert len(uploads) == 1 and post.call_args.kwargs["diff_image"] is uploads[0]
         standard.assert_not_awaited()
         saved = save.call_args_list[0].args[0]
         assert saved.tldr == (
