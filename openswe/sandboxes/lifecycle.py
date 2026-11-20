@@ -39,10 +39,10 @@ from openswe.sandboxes.configuration import SandboxResources
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import (
     LangSmithCreateOptions,
+    LiveSandboxProxy,
     TimeoutLangSmithSandbox,
     configure_sandbox_proxy,
     get_sandbox_proxy_config,
-    sandbox_proxy_config,
 )
 from openswe.sandboxes.providers.registry import SandboxGoneError, connect_existing_sandbox
 from openswe.sandboxes.state import (
@@ -673,7 +673,9 @@ async def mda_proxy_config(
             access = await _proxy_token(thread_id, repositories, permissions, force_refresh=True)
             expires_at = parse_iso(access.expires_at)
         token = access.token
-    proxy_config = await sandbox_proxy_config(
+    # As the backend writes it itself: the sandbox's own cloud identity rules, never ones from
+    # the thread's current create options that it wasn't created with.
+    proxy_config = await LiveSandboxProxy.config_for(
         sandbox_id, token, base_proxy_config=base_proxy_config, thread_id=thread_id
     )
     return proxy_config, expires_at if token else None

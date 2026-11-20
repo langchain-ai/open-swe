@@ -455,6 +455,67 @@ async def sandbox_proxy_config(
     return _json_object.validate_python(proxy_config)
 
 
+class LiveSandboxProxy:
+    """The proxy config of live sandbox ``name``, read and written through LangSmith's API.
+
+    LangSmith fixes a sandbox's cloud identity rules when it is created and refuses a write
+    that changes them (HTTP 422), so every config written here keeps the ones read from it.
+    """
+
+    def __init__(self, api: SandboxAPI, name: str) -> None:
+        self.api = api
+        self.name = name
+        self.url = f"{api.endpoint}/boxes/{name}"
+
+    @classmethod
+    async def config_for(
+        cls,
+        name: str,
+        github_token: str | None,
+        *,
+        base_proxy_config: Mapping[str, object] | None = None,
+        thread_id: str | None = None,
+    ) -> dict[str, JsonValue]:
+        """The config to write on live sandbox ``name``, with its own cloud identity rules.
+
+        Without a LangSmith API key nothing can read the sandbox, and the base config's are
+        kept."""
+        api = SandboxAPI.from_env()
+        if not api.api_key:
+            return await sandbox_proxy_config(
+                name, github_token, base_proxy_config=base_proxy_config, thread_id=thread_id
+            )
+        live = cls(api, name)
+        async with httpx2.AsyncClient(
+            transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
+        ) as client:
+            return await live.config(
+                client, github_token, base_proxy_config=base_proxy_config, thread_id=thread_id
+            )
+
+    async def config(
+        self,
+        client: httpx2.AsyncClient,
+        github_token: str | None,
+        *,
+        base_proxy_config: Mapping[str, object] | None = None,
+        thread_id: str | None = None,
+    ) -> dict[str, JsonValue]:
+        """``sandbox_proxy_config`` for this sandbox, its cloud identity rules read from it."""
+        return await sandbox_proxy_config(
+            self.name,
+            github_token,
+            base_proxy_config=base_proxy_config,
+            thread_id=thread_id,
+            federated_rules=await _federated_proxy_rules(client, self.url, self.api, self.name),
+        )
+
+    async def write(self, client: httpx2.AsyncClient, proxy_config: dict[str, JsonValue]) -> None:
+        await _patch_proxy_config(
+            client, self.url, {"proxy_config": proxy_config}, self.api, self.name
+        )
+
+
 async def configure_sandbox_proxy(
     sandbox_name: str,
     github_token: str | None,
@@ -467,18 +528,14 @@ async def configure_sandbox_proxy(
     if not api.api_key:
         logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
         return
-    url = f"{api.endpoint}/boxes/{sandbox_name}"
+    live = LiveSandboxProxy(api, sandbox_name)
     async with httpx2.AsyncClient(
         transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
     ) as client:
-        proxy_config = await sandbox_proxy_config(
-            sandbox_name,
-            github_token,
-            base_proxy_config=base_proxy_config,
-            thread_id=thread_id,
-            federated_rules=await _federated_proxy_rules(client, url, api, sandbox_name),
+        proxy_config = await live.config(
+            client, github_token, base_proxy_config=base_proxy_config, thread_id=thread_id
         )
-        await _patch_proxy_config(client, url, {"proxy_config": proxy_config}, api, sandbox_name)
+        await live.write(client, proxy_config)
     logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
 
 

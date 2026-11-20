@@ -7,6 +7,7 @@ import base64
 import contextvars
 import hashlib
 import json
+import re
 from collections.abc import Coroutine, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
@@ -181,7 +182,46 @@ def patch_sandbox_proxy_config(
             "Could not update sandbox proxy credentials.", "sandbox"
         ) from None
     if not response.is_success:
-        raise RuntimeError("Could not update sandbox proxy credentials.")
+        raise ProxyConfigRefusedError.of(response)
+
+
+#: Credential-shaped text an API error may echo back, never repeated in an error message.
+_SECRET_TEXT = re.compile(
+    r"(gh[opsu]_|github_pat_|lsv2_[a-z]{2}_|Bearer\s+|Basic\s+)[A-Za-z0-9_.=+/-]+", re.IGNORECASE
+)
+_DETAIL_LIMIT = 300
+
+
+class ProxyConfigRefusedError(RuntimeError):
+    """The sandbox API answered a proxy config write with an error; its message says why,
+    credentials removed.
+
+    Open SWE only: without it a refusal (HTTP 422) does not say which part of the config the
+    API rejected.
+    """
+
+    @classmethod
+    def of(cls, response: object) -> ProxyConfigRefusedError:
+        """The error for ``response``: its status, and the API's ``detail`` where it has one."""
+        status = getattr(response, "status_code", None)
+        return cls(
+            f"Could not update sandbox proxy credentials (HTTP {status}{cls._detail(response)})."
+        )
+
+    @staticmethod
+    def _detail(response: object) -> str:
+        try:
+            body = response.json()  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 — a body that is not JSON says nothing safe to repeat
+            return ""
+        detail = body.get("detail") if isinstance(body, Mapping) else None
+        if detail is None:
+            return ""
+        text = detail if isinstance(detail, str) else json.dumps(detail, default=str)
+        text = _SECRET_TEXT.sub(r"\1[redacted]", " ".join(text.split()))
+        if len(text) > _DETAIL_LIMIT:
+            text = f"{text[: _DETAIL_LIMIT - 1]}…"
+        return f": {text}"
 
 
 class SandboxProxyConfigSync:
@@ -225,6 +265,8 @@ class SandboxProxyConfigSync:
                 raise ResourceNotFoundError(
                     "Could not update sandbox proxy credentials.", "sandbox"
                 ) from None
+            if isinstance(error, ProxyConfigRefusedError):
+                raise ProxyConfigRefusedError(str(error)) from None
             raise RuntimeError("Could not update sandbox proxy credentials.") from None
         self._hashes[name] = digest
 

@@ -463,6 +463,45 @@ class TestMdaProxyConfig:
         assert expires_at is None
 
 
+# The cloud identity rule the workspace's sandboxes are created with today.
+_CURRENT_AWS_RULE = {
+    "name": "aws",
+    "type": "aws",
+    "aws": {"role_arn": "arn:aws:iam::123456789012:role/Current", "subject_scope": f"tag:{_TAG}"},
+}
+
+
+@pytest.mark.parametrize("live_rules", [[], [_AWS_RULE]], ids=["created-without", "created-with"])
+async def test_mda_gets_the_cloud_identity_rules_its_sandbox_was_created_with(
+    live_rules: list[dict[str, object]],
+) -> None:
+    """LangSmith fixes a sandbox's cloud identity rules when it is created and refuses a write
+    that changes them (HTTP 422), so the config MDA writes carries the live sandbox's, as the
+    backend's own write does, never the ones the thread's create options name today."""
+    from openswe.sandboxes import lifecycle
+    from openswe.sandboxes.providers import langsmith
+    from openswe.sandboxes.providers.langsmith_api import SandboxAPI
+
+    create = MagicMock(proxy_config={"rules": [_CURRENT_AWS_RULE, _RECORDED_RULE]})
+    read = AsyncMock(return_value=live_rules)
+    with (
+        patch.object(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={})),
+        patch.object(lifecycle.SandboxCreateConfig, "for_thread", AsyncMock(return_value=create)),
+        patch.object(
+            langsmith.SandboxAPI, "from_env", return_value=SandboxAPI("https://ls.invalid", "key")
+        ),
+        patch.object(langsmith, "_federated_proxy_rules", read),
+        patch(
+            "openswe.sandboxes.tool_access.tool_proxy_rule",
+            AsyncMock(return_value={"name": "open-swe-thread-tools"}),
+        ),
+    ):
+        config, _ = await lifecycle.mda_proxy_config("thread-123", "sandbox-abc")
+
+    assert read.await_args.args[-1] == "sandbox-abc"
+    assert config["rules"] == [{"name": "open-swe-thread-tools"}, _RECORDED_RULE, *live_rules]
+
+
 async def test_a_refused_token_is_minted_anew_for_mda() -> None:
     """After GitHub refused the token MDA wrote, the next one bypasses the backend's cache."""
     from openswe.sandboxes import lifecycle

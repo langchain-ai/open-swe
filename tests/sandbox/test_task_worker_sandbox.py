@@ -117,7 +117,7 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
         lifecycle, "sandbox_token", AsyncMock(return_value=SandboxGitHubAccess("token"))
     )
     monkeypatch.setattr(lifecycle, "configure_sandbox_proxy", configure)
-    monkeypatch.setattr(lifecycle, "sandbox_proxy_config", render)
+    monkeypatch.setattr(lifecycle.LiveSandboxProxy, "config_for", render)
     await lifecycle.refresh_thread_github_proxy("worker")
     assert configure.await_args.kwargs["base_proxy_config"] == proxy_config
     await lifecycle.mda_proxy_config("worker", host_sandbox_id)
