@@ -575,5 +575,10 @@ ENV.var(
     "Log the stack whenever the event loop goes unresponsive this many milliseconds; 0 disables.",
     default="500",
 )
+ENV.var(
+    "GC_PAUSE_LOG_MS",
+    "Log every garbage collection that holds the process this many milliseconds; 0 disables.",
+    default="200",
+)
 ENV.var("DEBUG_TRACEMALLOC", "Start tracemalloc to attribute unclosed-session warnings.")
 ENV.var("DEBUG_TRACEMALLOC_FRAMES", "Frames tracemalloc records per allocation.", default="25")

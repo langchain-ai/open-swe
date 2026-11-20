@@ -37,7 +37,7 @@ from openswe.threads.workflow_approval_api import workflow_approval_router
 from openswe.users.authorization import AccountConflict
 from openswe.users.records import UnknownUser
 from openswe.utils.dashboard_ui import mount_dashboard_ui
-from openswe.utils.event_loop import pin_single_event_loop, watch_for_stalls
+from openswe.utils.event_loop import GcPauses, pin_single_event_loop, watch_for_stalls
 from openswe.utils.http_pool import close_pool as close_http_pool
 
 logger = logging.getLogger(__name__)
@@ -135,9 +135,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with AsyncExitStack() as stack:
             stack.enter_context(WorkerShutdown(JOB_WORKER, SEGMENT_WORKER))
             stack.enter_context(watch_for_stalls())
+            stack.enter_context(GcPauses.watch())
             if AGENT_MCP is not None:
                 for mcp_app in AGENT_MCP.apps:
                     await stack.enter_async_context(mcp_app.lifespan(mcp_app))
+            GcPauses.freeze_startup_objects()
             yield
     finally:
         await asyncio.gather(SEGMENT_WORKER.stop(), JOB_WORKER.stop())

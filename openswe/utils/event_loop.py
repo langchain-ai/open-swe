@@ -7,16 +7,20 @@ and strands the thread permanently.
 
 The same loop serves every request, so one request running seconds of plain
 Python freezes all the others; ``watch_for_stalls`` logs what it was running.
+A garbage collection holds the loop the same way, whatever the loop was running
+when it began; ``GcPauses.watch`` logs each long one, and ``GcPauses.freeze_startup_objects``
+keeps everything startup made out of every later collection.
 """
 
 import asyncio
+import gc
 import logging
 import os
 import sys
 import threading
 import time
 import traceback
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -186,3 +190,60 @@ def watch_for_stalls() -> Iterator[None]:
         yield
     finally:
         watchdog.stop()
+
+
+class GcPauses:
+    """Times each collection from ``gc.callbacks``; the start and stop of one come in pairs."""
+
+    def __init__(self, threshold_seconds: float) -> None:
+        self._threshold = threshold_seconds
+        self._started: float | None = None
+
+    def __call__(self, phase: str, info: dict[str, int]) -> None:
+        if phase == "start":
+            self._started = time.perf_counter()
+            return
+        started, self._started = self._started, None
+        if started is None:
+            return
+        paused = time.perf_counter() - started
+        if paused < self._threshold:
+            return
+        logger.warning(
+            "Garbage collection paused the process",
+            extra={
+                "gc_pause_ms": round(paused * 1000),
+                "gc_generation": info.get("generation"),
+                "gc_collected": info.get("collected"),
+                "gc_uncollectable": info.get("uncollectable"),
+                "gc_frozen_objects": gc.get_freeze_count(),
+            },
+        )
+
+    @classmethod
+    @contextmanager
+    def watch(cls) -> Generator[None]:
+        """Log every garbage collection that lasts past ``GC_PAUSE_LOG_MS``."""
+        threshold_ms = ENV.GC_PAUSE_LOG_MS.get_int(200)
+        if threshold_ms <= 0:
+            yield
+            return
+        callback = cls(threshold_ms / 1000)
+        gc.callbacks.append(callback)
+        try:
+            yield
+        finally:
+            gc.callbacks.remove(callback)
+
+    @staticmethod
+    def freeze_startup_objects() -> None:
+        """Move everything startup made into the permanent generation.
+
+        Modules, tool definitions and warmed caches live as long as the process, yet a
+        full collection walks every one of them each time it runs, holding the loop for
+        as long as that takes. Frozen objects are never collected or walked again.
+        """
+        # Collect first, so startup's garbage is freed rather than frozen with the rest.
+        gc.collect()
+        gc.freeze()
+        logger.info("Froze startup objects", extra={"gc_frozen_objects": gc.get_freeze_count()})
