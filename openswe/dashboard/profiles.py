@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs.middleware import audit_endpoint
@@ -29,6 +29,7 @@ from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.database import postgres
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users import UserPreferencesPatch
+from openswe.users.preferences import ThreadTitlePreference
 from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
@@ -94,7 +95,7 @@ PROFILES = ProfileRecords("profile")
 GITHUB_OAUTH_TOKENS = UserRecords("github_oauth_token")
 
 
-class ProfileUpdate(BaseModel):
+class ProfileUpdate(ThreadTitlePreference):
     default_repo: str | None = None
     base_branch: str | None = None
     branch_prefix: str | None = None
@@ -398,6 +399,7 @@ async def put_my_profile(update: ProfileUpdate, reader: DashboardReadDep) -> dic
     patch = UserPreferencesPatch(
         concierge_mode=update.concierge_mode,
         experimental_classify=update.experimental_classify,
+        thread_title_instructions=update.thread_title_instructions,
     )
     preferences = await reader.user.merge_preferences(patch, session=reader.session)
     profile = await upsert_profile(login, reader.email or "", update, session=reader.session)

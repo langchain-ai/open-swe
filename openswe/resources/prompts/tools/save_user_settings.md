@@ -5,6 +5,8 @@ No login, email, thread ID, or on-behalf-of identity is accepted.
 Model selection uses shared defaults and per-thread overrides, not personal settings.
 
 Supported profile fields:
+- `thread_title_instructions`: how Robin titles threads the user starts, such as a tag prefix like `research:` or `pr:`; at most 2,000 characters.
+  An empty string restores Robin's default titles.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
 - `auto_fix_ci`: boolean preference.
 - `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.

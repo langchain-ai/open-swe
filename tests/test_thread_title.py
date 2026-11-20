@@ -1,5 +1,6 @@
 import asyncio
 import contextvars
+import uuid
 from types import SimpleNamespace
 from typing import Any, Literal, cast
 from unittest.mock import AsyncMock
@@ -19,6 +20,7 @@ from openswe.thread_title import (
     generate_and_store_thread_title,
     schedule_thread_title_generation,
 )
+from openswe.users import User, UserPreferences
 
 # Stands in for LangGraph's stream writer, which travels in a contextvar. A title
 # call that sees a non-default value here is running inside the agent run, and
@@ -116,6 +118,32 @@ async def test_generate_and_store_thread_title_only_replaces_explicit_seed(
     )
 
     assert threads.metadata == expected
+
+
+@pytest.mark.parametrize("instructions", ["", "Prefix titles with research:, review: or pr:"])
+async def test_title_follows_the_thread_starters_instructions(
+    monkeypatch: pytest.MonkeyPatch, instructions: str
+) -> None:
+    starter = uuid.uuid7()
+    preferences = UserPreferences(thread_title_instructions=instructions)
+    load = AsyncMock(return_value=SimpleNamespace(typed_preferences=preferences))
+    monkeypatch.setattr(User, "get", load)
+    monkeypatch.setattr("openswe.thread_title.mirror_thread_metadata", AsyncMock())
+    threads = _Threads({"source": "dashboard", "title": "fix it", "title_seed": "fix it"})
+    recorder: dict[str, Any] = {}
+
+    await generate_and_store_thread_title(
+        thread_id="thread-123",
+        conversation="fix it",
+        model=cast(BaseChatModel, _Model(recorder)),
+        client=SimpleNamespace(threads=threads),
+        user_id=starter,
+    )
+
+    load.assert_awaited_once_with(starter)
+    system_prompt = recorder["messages"][0].content
+    assert ("<title-instructions>" in system_prompt) is bool(instructions)
+    assert instructions in system_prompt
 
 
 @pytest.mark.parametrize("failure", ["error", "timeout"])

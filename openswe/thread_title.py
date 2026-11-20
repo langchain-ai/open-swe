@@ -2,7 +2,9 @@ import asyncio
 import contextvars
 import logging
 from collections.abc import Mapping, Sequence
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Self
+from uuid import UUID
 
 from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -18,6 +20,7 @@ from openswe.slack.client import append_slack_web_link_footer, update_slack_mess
 from openswe.slack.http import SlackRequestError
 from openswe.source_context import SourceContext
 from openswe.transcript.mirror import mirror_thread_metadata
+from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url
 
 logger = logging.getLogger(__name__)
@@ -31,10 +34,33 @@ _inflight_thread_ids: set[str] = set()
 
 
 class _ThreadTitle(BaseModel):
-    title: str = Field(description="Concise, task-focused thread title; aim for 5 words or fewer")
+    title: str = Field(description="Thread title that follows the title rules")
 
 
-_TITLE_SYSTEM_PROMPT = prompt("thread-title")
+@dataclass(frozen=True)
+class ThreadTitleStyle:
+    """How a thread is titled: Robin's terse default, or its starter's own instructions."""
+
+    instructions: str = ""
+
+    @classmethod
+    async def for_user(cls, user_id: UUID | None) -> Self:
+        if user_id is None:
+            return cls()
+        try:
+            user = await User.get(user_id)
+        except Exception:
+            logger.warning("Could not load thread title instructions", exc_info=True)
+            return cls()
+        return cls(user.typed_preferences.thread_title_instructions) if user else cls()
+
+    @property
+    def system_prompt(self) -> str:
+        return prompt("thread-title", instructions=self.instructions)
+
+    @staticmethod
+    def normalize(title: str) -> str:
+        return " ".join(title.strip().strip("`\"'").split()).rstrip(".")
 
 
 def _thread_metadata(thread: Any) -> dict[str, Any]:
@@ -68,17 +94,15 @@ def _breakout_title_input(request: str, conversation: str) -> str:
     )
 
 
-def _normalize_title(title: str) -> str:
-    return " ".join(title.strip().strip("`\"'").split()).rstrip(".")
-
-
 async def generate_and_store_thread_title(
     *,
     thread_id: str,
     conversation: str,
     model: BaseChatModel,
     client: Any,
+    user_id: UUID | None = None,
 ) -> None:
+    """Title the thread in the style its starter, ``user_id``, chose."""
     thread = await client.threads.get(thread_id=thread_id)
     metadata = _thread_metadata(thread)
     expected_title = metadata.get("title")
@@ -103,8 +127,9 @@ async def generate_and_store_thread_title(
     )["content"]
     if not isinstance(title_input, str):
         return
+    style = await ThreadTitleStyle.for_user(user_id)
     messages = [
-        SystemMessage(content=_TITLE_SYSTEM_PROMPT),
+        SystemMessage(content=style.system_prompt),
         HumanMessage(content=title_input),
     ]
     # Empty callbacks keep title tokens out of the thread's message stream.
@@ -126,17 +151,17 @@ async def generate_and_store_thread_title(
             response = await model.ainvoke(
                 [
                     SystemMessage(
-                        content=_TITLE_SYSTEM_PROMPT + "\n\n" + prompt("thread-title-plain")
+                        content=style.system_prompt + "\n\n" + prompt("thread-title-plain")
                     ),
                     HumanMessage(content=title_input),
                 ],
                 config=config,
             )
-            title = _normalize_title(response.text)
+            title = style.normalize(response.text)
         else:
             if not isinstance(result, _ThreadTitle):
                 return
-            title = _normalize_title(result.title)
+            title = style.normalize(result.title)
     if not title:
         return
 
@@ -187,6 +212,7 @@ def schedule_thread_title_generation(
     messages: Sequence[BaseMessage],
     model: BaseChatModel,
     client: Any,
+    user_id: UUID | None = None,
 ) -> None:
     conversation = _title_input(messages)
     if conversation is None or thread_id in _inflight_thread_ids:
@@ -200,6 +226,7 @@ def schedule_thread_title_generation(
                 conversation=conversation,
                 model=model,
                 client=client,
+                user_id=user_id,
             )
         except Exception:
             logger.warning(

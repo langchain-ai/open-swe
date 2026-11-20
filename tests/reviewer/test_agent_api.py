@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 
 import jwt
@@ -1090,7 +1091,12 @@ async def test_operation_respects_open_tool_argument_schemas(additional: JsonVal
 
 
 def test_run_token_round_trips_the_signed_run() -> None:
+    from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
+
     assert verify_runtime_token(sign_runtime_token(RUN)) == RUN
+    turn = AgentTurnSettings(title_model_id="openai:gpt-6-luna", profile_user_id=uuid.uuid7())
+    agent_run = RUN.model_copy(update={"settings": RunSettings(agent=turn)})
+    assert verify_runtime_token(sign_runtime_token(agent_run)) == agent_run
 
 
 def test_run_token_signed_with_a_rotated_out_key_still_verifies(

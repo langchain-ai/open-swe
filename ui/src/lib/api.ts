@@ -370,6 +370,7 @@ export interface Profile {
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  thread_title_instructions?: string
   updated_at?: string
 }
 
@@ -386,6 +387,7 @@ export interface ProfileUpdate {
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
+  thread_title_instructions?: string
 }
 
 export interface SlackBotOption {

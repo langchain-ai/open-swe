@@ -295,7 +295,7 @@ from openswe.tools.task_threads import (
     task_status,
 )
 from openswe.tools.upgrade_app_installs import upgrade_app_installs
-from openswe.users import User
+from openswe.users import User, UserPreferences
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -1419,6 +1419,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             messages=state.get("messages") or [],
             model=self._title_model,
             client=client,
+            user_id=self._turn.profile_user_id,
         )
         # Whose token the run works with is the same whatever model it asked for, so it is
         # resolved while a thread's first turn classifies that.
@@ -1767,7 +1768,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     # stay off the critical path during worker load and retry storms.
     settings: Settings | None = None
     routing_defaults: dict[str, tuple[str, str | None]]
-    (settings, profile), admin_thread, tool_access, sender_preferences = await asyncio.gather(
+    (settings, profile), admin_thread, tool_access, sender = await asyncio.gather(
         _timed(
             thread_id,
             "factory.settings_defaults",
@@ -1782,8 +1783,9 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         ),
         _timed(thread_id, "factory.admin_thread", _admin_thread(config, profile_login)),
         _timed(thread_id, "factory.tool_access", resolve_access(cfg, login=profile_login)),
-        User.preferences_for_login(profile_login or ""),
+        User.for_login("github", profile_login) if profile_login else asyncio.sleep(0, None),
     )
+    sender_preferences = sender.typed_preferences if sender is not None else UserPreferences()
     model_defaults = settings.default_model_pair("agent")
     routing_defaults = dict(settings.agent_routing_models)
     title_defaults = settings.default_thread_title_model
@@ -2148,6 +2150,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     # What preparing each turn reads, signed into the run's token (``RunSettings.agent``).
     turn = AgentTurnSettings(
         profile_login=profile_login,
+        profile_user_id=sender.id if sender is not None else None,
         credential_login=credential_login,
         admin=admin_thread,
         sole_writer=tool_access.sole,

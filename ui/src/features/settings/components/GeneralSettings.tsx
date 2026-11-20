@@ -11,6 +11,7 @@ import { Switch } from "@langchain/macaw-components/Switch"
 
 import type { Theme } from "@/lib/theme"
 import { SettingsRow, SettingsSection } from "@/components/AppShell"
+import { ThreadTitleSettings } from "./ThreadTitleSettings"
 import {
   notificationsEnabled,
   notificationsSupported,
@@ -181,6 +182,8 @@ export function GeneralSettings() {
           }
         />
       </SettingsSection>
+
+      <ThreadTitleSettings />
 
       <SettingsSection title="Notifications">
         <SettingsRow

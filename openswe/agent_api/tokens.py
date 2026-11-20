@@ -12,6 +12,7 @@ import secrets
 import time
 from collections.abc import Mapping
 from typing import Final
+from uuid import UUID
 
 import jwt
 from pydantic import (
@@ -60,6 +61,8 @@ class AgentTurnSettings(BaseModel):
 
     # Whoever sent the message that started the run, and whose private credentials it may use.
     profile_login: str | None = None
+    # The sender's ``users.id``, when they have one.
+    profile_user_id: UUID | None = None
     credential_login: str | None = None
     admin: bool = Field(default=False, validation_alias=AliasChoices("admin", "admin_workspaces"))
     sole_writer: bool = False
@@ -188,7 +191,11 @@ def _sign(audience: str, run: RemoteRun, extra: dict[str, JsonValue], now: int |
         "assistant_id": run.assistant_id,
         "cfg": run.configurable,
         "md": run.metadata,
-        **({"set": settings} if (settings := run.settings.model_dump(exclude_none=True)) else {}),
+        **(
+            {"set": settings}
+            if (settings := run.settings.model_dump(mode="json", exclude_none=True))
+            else {}
+        ),
         "gid": run.grant_id,
         **extra,
     }

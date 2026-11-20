@@ -38,7 +38,7 @@ Publication does not stop the source sandbox.
   Listing requires a private admin surface; writes also work in verified sole-writer shared threads and are audited with the affected bot ID.
 - **Projects** (sidebar folders and the composer's project picker): named folders of threads, personal or shared with teammates, optionally bound to one repository whose threads then file under it.
   Use `list_projects`, `create_project`, `update_project`, `share_project`, `unshare_project` and `move_thread_to_project`; deleting a project stays in the dashboard.
-- **Settings → General** (`/my-settings`): theme, thread defaults (visibility and follow-up behavior), whether the Changes panel opens when a run that edited files finishes, and notifications.
+- **Settings → General** (`/my-settings`): theme, thread defaults (visibility and follow-up behavior), thread title instructions (how Robin titles threads you start), whether the Changes panel opens when a run that edited files finishes, and notifications.
 - **Settings → Agent** (`/my-settings/agent`): automatic human-review assignment and review-request Slack DM preferences.
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
