@@ -26,6 +26,8 @@ from typing import Final
 
 import httpx2
 
+from openswe.config import ENV
+from openswe.github.run_calls import RUN_GITHUB_CALLS
 from openswe.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
@@ -179,6 +181,19 @@ class MeteredTransport(httpx2.AsyncBaseTransport):
         }
         return {name: value for name, value in ids.items() if value is not None}
 
+    @classmethod
+    def _rate_limited(cls, response: httpx2.Response) -> bool:
+        """Whether GitHub refused the request for a rate limit, which it does not charge: the
+        hourly quota spent, or a secondary limit, which names a ``Retry-After``."""
+        if response.status_code not in (403, 429):
+            return False
+        headers = response.headers
+        return (
+            response.status_code == 429
+            or cls._header_int(headers, "x-ratelimit-remaining") == 0
+            or (cls._header_int(headers, "retry-after") or 0) > 0
+        )
+
     @staticmethod
     def _header_int(headers: httpx2.Headers, name: str) -> int | None:
         try:
@@ -214,13 +229,21 @@ class MeteredTransport(httpx2.AsyncBaseTransport):
             return
         headers = response.headers
         revalidated = response.status_code == 304 or bool(response.extensions.get(REVALIDATED))
+        held = bool(response.extensions.get(HELD))
+        if (
+            (run_id := fields.get("run_id")) is not None
+            and fields.get("github_installation_id") is not None
+            and str(fields["github_installation_id"]) == ENV.GITHUB_APP_INSTALLATION_ID.get()
+            and not (revalidated or held or cls._rate_limited(response))
+        ):
+            RUN_GITHUB_CALLS.record(str(run_id))
         logger.info(
             "GitHub API request",
             extra={
                 **fields,
                 "github_status": response.status_code,
                 "github_revalidated": revalidated,
-                "github_held": bool(response.extensions.get(HELD)),
+                "github_held": held,
                 "github_quota_resource": headers.get("x-ratelimit-resource"),
                 "github_quota_used": cls._header_int(headers, "x-ratelimit-used"),
                 "github_quota_remaining": cls._header_int(headers, "x-ratelimit-remaining"),

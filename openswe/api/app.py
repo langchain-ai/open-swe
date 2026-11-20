@@ -59,6 +59,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from openswe.dashboard.oauth import validate_github_login_allowlist
     from openswe.database.analytics import activate_reporting, load_workspace
     from openswe.database.notifications import LISTENER
+    from openswe.github.run_calls import RUN_GITHUB_CALLS
     from openswe.jobs.kinds import SEGMENT_WORKER, start_jobs
     from openswe.jobs.kinds import WORKER as JOB_WORKER
     from openswe.jobs.worker import WorkerShutdown
@@ -122,6 +123,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     LISTENER.start()
     JOB_WORKER.start(first=start_jobs)
     SEGMENT_WORKER.start()
+    RUN_GITHUB_CALLS.start()
     try:
         from openswe.server import warm_agent_build
 
@@ -139,6 +141,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             yield
     finally:
         await asyncio.gather(SEGMENT_WORKER.stop(), JOB_WORKER.stop())
+        await RUN_GITHUB_CALLS.stop()
         await HUB.stop()
         await bridge_listener.stop()
         await PLUGIN_ROOMS.stop()
