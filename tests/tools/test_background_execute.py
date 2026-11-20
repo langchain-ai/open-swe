@@ -911,3 +911,56 @@ async def test_background_execute_rejects_a_thread_without_sandbox_metadata(
     assert result["success"] is False
     assert "Missing sandbox_id in thread metadata for unprepared" in result["error"]
     connect.assert_not_awaited()
+
+
+@pytest.mark.parametrize("cancelled", [True, False])
+async def test_a_cancelled_workers_completions_are_dropped_not_run(
+    monkeypatch: pytest.MonkeyPatch, cancelled: bool
+) -> None:
+    """A cancelled worker refuses runs: delivering would fail every poll, for good."""
+    task = {"task_id": "task-1", "status": "completed", "notification": "pending"}
+    client = AsyncMock()
+    client.threads.get.return_value = {
+        "metadata": {"sandbox_id": "sandbox-1", "running_background_tasks": ["task-1"]}
+    }
+    delegation = SimpleNamespace(cancelled=cancelled)
+    monkeypatch.setattr(background_tasks.TaskDelegation, "get", AsyncMock(return_value=delegation))
+
+    with (
+        patch("openswe.background_tasks._client", return_value=client),
+        patch("openswe.background_tasks.connect_sandbox", AsyncMock(return_value=AsyncMock())),
+        patch("openswe.background_tasks._list_tasks", AsyncMock(return_value=[task])),
+        patch("openswe.background_tasks._claim", AsyncMock(return_value=True)),
+        patch("openswe.background_tasks._mark_delivered", AsyncMock()) as mark_delivered,
+        patch("openswe.background_tasks.completion_configurable", AsyncMock(return_value={})),
+        patch("openswe.background_tasks.dispatch_agent_run", AsyncMock()) as dispatch,
+        patch("openswe.background_tasks.update_background_task_state", AsyncMock()) as track,
+        patch("openswe.background_tasks.refresh_slack_background_status", AsyncMock()),
+    ):
+        result = await reconcile_background_tasks("worker-1")
+
+    # Settled either way, so the polling cron deletes itself on its next tick.
+    assert result == {"status": "idle", "delivered": 0 if cancelled else 1, "pending": 0}
+    assert dispatch.await_count == (0 if cancelled else 1)
+    mark_delivered.assert_awaited_once()
+    track.assert_awaited_with(client, "worker-1", finished=["task-1"])
+
+
+async def test_no_worker_lookup_while_nothing_is_owed(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = AsyncMock()
+    client.threads.get.return_value = {
+        "metadata": {"sandbox_id": "sandbox-1", "running_background_tasks": ["task-1"]}
+    }
+    lookup = AsyncMock()
+    monkeypatch.setattr(background_tasks.TaskDelegation, "get", lookup)
+    running = {"task_id": "task-1", "status": "running"}
+
+    with (
+        patch("openswe.background_tasks._client", return_value=client),
+        patch("openswe.background_tasks.connect_sandbox", AsyncMock(return_value=AsyncMock())),
+        patch("openswe.background_tasks._list_tasks", AsyncMock(return_value=[running])),
+        patch("openswe.background_tasks.refresh_slack_background_status", AsyncMock()),
+    ):
+        await reconcile_background_tasks("worker-1")
+
+    lookup.assert_not_awaited()

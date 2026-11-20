@@ -190,6 +190,11 @@ class TaskDelegation(Base):
             return await session.get(cls, worker_thread_id)
 
     @classmethod
+    async def is_cancelled(cls, worker_thread_id: str) -> bool:
+        delegation = await cls.get(worker_thread_id)
+        return delegation is not None and delegation.cancelled
+
+    @classmethod
     async def launched(
         cls,
         coordinator_thread_id: str,

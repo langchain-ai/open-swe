@@ -25,6 +25,7 @@ from openswe.sandboxes.this_mac import MacSandbox
 from openswe.sandboxes.tool_access import SANDBOX_HOST_THREAD_KEY, ToolAccess
 from openswe.slack.thinking import refresh_slack_background_status
 from openswe.source_context import SourceContext
+from openswe.tasks.store import TaskDelegation
 from openswe.tools.background_execute import TASK_ROOT, list_tasks
 from openswe.utils.background_task_state import (
     RUNNING_BACKGROUND_TASKS_KEY,
@@ -250,12 +251,30 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
                 exc_info=True,
             )
     status_context = SourceContext.from_metadata(status_metadata or metadata)
+    # A cancelled worker takes no more runs, so a completion run would only be refused,
+    # and polling would ask again every minute for good: its completions are dropped.
+    dropping = bool(undelivered_ids) and await TaskDelegation.is_cancelled(thread_id)
     delivered_ids: list[str] = []
+    dropped_ids: list[str] = []
     for task in terminal:
         task_id = task.get("task_id")
         if not isinstance(task_id, str) or task.get("notification") == "done":
             continue
         if not await _claim(backend, task_id):
+            continue
+        if dropping:
+            try:
+                await _mark_delivered(backend, task_id)
+            except Exception:
+                await _unclaim(backend, task_id)
+                logger.warning(
+                    "Failed to drop background task",
+                    extra={"agent_thread_id": thread_id, "task_id": task_id},
+                    exc_info=True,
+                )
+                continue
+            task["notification"] = "done"
+            dropped_ids.append(task_id)
             continue
         message = _notification(task)
         try:
@@ -281,9 +300,14 @@ async def _reconcile(thread_id: str, *, access: ToolAccess | None = None) -> _Re
         except Exception:
             await _unclaim(backend, task_id)
             logger.warning("Failed to deliver background task %s", task_id, exc_info=True)
-    if delivered_ids:
+    if dropped_ids:
+        logger.info(
+            "Dropped a cancelled worker's background task completions",
+            extra={"agent_thread_id": thread_id, "task_ids": dropped_ids},
+        )
+    if settled_ids := [*delivered_ids, *dropped_ids]:
         try:
-            await update_background_task_state(client, thread_id, finished=delivered_ids)
+            await update_background_task_state(client, thread_id, finished=settled_ids)
         except Exception:
             tracked_successfully = False
             logger.warning(

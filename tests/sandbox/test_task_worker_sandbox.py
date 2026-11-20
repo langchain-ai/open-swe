@@ -178,6 +178,10 @@ async def test_worker_reattach_recovers_a_missed_background_completion(
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[task]))
     monkeypatch.setattr(background_tasks, "dispatch_agent_run", dispatch)
+    # A live worker: a cancelled one's completions are dropped instead.
+    monkeypatch.setattr(
+        background_tasks.TaskDelegation, "get", AsyncMock(return_value=MagicMock(cancelled=False))
+    )
     monkeypatch.setattr(
         task_service,
         "recipient_config",
