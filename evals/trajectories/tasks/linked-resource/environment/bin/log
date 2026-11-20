@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Appends one search command, with when and where it ran, to the log the grader reads."""
+
+import json
+import os
+import sys
+import time
+
+with open("/var/log/apps-eval/searches.log", "a") as out:
+    record = {"at": time.time(), "cwd": os.getcwd(), "argv": sys.argv[1:]}
+    record["piped"] = os.environ.get("APPS_EVAL_PIPED") == "1"
+    out.write(json.dumps(record) + "\n")

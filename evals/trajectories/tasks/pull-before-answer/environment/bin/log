@@ -1,0 +1,6 @@
+#!/bin/sh
+# Appends "<epoch seconds> <kind> <command>" to the events log the grader reads.
+kind=$1
+shift
+mkdir -p /var/log/widgets-eval
+printf '%s %s %s\n' "$(date +%s.%N)" "$kind" "$*" >> /var/log/widgets-eval/events.log

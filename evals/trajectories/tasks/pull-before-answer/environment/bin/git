@@ -1,0 +1,28 @@
+#!/bin/sh
+# Installed ahead of /usr/bin/git: logs fetches and pulls, then runs git unchanged.
+skip=
+sub=
+for arg in "$@"; do
+    if [ -n "$skip" ]; then
+        skip=
+        continue
+    fi
+    case "$arg" in
+        -C | -c | --git-dir | --work-tree | --namespace) skip=1 ;;
+        -*) ;;
+        *)
+            if [ -z "$sub" ]; then
+                sub=$arg
+            elif [ "$sub" = remote ]; then
+                [ "$arg" = update ] && sub="remote update"
+                break
+            else
+                break
+            fi
+            ;;
+    esac
+done
+case "$sub" in
+    fetch | pull | "remote update") /usr/local/lib/widgets-eval/log fetch "git $*" ;;
+esac
+exec /usr/bin/git "$@"

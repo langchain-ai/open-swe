@@ -1,0 +1,6 @@
+#!/bin/sh
+# The remote's upload-pack, as slow as the 137s pull in s08. Logged here too, so a fetch
+# through /usr/bin/git directly still counts.
+/usr/local/lib/widgets-eval/log fetch "upload-pack $*"
+sleep 150
+exec git-upload-pack "$@"

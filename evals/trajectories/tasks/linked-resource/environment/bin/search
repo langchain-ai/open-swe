@@ -1,0 +1,8 @@
+#!/bin/sh
+# Installed ahead of /usr/bin as grep, rg and find: logs the call, then runs the real tool.
+name=$(basename "$0")
+# A tool reading a pipe searches what it was given, not the working directory.
+piped=0
+[ -p /dev/stdin ] && piped=1
+APPS_EVAL_PIPED=$piped /usr/local/lib/apps-eval/log "$name" "$@" 2>/dev/null
+exec "/usr/bin/$name" "$@"

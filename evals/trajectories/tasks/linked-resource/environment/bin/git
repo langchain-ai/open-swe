@@ -1,0 +1,9 @@
+#!/bin/sh
+# Installed ahead of /usr/bin/git: logs `git grep`, then runs git unchanged.
+for arg in "$@"; do
+    if [ "$arg" = grep ]; then
+        /usr/local/lib/apps-eval/log git "$@" 2>/dev/null
+        break
+    fi
+done
+exec /usr/bin/git "$@"

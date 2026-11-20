@@ -37,6 +37,9 @@ Each has an instruction, a Docker environment, a `tests/test.sh` grader and a re
 | `long-build` | Blocking on a ~6 min build (RBN-212) | Fixes the bug, runs the build in the background and checks back |
 | `repo-search` | `grep -r` over vendored code and a generated patch (RBN-227) | Uses `rg`/`git grep`; decoys in ignored files give a wrong answer |
 | `answer-first` | Slow setup before a simple question (RBN-220) | Answers from the code without running `make setup` |
+| `pull-before-answer` | Pulling and setting up the repo before a question it can already answer (RBN-220, s08/d04) | Reads two files and answers; a fetch, pull, `make setup` or pip install before the answer scores 0, and the pull alone takes 150s |
+| `linked-resource` | Searching elsewhere instead of opening the resource the user linked (RBN-220, d08) | Reads the linked app and answers; the repo has an undeployed cap, and a search outside the app before the answer scores 0 |
+| `plain-answer` | Building an HTML artifact when a few bullets were asked for (RBN-220, s10/s12) | Writes two plain bullets; any new HTML, SVG or image file scores 0 |
 | `retry-loop` | Retrying a search that always times out (RBN-219) | Stops after a failure or two and finds the thread through the PR's author; more than 3 searches scores 0 |
 | `json-results` | Handling large JSON as text, as in code-mode stalls (RBN-215) | Parses each run and its double-encoded payload; text matching counts a decoy case |
 | `ci-babysit` | Blocking on a CI watch while a job has already failed (RBN-214) | Polls CI, fixes the early lint failure, reruns, and reports once the rerun is green; a blocking watch runs out of time |
