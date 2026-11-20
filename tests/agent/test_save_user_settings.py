@@ -9,7 +9,7 @@ from openswe.dashboard.personal_settings import SettingValue, patch_personal_set
 from openswe.dashboard.user_preferences import USER_PREFERENCES
 from openswe.tools.read_user_settings import read_user_settings
 from openswe.tools.save_user_settings import save_user_settings
-from openswe.users import User, UserPreferences
+from openswe.users import User
 from tests.conftest import FakeUserRecords, serve_threads_from
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -168,7 +168,6 @@ async def test_unavailable_thread_scope_fails_closed(
         {"default_model": "anthropic:claude-fable-5-2"},
         {"default_subagent_model": None, "subagent_reasoning_effort": "high"},
         {"branch_prefix": "new/", "default_visibility": "invalid"},
-        {"experimental_classify": None, "auto_fix_ci": False},
     ],
 )
 async def test_invalid_patch_rejects_all_changes(
@@ -204,34 +203,6 @@ async def test_agent_cannot_change_concierge_mode_even_in_mixed_patch(
     assert result["ok"] is False
     assert "dashboard" in str(result["error"])
     assert user_records.items == before
-
-
-@pytest.mark.parametrize("flag", ["experimental_classify"])
-async def test_feature_flag_requires_user_and_validates_before_writing(
-    user_records: FakeUserRecords,
-    requester: dict[str, object],
-    saved_scope: dict[str, object],
-    flag: str,
-) -> None:
-    with patch.object(
-        User, "update_preferences", new_callable=AsyncMock, return_value=None
-    ) as save:
-        assert (await save_user_settings({flag: True, "auto_fix_ci": False}))["ok"] is False
-        save.assert_awaited_once()
-    assert not user_records.items
-    with patch.object(
-        User,
-        "update_preferences",
-        new_callable=AsyncMock,
-        return_value=UserPreferences.model_validate({flag: True}),
-    ) as save:
-        assert (await save_user_settings({flag: True, "auto_fix_ci": False}))["updated"] == {
-            flag: True,
-            "auto_fix_ci": False,
-        }
-        assert save.await_args.args[0] == "Alice"
-        assert getattr(save.await_args.args[1], flag) is True
-    assert user_records.get("profile", "Alice")["auto_fix_ci"] is False
 
 
 async def test_first_setting_does_not_pin_inherited_model_defaults(
@@ -298,7 +269,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "review_request_dms_enabled": True,
                 "concierge_mode": False,
                 "thread_title_instructions": "",
-                "experimental_classify": False,
             },
             "preferences": {
                 "default_visibility": "private",

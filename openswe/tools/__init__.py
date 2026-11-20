@@ -28,7 +28,6 @@ _TOOL_MODULES = {
     "get_human_review_status": ".request_human_review",
     "get_thread": ".threads",
     "http_request": ".http_request",
-    "classify": ".classify",
     "list_automations": ".automations",
     "list_event_types": ".listen_events",
     "listen_events": ".listen_events",
@@ -120,7 +119,6 @@ __all__ = [
     "get_human_review_status",
     "get_thread",
     "http_request",
-    "classify",
     "list_automations",
     "list_event_types",
     "listen_events",
@@ -234,7 +232,6 @@ if TYPE_CHECKING:
     )
     from openswe.tools.background_execute import background_execute
     from openswe.tools.background_task import background_task
-    from openswe.tools.classify import classify
     from openswe.tools.connect_managed_tools import connect_managed_tools
     from openswe.tools.create_sandbox_file_download_url import create_sandbox_file_download_url
     from openswe.tools.discover_managed_tools import discover_managed_tools

@@ -181,7 +181,6 @@ from openswe.tools import (
     auto_assign_human_reviewer,
     background_execute,
     background_task,
-    classify,
     connect_managed_tools,
     create_automation,
     create_project,
@@ -295,7 +294,7 @@ from openswe.tools.task_threads import (
     task_status,
 )
 from openswe.tools.upgrade_app_installs import upgrade_app_installs
-from openswe.users import User, UserPreferences
+from openswe.users import User
 from openswe.utils import ttl_cache
 from openswe.utils.authorship import (
     OPEN_SWE_BOT_EMAIL,
@@ -307,7 +306,6 @@ from openswe.utils.authorship import (
 )
 from openswe.utils.dashboard_links import dashboard_base_url, dashboard_plan_url
 from openswe.utils.deferred_model import make_deferred_error_model
-from openswe.utils.jev import Jev
 from openswe.utils.json_types import as_json_object, thread_metadata
 from openswe.utils.startup_trace import aphase
 from openswe.utils.thread_participants import PARTICIPANT_LOGINS_KEY, participant_logins
@@ -706,7 +704,6 @@ AGENT_TOOLS: Final = (
     http_request,
     fetch_url,
     transcribe_audio,
-    classify,
     background_execute,
     background_task,
     monitor,
@@ -1785,7 +1782,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         _timed(thread_id, "factory.tool_access", resolve_access(cfg, login=profile_login)),
         User.for_login("github", profile_login) if profile_login else asyncio.sleep(0, None),
     )
-    sender_preferences = sender.typed_preferences if sender is not None else UserPreferences()
     model_defaults = settings.default_model_pair("agent")
     routing_defaults = dict(settings.agent_routing_models)
     title_defaults = settings.default_thread_title_model
@@ -2043,7 +2039,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             )
         ),
         *(() if _writes_database_rows() else (execute_database_sql, write_database_rows)),
-        *(() if sender_preferences.experimental_classify and Jev.configured() else (classify,)),
     ]
     static_tools = [tool for tool in AGENT_TOOLS if not any(tool is w for w in withheld)]
     static_tools = permitted(static_tools, tool_access)
