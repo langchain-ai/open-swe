@@ -820,7 +820,11 @@ export function AutomationEditor({
                 </MacawLink>
               </div>
             )}
-            <AutomationRuns automationId={schedule.id} limit={10} />
+            <AutomationRuns
+              key={schedule.id}
+              automationId={schedule.id}
+              limit={10}
+            />
           </>
         )}
       </div>

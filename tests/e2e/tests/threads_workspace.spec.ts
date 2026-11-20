@@ -974,7 +974,7 @@ test.describe("automation run history", () => {
     failAutomationRuns = false;
     const retryResponse = waitForThreadsPage(page, {
       scope: "automation",
-      limit: "100",
+      limit: "25",
       offset: "0",
     });
     await automations.getByRole("button", { name: "Retry" }).click();
