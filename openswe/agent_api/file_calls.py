@@ -1,7 +1,8 @@
-"""The calls of a run's file and shell tools that reach the thread's files on the backend.
+"""The calls of a run's file tools that reach the thread's files on the backend.
 
-MDA runs those tools itself, in the thread's sandbox; a path the backend serves rather
-than the sandbox, such as the run's skills, is answered here.
+MDA runs the file and shell tools itself, in the thread's sandbox; a path the backend
+serves rather than the sandbox (``FilesSpec.backend_paths``), such as the images a run
+offloaded, is answered here.
 """
 
 import base64
@@ -9,14 +10,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from typing import Protocol
 
-from deepagents.backends.composite import CompositeBackend
-from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
+from deepagents.backends.protocol import BackendProtocol
 from runtime_api.files import (
     DeleteRequest,
     DownloadRequest,
     EditRequest,
-    ExecuteReply,
-    ExecuteRequest,
     FileReply,
     GlobReply,
     GlobRequest,
@@ -99,18 +97,6 @@ async def files_grep(run: ReachesFiles, request: GrepRequest) -> GrepReply:
         ),
     )
     return GrepReply.model_validate(asdict(result))
-
-
-async def files_execute(run: ReachesFiles, request: ExecuteRequest) -> ExecuteReply:
-    files = await run.thread_files()
-    if not isinstance(files, SandboxBackendProtocol | CompositeBackend):
-        return ExecuteReply(output="Error: this thread's files cannot run commands", exit_code=1)
-    result = await run.in_run(
-        "files.execute", lambda: files.aexecute(request.command, timeout=request.timeout)
-    )
-    return ExecuteReply(
-        output=result.output, exit_code=result.exit_code, truncated=result.truncated
-    )
 
 
 async def files_upload(run: ReachesFiles, request: UploadRequest) -> TransferReplies:

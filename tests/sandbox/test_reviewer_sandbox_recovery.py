@@ -58,7 +58,7 @@ async def test_an_old_sandbox_that_cannot_be_reached_is_handed_to_mda_or_fails(
             side_effect=failure,
         ),
         patch(
-            "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
+            "openswe.sandboxes.lifecycle.THREADS.update", new_callable=AsyncMock
         ) as update_thread,
         pytest.raises(SandboxUnreachableError) as excinfo,
     ):
@@ -90,7 +90,7 @@ async def test_an_abandoned_cached_sandbox_is_forgotten() -> None:
             side_effect=SandboxClientError("sandbox is gone"),
         ),
         patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
-        patch("openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
+        patch("openswe.sandboxes.lifecycle.THREADS.update", new_callable=AsyncMock),
         pytest.raises(SandboxUnreachableError),
     ):
         await ensure_sandbox_for_thread(thread_id, abandon_unreachable=True)

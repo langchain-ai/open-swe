@@ -800,16 +800,22 @@ class TokenRun:
         return credential
 
     async def sandbox_proxy(self, request: SandboxProxyRequest) -> SandboxProxy:
-        """The backend's part of the proxy config MDA writes on the run's sandbox."""
+        """The proxy config MDA writes on the run's sandbox, with a GitHub token of the run's
+        scope: a task worker's, its coordinator's own."""
         managed = await self._sandbox.managed()
-        if managed is None or managed.github_proxy is None:
+        if not managed.writes_proxy:
             # The sandbox's capability goes only to a run that writes its proxy config.
             raise RefusedCallError("The backend writes this thread's sandbox proxy config")
-        config = await mda_proxy_config(
+        github_scope = None
+        if RunConfig.from_config(self.config).github_linked:
+            github_scope = (None, None) if managed.thread_id else await self._sandbox.github_scope()
+        config, expires_at = await mda_proxy_config(
             managed.thread_id or self.run.thread_id,
             request.sandbox_id,
+            github_scope=github_scope,
+            force_refresh=request.force_refresh,
         )
-        return SandboxProxy(config=config)
+        return SandboxProxy(config=config, expires_at=expires_at)
 
     async def reply_on_behalf(self, request: ReplyOnBehalf) -> Done:
         """Post the model's final answer for it, after it ignored the reply tool."""
@@ -1007,6 +1013,5 @@ CALLS.serve(file_api.EDIT, file_calls.files_edit)
 CALLS.serve(file_api.DELETE, file_calls.files_delete)
 CALLS.serve(file_api.GLOB, file_calls.files_glob)
 CALLS.serve(file_api.GREP, file_calls.files_grep)
-CALLS.serve(file_api.EXECUTE, file_calls.files_execute)
 CALLS.serve(file_api.UPLOAD, file_calls.files_upload)
 CALLS.serve(file_api.DOWNLOAD, file_calls.files_download)

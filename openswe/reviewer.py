@@ -21,7 +21,6 @@ import posixpath
 import re
 import uuid
 import warnings
-from functools import partial
 from typing import Any, Final, NamedTuple, NotRequired, cast
 
 logger = logging.getLogger(__name__)
@@ -33,7 +32,7 @@ from runtime_api.catalog import InboxSpec
 warnings.filterwarnings("ignore", module="langchain_core._api.deprecation")
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
-from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
+from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
@@ -88,7 +87,6 @@ from openswe.run_config import RunConfig
 from openswe.runtime import (
     DEFAULT_LLM_MAX_TOKENS,
     ensure_sandbox_for_thread,
-    get_cached_sandbox_backend,
 )
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
 from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
@@ -1107,18 +1105,6 @@ def reviewer_tools() -> list[BaseTool]:
             http_request,
             suggest_task,
         ]
-    )
-
-
-async def _reconnect_reviewer_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBackendProtocol:
-    await ensure_reviewer_github_token(thread_id, cfg)
-    return await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
-
-
-def reviewer_sandbox(thread_id: str, cfg: RunConfig) -> BackendProtocol:
-    """The review thread's sandbox, connected again with a fresh token whenever it is gone."""
-    return get_cached_sandbox_backend(
-        thread_id, reconnect=partial(_reconnect_reviewer_sandbox, thread_id, cfg)
     )
 
 

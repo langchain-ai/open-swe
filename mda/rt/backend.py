@@ -43,7 +43,7 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
-from runtime_api.catalog import Catalog, ToolSpec
+from runtime_api.catalog import Catalog, SandboxSpec, ToolSpec
 from runtime_api.endpoint import Delivery, call
 from runtime_api.loop import VISIBLE_FROM, RunCall, ToolCallReport
 from runtime_api.provenance import Provenance
@@ -360,10 +360,17 @@ class Run:
         return self.adopted if self.adopted is not None else self.planned
 
     @property
+    def sandbox(self) -> SandboxSpec:
+        """The thread's sandbox the run works in, as its catalog names it; every run has one."""
+        sandbox = self.planned.sandbox
+        if sandbox is None:
+            raise BackendCallError("This run has no sandbox")
+        return sandbox
+
+    @property
     def git_identity(self) -> GitIdentity:
         """Who commits in the run's sandbox: its thread's owner, or the bot."""
-        sandbox = self.planned.sandbox
-        return sandbox.git_identity if sandbox is not None else GitIdentity()
+        return self.sandbox.git_identity
 
     async def adopt(self, thread_id: str, run_id: str | None, instructions: str) -> None:
         """Become this worker thread's run: every later call, tools included, acts as it."""

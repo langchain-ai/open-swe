@@ -282,14 +282,13 @@ async def test_a_response_is_read_only_up_to_its_limit(monkeypatch: pytest.Monke
     )
 
 
-@pytest.mark.parametrize("in_sandbox", [True, False])
-async def test_a_large_response_goes_to_the_sandbox_mda_owns_or_the_backend_answers(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, in_sandbox: bool
+async def test_a_large_response_goes_to_the_sandbox(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     _resolving(monkeypatch, _PUBLIC)
     body = {"items": ["x" * 1_000] * 120}
     _serving(monkeypatch, {"api.example.com/items": httpx2.Response(200, json=body)})
-    backend = _run_backend(Catalog(sandbox=_IN_SANDBOX if in_sandbox else None))
+    backend = _run_backend(Catalog(sandbox=_IN_SANDBOX))
     asked = _operations(monkeypatch, backend)
     spec = ToolSpec(
         name="http_request",
@@ -306,10 +305,6 @@ async def test_a_large_response_goes_to_the_sandbox_mda_owns_or_the_backend_answ
     )
 
     assert isinstance(result, ToolMessage)
-    if not in_sandbox:
-        # Without a sandbox of MDA's, the backend offloads it to the run's own files.
-        assert (asked, result.content) == (["http_request"], "from the backend")
-        return
     assert asked == []
     answer = json.loads(result.text)
     path = answer.pop("response_path")

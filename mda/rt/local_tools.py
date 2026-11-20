@@ -3,9 +3,8 @@
 The backend still describes each, grants it and marks it (``ToolSpec.runtime_runs``);
 this runtime runs a marked tool it has here in place of calling its operation, and
 answers as the operation would, byte for byte (``rt.local_results``). A tool it has
-not, or one that offloads a large result where the run has no sandbox of MDA's, goes
-to the operation. The model's own requests go only to public addresses
-(``rt.public_http``), and large results go to the sandbox MDA owns.
+not goes to the operation. The model's own requests go only to public addresses
+(``rt.public_http``), and large results go to the thread's sandbox, which MDA owns.
 """
 
 import asyncio
@@ -49,18 +48,16 @@ class _Call:
     credentials: Mapping[str, str]
 
     @property
-    def sandbox(self) -> SandboxBackendProtocol | None:
-        """The thread's sandbox, when MDA owns it."""
+    def sandbox(self) -> SandboxBackendProtocol:
+        """The thread's sandbox."""
         files = getattr(self.runtime, "backend", None)
-        if self.run.planned.sandbox is None or not isinstance(files, SandboxBackendProtocol):
-            return None
+        if not isinstance(files, SandboxBackendProtocol):
+            raise RuntimeError("This run has no sandbox")
         return files
 
     async def write_output(self, tool: str, content: str, extension: str) -> str:
         """Where ``content`` went in the sandbox, as the backend's ``write_sandbox_output`` writes it."""
         sandbox = self.sandbox
-        if sandbox is None:
-            raise RuntimeError("This run has no sandbox of MDA's")
         await sandbox_setup(self.run).booted()
         path = posixpath.join(WORK_DIR, f"{tool}-{uuid4().hex}.{extension}")
         written = await sandbox.awrite(path, content)
@@ -76,9 +73,6 @@ type _Answer = _Content | tuple[_Content, dict[str, JsonValue]]
 @dataclass(frozen=True)
 class _LocalTool:
     run: Callable[[_Call, Mapping[str, JsonValue]], Awaitable[_Answer]]
-    # Whether a large result goes to the sandbox, so a run without one of MDA's calls
-    # the operation, which offloads it to the run's own files.
-    offloads: bool = False
 
 
 @validate_call(config=_arbitrary)
@@ -271,17 +265,17 @@ def _plain(answer: Callable[..., Mapping[str, object]]) -> _LocalTool:
     return _LocalTool(run)
 
 
-def _with_call(answer: Callable[..., Awaitable[_Answer]], *, offloads: bool = False) -> _LocalTool:
+def _with_call(answer: Callable[..., Awaitable[_Answer]]) -> _LocalTool:
     async def run(call: _Call, arguments: Mapping[str, JsonValue]) -> _Answer:
         return await answer(call, **arguments)
 
-    return _LocalTool(run, offloads=offloads)
+    return _LocalTool(run)
 
 
 _LOCAL_TOOLS: Final[Mapping[str, _LocalTool]] = {
-    "web_search": _with_call(web_search, offloads=True),
+    "web_search": _with_call(web_search),
     "fetch_url": _with_call(fetch_url),
-    "http_request": _with_call(http_request, offloads=True),
+    "http_request": _with_call(http_request),
     "slack_no_reply_needed": _LocalTool(_no_reply_needed),
     "record_human_input": _LocalTool(_record_human_input),
     "note_on_diff": _plain(results.note_on_diff),
@@ -290,12 +284,9 @@ _LOCAL_TOOLS: Final[Mapping[str, _LocalTool]] = {
 }
 
 
-def runs_locally(spec: ToolSpec, run: Run, runtime: ToolRuntime) -> bool:
-    """Whether this runtime runs ``spec``'s tool itself for this call."""
-    tool = _LOCAL_TOOLS.get(spec.name)
-    if not spec.runtime_runs or tool is None:
-        return False
-    return not tool.offloads or _Call(spec, run, runtime, {}).sandbox is not None
+def runs_locally(spec: ToolSpec) -> bool:
+    """Whether this runtime runs ``spec``'s tool itself."""
+    return spec.runtime_runs and spec.name in _LOCAL_TOOLS
 
 
 def _rejection(spec: ToolSpec, arguments: Mapping[str, JsonValue]) -> str | None:

@@ -11,10 +11,9 @@ import asyncio
 import logging
 import re
 import uuid
-from functools import partial
 from typing import Any, NotRequired
 
-from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
+from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
@@ -323,13 +322,6 @@ def scout_tools() -> list[BaseTool]:
             record_human_input,
             suggest_task,
         ]
-    )
-
-
-def scout_sandbox(thread_id: str, cfg: RunConfig) -> BackendProtocol:
-    """The scout thread's sandbox, connected again whenever it is gone."""
-    return get_cached_sandbox_backend(
-        thread_id, reconnect=partial(_ensure_scout_sandbox, thread_id, cfg)
     )
 
 

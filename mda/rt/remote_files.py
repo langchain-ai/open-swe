@@ -1,10 +1,9 @@
-"""The thread's files on the Open SWE backend, as a deepagents sandbox backend.
+"""The paths the Robin backend serves in the thread's files, as a deepagents backend.
 
-The backend serves the paths it holds (skills, offloaded images) and the files of
-a thread whose sandbox is not MDA's: one the backend made before MDA owned them, or a
-task worker's before the backend attaches it to its coordinator's. This backend reaches
-them through the typed files API (``runtime_api.files``), so the file and shell tools
-run here, as they do in the sandbox MDA owns.
+The backend holds some of the thread's files rather than the sandbox, such as the images
+a run offloaded (``FilesSpec.backend_paths``). This backend reaches them through the typed
+files API (``runtime_api.files``), so the file tools work on them as they do in the
+sandbox; it runs no commands.
 """
 
 import base64
@@ -13,10 +12,10 @@ from typing import Final
 
 from deepagents.backends.composite import CompositeBackend
 from deepagents.backends.protocol import (
+    BackendProtocol,
     ContextLine,
     DeleteResult,
     EditResult,
-    ExecuteResponse,
     FileData,
     FileDownloadResponse,
     FileInfo,
@@ -26,19 +25,15 @@ from deepagents.backends.protocol import (
     GrepResult,
     LsResult,
     ReadResult,
-    SandboxBackendProtocol,
     WriteResult,
 )
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 from runtime_api import files as file_api
-from runtime_api.endpoint import LONG_CALL_SECONDS, Endpoint, Transport, call
+from runtime_api.endpoint import Endpoint, Transport, call
 from runtime_api.operations import RunRequest
 
-from rt.backend import TOOL_CALL_SLACK_SECONDS
-
-_SYNC: Final = "The backend's files are reached asynchronously"
 # deepagents' file and shell tools.
 FILE_TOOLS: Final = frozenset(
     {"ls", "read_file", "write_file", "edit_file", "delete", "glob", "grep", "execute"}
@@ -78,25 +73,18 @@ def _grep_match(match: file_api.GrepMatch) -> GrepMatch:
     return found
 
 
-class RemoteFiles(SandboxBackendProtocol):
-    """The thread's files as the backend serves them, for this run."""
+class RemoteFiles(BackendProtocol):
+    """The paths of the thread's files the backend serves, for this run."""
 
     def __init__(self, transport: Transport, run_id: Callable[[], str | None]) -> None:
         self._transport = transport
         self._run_id = run_id
 
-    @property
-    def id(self) -> str:
-        return "open-swe-backend"
-
     async def _call[Request: RunRequest, Reply: BaseModel](
-        self, endpoint: Endpoint[Request, Reply], request: Request, *, timeout: float | None = None
+        self, endpoint: Endpoint[Request, Reply], request: Request
     ) -> Reply:
         return await call(
-            self._transport,
-            endpoint,
-            request.model_copy(update={"run_id": self._run_id()}),
-            timeout=timeout,
+            self._transport, endpoint, request.model_copy(update={"run_id": self._run_id()})
         )
 
     async def als(self, path: str) -> LsResult:
@@ -189,23 +177,6 @@ class RemoteFiles(SandboxBackendProtocol):
             truncated=reply.truncated,
         )
 
-    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        raise NotImplementedError(_SYNC)
-
-    async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:  # noqa: ASYNC109
-        # A command may run out its own timeout and answer that it did, past the
-        # call's usual deadline.
-        reply = await self._call(
-            file_api.EXECUTE,
-            file_api.ExecuteRequest(command=command, timeout=timeout),
-            timeout=None
-            if timeout is None
-            else max(LONG_CALL_SECONDS, timeout + TOOL_CALL_SLACK_SECONDS),
-        )
-        return ExecuteResponse(
-            output=reply.output, exit_code=reply.exit_code, truncated=reply.truncated
-        )
-
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         reply = await self._call(
             file_api.UPLOAD,
@@ -233,7 +204,8 @@ class RemoteFiles(SandboxBackendProtocol):
 
 
 def remote_file_tools(remote: RemoteFiles) -> dict[str, BaseTool]:
-    """deepagents' own file and shell tools, against the backend's files.
+    """deepagents' own file and shell tools, against the backend's files, where only the file
+    tools work.
 
     The tools read large results back only from a composite backend.
     """

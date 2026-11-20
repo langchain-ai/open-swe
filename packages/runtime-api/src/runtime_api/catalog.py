@@ -10,7 +10,7 @@ run in, and what its middleware does around each model call.
 from collections.abc import Mapping
 from typing import Final, Literal, Self
 
-from pydantic import BaseModel, JsonValue, field_validator, model_validator
+from pydantic import BaseModel, JsonValue, model_validator
 
 from runtime_api.connections import ConnectionRef
 from runtime_api.provenance import Provenance
@@ -117,9 +117,9 @@ class SandboxSpec(BaseModel):
 
     create: SandboxCreate
     sandbox_id: str | None = None
-    # The connection the sandbox's GitHub rules carry, where MDA writes its proxy config
-    # (``runtime_api.sandbox_proxy``); None leaves the proxy config to the backend.
-    github_proxy: ConnectionRef | None = None
+    # Whether MDA writes the sandbox's whole proxy config, which the backend hands it
+    # (``runtime_api.sandbox_proxy``); false leaves the proxy config to the backend.
+    writes_proxy: bool = False
     # Whether the run may prepare before its sandbox is open and report the sandbox afterwards
     # (``runtime_api.loop.BIND_SANDBOX``), so its first model call waits for neither: nothing
     # preparing this run does reaches the sandbox. A backend from before that call says nothing.
@@ -128,15 +128,6 @@ class SandboxSpec(BaseModel):
     git_identity: GitIdentity = GitIdentity()
     # Externally created LangSmith sandbox (evals): adopt as-is without setup, proxy writes, or replacement.
     external: bool = False
-
-    @field_validator("github_proxy")
-    @classmethod
-    def _deployments_own(cls, github: ConnectionRef | None) -> ConnectionRef | None:
-        # Everyone who runs on the thread, and its task workers, works in the sandbox, and
-        # its proxy config outlives the run: one person's token there reaches them all.
-        if github is not None and github.owner != "agent":
-            raise ValueError("A sandbox's GitHub proxy reads the deployment's own connection")
-        return github
 
 
 ShellGuard = Literal["shell_commands"]
@@ -381,7 +372,8 @@ class Catalog(BaseModel):
     disabled: list[str] = []
     # Tools the model labels each call of, with what the label argument tells it.
     described: dict[str, str] = {}
-    # The thread's sandbox; None runs the file and shell tools through the files API alone.
+    # The thread's sandbox, which every run has; None only from a backend from before that,
+    # whose run MDA refuses.
     sandbox: SandboxSpec | None = None
     files: FilesSpec = FilesSpec()
     # A review's browser; None gives a review none. The coding agent always has its own.

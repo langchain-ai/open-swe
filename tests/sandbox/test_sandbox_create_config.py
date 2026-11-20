@@ -1,6 +1,6 @@
 """Pinned execution images and private sandbox authority."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -70,7 +70,7 @@ async def test_mda_recreation_tracks_the_image_without_changing_bound_authority(
         execution_defaults.snapshot_id = snapshot
         execution_defaults.create_params = {"proxy_config": {"rules": [{"name": "new"}]}}
         monkeypatch.setenv("SANDBOX_CREATE_EXTRA_JSON", '{"proxy_config":{"rules":["injected"]}}')
-        managed = await ManagedSandbox.for_thread("thread-1", allow_github=False)
+        managed = await ManagedSandbox.for_thread("thread-1")
         assert managed is not None and managed.sandbox_id == "mda-sandbox"
         assert managed.create == original.model_copy(
             update={"snapshot_id": None if source == "base" else snapshot}
@@ -82,43 +82,69 @@ async def test_mda_recreation_tracks_the_image_without_changing_bound_authority(
 
 _HOST = "coordinator-1"
 _WORKER = {"task_id": "00000000-0000-0000-0000-000000000001", "sandbox_host_thread_id": _HOST}
+_UNBOUND = {"sandbox_id": None, "sandbox_base_proxy_config": None}
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("metadata", "host", "owner"),
+    ("metadata", "host", "owner", "sandbox_id", "written"),
     [
-        ({}, {}, "own"),
-        ({"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}, {}, "own"),
+        ({}, {}, "own", None, []),
+        ({"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}, {}, "own", "mda-sandbox", []),
         # Files a Slack message brought wait for preparing to write them in the sandbox.
         (
             {"slack_files_pending": [{"url": "https://files.invalid/a", "path": "/tmp/a"}]},
             {},
             "own",
+            None,
+            [],
         ),
-        ({"sandbox_id": "backend-sandbox"}, {}, None),
-        # The sandbox the backend made is gone: this run starts in MDA's instead of failing.
-        ({"sandbox_id": "gone-sandbox"}, {}, "own"),
-        ({**_WORKER}, {"sandbox_id": "sandbox", "sandbox_owner": "mda"}, None),
+        # The sandbox the backend made becomes MDA's under its own name.
         (
-            {**_WORKER, "sandbox_id": "sandbox"},
+            {"sandbox_id": "backend-sandbox"},
+            {},
+            "own",
+            "backend-sandbox",
+            [("thread-1", {"sandbox_owner": "mda"})],
+        ),
+        # The sandbox the backend made is gone: this run starts in MDA's instead of failing.
+        ({"sandbox_id": "gone-sandbox"}, {}, "own", None, [("thread-1", _UNBOUND)]),
+        # A worker shares the sandbox its coordinator is bound to now, whatever its own copy says.
+        ({**_WORKER}, {"sandbox_id": "sandbox", "sandbox_owner": "mda"}, _HOST, "sandbox", []),
+        (
+            {**_WORKER, "sandbox_id": "stale"},
             {"sandbox_id": "sandbox", "sandbox_owner": "mda"},
             _HOST,
+            "sandbox",
+            [],
         ),
-        ({**_WORKER, "sandbox_id": "sandbox"}, {"sandbox_id": "sandbox"}, None),
+        # The coordinator's sandbox the backend made is adopted for the coordinator.
+        (
+            {**_WORKER, "sandbox_id": "sandbox"},
+            {"sandbox_id": "sandbox"},
+            _HOST,
+            "sandbox",
+            [(_HOST, {"sandbox_owner": "mda"})],
+        ),
+        # Before the coordinator has one, MDA shares the sandbox it opens for the coordinator.
+        ({**_WORKER}, {}, _HOST, None, []),
     ],
 )
-async def test_mda_owns_new_threads_and_its_own_sandboxes(
+async def test_every_run_gets_an_mda_sandbox(
     monkeypatch,
     execution_defaults: ExecutionDefaults,
     metadata: dict[str, object],
     host: dict[str, object],
-    owner: str | None,
+    owner: str,
+    sandbox_id: str | None,
+    written: list[tuple[str, dict[str, object]]],
 ) -> None:
-    """MDA creates new threads' sandboxes; a sandbox the backend made before is kept; workers share MDA's.
+    """MDA creates new threads' sandboxes and adopts those the backend made; workers share
+    their coordinator's.
 
     A run reports its sandbox behind its preparation only where preparing reaches none, and
     the deployment has not turned that off."""
+    from openswe.sandboxes.lifecycle import TaskWorkerSandbox
     from openswe.sandboxes.managed import ManagedSandbox
 
     execution_defaults.snapshot_id = "snap-1"
@@ -130,42 +156,71 @@ async def test_mda_owns_new_threads_and_its_own_sandboxes(
     async def exists(sandbox_id: str) -> bool:
         return sandbox_id != "gone-sandbox"
 
-    unbound: list[dict[str, object]] = []
+    writes: list[tuple[str, dict[str, object]]] = []
 
     async def write_metadata(*, thread_id: str, metadata: dict[str, object]) -> None:
-        unbound.append(metadata)
+        writes.append((thread_id, metadata))
 
-    monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", read_metadata)
+    for module in ("managed", "lifecycle"):
+        monkeypatch.setattr(f"openswe.sandboxes.{module}.get_sandbox_metadata", read_metadata)
     monkeypatch.setattr("openswe.sandboxes.providers.langsmith.sandbox_exists", exists)
     monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", write_metadata)
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.THREADS.update", write_metadata)
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.THREADS.search", AsyncMock(return_value=[]))
+    monkeypatch.setattr(TaskWorkerSandbox, "host", AsyncMock(return_value=_HOST))
 
     sandbox = await ManagedSandbox.for_thread("thread-1", prepare_reaches_sandbox=False)
 
-    handed_over = metadata.get("sandbox_id") == "gone-sandbox"
-    assert unbound == (
-        [{"sandbox_id": None, "sandbox_base_proxy_config": None}] if handed_over else []
-    )
-
-    if owner is None:
-        assert sandbox is None
-        return
-    assert sandbox is not None
+    assert writes == written
     assert sandbox.thread_id == (None if owner == "own" else owner)
-    assert sandbox.sandbox_id == (
-        metadata.get("sandbox_id")
-        if owner == _HOST or metadata.get("sandbox_owner") == "mda"
-        else None
-    )
+    assert sandbox.sandbox_id == sandbox_id
     assert sandbox.bind_after_prepare is (owner == "own" and "slack_files_pending" not in metadata)
     # A review prepares in its sandbox, and the deployment can turn the late report off.
     review = await ManagedSandbox.for_thread("thread-1")
     monkeypatch.setenv("MDA_BIND_SANDBOX_AFTER_PREPARE", "false")
     disabled = await ManagedSandbox.for_thread("thread-1", prepare_reaches_sandbox=False)
-    assert review is not None and not review.bind_after_prepare
-    assert disabled is not None and not disabled.bind_after_prepare
-    assert sandbox.create.snapshot_id == (
-        None if isinstance(metadata.get("sandbox_id"), str) and not handed_over else "snap-1"
+    assert not review.bind_after_prepare
+    assert not disabled.bind_after_prepare
+    assert sandbox.create.snapshot_id == (None if sandbox_id is not None else "snap-1")
+
+
+@pytest.mark.asyncio
+async def test_mda_adopts_a_backend_sandbox_only_one_thread_is_bound_to(
+    monkeypatch, registry_db
+) -> None:
+    """MDA keeps one sandbox per thread, so it adopts a sandbox the backend made only where no
+    other thread but the task workers sharing it is bound to it; elsewhere the thread starts in
+    a fresh sandbox, and the threads still bound to the shared one keep it."""
+    from openswe.sandboxes.lifecycle import BackendSandbox
+    from openswe.threads import index
+    from openswe.threads.store import THREADS
+
+    monkeypatch.setattr(THREADS.copies, "start", MagicMock())
+    monkeypatch.setattr("openswe.sandboxes.lifecycle.client.threads.update", THREADS.update)
+    monkeypatch.setattr(
+        "openswe.sandboxes.providers.langsmith.sandbox_exists", AsyncMock(return_value=True)
     )
+    for thread_id, metadata in (
+        ("coordinator", {"sandbox_id": "own-box"}),
+        ("worker", {**_WORKER, "sandbox_host_thread_id": "coordinator", "sandbox_id": "own-box"}),
+        ("first", {"sandbox_id": "shared-box"}),
+        ("second", {"sandbox_id": "shared-box"}),
+    ):
+        await index.create(thread_id, runtime="mda", metadata=metadata)
+
+    assert await BackendSandbox("coordinator", "own-box").hand_to_mda() == "own-box"
+    assert await BackendSandbox("first", "shared-box").hand_to_mda() is None
+
+    threads = await THREADS.get_many(["coordinator", "worker", "first", "second"])
+    assert {
+        thread_id: (thread.metadata.get("sandbox_id"), thread.metadata.get("sandbox_owner"))
+        for thread_id, thread in threads.items()
+    } == {
+        "coordinator": ("own-box", "mda"),
+        "worker": ("own-box", None),
+        "first": (None, None),
+        "second": ("shared-box", None),
+    }
 
 
 @pytest.mark.asyncio
@@ -490,8 +545,14 @@ async def test_failed_replacement_can_be_retried_without_accepting_stale_callbac
 class TestLangSmithSandboxCredentials:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("linked_github", [False, True])
+    @pytest.mark.parametrize("mda_writes", [False, True])
     async def test_cloud_lifecycle_never_borrows_github_credentials(
-        self, monkeypatch, registry_db, execution_defaults: ExecutionDefaults, linked_github: bool
+        self,
+        monkeypatch,
+        registry_db,
+        execution_defaults: ExecutionDefaults,
+        linked_github: bool,
+        mda_writes: bool,
     ) -> None:
         from unittest.mock import AsyncMock, MagicMock
         from uuid import UUID
@@ -531,7 +592,10 @@ class TestLangSmithSandboxCredentials:
         mint = AsyncMock(side_effect=AssertionError("GitHub token minting is forbidden"))
         scope = AsyncMock(side_effect=AssertionError("GitHub scope lookup is forbidden"))
         configure = AsyncMock(side_effect=sandbox_proxy_config)
-        monkeypatch.setenv("MDA_GITHUB_PROXY_CONNECTION", "github-installation")
+        if mda_writes:
+            monkeypatch.setenv("MDA_WRITES_SANDBOX_PROXY", "true")
+        else:
+            monkeypatch.delenv("MDA_WRITES_SANDBOX_PROXY", raising=False)
         monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
         monkeypatch.setattr(lifecycle, "get_sandbox_metadata", AsyncMock(return_value=metadata))
         monkeypatch.setattr(
@@ -552,8 +616,7 @@ class TestLangSmithSandboxCredentials:
         )
 
         managed = await ManagedSandbox.for_thread("ls-thread")
-        assert managed is not None
-        assert managed.github_proxy is None
+        assert managed.writes_proxy is mda_writes
         assert managed.create.snapshot_id == "snap-1"
         await lifecycle.bind_mda_sandbox("ls-thread", "sandbox-ls")
         metadata.update(
@@ -561,11 +624,20 @@ class TestLangSmithSandboxCredentials:
         )
         await lifecycle.reconnect_replaced_sandbox("ls-thread")
         assert await lifecycle.refresh_thread_github_proxy("ls-thread") is None
-        assert configure.await_count == 2
-        for call in configure.await_args_list:
-            assert call.args == ("sandbox-ls", None)
-            clean_config = await sandbox_proxy_config(*call.args, **call.kwargs)
-            assert clean_config["rules"] == [tools_rule, cloud_rule]
+        if mda_writes:
+            # MDA writes it as the backend hands it over, with no GitHub rules.
+            assert configure.await_count == 0
+            config, expires_at = await lifecycle.mda_proxy_config(
+                "ls-thread", "sandbox-ls", github_scope=(None, None)
+            )
+            assert config["rules"] == [tools_rule, cloud_rule]
+            assert expires_at is None
+        else:
+            assert configure.await_count == 2
+            for call in configure.await_args_list:
+                assert call.args == ("sandbox-ls", None)
+                clean_config = await sandbox_proxy_config(*call.args, **call.kwargs)
+                assert clean_config["rules"] == [tools_rule, cloud_rule]
         mint.assert_not_awaited()
         scope.assert_not_awaited()
 
@@ -618,11 +690,12 @@ async def test_external_sandbox_skips_credentials_proxy_and_recreation(monkeypat
     configure_proxy = AsyncMock()
     monkeypatch.setattr("openswe.sandboxes.lifecycle.configure_sandbox_proxy", configure_proxy)
 
-    managed = await ManagedSandbox.for_thread("thread-ext", allow_github=True)
-    assert managed is not None
+    monkeypatch.setenv("MDA_WRITES_SANDBOX_PROXY", "true")
+    managed = await ManagedSandbox.for_thread("thread-ext")
     assert managed.sandbox_id == "tb-task-1"
     assert managed.external is True
-    assert managed.github_proxy is None
+    # Nothing writes an attached sandbox's proxy, MDA included.
+    assert not managed.writes_proxy
     assert not await SandboxCredentialPolicy(
         ThreadMetadata.model_validate(metadata)
     ).allows_github()

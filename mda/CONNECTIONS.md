@@ -7,7 +7,7 @@ Each backend setting is off until set, and unset keeps that credential on the ba
 | Slug | Owner | Read by | Backend setting |
 |---|---|---|---|
 | none: a person's Agent Auth principal | user | The backend's runs for a person on a channel's thread | `MDA_WORKSPACE_ID`, when not the backend's workspace |
-| `mda/github-token` | agent | The GitHub proxy of the sandboxes MDA owns whose thread reaches the whole App installation | `MDA_GITHUB_PROXY_CONNECTION=mda/github-token` |
+| `mda/github-token` | agent | The GitHub channel, as it reads an issue and its comments | none |
 | `open-swe-exa` | agent | `web_search` | `MDA_EXA_CONNECTION=open-swe-exa` |
 | `open-swe-github-<env>` | user | `open_pull_request`, for the requester's own PR | `MDA_GITHUB_USER_CONNECTION=open-swe-github-<env>` |
 | `mda/linear-token` | agent | The Linear channel; its `mda deploy` keeps it | none |
@@ -57,7 +57,7 @@ uv run --project mda --locked mda connections list --project mda --json \
   | jq -e --arg s "mda/github-app/$DEPLOYMENT_ID" 'any(.[]; .slug == $s)'
 ```
 
-Only then set `MDA_GITHUB_PROXY_CONNECTION=mda/github-token` on the backend: a deployment that runs an older build leaves those sandboxes without a proxy config.
+Sandboxes' GitHub tokens never come from this connection: the backend mints them, whichever side writes the sandbox's proxy config (`MDA_WRITES_SANDBOX_PROXY`).
 
 ## 3. `open-swe-exa`: the Exa key for `web_search`
 

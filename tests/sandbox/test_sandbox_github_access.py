@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx2
 import pytest
 from deepagents.backends.protocol import ExecuteResponse
-from runtime_api.connections import ConnectionRef
 
 from openswe.agent_api.hosted import run_kinds
 from openswe.agent_api.run_calls import TokenRun
@@ -299,19 +298,21 @@ async def test_a_replaced_sandbox_reconnects_on_the_authenticated_run_scope(
 
 
 @pytest.mark.parametrize("kind", ["reviewer", "review-scout", "agent"])
-async def test_mda_alone_writes_the_proxy_of_its_sandbox_where_the_token_reaches_everything(
+async def test_mda_alone_writes_the_proxy_of_every_sandbox_it_owns(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     kind: str,
 ) -> None:
-    """The catalog hands the proxy to MDA exactly where the backend stops writing it: an
-    installation-wide token is never written over a review's narrowed one, even on a
-    thread that does not say it is a review's."""
+    """With the setting on, MDA writes every sandbox's proxy and the backend none: the backend
+    hands MDA the config with a token minted for the run's scope, a review's narrowed to its
+    repository and read-only."""
     metadata = AsyncMock(return_value={"sandbox_id": "sandbox", "sandbox_owner": "mda"})
-    monkeypatch.setenv("MDA_GITHUB_PROXY_CONNECTION", "mda/github-token")
+    monkeypatch.setenv("MDA_WRITES_SANDBOX_PROXY", "true")
     monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", metadata)
     monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", metadata)
+    handed = AsyncMock(return_value=({"rules": []}, None))
+    monkeypatch.setattr("openswe.agent_api.run_calls.mda_proxy_config", handed)
     parts = run_kinds()[kind]
     run = RemoteRun(
         thread_id="thread",
@@ -322,31 +323,64 @@ async def test_mda_alone_writes_the_proxy_of_its_sandbox_where_the_token_reaches
     managed = await RunSandbox(run_config(run), reviews=parts.reviews).managed()
     await TokenRun.answer(parts, run, "sandbox_replaced", {})
     refreshed = await TokenRun.answer(parts, run, "refresh_github_proxy", {})
+    await TokenRun.answer(parts, run, "sandbox_proxy", {"run_id": "run", "sandbox_id": "sandbox"})
 
-    assert managed is not None
-    if kind == "agent":
-        assert managed.github_proxy == ConnectionRef(slug="mda/github-token", owner="agent")
-        assert github == []
-        assert refreshed == {"expires_at": None}
-    else:
-        read_only = (
-            "x-access-token:repos:11;actions=read,checks=read,contents=read,issues=read,"
-            "metadata=read,pull_requests=read,statuses=read"
+    assert managed.writes_proxy
+    assert github == []
+    assert refreshed == {"expires_at": None}
+    scope = (
+        (None, None)
+        if kind == "agent"
+        else (["acme/api"], sandbox_access.READ_ONLY_REVIEW_PERMISSIONS)
+    )
+    handed.assert_awaited_once_with("thread", "sandbox", github_scope=scope, force_refresh=False)
+
+
+async def test_a_run_without_github_gets_no_token_in_the_config_mda_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run not linked to GitHub, such as a LangSmith cloud run, gets no GitHub rules."""
+    metadata = AsyncMock(return_value={"sandbox_id": "sandbox", "sandbox_owner": "mda"})
+    monkeypatch.setenv("MDA_WRITES_SANDBOX_PROXY", "true")
+    monkeypatch.setattr(lifecycle, "get_sandbox_metadata", metadata)
+    monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", metadata)
+    handed = AsyncMock(return_value=({"rules": []}, None))
+    monkeypatch.setattr("openswe.agent_api.run_calls.mda_proxy_config", handed)
+    run = RemoteRun(thread_id="thread", assistant_id="agent", configurable={"github_linked": False})
+
+    await TokenRun.answer(
+        run_kinds()["agent"], run, "sandbox_proxy", {"run_id": "run", "sandbox_id": "sandbox"}
+    )
+
+    handed.assert_awaited_once_with("thread", "sandbox", github_scope=None, force_refresh=False)
+
+
+async def test_without_the_setting_mda_gets_no_proxy_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset, the backend writes every sandbox's proxy, so its capability goes to no run."""
+    metadata = AsyncMock(return_value={"sandbox_id": "sandbox", "sandbox_owner": "mda"})
+    monkeypatch.delenv("MDA_WRITES_SANDBOX_PROXY", raising=False)
+    monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
+    monkeypatch.setattr(lifecycle, "get_sandbox_metadata", metadata)
+    monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", metadata)
+    parts = run_kinds()["agent"]
+    run = RemoteRun(thread_id="thread", assistant_id="agent", configurable={})
+
+    managed = await RunSandbox(run_config(run), reviews=parts.reviews).managed()
+
+    assert not managed.writes_proxy
+    with pytest.raises(RefusedCallError):
+        await TokenRun.answer(
+            parts, run, "sandbox_proxy", {"run_id": "run", "sandbox_id": "sandbox"}
         )
-        assert managed.github_proxy is None
-        assert injected_auth(github) == [read_only, read_only]
-        # The sandbox's capability goes only to a run that writes its proxy config.
-        with pytest.raises(RefusedCallError):
-            await TokenRun.answer(
-                parts, run, "sandbox_proxy", {"run_id": "run", "sandbox_id": "sandbox"}
-            )
 
 
 @pytest.mark.parametrize(
     ("assistant", "kind"),
     [("reviewer", "reviewer"), ("reviewer", "reviewer-shadow"), ("review-scout", "review-scout")],
 )
-async def test_without_mda_github_proxy_a_review_refreshes_on_its_threads_scope(
+async def test_without_the_setting_a_review_refreshes_on_its_threads_scope(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     assistant: str,
@@ -357,7 +391,7 @@ async def test_without_mda_github_proxy_a_review_refreshes_on_its_threads_scope(
     metadata = AsyncMock(
         return_value={"sandbox_id": "sandbox", "kind": kind, "pr": {"owner": "acme", "name": "api"}}
     )
-    monkeypatch.delenv("MDA_GITHUB_PROXY_CONNECTION", raising=False)
+    monkeypatch.delenv("MDA_WRITES_SANDBOX_PROXY", raising=False)
     monkeypatch.setattr(lifecycle, "thread_token_repositories", AsyncMock(return_value=None))
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", metadata)
     run = RemoteRun(thread_id="thread", assistant_id=assistant, configurable={})

@@ -1,14 +1,16 @@
 """The thread's sandbox's proxy config, which gives commands in the sandbox their credentials.
 
 The proxy config is written whole, so one side writes all of it. The backend does,
-with a GitHub token it mints for the thread, unless the run's catalog names the
-connection the sandbox's GitHub rules carry (``SandboxSpec.github_proxy``). Then MDA
-writes it before each command: GitHub's rules from that connection, and the rest
-the backend keeps on the sandbox (``SANDBOX_PROXY``), such as its tool channel's
-capability, which names the sandbox.
+with a GitHub token it mints for the thread, unless the run's catalog says MDA does
+(``SandboxSpec.writes_proxy``). Then MDA writes it before each command as the backend
+hands it over (``SANDBOX_PROXY``): GitHub's rules, with a token the backend minted for
+the run's scope, and the rest the backend keeps on the sandbox, such as its tool
+channel's capability, which names the sandbox. MDA asks for it again before the token
+expires.
 """
 
 import base64
+from datetime import datetime
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
@@ -52,13 +54,18 @@ GITHUB_PROXY_RULES: Final = (
 class SandboxProxyRequest(RunRequest):
     # The sandbox MDA opened for the run, which the capability in the answer names.
     sandbox_id: str
+    # GitHub refused the token the last answer carried: mint another, not a cached one.
+    force_refresh: bool = False
 
 
 class SandboxProxy(BaseModel):
-    """The backend's part of the sandbox's proxy config, which MDA writes beside GitHub's rules."""
+    """The sandbox's whole proxy config, which MDA writes as the backend hands it over."""
 
-    # Its rules carry a capability for the sandbox, so it is never logged.
+    # Its rules carry a GitHub token and a capability for the sandbox, so it is never logged.
     config: dict[str, JsonValue] = Field(default_factory=dict, repr=False)
+    # When the GitHub token in ``config`` expires, so MDA asks again before then; None
+    # where it carries none.
+    expires_at: datetime | None = None
 
 
 # Only reads the thread and signs the same capability again, so it is safe to send again.

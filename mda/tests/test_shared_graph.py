@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import gc
 import json
 import threading
@@ -86,7 +85,6 @@ from runtime_api.catalog import (
     SubagentSpec,
     ToolSpec,
 )
-from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import Endpoint
 from runtime_api.loop import SANDBOX_UNREACHABLE
 from runtime_api.operations import RunRequest
@@ -136,8 +134,8 @@ def _catalog(
     grant: str,
     *,
     snapshot: str | None = None,
-    github_proxy: ConnectionRef | None = None,
     bind_after_prepare: bool = False,
+    writes_proxy: bool = False,
 ) -> Catalog:
     return Catalog(
         operations=[
@@ -146,17 +144,15 @@ def _catalog(
         subagents=[SubagentSpec(name="reviewer", description="Reviews.", system_prompt="")],
         skill_sources=["/skills/org/"],
         loop=LoopRules(),
-        sandbox=None
-        if snapshot is None
-        else SandboxSpec(
+        sandbox=SandboxSpec(
             create=SandboxCreate(
                 snapshot_id=snapshot,
                 fs_capacity_bytes=1,
                 idle_ttl_seconds=60,
                 delete_after_stop_seconds=60,
             ),
-            github_proxy=github_proxy,
             bind_after_prepare=bind_after_prepare,
+            writes_proxy=writes_proxy,
         ),
     )
 
@@ -276,6 +272,21 @@ def backend_calls(
     client = MagicMock(is_closed=False)
     client.post = AsyncMock(side_effect=post)
     monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+
+    # Each thread's sandbox, which every run works in; a test that looks at it fakes its own.
+    def claim(sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object) -> str:
+        return f"sandbox-{((config or {}).get('configurable') or {}).get('thread_id')}"
+
+    def resolve(
+        sandbox: SandboxDefinition, config: ManagedRunConfig | None, *args: object
+    ) -> StateBackend:
+        fake = MagicMock(spec=StateBackend)
+        fake.id = claim(sandbox, config)
+        fake.aexecute = AsyncMock(return_value=ExecuteResponse(output="ok", exit_code=0))
+        return fake
+
+    monkeypatch.setattr(mda_runtime, "_claim_managed_sandbox", claim)
+    monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", resolve)
     return calls
 
 
@@ -898,52 +909,22 @@ def proxy_writes(
 
 
 async def test_mda_writes_the_whole_proxy_config_behind_the_runs_preparation(
-    monkeypatch: pytest.MonkeyPatch,
     backend_calls: BackendCalls,
     proxy_writes: list[tuple[str, object]],
 ) -> None:
-    """Where the catalog names the connection the sandbox's GitHub rules carry, MDA writes the
-    sandbox's whole proxy config once the run has prepared: never one without the backend's
-    own rules, which it would wipe."""
-    monkeypatch.setenv("MDA_DEV_MDA__GITHUB_TOKEN", "app-token")
-    github = ConnectionRef(slug="mda/github-token", owner="agent")
-
+    """Where the catalog says MDA writes the sandbox's proxy config, MDA writes it once the run
+    has prepared, as the backend hands it over: never one without the backend's rules, which
+    it would wipe."""
     await _run(
         InMemoryStore(),
         "thread-1",
-        _context(
-            "agent", "token-1", _catalog("web_search", "g1", snapshot="a", github_proxy=github)
-        ),
+        _context("agent", "token-1", _catalog("web_search", "g1", snapshot="a", writes_proxy=True)),
     )
 
     hooks = [hook for hook, _, _ in backend_calls]
     assert hooks.index("prepare") < hooks.index("sandbox_proxy") < hooks.index("proxy_config")
-    basic = base64.b64encode(b"x-access-token:app-token").decode()
-    assert proxy_writes == [
-        (
-            "sandbox-thread-1",
-            {
-                "rules": [
-                    {
-                        "name": "github-api",
-                        "match_hosts": ["api.github.com"],
-                        "headers": [
-                            {"name": "Authorization", "type": "opaque", "value": "Bearer app-token"}
-                        ],
-                        "env_vars": {"GH_TOKEN": "proxy-injected"},
-                    },
-                    {
-                        "name": "github",
-                        "match_hosts": ["github.com", "*.github.com"],
-                        "headers": [
-                            {"name": "Authorization", "type": "opaque", "value": f"Basic {basic}"}
-                        ],
-                    },
-                    _TOOLS_RULE,
-                ]
-            },
-        )
-    ]
+    assert "refresh_github_proxy" not in hooks
+    assert proxy_writes == [("sandbox-thread-1", {"rules": [_TOOLS_RULE]})]
 
 
 async def test_a_runs_first_model_call_goes_ahead_while_its_sandbox_boots_and_no_tool_call_does(
@@ -954,7 +935,6 @@ async def test_a_runs_first_model_call_goes_ahead_while_its_sandbox_boots_and_no
 ) -> None:
     """The proxy config MDA writes, which waits for the sandbox to boot, is written behind the
     run's first model call; its first tool call, one the backend runs included, waits for it."""
-    monkeypatch.setenv("MDA_DEV_MDA__GITHUB_TOKEN", "app-token")
     answering = threading.Event()
     booted_behind_the_model: list[bool] = []
     resolve = mda_runtime._resolve_managed_sandbox
@@ -976,8 +956,7 @@ async def test_a_runs_first_model_call_goes_ahead_while_its_sandbox_boots_and_no
 
     monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", boot)
     monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
-    github = ConnectionRef(slug="mda/github-token", owner="agent")
-    catalog = _catalog("web_search", "g1", snapshot="a", github_proxy=github)
+    catalog = _catalog("web_search", "g1", snapshot="a", writes_proxy=True)
 
     await _run(InMemoryStore(), "thread-1", _context("agent", "token-1", catalog))
 
@@ -1008,7 +987,6 @@ async def test_a_run_answers_its_first_model_call_while_its_sandbox_is_opened_an
     backend runs included, waits for the sandbox to be opened, bound to the thread and given
     its proxy config. The GitHub token that is due comes with the binding, so no model call
     asks for it."""
-    monkeypatch.setenv("MDA_DEV_MDA__GITHUB_TOKEN", "app-token")
     monkeypatch.setitem(_BIND_ANSWER, "github_proxy", {"expires_at": "2099-01-01T00:00:00Z"})
     answering = threading.Event()
     opened_behind_the_model: list[bool] = []
@@ -1032,9 +1010,7 @@ async def test_a_run_answers_its_first_model_call_while_its_sandbox_is_opened_an
         "web_search",
         "g1",
         snapshot="a",
-        github_proxy=ConnectionRef(slug="mda/github-token", owner="agent")
-        if mda_writes_proxy
-        else None,
+        writes_proxy=mda_writes_proxy,
         bind_after_prepare=True,
     ).model_copy(update={"loop": LoopRules(refresh_github_proxy=True)})
 
@@ -1143,21 +1119,24 @@ async def test_a_run_that_cannot_write_its_sandboxs_proxy_config_never_uses_the_
     MDA cannot write it on has none, nor the workspace's egress rules: the run ends at its
     first tool call, where the write left to the sandbox's boot fails, and no command reaches
     the sandbox, nor a tool the backend may run there."""
-    monkeypatch.delenv("MDA_DEV_MDA__GITHUB_TOKEN", raising=False)
+
+    def refuse(sandbox: SandboxDefinition, name: str, config: dict[str, JsonValue]) -> None:
+        raise RuntimeError("Could not update sandbox proxy credentials.")
+
+    monkeypatch.setattr(mda_sandbox_proxy, "patch_sandbox_proxy_config", refuse)
     monkeypatch.setattr(
         agent, "_DEFAULT_MODEL", _calling(ToolCall(name="web_search", args={}, id="1"))
     )
     sleep = AsyncMock()
     monkeypatch.setattr("rt.managed_sandbox.asyncio.sleep", sleep)
-    github = ConnectionRef(slug="mda/github-token", owner="agent")
     catalog = _catalog(
         "web_search",
         "g1",
         snapshot="a",
-        github_proxy=github,
+        writes_proxy=True,
     )
 
-    with pytest.raises(RuntimeError, match="Could not resolve sandbox proxy connections"):
+    with pytest.raises(RuntimeError, match="Could not update sandbox proxy credentials"):
         await _run(InMemoryStore(), "thread-1", _context("agent", "token-1", catalog))
 
     hooks = [hook for hook, _, _ in backend_calls]
@@ -1178,7 +1157,6 @@ async def test_a_run_writes_its_sandboxs_proxy_config_again_until_the_sandbox_ap
 ) -> None:
     """The sandbox API takes no proxy config while the host suspends an idle sandbox, so a
     write it refuses is tried again."""
-    monkeypatch.setenv("MDA_DEV_MDA__GITHUB_TOKEN", "app-token")
     write = mda_sandbox_proxy.patch_sandbox_proxy_config
     refusals = [RuntimeError("Could not update sandbox proxy credentials.")]
 
@@ -1190,14 +1168,11 @@ async def test_a_run_writes_its_sandboxs_proxy_config_again_until_the_sandbox_ap
     monkeypatch.setattr(mda_sandbox_proxy, "patch_sandbox_proxy_config", patch)
     sleep = AsyncMock()
     monkeypatch.setattr("rt.managed_sandbox.asyncio.sleep", sleep)
-    github = ConnectionRef(slug="mda/github-token", owner="agent")
 
     await _run(
         InMemoryStore(),
         "thread-1",
-        _context(
-            "agent", "token-1", _catalog("web_search", "g1", snapshot="a", github_proxy=github)
-        ),
+        _context("agent", "token-1", _catalog("web_search", "g1", snapshot="a", writes_proxy=True)),
     )
 
     assert sleep.await_count == 1
@@ -1224,7 +1199,6 @@ def replacements(
 ) -> list[SandboxDefinition]:
     """Each sandbox a run's recreate_sandbox replaced the thread's with, under its name; the
     backend answers it with a sandbox from another snapshot that carries a cloud identity rule."""
-    monkeypatch.setenv("MDA_DEV_MDA__GITHUB_TOKEN", "app-token")
     create = SandboxCreate(
         snapshot_id="b",
         fs_capacity_bytes=1,
@@ -1263,9 +1237,8 @@ def _replacing_run(monkeypatch: pytest.MonkeyPatch, *after: ToolCall) -> dict[st
         yield AIMessage(content="done")
 
     monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
-    github = ConnectionRef(slug="mda/github-token", owner="agent")
     return _context(
-        "agent", "token-1", _catalog("recreate_sandbox", "g1", snapshot="a", github_proxy=github)
+        "agent", "token-1", _catalog("recreate_sandbox", "g1", snapshot="a", writes_proxy=True)
     )
 
 

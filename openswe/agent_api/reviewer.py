@@ -3,7 +3,6 @@
 import logging
 from functools import cache
 
-from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -23,7 +22,6 @@ from openswe.reviewer import (
     ensure_reviewer_github_token,
     resolve_reviewer_models,
     reviewer_catalog,
-    reviewer_sandbox,
     reviewer_tools,
 )
 from openswe.run_config import RunConfig
@@ -123,10 +121,6 @@ class ReviewerKind(RunKind):
         except Exception:
             # A tool that needs the token says so itself; settling the check must still run.
             logger.warning("Minting the reviewer's GitHub token failed", exc_info=True)
-
-    async def files(self, config: RunnableConfig) -> BackendProtocol | None:
-        cfg = RunConfig.from_config(config)
-        return None if cfg.thread_id is None else reviewer_sandbox(cfg.thread_id, cfg)
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:
         static = _tools_by_name().get(name)

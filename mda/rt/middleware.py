@@ -112,7 +112,6 @@ from rt.model_calls import call_with_fallback
 from rt.models import build_model
 from rt.offload import OFFLOADING_KEY, RequestedOffload
 from rt.outbox import OUTBOX_KEY, carry
-from rt.remote_files import RemoteFiles
 from rt.sandbox_binding import SandboxBinding
 from rt.sandbox_setup import sandbox_setup
 from rt.tools import STATE_KEY, run_id, tool_report
@@ -380,35 +379,25 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         update, opened = await self._before_agent(state, runtime)
         held = {**state.get(STATE_KEY, {}), **_held(update)}
         run = self._backend.run
-        external = bool(run.planned.sandbox and run.planned.sandbox.external)
-        if self._in_sandbox:
-            # A sandbox MDA could not open is not asked for again here: the run's first tool
-            # call opens it, or says why it cannot.
-            files = getattr(runtime, "backend", None) if opened else None
-            boot = self._boot_sandbox
-            sandbox_setup(run).start(
-                files,
-                run.git_identity,
-                None if boot is None else partial(boot, runtime),
-                skip_setup=external,
-            )
-        else:
-            # Without a sandbox of MDA's, the thread's files are the backend's to reach.
-            files = RemoteFiles(self._backend, run_id)
+        external = run.sandbox.external
+        # A sandbox MDA could not open is not asked for again here: the run's first tool
+        # call opens it, or says why it cannot.
+        files = getattr(runtime, "backend", None) if opened else None
+        boot = self._boot_sandbox
+        sandbox_setup(run).start(
+            files,
+            run.git_identity,
+            None if boot is None else partial(boot, runtime),
+            skip_setup=external,
+        )
         if not external:
             turn_git(run).start(files, held.get("work_dir"), sandbox_setup(run).done)
         return self._carrying(state, update)
 
     @property
-    def _in_sandbox(self) -> bool:
-        """Whether the run's files are in MDA's sandbox, which it asks for as it starts."""
-        return self._open_sandbox is not None and self._backend.run.planned.sandbox is not None
-
-    @property
     def _binds_later(self) -> bool:
         """Whether the run prepares while its sandbox is opened, and reports it afterwards."""
-        spec = self._backend.run.planned.sandbox
-        return self._open_sandbox is not None and spec is not None and spec.bind_after_prepare
+        return self._backend.run.sandbox.bind_after_prepare and self._open_sandbox is not None
 
     @staticmethod
     def _thread_id() -> str | None:
@@ -440,6 +429,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # the distinct threads they belong to.
             trace.update({"thread_start": True})
         trace.tag(self._backend.run.catalog.trace_tags)
+        # A run whose catalog names no sandbox ends here, on its trace, before it does anything.
+        binds_later = self._binds_later
         if self._backend.awaiting_adoption:
             # A worker never acts on its grant: it has no identity until it adopts one.
             thread_id = _RunConfigurable.model_validate(get_config().get("configurable", {}))
@@ -464,7 +455,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         classifying = self._loop.classify_ahead(state)
         binding = SandboxBinding.of(self._backend.run)
         proxy_due = self._loop.github_proxy_due(_held(state))
-        binds_later = self._binds_later
         if binds_later:
             # Neither preparing nor the first model call needs the sandbox: the backend hears
             # of it once it is open, and the run's first tool call waits for that.
@@ -479,7 +469,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                     Prepare,
                     run_id(),
                     state,
-                    in_sandbox=self._in_sandbox,
+                    in_sandbox=True,
                     sandbox_id=opened.sandbox_id,
                     sandbox_error=opened.error,
                     # What the first model call would ask next comes back with the preparation.
@@ -561,7 +551,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             await self._backend.run.load_tool_specs(run_id())
 
     async def _opened(self, runtime: Runtime) -> OpenedSandbox:
-        if self._open_sandbox is None or not self._in_sandbox:
+        if self._open_sandbox is None:
             return OpenedSandbox()
         # The run's first model call waits on this, and nothing else in the trace shows it.
         async with trace("sandbox.open", run_type="chain"):
@@ -576,12 +566,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     async def _offload(self, state: RunState, runtime: Runtime) -> dict[str, object]:
         """Summarize the conversation now, as the run was asked to, and end the run."""
-        # Where MDA's own summarization keeps the history: the sandbox, or else the backend.
-        files = (
-            getattr(runtime, "backend", None)
-            if self._in_sandbox
-            else RemoteFiles(self._backend, run_id)
-        )
+        # Where MDA's own summarization keeps the history: the sandbox.
+        files = getattr(runtime, "backend", None)
         if not isinstance(files, BackendProtocol):
             raise BackendCallError("The run has no files to offload the conversation to")
         update, outcome = await RequestedOffload(

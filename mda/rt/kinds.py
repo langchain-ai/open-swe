@@ -30,12 +30,12 @@ class KindRules:
     def applied(self, catalog: Catalog) -> Catalog:
         """``catalog``, with this kind's rules in place of the run's."""
         loop = self.loop if self.loop is not None else catalog.loop
-        github_proxy = catalog.sandbox.github_proxy if catalog.sandbox is not None else None
+        writes_proxy = catalog.sandbox is not None and catalog.sandbox.writes_proxy
         loop = loop.model_copy(
             update={
                 "deployment_prompt": catalog.loop.deployment_prompt,
-                # MDA puts a fresh token in this sandbox's proxy config itself, before each command.
-                "refresh_github_proxy": loop.refresh_github_proxy and github_proxy is None,
+                # MDA keeps this sandbox's proxy config fresh itself, before each command.
+                "refresh_github_proxy": loop.refresh_github_proxy and not writes_proxy,
             }
         )
         files = catalog.files

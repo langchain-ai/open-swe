@@ -59,10 +59,7 @@ from managed_deepagents import (
     ConnectionNotFoundError,
     CredentialAuthorizationRequiredError,
     CredentialStoreError,
-    DeepAgentDefinition,
-    ManagedServerRuntime,
     define_deep_agent,
-    shared_factory,
 )
 from managed_deepagents._memory.layers import MemoryLayers
 from managed_deepagents._memory_instructions import create_memory_instructions_middleware
@@ -81,7 +78,6 @@ from rt.file_tools import FileToolsMiddleware
 from rt.gateway import RUN_GATEWAY
 from rt.git_evidence import TurnGit, turn_git
 from rt.kinds import KINDS
-from rt.managed_sandbox import declared_sandbox
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import MODEL_OUTAGE_MESSAGE, model_call_guards
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
@@ -254,7 +250,7 @@ type Answer = Callable[[str, dict[str, JsonValue]], Awaitable[BaseModel]]
 # A run planned with nothing in particular.
 _NO_PLAN: Final = Catalog()
 _INBOX = InboxSpec(events=True, surface="slack")
-# A run whose files are in MDA's sandbox.
+# The thread's sandbox, which the backend names in every run's catalog.
 _IN_SANDBOX: Final = SandboxSpec(
     create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=60, delete_after_stop_seconds=60)
 )
@@ -267,13 +263,19 @@ def _run_backend(
     invocation_id: str | None = None,
     catalog: Catalog = _NO_PLAN,
 ) -> OpenSweBackend:
-    """The backend as a run of its own, outside any graph's run, started with ``catalog``."""
+    """The backend as a run of its own, outside any graph's run, started with ``catalog`` and
+    the thread's sandbox, as the backend plans every run."""
+    planned = (
+        catalog
+        if catalog.sandbox is not None
+        else catalog.model_copy(update={"sandbox": _IN_SANDBOX})
+    )
     context = RunContext.model_validate(
         {
             "__run_token": token,
             "__worker_grant": worker_grant,
             "invocation_id": invocation_id,
-            "__catalog": catalog.model_dump(mode="json"),
+            "__catalog": planned.model_dump(mode="json"),
         }
     )
     return Run(context).backend
@@ -1797,6 +1799,26 @@ async def test_root_attribution_survives_a_missing_catalog(
     assert _run_metadata(root_patches[-1]).get("created_by") != "system"
 
 
+async def test_a_run_planned_without_a_sandbox_ends_before_it_prepares(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A backend from before every run had a sandbox never gets a run that works without one."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    context = {"__run_token": "token", "__catalog": Catalog().model_dump(mode="json")}
+    backend = Run(RunContext.model_validate(context)).backend
+    post = AsyncMock()
+    monkeypatch.setattr(backend, "post", post)
+    graph = create_agent(
+        model=FakeListChatModel(responses=["unused"]),
+        middleware=[BackendRunMiddleware(backend)],
+    )
+
+    with pytest.raises(BackendCallError, match="This run has no sandbox"):
+        await graph.ainvoke({"messages": [("user", "hello")]})
+
+    post.assert_not_awaited()
+
+
 @pytest.mark.parametrize("destination", ["project", "address"])
 async def test_backfill_preserves_destination_timing_and_outputs(
     monkeypatch: pytest.MonkeyPatch, destination: str
@@ -2131,6 +2153,59 @@ async def test_a_command_github_refused_gets_the_sandbox_a_fresh_token(
     assert ("fresh GitHub token" in result.text) is refreshed
 
 
+async def test_where_mda_writes_the_proxy_a_refused_token_is_minted_anew_by_mda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MDA writes the sandbox's proxy config, so it asks the backend for a newly minted token
+    and writes it at once, instead of the backend's refresh, which writes nothing there."""
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    backend = _run_backend(catalog=Catalog(loop=LoopRules(), sandbox=_IN_SANDBOX))
+    calls: list[str] = []
+
+    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
+        calls.append(name)
+        return ShellVerdict(allowed=True)
+
+    _answering(monkeypatch, backend, answer)
+    monkeypatch.setattr(backend.outbox, "started", MagicMock())
+    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
+    writer = MagicMock(rewrite_fresh=AsyncMock(return_value=True))
+    monkeypatch.setattr("rt.file_tools.SandboxProxyWriter.of", lambda runtime: writer)
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    request = ToolCallRequest(
+        tool_call={
+            "name": "execute",
+            "args": {"command": "gh pr view"},
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        tool=None,
+        state={"messages": []},
+        runtime=runtime,
+    )
+    refused = "HTTP 401: Bad credentials (https://api.github.com/graphql)"
+    in_sandbox = AsyncMock(return_value=ToolMessage(content=refused, tool_call_id="call-1"))
+    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+
+    result = await files.awrap_tool_call(request, in_sandbox)
+    await backend.outbox.drain()
+
+    in_sandbox.assert_awaited_once()
+    writer.rewrite_fresh.assert_awaited_once_with(runtime)
+    assert "refresh_github_proxy" not in calls
+    assert isinstance(result, ToolMessage)
+    assert "fresh GitHub token" in result.text
+
+
 @pytest.mark.parametrize("excluded", [[], ["grep", "glob"]])
 async def test_execute_searches_through_the_shell_where_grep_and_glob_are_excluded(
     monkeypatch: pytest.MonkeyPatch, excluded: list[str]
@@ -2218,48 +2293,6 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     ran.assert_not_awaited()
 
 
-class _ExecuteTransport:
-    """A backend that answers every ``files.execute`` with ``exit_code`` and ``output``, and
-    records the call."""
-
-    def __init__(self, exit_code: int, output: str) -> None:
-        self.exit_code = exit_code
-        self.output = output
-        self.bodies: list[dict[str, JsonValue]] = []
-        self.timeouts: list[float] = []
-
-    async def post(
-        self,
-        path: str,
-        body: dict[str, JsonValue],
-        *,
-        timeout: float,
-        delivery: Delivery,
-        headers: Mapping[str, str] | None = None,
-    ) -> JsonValue:
-        self.bodies.append(body)
-        self.timeouts.append(timeout)
-        return {"output": self.output, "exit_code": self.exit_code, "truncated": False}
-
-
-@pytest.mark.parametrize("timeout", [1500, 300, None])
-async def test_a_command_through_the_backend_runs_for_its_own_timeout(
-    timeout: int | None,
-) -> None:
-    """A command the backend runs keeps its timeout, and the call waits that long."""
-    from rt.remote_files import RemoteFiles
-
-    transport = _ExecuteTransport(124, "building...")
-    remote = RemoteFiles(transport, lambda: "run-1")
-
-    result = await remote.aexecute("make build", timeout=timeout)
-
-    assert transport.bodies[0]["timeout"] == timeout
-    if timeout is not None:
-        assert transport.timeouts[0] >= timeout
-    assert (result.exit_code, result.output) == (124, "building...")
-
-
 async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2311,47 +2344,6 @@ async def test_a_read_file_the_backend_serves_gets_the_read_checks(
     assert isinstance(message, ToolMessage)
     assert message.status == "error"
     assert "not a valid image" in message.content
-
-
-async def test_a_run_without_an_mda_sandbox_offloads_a_large_result_to_its_own_files(
-    tmp_path: Path,
-) -> None:
-    files = LocalShellBackend(root_dir=tmp_path, virtual_mode=True)
-
-    @tool
-    def dump() -> str:
-        """Print a lot."""
-        return "x" * 100_000
-
-    class NoInputs(BaseModel):
-        pass
-
-    async def no_inputs(_runtime: ManagedServerRuntime) -> NoInputs:
-        return NoInputs()
-
-    # A shared graph, as Open SWE's is: compiled for no one run.
-    @shared_factory(no_inputs)
-    def shared(_inputs: NoInputs) -> DeepAgentDefinition:
-        return define_deep_agent(
-            name="test-agent",
-            model=_ToolCallingModel(
-                messages=iter(
-                    [
-                        AIMessage(content="", tool_calls=[ToolCall(name="dump", args={}, id="c1")]),
-                        AIMessage(content="done"),
-                    ]
-                )
-            ),
-            tools=[dump],
-            sandbox=declared_sandbox(files),
-        )
-
-    agent = await compile_managed_agent_async(shared, None, report_telemetry=False)
-
-    result = await agent.ainvoke({"messages": [("user", "dump")]})
-
-    assert result["messages"][-1].content == "done"
-    assert (tmp_path / "large_tool_results" / "c1").read_text() == "x" * 100_000
 
 
 @pytest.mark.parametrize("bundled", [True, False])
@@ -2639,6 +2631,7 @@ _ROLE = '<dynamic-context kind="run" id="task-role">You coordinate.</dynamic-con
 COORDINATOR_CATALOG = Catalog(
     skill_sources=["/skills/coordinator/"],
     loop=LoopRules(task_context=TaskContext(instructions=_ROLE)),
+    sandbox=_IN_SANDBOX,
 )
 
 

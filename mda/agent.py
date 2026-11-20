@@ -7,8 +7,8 @@ it works out as it starts the run names the run's operations, subagents, models,
 sandbox and the rules of its loop. This runtime's own middleware runs the loop
 around each model call as those rules say (``rt.loop``), asking the backend only for
 what needs its data or credentials. The file and shell tools are this runtime's own,
-in the thread's sandbox or against its files on the backend (``rt.file_tools``). The run
-token in the context authenticates every call.
+in the thread's sandbox, which every run has, but on the paths the backend serves
+(``rt.file_tools``). The run token in the context authenticates every call.
 
 None of that is built into the graph but the run's models. Each graph is built once
 per process from what is the same for every run that plays it on the same models
@@ -300,8 +300,7 @@ def _parts(graph: Graph) -> _Parts:
         subagents=subagents,
         middleware=middleware,
         worker_middleware=[*middleware, AsyncWorkerLaunchMiddleware(backend)],
-        # A run without MDA's sandbox keeps the graph's own files where its file tools are.
-        sandbox=declared_sandbox(remote),
+        sandbox=declared_sandbox(),
     )
 
 
@@ -330,7 +329,7 @@ def agent(inputs: GraphInputs) -> DeepAgentDefinition:
         context_schema=RunContext,
         # The thread's sandbox, for the file and shell tools run in it and for MDA's own use
         # of it, such as the browser's screenshots; the backend's operations work in the
-        # same sandbox. Whether a run has one, and its options, are the run's catalog's; a
+        # same sandbox. Which sandbox a run has, and its options, are the run's catalog's; a
         # worker, MDA's async subagent of its coordinator, shares the coordinator's sandbox.
         sandbox=parts.sandbox,
         # `mda build` reads `worker`'s literal name to build its graph.

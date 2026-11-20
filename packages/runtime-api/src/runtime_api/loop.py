@@ -75,8 +75,9 @@ class Inbox(BaseModel):
 
 
 class Prepare(RunCall):
-    # Whether the runtime keeps the thread's sandbox, and the sandbox it opened before preparing;
-    # None when it could not. An MDA deployed before the field was renamed sends ``in_box``.
+    # Whether the runtime keeps the thread's sandbox, as every run's does, and the sandbox it
+    # opened before preparing; None when it could not. An MDA deployed before the field was
+    # renamed sends ``in_box``.
     in_sandbox: bool = Field(False, validation_alias=AliasChoices("in_sandbox", "in_box"))
     sandbox_id: str | None = None
     # Why the runtime could not open it, secrets removed.

@@ -1,6 +1,8 @@
 """Tests for GitHub proxy auth configuration."""
 
+import json
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -400,6 +402,96 @@ class TestMdaProxyConfig:
                 with pytest.raises(ValueError, match="not privately pinned"):
                     await mda_proxy_config("thread-123", "sandbox-abc")
                 return
-            config = await mda_proxy_config("thread-123", "sandbox-abc")
+            config, expires_at = await mda_proxy_config("thread-123", "sandbox-abc")
 
         assert config["rules"] == [tools_rule, *expected]
+        assert expires_at is None
+
+    @pytest.mark.parametrize("fresh", [True, False])
+    async def test_the_config_carries_a_token_of_the_runs_scope(self, fresh: bool) -> None:
+        """The config MDA writes carries GitHub's rules with a token minted for the run's
+        scope, as the backend's own write would, lasting past MDA's next ask."""
+        from openswe.sandboxes import lifecycle
+
+        now = datetime.now(UTC)
+        stale = SandboxGitHubAccess("stale-token", (now + timedelta(minutes=10)).isoformat())
+        minted = SandboxGitHubAccess("fresh-token", (now + timedelta(minutes=60)).isoformat())
+        mint = AsyncMock(side_effect=[minted] if fresh else [stale, minted])
+        with (
+            patch.object(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={})),
+            patch.object(
+                lifecycle.SandboxCredentialPolicy, "allows_github", AsyncMock(return_value=True)
+            ),
+            patch.object(
+                lifecycle, "thread_token_repositories", AsyncMock(return_value=["acme/api"])
+            ),
+            patch.object(lifecycle, "sandbox_token", mint),
+            patch(
+                "openswe.sandboxes.tool_access.tool_proxy_rule",
+                AsyncMock(return_value={"name": "open-swe-thread-tools"}),
+            ),
+        ):
+            config, expires_at = await lifecycle.mda_proxy_config(
+                "thread-123", "sandbox-abc", github_scope=(["acme/api"], {"contents": "read"})
+            )
+
+        rules = config["rules"]
+        assert isinstance(rules, list)
+        assert {rule["name"] for rule in rules if isinstance(rule, dict)} >= {
+            "github",
+            "github-api",
+        }
+        assert "fresh-token" in json.dumps(rules) and "stale-token" not in json.dumps(rules)
+        assert expires_at is not None and expires_at - now > timedelta(minutes=50)
+        assert mint.await_args_list[0].kwargs["repositories"] == ["acme/api"]
+        assert mint.await_args_list[0].kwargs["permissions"] == {"contents": "read"}
+        assert mint.await_args_list[-1].kwargs["force_refresh"] is (not fresh)
+
+    async def test_a_thread_that_may_not_use_github_gets_no_token_in_the_config(self) -> None:
+        from openswe.sandboxes import lifecycle
+
+        mint = AsyncMock(side_effect=AssertionError("no token for this thread"))
+        with (
+            patch.object(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={})),
+            patch.object(
+                lifecycle.SandboxCredentialPolicy, "allows_github", AsyncMock(return_value=False)
+            ),
+            patch.object(lifecycle, "sandbox_token", mint),
+            patch(
+                "openswe.sandboxes.tool_access.tool_proxy_rule",
+                AsyncMock(return_value={"name": "open-swe-thread-tools"}),
+            ),
+        ):
+            config, expires_at = await lifecycle.mda_proxy_config(
+                "thread-123", "sandbox-abc", github_scope=(None, None)
+            )
+
+        assert config["rules"] == [{"name": "open-swe-thread-tools"}]
+        assert expires_at is None
+
+
+async def test_a_refused_token_is_minted_anew_for_mda() -> None:
+    """After GitHub refused the token MDA wrote, the next one bypasses the backend's cache."""
+    from openswe.sandboxes import lifecycle
+
+    minted = SandboxGitHubAccess(
+        "fresh-token", (datetime.now(UTC) + timedelta(minutes=60)).isoformat()
+    )
+    mint = AsyncMock(return_value=minted)
+    with (
+        patch.object(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={})),
+        patch.object(
+            lifecycle.SandboxCredentialPolicy, "allows_github", AsyncMock(return_value=True)
+        ),
+        patch.object(lifecycle, "thread_token_repositories", AsyncMock(return_value=None)),
+        patch.object(lifecycle, "sandbox_token", mint),
+        patch(
+            "openswe.sandboxes.tool_access.tool_proxy_rule",
+            AsyncMock(return_value={"name": "open-swe-thread-tools"}),
+        ),
+    ):
+        await lifecycle.mda_proxy_config(
+            "thread-123", "sandbox-abc", github_scope=(None, None), force_refresh=True
+        )
+
+    assert mint.await_args_list[0].kwargs["force_refresh"] is True

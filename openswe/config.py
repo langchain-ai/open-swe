@@ -226,12 +226,13 @@ ENV.var(
     secret=True,
 )
 ENV.var(
-    "MDA_GITHUB_PROXY_CONNECTION",
-    "MDA connection (mda/github-token, the GitHub channel's App token) whose token MDA puts "
-    "in the GitHub proxy of the sandboxes it owns whose thread reaches the whole App "
-    "installation; MDA then writes those sandboxes' proxy config, not the backend. Set it only "
-    "once the MDA deployment runs a build that writes it: an older one leaves those sandboxes "
-    "without one. Unset: the backend writes every sandbox's proxy config with a token it mints.",
+    "MDA_WRITES_SANDBOX_PROXY",
+    "Whether MDA writes the whole proxy config of every sandbox it owns, as the backend hands "
+    "it over (sandbox_proxy): GitHub's rules with a token the backend mints for the run's "
+    "scope, which MDA asks for again before it expires, and the backend's own rules for the "
+    "sandbox. The backend then writes none of it. Turn it on only once the MDA deployment runs "
+    "a build that writes it: an older one leaves those sandboxes without one. Defaults to "
+    "false: the backend writes every sandbox's proxy config.",
 )
 ENV.var(
     "MDA_BIND_SANDBOX_AFTER_PREPARE",

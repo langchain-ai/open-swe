@@ -1,8 +1,8 @@
-"""The thread's files on the backend: paths it serves, and sandboxes the runtime does not own.
+"""The thread's files on the backend: the paths it serves rather than the sandbox.
 
-One endpoint per operation of deepagents' sandbox backend, carrying what that
-backend takes and returns, so the runtime's own file and shell tools can work
-against it. Bytes travel base64-encoded.
+One endpoint per file operation of deepagents' backends, carrying what that backend
+takes and returns, so the runtime's own file tools can work against those paths. Bytes
+travel base64-encoded.
 """
 
 from pydantic import BaseModel
@@ -112,17 +112,6 @@ class GrepReply(BaseModel):
     truncated: bool = False
 
 
-class ExecuteRequest(RunRequest):
-    command: str
-    timeout: int | None = None
-
-
-class ExecuteReply(BaseModel):
-    output: str
-    exit_code: int | None = None
-    truncated: bool = False
-
-
 class UploadedFile(BaseModel):
     path: str
     content_base64: str
@@ -154,6 +143,5 @@ EDIT = Endpoint("files.edit", EditRequest, FileReply)
 DELETE = Endpoint("files.delete", DeleteRequest, FileReply)
 GLOB = Endpoint("files.glob", GlobRequest, GlobReply)
 GREP = Endpoint("files.grep", GrepRequest, GrepReply)
-EXECUTE = Endpoint("files.execute", ExecuteRequest, ExecuteReply)
 UPLOAD = Endpoint("files.upload", UploadRequest, TransferReplies)
 DOWNLOAD = Endpoint("files.download", DownloadRequest, TransferReplies)

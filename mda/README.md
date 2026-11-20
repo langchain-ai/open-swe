@@ -10,6 +10,8 @@ Each endpoint declares how long it may take and when it is sent again after a fa
 Every call is authenticated with the run token.
 
 - **Sandbox:** MDA names, creates, adopts, restarts and replaces each thread's LangSmith sandbox, one per thread.
+  Every run has one: its thread's own, or a task worker's coordinator's; a run whose catalog names none fails as it starts ("This run has no sandbox").
+  A sandbox the backend made before MDA owned them is adopted under its own name (`SandboxSpec.sandbox_id`), unless it is gone or another thread is bound to it, when the run starts in a fresh one.
   The catalog gives the options it is created with (the global execution image, VM size, TTLs, `preserve_memory_on_stop`), which apply only when MDA creates it, so a refreshed snapshot never strands a thread's work.
   Before `prepare`, the run opens the sandbox (`open_sandbox`), alongside reading its tool specs and sending what its outbox holds, and reports its name; the backend binds the thread to it (`sandbox_owner: mda`).
   Where preparing the run reaches no sandbox (`SandboxSpec.bind_after_prepare`, which the backend sets unless `MDA_BIND_SANDBOX_AFTER_PREPARE` is false), the run prepares and makes its first model call while the sandbox is opened, and reports it once it is open (`bind_sandbox`, `rt/sandbox_binding.py`): the backend binds the thread and puts the GitHub token that is due on the sandbox.
@@ -20,10 +22,9 @@ Every call is authenticated with the run token.
   MDA runs no project hook as it creates or adopts a sandbox.
   The backend never connects to the sandbox to prepare a turn, only for the work of an operation.
   The sandbox's proxy config, which gives its commands their credentials, is written whole, so one side writes all of it.
-  The backend writes it with a GitHub token it mints for the thread, fresh again when the run's loop asks (`refresh_github_proxy`), and MDA leaves it alone (`_openswe_no_manage_proxy=True`), unless the catalog names the connection the sandbox's GitHub rules carry (`SandboxSpec.github_proxy`, `runtime_api.sandbox_proxy`).
-  The catalog names one where the backend's `MDA_GITHUB_PROXY_CONNECTION` does and the thread reaches the whole GitHub App installation, as that connection's token does.
-  Reviewer and review scout threads, and threads an event or automation on a public repository started, are narrowed, so the backend keeps writing theirs.
-  Where the catalog names one, MDA writes the config before each command it runs in the sandbox: the two GitHub rules with the token it reads from `mda/github-token`, which Agent Auth renews, and the backend's own rules for the sandbox, which it asks for once the sandbox is open (`sandbox_proxy`): its tool channel's capability, and the global proxy rules, its cloud identity rules among them.
+  The backend writes it with a GitHub token it mints for the thread, fresh again when the run's loop asks (`refresh_github_proxy`), and MDA leaves it alone (`_openswe_no_manage_proxy=True`), unless the catalog says MDA writes it (`SandboxSpec.writes_proxy`, `runtime_api.sandbox_proxy`), as it does for every sandbox MDA owns where the backend's `MDA_WRITES_SANDBOX_PROXY` is on.
+  MDA then writes the config before each command it runs in the sandbox, as the backend hands it over once the sandbox is open (`sandbox_proxy`): the two GitHub rules, with a token the backend minted for the run's scope (a review's read-only on its pull request's repository), its tool channel's capability, and the global proxy rules, its cloud identity rules among them.
+  The backend's answer says when the token expires, and MDA asks for the config again 15 minutes before then.
   The first write waits for a new sandbox to boot and is retried for up to three minutes, as long as the host takes to suspend an idle sandbox, while the sandbox API takes no proxy config.
   The run prepares and makes its first model call meanwhile, and its first tool call, whichever tool it is, waits for the write; a run that still cannot write it there ends at that call, since the backend never writes it on that sandbox.
   It writes it after a replacement, which starts with the proxy config the backend chose for it (a cloud identity applies only at create) and keeps it until that write lands, and every five minutes before a model or tool call, for the commands the backend runs in the sandbox; a run resumed from an interrupt writes it before its first tool call.
@@ -59,8 +60,8 @@ Every call is authenticated with the run token.
   Each call reads the credential again and sends it only to the server's HTTPS origin, at a public address.
   `ConnectionRef.for_mcp_server` lets a server receive only an `open-swe-mcp-<server>` connection, or `mda/linear-token` on Linear's MCP origin, `https://mcp.linear.app`, so no server gets a credential Robin or a channel reads for itself, such as `mda/github-token`.
 - **File and shell tools:** this runtime's own (`ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`), run by `FileToolsMiddleware` (`rt/file_tools.py`).
-  Where MDA owns the sandbox they run in it.
-  On the paths the backend serves (`files.backend_paths`: offloaded images), and on a thread whose sandbox is not MDA's, such as a desktop thread, deepagents' own tools run against the backend's files through the typed files API (`rt/remote_files.py`).
+  They run in the thread's sandbox.
+  On the paths the backend serves (`files.backend_paths`: offloaded images), deepagents' own file tools run against the backend's files through the typed files API (`rt/remote_files.py`).
   Around every call: an `execute` whose command names `push`, `gh` or `pulls` or nests three shells is first put to the backend's push and pull request guards (`check_shell`), a match wider than what they block; they may refuse it, or let an approved push run as they fixed it.
   The backend's `background_execute` and `monitor` operations put their commands to the same guards.
   Tool errors become results.
@@ -167,7 +168,7 @@ The backend:
 | `MDA_LANGSMITH_PROJECT` | This deployment's LangSmith project (its `LANGSMITH_PROJECT`, the deployment name), where its runs are traced; the backend's trace links, costs, feedback and reviewer evals read runs there. Unset: the backend's `LANGSMITH_PROJECT` |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 | `MDA_SERVICE_SECRET` | The same value as this deployment's; `/mda/channel-api/*` and `/github/channel/*` answer only calls signed with it |
-| `MDA_GITHUB_PROXY_CONNECTION` | `mda/github-token`: MDA writes the proxy config of the sandboxes it owns whose thread reaches the whole App installation, their GitHub rules filled from that connection. Set it only once this deployment runs a build that writes it: an older one leaves those sandboxes without one. Unset: the backend writes every sandbox's |
+| `MDA_WRITES_SANDBOX_PROXY` | `true`: MDA writes the proxy config of every sandbox it owns, as the backend hands it over, GitHub's token minted by the backend for the run's scope. Turn it on only once this deployment runs a build that writes it: an older one leaves those sandboxes without one. Unset: the backend writes every sandbox's |
 | `MDA_BIND_SANDBOX_AFTER_PREPARE` | `false`: every run opens its sandbox, and the backend binds its thread to it, before the run prepares. Unset or `true`: a run whose preparation reaches no sandbox prepares and makes its first model call meanwhile, and its first tool call waits for the sandbox (`bind_sandbox`) |
 | `MDA_EXA_CONNECTION` | The deployment's agent connection holding the Exa key (`open-swe-exa`), which `web_search` then uses, run in MDA. Unset: the backend runs it with its `EXA_API_KEY` |
 | `MDA_GITHUB_USER_CONNECTION` | The deployment's user GitHub OAuth connection (`open-swe-github-<env>`): `open_pull_request` opens the requester's own PR with their grant there when it is the account Robin knows them by. Unset, or for another participant: their dashboard GitHub sign-in |
@@ -313,8 +314,7 @@ Both deploy workflows set them for a deployment that has no App yet: the App and
 A deployment that already has its App keeps it.
 Without them, the deploy of a deployment with no App fails before uploading anything.
 
-The channel asks for the App's repository permissions (`app.permissions`), so the token deploy keeps at `mda/github-token` can do what the backend's sandbox token does, for the sandboxes whose GitHub proxy MDA writes (Sandbox, above).
-Deploy renews the token with them only where the App's installation grants them and the App is installed once; its report names the token's permissions, which `MDA_GITHUB_PROXY_CONNECTION` needs in full.
+The channel asks for the App's repository permissions (`app.permissions`), and deploy renews the token it keeps at `mda/github-token` with them only where the App's installation grants them and the App is installed once; its report names the token's permissions.
 Under `mda dev` the token comes from `MDA_DEV_MDA__GITHUB_TOKEN`.
 
 ## Slack

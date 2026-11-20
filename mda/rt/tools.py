@@ -341,11 +341,7 @@ async def run_operation(
     except UnreadConnectionError as exc:
         make = exc.result
     else:
-        run = (
-            _run_locally
-            if runs_locally(spec, backend.run, runtime)
-            else partial(_operate, local_review=local_review)
-        )
+        run = _run_locally if runs_locally(spec) else partial(_operate, local_review=local_review)
         make = partial(run, backend, spec, arguments, runtime, credentials=credentials)
     return await called(backend, spec.name, arguments, runtime, make)
 

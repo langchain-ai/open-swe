@@ -2,7 +2,6 @@ import pytest
 from rt.backend import Run, RunContext
 from rt.kinds import Graph
 from runtime_api.catalog import Catalog, LoopRules, SandboxCreate, SandboxSpec
-from runtime_api.connections import ConnectionRef
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +40,7 @@ def test_the_agent_keeps_its_catalogs_loop_and_guards_its_shell() -> None:
 def test_mda_keeps_a_proxy_it_writes_fresh_itself() -> None:
     sandbox = SandboxSpec(
         create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=1, delete_after_stop_seconds=1),
-        github_proxy=ConnectionRef(slug="github", owner="agent"),
+        writes_proxy=True,
     )
 
     planned = _run("reviewer", Catalog(sandbox=sandbox)).planned

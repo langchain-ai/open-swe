@@ -14,7 +14,7 @@ Before every command it runs in the sandbox, MDA replaces the sandbox's whole pr
 
 **Cost:** on these sandboxes no MDA connection, channel or connector can inject credentials through the proxy, since MDA no longer writes any rules there.
 
-Open SWE sets it only on the sandboxes whose proxy config its backend writes. Where the backend names `MDA_GITHUB_PROXY_CONNECTION` and the thread's GitHub token is not narrowed, the run's sandbox definition declares the whole config instead: GitHub's rules from that connection and the backend's own rules for the sandbox. The backend then writes none of it, so one writer still owns every rule. To have MDA write it before the backend uses the sandbox, Open SWE runs a no-op command through a fresh handle from the hook backend's `bind_runtime`: the hook's own handle keeps the sandbox definition it resolved first, from before the backend's rules were known.
+Open SWE sets it only on the sandboxes whose proxy config its backend writes. Where the backend's `MDA_WRITES_SANDBOX_PROXY` is on, the run's sandbox definition declares the whole config instead, as the backend hands it over: GitHub's rules with a token it minted for the run's scope and the backend's own rules for the sandbox. The backend then writes none of it, so one writer still owns every rule. To have MDA write it before the backend uses the sandbox, Open SWE runs a no-op command through a fresh handle from the hook backend's `bind_runtime`: the hook's own handle keeps the sandbox definition it resolved first, from before the backend's rules were known.
 
 ## Upstream
 

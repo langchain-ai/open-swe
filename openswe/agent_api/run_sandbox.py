@@ -41,16 +41,14 @@ class RunSandbox:
             return None, None
         return [self._cfg.repo.full_name] if self._cfg.repo else [], READ_ONLY_REVIEW_PERMISSIONS
 
-    async def managed(self) -> ManagedSandbox | None:
-        """The sandbox as MDA creates it, when MDA owns it."""
+    async def managed(self) -> ManagedSandbox:
+        """The sandbox as MDA creates it."""
         if self._cfg.thread_id is None:
-            return None
-        repositories, permissions = self._github_scope()
+            raise ValueError("This run has no thread")
+        repositories, _permissions = self._github_scope()
         return await ManagedSandbox.for_thread(
             self._cfg.thread_id,
-            allow_github=self._cfg.github_linked,
             github_repositories=repositories,
-            github_permissions=permissions,
             # A review's preparation works in the sandbox: its checkout and its diff.
             prepare_reaches_sandbox=self.reviews,
         )
@@ -109,8 +107,12 @@ class RunSandbox:
 
         await in_graph_context({**self.config, "run_name": "sandbox"}, reconnect)
 
-    async def refresh_github_proxy(self, *, force_refresh: bool = False) -> datetime | None:
-        """Refresh the backend-owned proxy within the authenticated run's GitHub scope."""
+    async def github_scope(self) -> tuple[list[str] | None, PermissionMap | None]:
+        """How the run narrows its sandbox's GitHub token beyond its thread's own scope, as
+        the token in its proxy config is minted.
+
+        A review thread's own scope already names its pull request's repository.
+        """
         if self._cfg.thread_id is None:
             raise ValueError("This run has no thread")
         repositories, permissions = self._github_scope()
@@ -118,6 +120,13 @@ class RunSandbox:
             metadata = await lifecycle.get_sandbox_metadata(self._cfg.thread_id)
             if metadata.get("kind") in {"reviewer", "reviewer-shadow", "review-scout"}:
                 repositories = None
+        return repositories, permissions
+
+    async def refresh_github_proxy(self, *, force_refresh: bool = False) -> datetime | None:
+        """Refresh the backend-owned proxy within the authenticated run's GitHub scope."""
+        if self._cfg.thread_id is None:
+            raise ValueError("This run has no thread")
+        repositories, permissions = await self.github_scope()
         return await refresh_thread_github_proxy(
             self._cfg.thread_id,
             github_proxy_repositories=repositories,

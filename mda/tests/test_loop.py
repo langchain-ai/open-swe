@@ -33,6 +33,8 @@ from runtime_api.catalog import (
     ReplyRules,
     RoutingRules,
     RunModels,
+    SandboxCreate,
+    SandboxSpec,
     TaskContext,
 )
 from runtime_api.endpoint import Delivery
@@ -51,6 +53,9 @@ _FALLBACK = ModelSpec(model_id="openai:gpt-6.1-sol", kwargs={})
 _FAST = ModelSpec(model_id="fireworks:kimi", kwargs={}, reads_images=False, fallback=_FALLBACK)
 _VISION = ModelSpec(model_id="google_genai:gemini-3.8-flash", kwargs={})
 _MODELS = RunModels(model=_MAIN, subagent_model=_MAIN, routes={"fast": _FAST}, vision=_VISION)
+_SANDBOX = SandboxSpec(
+    create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=60, delete_after_stop_seconds=60)
+)
 _GUARD = "system:reply-guard"
 _NUDGE = (
     f'<input-message sender="{_GUARD}" surface="automation" kind="system">'
@@ -78,7 +83,11 @@ def _backend(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.loop.run_id", lambda: "run-1")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
-    catalog = Catalog() if rules is None else Catalog(loop=rules, models=_MODELS)
+    catalog = (
+        Catalog(sandbox=_SANDBOX)
+        if rules is None
+        else Catalog(loop=rules, models=_MODELS, sandbox=_SANDBOX)
+    )
     context = {"__run_token": "token", "__catalog": catalog.model_dump(mode="json")}
     backend = Run(RunContext.model_validate(context)).backend
     calls: Calls = []

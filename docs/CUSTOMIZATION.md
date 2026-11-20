@@ -50,7 +50,7 @@ For LangSmith sandboxes, Robin configures two GitHub proxy rules whenever a sand
 - `api.github.com` receives Bearer auth for `gh` and REST API operations.
 
 The proxy token is minted at runtime from the GitHub App installation credentials.
-With `MDA_GITHUB_PROXY_CONNECTION` set, the Managed Deep Agents deployment writes these rules instead on the sandboxes it owns whose thread reaches the whole installation, with the App token its GitHub channel keeps in Agent Auth (see [mda/README.md](../mda/README.md)).
+With `MDA_WRITES_SANDBOX_PROXY` on, the Managed Deep Agents deployment writes these rules instead on every sandbox it owns, with the token the backend mints and hands it (see [mda/README.md](../mda/README.md)).
 Do not store GitHub access tokens as deployment environment variables.
 
 ### Who creates sandboxes

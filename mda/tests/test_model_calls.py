@@ -52,7 +52,14 @@ from rt.model_retries import ModelRetriesMiddleware
 from rt.models import ModelSpec, build_model
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from rt.tracing import TurnTrace
-from runtime_api.catalog import Catalog, LoopRules, RoutingRules, RunModels
+from runtime_api.catalog import (
+    Catalog,
+    LoopRules,
+    RoutingRules,
+    RunModels,
+    SandboxCreate,
+    SandboxSpec,
+)
 from runtime_api.loop import GatewayCredential
 from runtime_api.model_errors import is_model_failure_reply
 from runtime_api.provenance import Provenance
@@ -953,7 +960,11 @@ async def test_streamed_partial_output_is_superseded_on_retry_or_fallback(
 
     monkeypatch.setattr(ChatOpenAI, "_astream", partial)
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    run = Run(RunContext.model_validate({"__catalog": Catalog().model_dump(mode="json")}))
+    sandbox = SandboxSpec(
+        create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=60, delete_after_stop_seconds=60)
+    )
+    catalog = Catalog(sandbox=sandbox)
+    run = Run(RunContext.model_validate({"__catalog": catalog.model_dump(mode="json")}))
     model = ChatOpenAI(model="test", api_key="test", max_retries=0)
     backend_middleware = BackendRunMiddleware(run.backend)
     monkeypatch.setattr(backend_middleware, "_before_agent", AsyncMock(return_value=(None, False)))

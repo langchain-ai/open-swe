@@ -1,29 +1,31 @@
-"""Threads whose sandbox Managed Deep Agents owns.
+"""Every thread's sandbox, which Managed Deep Agents owns.
 
-MDA names, creates, adopts, restarts and replaces each such thread's sandbox; one per
-thread, kept whatever the options below become, which apply only when MDA creates
-it. The run opens the sandbox and reports its name, and the backend binds the thread to
-it and connects as to any reused sandbox: proxy credentials, git identity, tool channel.
-It reports the sandbox before it prepares, or behind its preparation and first model call
-where preparing reaches no sandbox (``bind_after_prepare``). The backend writes the
-sandbox's proxy config, unless MDA does (``github_proxy``). The backend never creates or
-replaces an MDA-owned sandbox itself.
+MDA names, creates, adopts, restarts and replaces each thread's sandbox; one per thread,
+kept whatever the options below become, which apply only when MDA creates it. Every run
+with a thread works in one: its own, or a task worker's coordinator's. A sandbox the
+backend made before MDA owned them becomes MDA's as the next run is planned
+(``BackendSandbox``). The run opens the sandbox and reports its name, and the backend
+binds the thread to it and connects as to any reused sandbox: proxy credentials, git
+identity, tool channel. It reports the sandbox before it prepares, or behind its
+preparation and first model call where preparing reaches no sandbox
+(``bind_after_prepare``). The backend writes the sandbox's proxy config, unless MDA does
+(``writes_proxy``), from what the backend hands it. The backend never creates or replaces a
+sandbox itself.
 """
 
 from collections.abc import Sequence
 
 from pydantic import BaseModel
-from runtime_api.connections import ConnectionRef
 
 from openswe.config import ENV
-from openswe.github.app import PermissionMap
 from openswe.sandboxes.lifecycle import (
+    BackendSandbox,
     SandboxCreateConfig,
-    hand_gone_sandbox_to_mda,
-    mda_github_proxy,
+    TaskWorkerSandbox,
+    mda_writes_proxy,
 )
 from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
-from openswe.sandboxes.state import get_sandbox_metadata
+from openswe.sandboxes.state import SandboxUnreachableError, get_sandbox_metadata
 from openswe.slack.staged_files import slack_files_pending
 from openswe.tasks.schemas import ThreadMetadata
 
@@ -36,9 +38,9 @@ class ManagedSandbox(BaseModel):
     sandbox_id: str | None = None
     # The thread whose sandbox this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
-    # The connection MDA fills the sandbox's GitHub proxy from, as it writes all of the sandbox's
-    # proxy config; None where the backend writes it.
-    github_proxy: ConnectionRef | None = None
+    # Whether MDA writes the sandbox's whole proxy config, as the backend hands it over
+    # (``sandbox_proxy``), and the backend none of it.
+    writes_proxy: bool = False
     # Whether the run may prepare before the sandbox is open and report it afterwards
     # (``bind_sandbox``): preparing it reaches no sandbox, and the deployment allows it
     # (``MDA_BIND_SANDBOX_AFTER_PREPARE``).
@@ -52,79 +54,71 @@ class ManagedSandbox(BaseModel):
         thread_id: str,
         *,
         github_repositories: Sequence[str] | None = None,
-        github_permissions: PermissionMap | None = None,
-        allow_github: bool = True,
         prepare_reaches_sandbox: bool = True,
-    ) -> ManagedSandbox | None:
-        """The sandbox the thread's MDA run declares, or ``None`` when the backend keeps its own.
+    ) -> ManagedSandbox:
+        """The sandbox the thread's MDA run declares.
 
-        New threads and MDA's own get MDA's sandbox, created from the replacement
-        ``recreate_sandbox`` asked for if any. A thread the backend gave a sandbox before
-        MDA owned them keeps it until it is gone, when this run starts in MDA's
-        instead. A task worker shares its
-        coordinator's MDA sandbox once the backend has attached it there, which checks that
-        it may. ``github_repositories`` and ``github_permissions`` narrow the run's
-        GitHub token beyond its thread's own scope, as a review's do.
-        ``prepare_reaches_sandbox`` says preparing a turn of the run's kind works in the
-        sandbox, as a review's does; the thread says so too where files a Slack message
-        brought wait to be written there, and a task worker's attaches to its coordinator's.
+        A new thread gets MDA's sandbox, created from the replacement ``recreate_sandbox``
+        asked for if any. A task worker shares its coordinator's, once the backend has
+        checked that it may: the one the coordinator is bound to, or, before it has one, the
+        one MDA opens for the coordinator's run. ``github_repositories`` narrows the run's
+        GitHub token beyond its thread's own scope, as a review's does, which a worker's
+        coordinator must reach. ``prepare_reaches_sandbox`` says preparing a turn of the run's kind
+        works in the sandbox, as a review's does; the thread says so too where files a Slack
+        message brought wait to be written there, and a task worker's attaches to its
+        coordinator's.
         """
         raw = await get_sandbox_metadata(thread_id)
         metadata = ThreadMetadata.model_validate(raw)
-        # The metadata of the thread whose sandbox this is: a worker's coordinator's.
-        sandbox_metadata = raw
-        owner: str | None = None
-        external = metadata.sandbox_owner == "external"
-        if metadata.task_id is not None:
-            owner = metadata.sandbox_host_thread_id
-            if owner is None or metadata.sandbox_id is None:
-                return None
-            sandbox_metadata = await get_sandbox_metadata(owner)
-            host = ThreadMetadata.model_validate(sandbox_metadata)
-            if (
-                host.sandbox_owner not in ("mda", "external")
-                or host.sandbox_id != metadata.sandbox_id
-            ):
-                return None
-            external = host.sandbox_owner == "external"
-        elif external:
-            if metadata.sandbox_id is None:
-                return None
-        elif metadata.sandbox_id is not None and metadata.sandbox_owner != "mda":
-            if not await hand_gone_sandbox_to_mda(thread_id, metadata.sandbox_id):
-                return None
-            sandbox_metadata = {**raw, "sandbox_id": None}
-        if external:
+        # The thread whose sandbox this is: a worker's coordinator.
+        owner = (
+            await TaskWorkerSandbox(thread_id, metadata).host(github_repositories)
+            if metadata.task_id is not None
+            else None
+        )
+        sandbox_thread = owner or thread_id
+        host_metadata = raw if owner is None else await get_sandbox_metadata(owner)
+        bind_after_prepare = not (
+            prepare_reaches_sandbox or owner is not None or slack_files_pending(raw)
+        ) and ENV.MDA_BIND_SANDBOX_AFTER_PREPARE.get_bool(default=True)
+        if host_metadata.get("sandbox_owner") == "external":
+            # A sandbox an eval harness attached: adopted as it is, never set up, written
+            # to or replaced, and never handed to MDA's own.
+            external_id = host_metadata.get("sandbox_id")
+            if not isinstance(external_id, str):
+                raise SandboxUnreachableError(
+                    sandbox_thread, None, "This thread's external sandbox is not bound"
+                )
             return cls(
                 create=LangSmithCreateOptions.resolve(),
                 thread_id=owner,
-                sandbox_id=metadata.sandbox_id,
-                github_proxy=None,
-                bind_after_prepare=not (
-                    prepare_reaches_sandbox or owner is not None or slack_files_pending(raw)
-                )
-                and ENV.MDA_BIND_SANDBOX_AFTER_PREPARE.get_bool(default=True),
+                sandbox_id=external_id,
+                bind_after_prepare=bind_after_prepare,
                 external=True,
             )
-        config = await SandboxCreateConfig.for_thread(
-            sandbox_metadata, thread_id=owner or thread_id
-        )
+        sandbox_metadata = await cls._owned_by_mda(sandbox_thread, host_metadata)
+        sandbox_id = sandbox_metadata.get("sandbox_id")
+        config = await SandboxCreateConfig.for_thread(sandbox_metadata, thread_id=sandbox_thread)
         return cls(
             create=await config.recreation_options()
-            if isinstance(sandbox_metadata.get("sandbox_id"), str)
+            if isinstance(sandbox_id, str)
             else config.langsmith_options(),
             thread_id=owner,
-            sandbox_id=metadata.sandbox_id if owner or metadata.sandbox_owner == "mda" else None,
-            # The sandbox's own thread decides: a worker's coordinator.
-            github_proxy=(
-                await mda_github_proxy(
-                    owner or thread_id, sandbox_metadata, github_repositories, github_permissions
-                )
-                if allow_github
-                else None
-            ),
-            bind_after_prepare=not (
-                prepare_reaches_sandbox or owner is not None or slack_files_pending(raw)
-            )
-            and ENV.MDA_BIND_SANDBOX_AFTER_PREPARE.get_bool(default=True),
+            sandbox_id=sandbox_id if isinstance(sandbox_id, str) else None,
+            writes_proxy=mda_writes_proxy(),
+            bind_after_prepare=bind_after_prepare,
         )
+
+    @staticmethod
+    async def _owned_by_mda(thread_id: str, metadata: dict[str, object]) -> dict[str, object]:
+        """``thread_id``'s ``metadata`` once MDA owns its sandbox: adopted, or let go for a fresh
+        one, where the backend made it."""
+        sandbox_id = metadata.get("sandbox_id")
+        if not isinstance(sandbox_id, str) or metadata.get("sandbox_owner") == "mda":
+            return metadata
+        adopted = await BackendSandbox(thread_id, sandbox_id).hand_to_mda()
+        return {
+            **metadata,
+            "sandbox_id": adopted,
+            **({"sandbox_owner": "mda"} if adopted is not None else {}),
+        }

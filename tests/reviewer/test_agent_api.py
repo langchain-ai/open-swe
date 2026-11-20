@@ -13,12 +13,14 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from pydantic import JsonValue
 from runtime_api.operations import OPERATION, OperationResult, RunOperation
+from runtime_api.sandbox_setup import GitIdentity
 from starlette.types import Message, Receive, Scope, Send
 
 from openswe.agent_api import server
 from openswe.agent_api.agent import AgentKind
 from openswe.agent_api.run_calls import TokenRun
 from openswe.agent_api.run_kinds import RunKind
+from openswe.agent_api.run_sandbox import RunSandbox
 from openswe.agent_api.run_state import as_messages
 from openswe.agent_api.server import RunTokenMiddleware
 from openswe.agent_api.tokens import (
@@ -32,7 +34,12 @@ from openswe.agent_api.tokens import (
     verify_worker_grant,
 )
 from openswe.input_messages import human_input
+from openswe.sandboxes.managed import ManagedSandbox
+from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
 from openswe.sandboxes.tool_runtime import ToolSurface
+
+# The thread's sandbox, as the backend plans it for every run.
+_MANAGED = ManagedSandbox(create=LangSmithCreateOptions.resolve())
 
 RUN = RemoteRun(
     thread_id="thread-1",
@@ -177,25 +184,21 @@ async def test_a_runs_thread_files_are_built_once_until_its_sandbox_changes(
 ) -> None:
     """Reaching the thread's files reads the thread and the run's skill stores; the run's
     later files calls reach the same files, and a fresh sandbox builds them again."""
-    from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
+    from deepagents.backends.protocol import BackendProtocol, FileInfo, LsResult
 
     from openswe.agent_api import run_calls
     from openswe.agent_api.run_sandbox import RunSandbox
 
-    class Machine(SandboxBackendProtocol):
-        @property
-        def id(self) -> str:
-            return "machine"
-
-        async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-            return ExecuteResponse(output=f"ran {command}", exit_code=0)
+    class Blobs(BackendProtocol):
+        async def als(self, path: str) -> LsResult:
+            return LsResult(entries=[FileInfo(path=f"{path}shot.png")])
 
     built: list[str | None] = []
 
     class Kind(RunKind):
-        async def files(self, config: RunnableConfig) -> Machine:
+        async def files(self, config: RunnableConfig) -> Blobs:
             built.append(config["configurable"].get("run_id"))
-            return Machine()
+            return Blobs()
 
     async def reconnected(self: RunSandbox) -> None:
         return None
@@ -206,18 +209,18 @@ async def test_a_runs_thread_files_are_built_once_until_its_sandbox_changes(
     other = RUN.model_copy(update={"grant_id": "grant-2"})
 
     for run_id in ("run-1", "run-1", "run-2"):
-        reply = await TokenRun.answer(
-            kind, run, "files.execute", {"command": "ls", "run_id": run_id}
-        )
-        assert reply == {"output": "ran ls", "exit_code": 0, "truncated": False}
+        reply = await TokenRun.answer(kind, run, "files.ls", {"path": "/blobs/", "run_id": run_id})
+        assert reply["entries"] == [
+            {"path": "/blobs/shot.png", "is_dir": None, "size": None, "modified_at": None}
+        ]
     assert built == ["run-1"]
     # Another run on the thread reaches its files as itself.
-    await TokenRun.answer(kind, other, "files.execute", {"command": "ls", "run_id": "run-3"})
+    await TokenRun.answer(kind, other, "files.ls", {"path": "/blobs/", "run_id": "run-3"})
     assert built == ["run-1", "run-3"]
 
     monkeypatch.setattr(RunSandbox, "reconnect", reconnected)
     await TokenRun.answer(kind, run, "sandbox_replaced", {"run_id": "run-1"})
-    await TokenRun.answer(kind, run, "files.execute", {"command": "ls", "run_id": "run-1"})
+    await TokenRun.answer(kind, run, "files.ls", {"path": "/blobs/", "run_id": "run-1"})
     assert built == ["run-1", "run-3", "run-1"]
     run_calls._files.clear()
 
@@ -1087,7 +1090,8 @@ async def test_reviewer_runs_record_transcript_model_and_usage(
     )
     monkeypatch.setattr("openswe.middleware.transcript.get_client", lambda: client)
     monkeypatch.setattr(reviewer, "prepare_reviewer_run", AsyncMock(return_value={}))
-    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
+    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=_MANAGED))
+    monkeypatch.setattr(RunSandbox, "git_identity", AsyncMock(return_value=GitIdentity()))
     schedule = AsyncMock(return_value=True)
     monkeypatch.setattr("openswe.agent_cost.schedule_agent_cost_refresh", schedule)
     asked = HumanMessage(content="Review this PR", id="human")
@@ -1357,8 +1361,8 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
 
     from openswe.sandboxes.managed import ManagedSandbox
 
-    # A thread with no sandbox of MDA's, so the catalog reads no thread metadata.
-    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=None))
+    monkeypatch.setattr(ManagedSandbox, "for_thread", AsyncMock(return_value=_MANAGED))
+    monkeypatch.setattr(RunSandbox, "git_identity", AsyncMock(return_value=GitIdentity()))
     monkeypatch.setenv("LANGCHAIN_REVISION_ID", "current-backend-sha")
     from langchain_core.tools import StructuredTool
     from runtime_api.catalog import LoopRules, RoutingRules
@@ -1670,33 +1674,26 @@ async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_cha
 
 
 async def test_the_files_api_reaches_the_threads_files_as_the_run() -> None:
-    """A sandbox backend may check who the run is for, which it reads from the run's own config."""
-    from deepagents.backends.protocol import (
-        BackendProtocol,
-        ExecuteResponse,
-        SandboxBackendProtocol,
-    )
+    """A backend the files API reaches may check who the run is for, which it reads from the
+    run's own config."""
+    from deepagents.backends.protocol import BackendProtocol, LsResult
 
     from openswe.run_config import RunConfig
 
     seen: list[str | None] = []
 
-    class Machine(SandboxBackendProtocol):
-        @property
-        def id(self) -> str:
-            return "machine"
-
-        async def aexecute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+    class Blobs(BackendProtocol):
+        async def als(self, path: str) -> LsResult:  # noqa: ARG002
             seen.append(RunConfig.from_runtime().thread_id)
-            return ExecuteResponse(output=f"ran {command}", exit_code=0)
+            return LsResult(entries=[])
 
-    class OnTheMachine(RunKind):
+    class OfTheThread(RunKind):
         async def files(self, config: RunnableConfig) -> BackendProtocol:  # noqa: ARG002
-            return Machine()
+            return Blobs()
 
-    reply = await TokenRun.answer(OnTheMachine(), RUN, "files.execute", {"command": "ls"})
+    reply = await TokenRun.answer(OfTheThread(), RUN, "files.ls", {"path": "/blobs/"})
 
-    assert reply == {"output": "ran ls", "exit_code": 0, "truncated": False}
+    assert reply == {"error": None, "entries": []}
     assert seen == ["thread-1"]
 
 
@@ -2317,7 +2314,6 @@ async def test_langsmith_cloud_run_delegates_to_credential_isolated_sandbox(
     ).managed()
     assert result == "managed-cloud"
     assert create.call_args.args[0] == "cloud-thread"
-    assert create.call_args.kwargs["allow_github"] is False
 
 
 @pytest.mark.parametrize(

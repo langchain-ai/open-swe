@@ -150,18 +150,14 @@ class SubdirAgentsReadMiddleware(AgentMiddleware):
 
     state_schema = AgentState
 
-    def __init__(self, files: BackendProtocol | None = None) -> None:
-        # Where the thread's files are; None reads them from the run's own backend, its sandbox.
-        self._files = files
+    def __init__(self) -> None:
         self._loaded: defaultdict[str, set[str]] = defaultdict(set)
 
     def _thread_key(self, request: ToolCallRequest) -> str:
         return _thread_id(request) or "__unknown_thread__"
 
     def backend(self, request: ToolCallRequest) -> BackendProtocol | None:
-        """The thread's files: its sandbox, behind the run's backend, unless they are elsewhere."""
-        if self._files is not None:
-            return self._files
+        """The thread's files: its sandbox, behind the run's backend."""
         backend = getattr(request.runtime, "backend", None)
         return backend if isinstance(backend, BackendProtocol) else None
 
