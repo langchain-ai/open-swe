@@ -172,6 +172,85 @@ describe("Messages", () => {
     Reflect.deleteProperty(navigator, "clipboard")
   })
 
+  it("copies a user's full message and passage replies without metadata", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    Object.defineProperty(window, "isSecureContext", {
+      configurable: true,
+      value: true,
+    })
+    const content = "Please investigate this.\n".repeat(30)
+    render(
+      <Messages
+        messages={[
+          {
+            id: "user-copy",
+            author: "user",
+            timestamp: "2026-11-06T20:18:00Z",
+            timestampIsFallback: true,
+            structuredSenderName: "Alice",
+            contextLabel: "Private context, not part of the message",
+            chunks: [
+              { kind: "text", text: content.slice(0, 100) },
+              { kind: "text", text: content.slice(100) },
+            ],
+            replies: [
+              {
+                source: "conversation",
+                before: "Hidden preceding context",
+                selection: "The selected passage",
+                after: "Hidden following context",
+                comment: "Explain this too.",
+              },
+            ],
+          },
+        ]}
+        isStreaming={false}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message" }))
+    await vi.waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        `The selected passage\n\nExplain this too.\n\n${content}`
+      )
+    )
+    expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy()
+    Reflect.deleteProperty(navigator, "clipboard")
+  })
+
+  it("does not offer message copying for system notices or image-only messages", () => {
+    render(
+      <Messages
+        messages={[
+          {
+            id: "system-notice",
+            author: "user",
+            timestamp: "2026-11-06T20:18:00Z",
+            structuredSenderKind: "system",
+            chunks: [{ kind: "text", text: "A system notice" }],
+          },
+          {
+            id: "image-only",
+            author: "user",
+            timestamp: "2026-11-06T20:18:00Z",
+            chunks: [
+              { kind: "image", base64: "aW1hZ2U=", mimeType: "image/png" },
+            ],
+          },
+        ]}
+        isStreaming={false}
+      />,
+      { wrapper }
+    )
+
+    expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull()
+  })
+
   it("renders queued passage replies even without plain text", () => {
     render(
       <Messages

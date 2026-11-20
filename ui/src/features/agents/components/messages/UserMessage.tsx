@@ -3,6 +3,7 @@ import {
   ChatMessageBody,
 } from "@langchain/macaw-components/ChatMessage"
 import { Button } from "@langchain/macaw-components/Button"
+import { CopyIconButton } from "@langchain/macaw-components/CopyButton"
 import { Link } from "@langchain/macaw-components/Link"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
@@ -72,15 +73,21 @@ export function SentReply({ reply }: { reply: PassageReply }) {
 function StandardUserMessage({ message, threadId }: UserMessageProps) {
   const isSystem = message.structuredSenderKind === "system"
   const isSlack = message.structuredSurface === "slack"
-  const { excerpts, text } = parseExcerpts(
-    message.chunks
-      .filter((c) => c.kind === "text")
-      .map((c) => c.text)
-      .join("")
-  )
+  const content = message.chunks
+    .filter((c) => c.kind === "text")
+    .map((c) => c.text)
+    .join("")
+  const { excerpts, text } = parseExcerpts(content)
 
   const images = message.chunks.filter((c) => c.kind === "image")
   const replies = message.replies ?? []
+  const copyText = [
+    ...replies.flatMap((reply) => [reply.selection, reply.comment]),
+    content,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+  const canCopy = !isSystem && Boolean(copyText.trim())
   const hasBody =
     Boolean(text) ||
     images.length > 0 ||
@@ -204,12 +211,23 @@ function StandardUserMessage({ message, threadId }: UserMessageProps) {
       data-message-sender-kind={message.structuredSenderKind}
       data-message-surface={message.structuredSurface}
       footer={
-        !message.timestampIsFallback && (
-          <MessageTimestamp
-            timestamp={message.timestamp}
-            align={isSystem ? "left" : "right"}
-            className="mt-space-1 pr-space-1"
-          />
+        (canCopy || !message.timestampIsFallback) && (
+          <div
+            className={cn(
+              "mt-space-1 flex items-center gap-space-1 pr-space-1",
+              !isSystem && "justify-end"
+            )}
+          >
+            {canCopy && (
+              <CopyIconButton copy={copyText} label="Copy message" size="xs" />
+            )}
+            {!message.timestampIsFallback && (
+              <MessageTimestamp
+                timestamp={message.timestamp}
+                align={isSystem ? "left" : "right"}
+              />
+            )}
+          </div>
         )
       }
     >
