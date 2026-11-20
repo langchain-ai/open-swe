@@ -366,3 +366,28 @@ async def test_retirement_clears_in_flight_and_stale_blockers(
     assert not reactions & {"warning", "construction"}
     await ReviewCard(request).update_blocked_reactions(snapshot)
     assert not reactions & {"warning", "construction"}
+
+
+async def test_a_new_request_is_saved_without_reading_it_back_first(
+    registry_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pr = await PullRequest(owner="lc", repo="repo", number=7, author="ada").save()
+    events: list[str] = []
+
+    async def log_event(_: HumanReviewRequest, event_type: str, **details: object) -> None:
+        events.append(event_type)
+
+    monkeypatch.setattr(HumanReviewRequest, "log_event", log_event)
+    get = AsyncMock(wraps=HumanReviewRequest.get)
+    monkeypatch.setattr(HumanReviewRequest, "get", get)
+
+    request = await HumanReviewRequest(
+        pull_request_id=pr.id, head_sha="abc", kind="standard"
+    ).save()
+    get.assert_not_awaited()
+    request.slack_message_ts = "1.0"
+    await request.save()
+
+    # A stored one is still compared with what is stored, to log what changed.
+    get.assert_awaited_once()
+    assert events == ["request.created", "request.updated"]

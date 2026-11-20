@@ -715,7 +715,8 @@ class HumanReviewRequest(Base):
 
     async def save(self) -> Self:
         cls = type(self)
-        previous = await cls.get(self.id)
+        # A request never stored has nothing to compare against, so skip reading it back.
+        previous = None if inspect(self).transient else await cls.get(self.id)
         before = previous.event_state() if previous is not None else None
         async with postgres.session() as session:
             session.add(self)

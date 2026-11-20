@@ -576,13 +576,15 @@ async def _request_review(
         return await _existing(winner, auto_merge, target.id if channel.strip() else "")
     # Without its deadlines a request could wait forever on a reviewer who never approves.
     with apm_span("human_review.schedule_deadlines", span_tags):
-        scheduled = await _schedule(
-            request, "unclaimed", timedelta(minutes=await _assignment_minutes(request))
-        )
-        if scheduled and request.auto_merge:
-            scheduled = await _schedule(
-                request, "auto_merge", timedelta(hours=AUTO_MERGE_AFTER_HOURS)
+        deadlines = [
+            _schedule(request, "unclaimed", timedelta(minutes=await _assignment_minutes(request)))
+        ]
+        if request.auto_merge:
+            deadlines.append(
+                _schedule(request, "auto_merge", timedelta(hours=AUTO_MERGE_AFTER_HOURS))
             )
+        # Independent; one left behind by a discarded request finds it gone and does nothing.
+        scheduled = all(await asyncio.gather(*deadlines))
     if not scheduled:
         await _discard(request.id)
         return _failure("Robin could not schedule the review request's deadlines. Try again.")
