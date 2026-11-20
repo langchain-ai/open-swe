@@ -22,7 +22,20 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
+  Link: ({
+    children,
+    to,
+    params,
+    ...props
+  }: {
+    children?: React.ReactNode
+    to: string
+    params?: { threadId: string }
+  }) => (
+    <a {...props} href={to.replace("$threadId", params?.threadId ?? "")}>
+      {children}
+    </a>
+  ),
   useNavigate: () => mocks.navigate,
 }))
 vi.mock("@/features/agents/lib/queries", () => ({
@@ -274,6 +287,42 @@ describe("AutomationEditor", () => {
     expect(memberMarkup).toContain("Auto")
     expect(memberMarkup).not.toContain("tokens")
     expect(memberMarkup).not.toContain("Save changes")
+  })
+
+  it("explains Slack history access when choosing the automation owner", () => {
+    signInAsAdmin()
+    render(<AutomationEditor mode="create" template={TEMPLATE} />, {
+      wrapper: TooltipProvider,
+    })
+
+    expect(screen.getByText(/Personal runs are private/)).toBeTruthy()
+    fireEvent.click(screen.getByRole("checkbox", { name: "System automation" }))
+    expect(screen.getByText(/Scheduled and test runs of system/)).toBeTruthy()
+    expect(screen.getByText(/workspace bot must have access/)).toBeTruthy()
+    fireEvent.click(screen.getByRole("checkbox", { name: "System automation" }))
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+    expect(mocks.createMutate.mock.calls[0]?.[0].system).toBe(false)
+  })
+
+  it("shows a saved automation error and its latest run separately", () => {
+    signInAsAdmin()
+    render(
+      <AutomationEditor
+        mode="edit"
+        schedule={{
+          ...SCHEDULE,
+          lastError: "Permission denied",
+          lastThreadId: "previous-run",
+        }}
+      />,
+      { wrapper: TooltipProvider }
+    )
+
+    expect(screen.getByText("Latest automation error")).toBeTruthy()
+    expect(screen.getByText("Permission denied")).toBeTruthy()
+    expect(
+      screen.getByRole("link", { name: "Open latest run" }).getAttribute("href")
+    ).toBe("/agents/previous-run")
   })
 
   it("saves a GitHub trigger with its own repository and branch filters beside the schedule", () => {

@@ -1033,9 +1033,9 @@ test.describe("automation run history", () => {
     await expect(page.getByText(TITLES.dailyScheduled)).toBeVisible();
     await expect(page.getByText(TITLES.dailyTest)).toBeVisible();
     await expect(page.getByText(TITLES.weeklyRunning)).toHaveCount(0);
-    const recentProducedRun = page.locator(
-      `a[href="/agents/${triggered.thread_id}"]`,
-    );
+    const recentProducedRun = page
+      .locator(`a[href="/agents/${triggered.thread_id}"]`)
+      .filter({ hasText: "Add greet() helper" });
     await expect(recentProducedRun).toContainText("Add greet() helper");
 
     await recentProducedRun.click();

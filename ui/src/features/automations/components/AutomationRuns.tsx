@@ -90,6 +90,12 @@ export function AutomationRuns({
 
   return (
     <div className="space-y-space-5">
+      {runs.some((run) => run.status === "finished") && (
+        <p className="text-xs text-secondary">
+          Finished means the run ended, not that its task succeeded. Open a run
+          to review the outcome.
+        </p>
+      )}
       {grouped.map((group) => (
         <section key={group.id}>
           {!automationId && (
@@ -155,9 +161,7 @@ function AutomationRunRow({ run }: { run: AgentThread }) {
             "size-2.5 shrink-0 rounded-full",
             run.status === "error" || run.status === "interrupted"
               ? "bg-error-strong"
-              : run.status === "finished"
-                ? "bg-success-strong"
-                : "bg-surface-level-4"
+              : "bg-surface-level-4"
           )}
         />
       )}

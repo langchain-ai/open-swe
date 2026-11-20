@@ -9,6 +9,7 @@ import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
+import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
@@ -734,6 +735,25 @@ export function AutomationEditor({
               <span className="text-xs text-secondary">Auto</span>
             )}
           </div>
+          <div className="mt-space-3 border-t border-subtle pt-space-3">
+            {system ? (
+              <Banner intent="warning" title="Slack history access">
+                Scheduled and test runs of system automations are public, so
+                Robin’s Slack history tools cannot read channel history in those
+                runs, even from public channels. If your task needs it, create a
+                personal automation instead. Personal runs are private, run as
+                their creator, and are billed to them. The workspace bot must
+                have access to the public, internal channel.
+              </Banner>
+            ) : (
+              <p className="text-xs text-secondary">
+                Personal runs are private, run as their creator, and are billed
+                to them. Robin can read public, internal Slack channels the
+                workspace bot can access, not private channels, DMs, or channels
+                shared with another organization.
+              </p>
+            )}
+          </div>
           {isAdmin && (
             <div className="mt-space-3 border-t border-subtle pt-space-3">
               <Checkbox
@@ -776,6 +796,30 @@ export function AutomationEditor({
         {mode === "edit" && schedule && (
           <>
             <SectionLabel>Recent runs</SectionLabel>
+            {schedule.lastError && (
+              <Banner
+                intent="error"
+                title="Latest automation error"
+                className="mb-space-3"
+              >
+                {schedule.lastError}
+              </Banner>
+            )}
+            {schedule.lastThreadId && (
+              <div className="mb-space-3">
+                <MacawLink
+                  variant="xs"
+                  as={
+                    <Link
+                      to="/agents/$threadId"
+                      params={{ threadId: schedule.lastThreadId }}
+                    />
+                  }
+                >
+                  Open latest run
+                </MacawLink>
+              </div>
+            )}
             <AutomationRuns automationId={schedule.id} limit={10} />
           </>
         )}

@@ -81,5 +81,6 @@ describe("AutomationRuns", () => {
 
     expect(screen.getAllByLabelText("Action posted to Slack")).toHaveLength(1)
     expect(screen.getByText("Posted to Slack")).toBeTruthy()
+    expect(screen.getByText(/Finished means the run ended/)).toBeTruthy()
   })
 })
