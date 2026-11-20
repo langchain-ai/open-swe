@@ -12,7 +12,7 @@ _WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("scope"))
 @expose_mcp(access="admin")
 @access(_READ)
 async def read_execution_defaults() -> dict[str, object]:
-    """Read the Robin-wide activation toggle, instructions and sandbox configuration under Defaults."""
+    """Read the Robin-wide instructions and sandbox configuration under Defaults."""
     return (await EXECUTION_DEFAULTS.load()).model_dump(mode="json")
 
 

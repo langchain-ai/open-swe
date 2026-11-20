@@ -1684,7 +1684,7 @@ async def refresh_thread_github_token_after_401(thread_id: str, email: str) -> s
 
 
 async def get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
-    """GitHub webhook conversations always use the workspace bot identity."""
+    """GitHub webhook conversations always use the deployment's bot identity."""
     del email
     await invalidate_cached_github_token(thread_id)
     bot_token, expires_at = await get_github_app_installation_token_with_expiry()
@@ -1693,7 +1693,7 @@ async def get_or_resolve_thread_github_token(thread_id: str, email: str) -> str 
             thread_id, bot_token, expires_at=expires_at, is_bot_token=True
         )
         return bot_token
-    logger.warning("Workspace GitHub App token unavailable", extra={"thread_id": thread_id})
+    logger.warning("Deployment GitHub App token unavailable", extra={"thread_id": thread_id})
     return None
 
 

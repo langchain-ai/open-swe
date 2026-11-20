@@ -113,7 +113,7 @@ async def _requester_grant(login: str) -> str | None:
     return token
 
 
-async def _workspace_has_repository(client: httpx2.AsyncClient, owner: str, repo: str) -> bool:
+async def _installation_has_repository(client: httpx2.AsyncClient, owner: str, repo: str) -> bool:
     token = await get_github_app_installation_token()
     if not token:
         return False
@@ -1069,7 +1069,7 @@ async def _open_pull_request(
         if (
             kind == "user"
             and await private_credential_login() is None
-            and not await _workspace_has_repository(client, owner, repo)
+            and not await _installation_has_repository(client, owner, repo)
         ):
             return _access_failure_payload(
                 owner=owner,
@@ -1078,9 +1078,9 @@ async def _open_pull_request(
                 base=base,
                 token_kind=kind,
                 http_status=None,
-                reason="Could not verify the target repository belongs to the workspace GitHub App installation",
+                reason="Could not verify the target repository belongs to the deployment's GitHub App installation",
                 branch_pushed=None,
-                failed_step="workspace_repo",
+                failed_step="installation_repository",
             )
         preflight_failure = await _preflight_pr_access(
             client=client,
@@ -1316,9 +1316,12 @@ async def link_pull_request(pr_url: str) -> dict[str, Any]:
         if (
             kind == "user"
             and await private_credential_login() is None
-            and not await _workspace_has_repository(client, ref.owner, ref.repo)
+            and not await _installation_has_repository(client, ref.owner, ref.repo)
         ):
-            return {"success": False, "error": f"{ref.owner}/{ref.repo} is not in this workspace"}
+            return {
+                "success": False,
+                "error": f"{ref.owner}/{ref.repo} is not accessible to the deployment's GitHub App installation",
+            }
         pr = await _fetch_pr_details(client, token, ref.owner, ref.repo, ref.number)
         if not pr:
             return {"success": False, "error": f"Could not read {pr_url}"}

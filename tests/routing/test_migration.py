@@ -76,6 +76,40 @@ async def test_expand_migration_preserves_bindings_flags_queue_identity_and_lega
                 ),
                 {"id": queue_id, "workspace": workspace, "repository": repository},
             )
+        subscription_sources = {
+            uuid7(): (["workspace"], ["robin"]),
+            uuid7(): (["github", "workspace"], ["github", "robin"]),
+            uuid7(): (["github"], ["github"]),
+            uuid7(): ([], []),
+            uuid7(): (["robin"], ["robin"]),
+        }
+        for subscription_id, (sources, _) in subscription_sources.items():
+            await conn.execute(
+                text("""
+                    INSERT INTO event_subscription (
+                        id, thread_id, workspace_id, repository_id, sources,
+                        event_types, payload_match, multitask_strategy, instructions,
+                        one_shot, run_config, expires_at
+                    ) VALUES (
+                        :id, 'legacy-listener', :workspace, :repository, :sources,
+                        ARRAY['task.suggested'], '{"summary": "follow up"}', 'enqueue',
+                        'Handle the suggestion', true, CAST(:config AS jsonb),
+                        clock_timestamp() + interval '1 hour'
+                    )
+                """),
+                {
+                    "id": subscription_id,
+                    "workspace": first,
+                    "repository": allowed,
+                    "sources": sources,
+                    "config": json.dumps(legacy_config),
+                },
+            )
+        subscriptions_before = (
+            (await conn.execute(text("SELECT * FROM event_subscription ORDER BY id")))
+            .mappings()
+            .all()
+        )
         legacy_workspace_ids = set(await conn.scalars(text("SELECT id FROM workspace")))
         await conn.execute(
             text("""
@@ -118,6 +152,14 @@ async def test_expand_migration_preserves_bindings_flags_queue_identity_and_lega
         await conn.commit()
         await conn.run_sync(postgres.upgrade, migrations, "routing_upgrade", "heads")
         await conn.execute(text("SET LOCAL search_path TO routing_upgrade, public"))
+        subscriptions_after = (
+            (await conn.execute(text("SELECT * FROM event_subscription ORDER BY id")))
+            .mappings()
+            .all()
+        )
+        assert subscriptions_after == [
+            {**row, "sources": subscription_sources[row["id"]][1]} for row in subscriptions_before
+        ]
         bindings = (
             await conn.execute(
                 text(

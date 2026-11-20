@@ -140,11 +140,11 @@ def _open(base: str = "main") -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    "workspace_access", ["allowed", "other_account", "unavailable", "no_token"]
+    "installation_access", ["allowed", "other_account", "unavailable", "no_token"]
 )
 @pytest.mark.parametrize("requester_access", [True, False])
-def test_public_pr_cannot_use_requester_authority_outside_workspace(
-    monkeypatch: pytest.MonkeyPatch, workspace_access: str, requester_access: bool
+def test_public_pr_cannot_use_requester_authority_outside_installation(
+    monkeypatch: pytest.MonkeyPatch, installation_access: str, requester_access: bool
 ) -> None:
     _set_config(
         monkeypatch,
@@ -158,7 +158,7 @@ def test_public_pr_cannot_use_requester_authority_outside_workspace(
     monkeypatch.setattr(
         opr,
         "get_github_app_installation_token",
-        AsyncMock(return_value=None if workspace_access == "no_token" else "workspace-token"),
+        AsyncMock(return_value=None if installation_access == "no_token" else "installation-token"),
     )
     monkeypatch.setattr(opr, "_record_pr_telemetry", AsyncMock())
     monkeypatch.setattr(opr, "get_plan_content", AsyncMock(return_value=None))
@@ -167,18 +167,16 @@ def test_public_pr_cannot_use_requester_authority_outside_workspace(
     async def github(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
         if request.url.path == "/installation/repositories":
-            assert request.headers["Authorization"] == "Bearer workspace-token"
-            if workspace_access == "unavailable":
+            assert request.headers["Authorization"] == "Bearer installation-token"
+            if installation_access == "unavailable":
                 return httpx2.Response(503)
             if request.url.params["page"] == "1":
                 return httpx2.Response(
                     200,
-                    json={
-                        "repositories": [{"full_name": f"workspace/repo-{i}"} for i in range(100)]
-                    },
+                    json={"repositories": [{"full_name": f"acme/repo-{i}"} for i in range(100)]},
                 )
             full_name = (
-                "langchain-ai/open-swe" if workspace_access == "allowed" else "other/open-swe"
+                "langchain-ai/open-swe" if installation_access == "allowed" else "other/open-swe"
             )
             return httpx2.Response(200, json={"repositories": [{"full_name": full_name}]})
         # OAuth has broader access, including branches already pushed by someone else.
@@ -193,14 +191,14 @@ def test_public_pr_cannot_use_requester_authority_outside_workspace(
     monkeypatch.setattr(opr.httpx2, "AsyncClient", lambda **kwargs: client)
     result = _open()
 
-    if workspace_access == "allowed" and requester_access:
+    if installation_access == "allowed" and requester_access:
         assert result["success"] is True
         assert result["author"] == "Alice"
         assert result["token_kind"] == "user"
         assert any(request.method == "POST" for request in requests)
     else:
         assert result["success"] is False
-        assert ("403" if workspace_access == "allowed" else "workspace") in result["error"]
+        assert ("403" if installation_access == "allowed" else "installation") in result["error"]
         assert not any(request.method == "POST" for request in requests)
         assert all(request.headers["Authorization"] != "Bearer bob-token" for request in requests)
 

@@ -24,7 +24,7 @@ function stepSummary(app: App): string {
 }
 
 /**
- * The apps reviews do work for, at one tier: listed apps whose newest release
+ * The apps reviews do work for globally: listed apps whose newest release
  * has a review step. Each is pinned to the release an admin turned on, so its
  * owner's later releases change no review until an admin updates it.
  */

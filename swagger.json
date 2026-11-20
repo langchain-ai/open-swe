@@ -27764,7 +27764,7 @@
     },
     "/dashboard/api/ui-invalidations": {
       "get": {
-        "description": "``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``.",
+        "description": "``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.settings``.",
         "operationId": "api_ui_invalidations_dashboard_api_ui_invalidations_get",
         "parameters": [
           {

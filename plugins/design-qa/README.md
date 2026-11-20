@@ -42,7 +42,7 @@ Nothing is sent until you press Send.
 
 ## Capturing
 
-Design QA captures through its [review step](../../docs/PLUGINS.md#review-steps): a workspace adds it in **Settings → Review → Apps in reviews**, and reviews of that workspace's private repositories then follow its instructions.
+Design QA captures through its [review step](../../docs/PLUGINS.md#review-steps): an instance admin adds it in **Defaults → Apps in reviews** (`/settings`), and reviews of private repositories then follow its approved release's instructions.
 The manifest's review `paths` name the frontend files Design QA captures: components, styles, markup, images and fonts, but not tests, stories, type declarations or scripts.
 A review of a pull request that changes none of them leaves Design QA out and records it as skipped without running anything, so docs, backend and test-only changes never reach a capture.
 The review also records `skipped`, not `blocked`, when the frontend it changes has no preview or no base to compare against; `blocked` is kept for something fixable, such as a preview still deploying or a failed sign-in.
@@ -71,16 +71,16 @@ A capture is not proof that its preview serves that commit: build verification s
 
 ## Capture recovery and release
 
-Capture and Retry capture request the workspace-approved app review through the host's job queue.
+Capture and Retry capture request the globally approved app review through the host's job queue.
 They require the installed app's `agent` and GitHub grants, repository access, a private open PR, and automatic reviews with a configured preview check.
 The backend records outcomes separately from captures; blocked, failed and skipped attempts show their reasons.
 Retry requests are limited to three per PR and app per hour.
 An hourly recovery pass gives each known open reviewed PR one extra preview watch, including those whose original watch expired.
 It does not renew that watch indefinitely and starts at most five recovery reviews per repository per hour.
-Drafts follow the author's existing draft-review preference and workspace fallback.
+Drafts follow the author's existing draft-review preference, falling back to the instance default.
 
 Publishing and merging are separate steps.
-Build version 0.4.0 from this directory, publish `bundle/index.html` as a new release of the existing app, update the installed app in Settings → Apps, and approve that same release under Defaults → Apps in reviews (or the owning environment's override).
+Build version 0.4.0 from this directory, publish `bundle/index.html` as a new release of the existing app, update the installed app in Settings → Apps, and have an instance admin approve that same release globally under Defaults → Apps in reviews.
 Reviews follow `review.md` and `paths` from the approved release only, so the design system check, recordings and frontend-only triage start once that release is approved, and triage once the backend that reads `paths` is deployed; an earlier backend ignores them.
 
 Before capture, verify Preview checks names the actual deployment check, review guidelines identify a comparison base, and Review browser lists only the allowed review/base domains and an existing tool name from Robin's bot kit.

@@ -232,7 +232,7 @@ export interface ThreadListOptions {
   offset?: number
 }
 
-/** A Slack bot a workspace admin allowed to start threads by mentioning Robin. */
+/** A Slack bot an instance admin allowed to start threads by mentioning Robin. */
 export interface SlackBot {
   /** `<team_id>:<bot_id>`. */
   key: string
@@ -633,7 +633,7 @@ export interface ReviewOutcome {
 }
 
 export interface GitHubRepositoryApi extends RpcTarget {
-  /** Request this app's review work; requires agent and GitHub access and workspace approval. */
+  /** Request this app's review work; requires agent and GitHub access and global instance-admin approval. */
   requestReview(number: number): Promise<ReviewOutcome>
   info(): Promise<RepositoryInfo>
   /** The commit a branch, tag or SHA names; `null` when there is none. */

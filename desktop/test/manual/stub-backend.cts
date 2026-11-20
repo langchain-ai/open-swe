@@ -40,10 +40,6 @@ const SIGNED_IN_ROUTES = {
   },
   "/dashboard/api/my-mapping": {},
   "/dashboard/api/profile": {},
-  "/dashboard/api/environments/options": {
-    environments: [],
-    default_slug: "default",
-  },
   "/dashboard/api/options": {
     models: [MODEL],
     default_agent_model: MODEL.id,

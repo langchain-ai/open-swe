@@ -10,7 +10,7 @@ from pydantic import JsonValue
 from sqlalchemy import text
 from starlette.requests import Request
 
-from openswe.database import transaction
+from openswe.database import postgres, transaction
 from openswe.github.comments import (
     UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG,
     UNTRUSTED_GITHUB_COMMENT_OPEN_TAG,
@@ -453,14 +453,23 @@ async def test_review_log_tracks_committed_changes_without_run_secrets(
     assert "do-not-log" not in json.dumps([row["payload"] for row in rows])
 
 
-@pytest.mark.parametrize("source", ["robin", "human_review", "reviewer"])
+@pytest.mark.parametrize(
+    ("stored_source", "source"),
+    [
+        ("robin", "robin"),
+        ("workspace", "robin"),
+        ("human_review", "human_review"),
+        ("reviewer", "reviewer"),
+    ],
+)
 async def test_internal_events_reach_only_admin_threads_that_name_the_source(
     registry: dict[str, UUID],
     delivered: list[tuple[str, MultitaskStrategy]],
+    stored_source: str,
     source: WebhookSource,
 ) -> None:
     await _subscribe(registry, event_types=["refresh"])
-    await _subscribe(registry, sources=[source], event_types=["refresh"])
+    await _subscribe(registry, sources=[stored_source], event_types=["refresh"])
     await index.create(
         "admin-thread", runtime="mda", metadata={"visibility": "public", "owner_type": "system"}
     )
@@ -469,9 +478,14 @@ async def test_internal_events_reach_only_admin_threads_that_name_the_source(
         multitask_strategy="enqueue",
         run_config={"thread_id": "admin-thread", "admin_thread": True},
         expires_at=datetime.now(UTC) + timedelta(hours=1),
-        sources=[source],
+        sources=[stored_source],
         event_types=["refresh"],
     ).create()
+    if stored_source == "workspace":
+        async with transaction() as conn:
+            await conn.run_sync(
+                postgres.execute_revision, postgres.load_migrations(), "5123042028cf"
+            )
 
     await EventLog.append(
         source,

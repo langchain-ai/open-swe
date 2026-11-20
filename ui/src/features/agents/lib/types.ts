@@ -422,7 +422,7 @@ export interface AgentThreadMonitor {
 /** An event subscription that wakes the thread when a matching event arrives. */
 export interface AgentEventListener {
   subscription_id: string
-  /** The pull request URL, repository, or "workspace" it listens on. */
+  /** The pull request URL, repository, or "Robin events" it listens on. */
   target: string
   sources: Array<string>
   event_types: Array<string>

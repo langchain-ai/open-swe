@@ -163,7 +163,7 @@ export function PullRequestPage({
           {empty && (
             <Card role="status" className="p-space-4 text-sm text-secondary">
               No saved comparisons. Capture checks the deployed preview and the
-              workspace's base site, then saves matching screenshots here.
+              configured base site, then saves matching screenshots here.
             </Card>
           )}
           {options.length > 1 && (

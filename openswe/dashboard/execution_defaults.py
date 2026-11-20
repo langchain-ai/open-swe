@@ -1,4 +1,4 @@
-"""Robin-wide instructions and sandbox configuration, stored independently of environments."""
+"""Robin-wide instructions and sandbox configuration under Defaults."""
 
 import logging
 

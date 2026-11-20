@@ -41,7 +41,7 @@ async def api_ui_invalidations(
     t: Annotated[list[str] | None, Query()] = None,
     session: dict[str, Any] = SESSION_DEP,
 ) -> StreamingResponse:
-    """``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.workspaces``."""
+    """``t`` is repeated ``<age seconds>.<topic>``, e.g. ``t=42.settings``."""
     ages = _parse_subscriptions(t or [])
     audible = await Topic.audible(session, ages)
     heard = {topic: age for topic, age in ages.items() if topic in audible}
