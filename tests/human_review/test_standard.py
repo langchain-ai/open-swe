@@ -745,6 +745,34 @@ async def test_open_card_counts_only_non_test_files(available: bool) -> None:
     assert "−55" not in rendered
 
 
+async def test_an_open_card_reads_author_and_review_states_at_once() -> None:
+    pr = PullRequest(owner="o", repo="r", number=1, title="Fix", author="ada", changed_files=1)
+    request = HumanReviewRequest(pull_request_id=pr.id, head_sha="abc", kind="standard")
+    request.pull_request = pr
+    request.requested_by = None
+    both = asyncio.Barrier(2)
+
+    async def states() -> dict[str, str]:
+        await both.wait()
+        return {}
+
+    async def author() -> str:
+        await both.wait()
+        return "@ada"
+
+    with (
+        patch.object(
+            ReviewCard,
+            "_files",
+            AsyncMock(return_value=[ChangedFile(filename="app.py", additions=1)]),
+        ),
+        patch.object(ReviewCard, "_review_states", side_effect=states),
+        patch.object(HumanReviewRequest, "author_mention", side_effect=author),
+    ):
+        _, blocks = await asyncio.wait_for(ReviewCard(request)._render_standard(None), 2)
+    assert blocks
+
+
 @pytest.mark.parametrize("count", [101, 102])
 async def test_standard_card_requires_complete_file_counts(
     count: int, github_app: AsyncMock
@@ -806,8 +834,17 @@ async def test_approved_card_collapses_without_closing_the_request(
             "openswe.human_review.lifecycle.latest_review_states", AsyncMock(return_value=states)
         ),
         patch.object(HumanReviewRequest, "author_mention", AsyncMock(return_value="<@U_ada>")),
+        patch.object(
+            ReviewCard,
+            "_files",
+            AsyncMock(side_effect=RuntimeError("GitHub files unavailable"))
+            if collapsed
+            else AsyncMock(return_value=[]),
+        ) as files,
     ):
         text, blocks = await ReviewCard(request).render(None)
+    if collapsed:
+        files.assert_not_awaited()
     assert text.startswith(":white_check_mark: ") is collapsed
     assert (len(blocks) == 1) is collapsed
     assert "<@U_ada>" in str(block_payload(blocks))

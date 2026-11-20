@@ -362,8 +362,11 @@ class ReviewCard:
     async def _render_standard(self, outcome: str | None) -> tuple[str, list[Block]]:
         request = self.request
         pr = request.pull_request
-        author = await request.author_mention()
-        states = await self._review_states() if outcome in (None, "merged") else {}
+        if outcome is None:
+            author, states = await asyncio.gather(request.author_mention(), self._review_states())
+        else:
+            author = await request.author_mention()
+            states = await self._review_states() if outcome == "merged" else {}
         if outcome is not None:
             return await standard_card.closed_card(
                 request, title=pr.title, author=author, outcome=outcome, review_states=states

@@ -434,24 +434,25 @@ async def request_review(
             )
     except GitHubAppUnavailable:
         result = _failure("Robin cannot reach this repository's GitHub App installation.")
-    await EventLog.append(
-        "human_review",
-        {
-            "pull_request_url": pr_ref.url,
-            "thread_id": origin.thread_id,
-            "requested_by_user_id": str(origin.requester.id) if origin.requester else None,
-            "success": result.success,
-            "error": result.error,
-            "request_id": result.request_id,
-        },
-        event_type="request.finished",
-        delivery_id=str(uuid7()),
-        refs=EventRefs(
-            github_repository=f"{pr_ref.owner}/{pr_ref.repo}",
-            pull_request_number=pr_ref.number,
-            slack_channel_id=origin.slack_channel_id,
-        ),
-    )
+    with apm_span("human_review.event_log", {"pull_request.url": pr_ref.url}):
+        await EventLog.append(
+            "human_review",
+            {
+                "pull_request_url": pr_ref.url,
+                "thread_id": origin.thread_id,
+                "requested_by_user_id": str(origin.requester.id) if origin.requester else None,
+                "success": result.success,
+                "error": result.error,
+                "request_id": result.request_id,
+            },
+            event_type="request.finished",
+            delivery_id=str(uuid7()),
+            refs=EventRefs(
+                github_repository=f"{pr_ref.owner}/{pr_ref.repo}",
+                pull_request_number=pr_ref.number,
+                slack_channel_id=origin.slack_channel_id,
+            ),
+        )
     return result
 
 
@@ -616,6 +617,8 @@ async def _request_review(
             refusal = str(refused)
     with apm_span("human_review.supplementary_reviews", span_tags):
         await SupplementaryReviews(request).start(pull)
+    with apm_span("human_review.permalink", span_tags):
+        permalink = await request.permalink()
     return RequestResult(
         success=True,
         supplementary_refusal=refusal,
@@ -623,7 +626,7 @@ async def _request_review(
         request_id=str(request.id),
         channel=target.id,
         channel_name=target.name,
-        permalink=await request.permalink(),
+        permalink=permalink,
     )
 
 
