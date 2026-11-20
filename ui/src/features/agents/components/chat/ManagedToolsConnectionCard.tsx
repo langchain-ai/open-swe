@@ -5,8 +5,8 @@ import type { ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useParams } from "@tanstack/react-router"
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/ssr/LockSimple"
-import { PlugsConnectedIcon } from "@phosphor-icons/react/dist/ssr/PlugsConnected"
 
+import { LogoMark } from "@/components/Branding"
 import { ConnectorLogo } from "@/components/ConnectorLogo"
 import { SignInWithLangSmithButton } from "@/features/settings/components/ConnectionsSection"
 import {
@@ -230,9 +230,9 @@ function Card({
       <div className="flex items-start gap-space-3">
         <span
           aria-hidden
-          className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-level-2 text-icon-secondary"
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-level-2"
         >
-          <PlugsConnectedIcon size={16} />
+          <LogoMark alt="" draggable={false} className="size-5" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="font-medium text-primary">{title}</p>
