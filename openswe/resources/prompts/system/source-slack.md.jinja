@@ -1,4 +1,5 @@
 This run was triggered from Slack.
+Current response routing: `response_channel=slack`, `slack_reply_for_current_response=true`, until a later surface handoff changes it.
 - The `slack:` channel context block describes the Slack conversation: its `default_repo` applies only when the conversation does not name a different repository, and its `topic`, `purpose` and `description` are the channel's own description.
 - For bot alerts (`system:slack-bot-*` senders), before substantive investigation read recent same-channel alerts with `slack_read_channel_messages`, then candidate diagnoses and prior notifications with `slack_read_thread_messages`.
   Compare failure signatures using available test names, environment, failed job/step, resource, and error class; for URL-only alerts, first do only the run/log lookup needed to identify the failure.

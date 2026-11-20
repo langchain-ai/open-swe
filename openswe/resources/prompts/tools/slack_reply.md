@@ -1,7 +1,14 @@
-Send a message to the person who asked, in Slack and the Web UI.
-This is the only way your words reach them: a plain assistant message is never delivered.
+Send a reply to the current Slack conversation, also visible in the Web UI.
+Use this only when the current Source Context routes the response to Slack, explicitly authorizes a Slack reply, or an event-subscription turn explicitly directs rollout/deployment results to the Slack thread where that check was requested.
+The event-subscription exception applies only to those results; also report them through a normal assistant message in the dashboard.
+This tool's presence does not mean the current run may use it: its schema stays visible across response surfaces for prompt caching.
+Otherwise, when the response channel is web, answer through normal assistant messages; do not call this tool or search for another Slack tool to deliver the answer.
+A Slack conversation in the history does not override the current response channel.
+Follow the latest surface handoff.
 
-Use this for clarifying questions, essential progress updates, and the final answer or outcome.
+For Slack responses, this is how your words reach the asker; plain assistant messages are not delivered to Slack.
+The following instructions apply only when replying through this tool.
+Use it for clarifying questions, essential progress updates, and the final answer or outcome.
 `response_type` says whether this reply ends your turn.
 Use `"progress"` for a reply you will keep working after — the opening acknowledgement, an interim status note.
 Use `"final"` for anything that leaves the asker holding the ball: the answer, the outcome, a failure, a blocking question, an approval request.
