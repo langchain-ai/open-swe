@@ -1,0 +1,27 @@
+[project]
+# Runs Harbor on the machine that drives the benchmark, so it keeps its dependencies out of
+# Robin's deployment.
+name = "robin-terminal-bench"
+version = "0.1.0"
+description = "Harbor adapter that runs Robin on Terminal-Bench."
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "harbor[langsmith]==0.24.0",
+    "langsmith>=0.15,<0.16",
+    "python-dotenv>=1.2,<2",
+]
+
+[project.scripts]
+# Runs a job in a LangSmith sandbox, so the laptop can close (README: "Remotely, on LangSmith sandboxes").
+harbor-runner = "harbor_runner:main"
+
+# Installed (editable) so Harbor's CLI can import `harbor_adapter:RobinAgent` from any directory.
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["harbor_adapter.py", "harbor_runner.py"]
+
+[tool.ruff]
+extend = "../../pyproject.toml"

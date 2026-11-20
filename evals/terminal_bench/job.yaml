@@ -1,0 +1,14 @@
+# Robin on Terminal-Bench 2.0. Start it with `uv run --locked harbor-runner up` (README).
+# Credentials come from the shell or open-swe/.env, never from this file: Harbor copies the
+# job's config into every job's config.json.
+jobs_dir: jobs
+n_concurrent_trials: 16
+datasets:
+  - name: terminal-bench
+    version: "2.0"
+agents:
+  - import_path: harbor_adapter:RobinAgent
+# Every task runs in a LangSmith sandbox of its own, built from the task's image and labelled so
+# Robin may attach it.
+environment:
+  import_path: harbor_adapter:RobinSandbox
