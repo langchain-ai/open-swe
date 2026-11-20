@@ -1,8 +1,10 @@
 """FastAPI dependencies shared by every dashboard-mounted API router."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
+from itertools import batched
 from typing import Annotated, Any, Protocol
 
 from fastapi import Depends, HTTPException
@@ -55,14 +57,17 @@ async def filter_repo_models_for_user[RepoRecordT: RepoScopedRecord](
     records: list[RepoRecordT],
 ) -> list[RepoRecordT]:
     out: list[RepoRecordT] = []
-    for record in records:
-        try:
-            await require_repo_access_for_user(login, record.full_name)
-        except HTTPException as exc:
-            if exc.status_code in {403, 404}:
+    for batch in batched(records, 4, strict=False):
+        results = await asyncio.gather(
+            *(require_repo_access_for_user(login, record.full_name) for record in batch),
+            return_exceptions=True,
+        )
+        for record, result in zip(batch, results, strict=True):
+            if isinstance(result, HTTPException) and result.status_code in {403, 404}:
                 continue
-            raise
-        out.append(record)
+            if isinstance(result, BaseException):
+                raise result
+            out.append(record)
     return out
 
 

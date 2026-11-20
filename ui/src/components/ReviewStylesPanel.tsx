@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
 import { AddRepositoryField } from "@/components/AddRepositoryField"
+import { LoadError } from "@/components/LoadError"
 import type { ReviewApprovalMode, ReviewStyle } from "@/lib/api"
 import { api, connectService, isGithubReauthError } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
@@ -136,6 +137,16 @@ export function ReviewStylesPanel() {
     )
   }
 
+  if (styles.isError && !isGithubReauthError(styles.error)) {
+    return (
+      <LoadError
+        title="Couldn't load review styles"
+        error={styles.error}
+        retry={() => void styles.refetch()}
+      />
+    )
+  }
+
   const configured = new Set((styles.data ?? []).map((s) => s.full_name))
   const suggestedRepos = (repos.data?.repositories ?? []).filter(
     (r) => !configured.has(r.full_name)
@@ -155,6 +166,7 @@ export function ReviewStylesPanel() {
   }
 
   const githubReauth =
+    (styles.isError && isGithubReauthError(styles.error)) ||
     (repos.isError && isGithubReauthError(repos.error)) ||
     [saveMode, createStyle, savePrompt, removeStyle]
       .map((m) => m.error)

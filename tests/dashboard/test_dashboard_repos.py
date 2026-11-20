@@ -7,9 +7,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from openswe.api.github_errors import add_github_error_handlers
-from openswe.dashboard import repo_access
+from openswe.dashboard import deps, repo_access
 from openswe.github import dashboard_routes, http, repo_cache, repos
 from openswe.github.http import GitHubClient
+from openswe.github.repo_names import RepoFullName
+from openswe.review.styles import ReviewStyle
 from openswe.users import User
 from tests.support.github_sdk import mock_github_sdk
 
@@ -234,6 +236,69 @@ async def test_parallel_access_checks_share_one_refresh_and_never_outlive_it(
     with pytest.raises(HTTPException) as excinfo:
         await repo_access.require_repo_access_for_user("octocat", "acme/api")
     assert excinfo.value.status_code == 404
+
+
+async def test_repo_lists_check_access_concurrently_in_bounded_batches_and_preserve_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = [ReviewStyle(full_name=RepoFullName(f"acme/repo-{i}")) for i in range(9)]
+    first_batch = asyncio.Event()
+    active = 0
+    peak = 0
+    revoked = False
+    checked: list[str] = []
+
+    async def handle(request: httpx2.Request) -> httpx2.Response:
+        nonlocal active, peak
+        assert request.headers["authorization"] == "Bearer user-token"
+        active += 1
+        peak = max(peak, active)
+        checked.append(request.url.path)
+        if active == 4:
+            first_batch.set()
+        try:
+            await first_batch.wait()
+            await asyncio.sleep(0)
+            if request.url.path.endswith("repo-1"):
+                return httpx2.Response(403, json={"message": "Forbidden"})
+            if request.url.path.endswith("repo-2") or (
+                revoked and request.url.path.endswith("repo-0")
+            ):
+                return httpx2.Response(404, json={"message": "Not found"})
+            return httpx2.Response(200, json={"full_name": request.url.path[7:]})
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(
+        "openswe.dashboard.profiles.get_valid_access_token",
+        AsyncMock(return_value="user-token"),
+    )
+    monkeypatch.setattr(http, "GITHUB_TRANSPORT", httpx2.MockTransport(handle))
+
+    async with asyncio.timeout(2):
+        assert await deps.filter_repo_models_for_user("octocat", records) == [
+            records[0],
+            *records[3:],
+        ]
+        revoked = True
+        assert await deps.filter_repo_models_for_user("octocat", records) == records[3:]
+    assert peak == 4
+    assert active == 0
+    assert len(checked) == 2 * len(records)
+
+
+@pytest.mark.parametrize("status", [401, 429, 500, 502, 503])
+async def test_repo_lists_propagate_check_failures_without_returning_partial_data(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    failure = HTTPException(status, "GitHub unavailable", headers={"Retry-After": "60"})
+    access = AsyncMock(side_effect=["token", failure, HTTPException(403), "token"])
+    monkeypatch.setattr(deps, "require_repo_access_for_user", access)
+    records = [ReviewStyle(full_name=RepoFullName(f"acme/repo-{i}")) for i in range(5)]
+
+    with pytest.raises(HTTPException) as excinfo:
+        await deps.filter_repo_models_for_user("octocat", records)
+    assert excinfo.value is failure
 
 
 @pytest.mark.parametrize(

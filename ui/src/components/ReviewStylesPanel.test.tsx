@@ -10,7 +10,7 @@ import {
 } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
-import { api, type ReviewStyle } from "@/lib/api"
+import { ApiError, api, type ReviewStyle } from "@/lib/api"
 import { reportError } from "@/lib/errorReporting"
 import { makeQueryClient } from "@/lib/query"
 import { ReviewStylesPanel } from "./ReviewStylesPanel"
@@ -81,6 +81,39 @@ async function renderAndSelect(repo: string) {
   )
   await screen.findByDisplayValue(`${repo} prompt`)
 }
+
+it("shows a list failure instead of an empty state and retries without reloading", async () => {
+  const failure = new Error("GitHub API rate limit reached. Try again later.")
+  vi.spyOn(api, "listReviewStyles").mockRejectedValueOnce(failure)
+  render(
+    <QueryClientProvider client={client}>
+      <ReviewStylesPanel />
+    </QueryClientProvider>
+  )
+
+  expect(await screen.findByRole("alert")).toBeTruthy()
+  expect(screen.getByText("Couldn't load review styles")).toBeTruthy()
+  expect(screen.getByText(/GitHub API rate limit reached/)).toBeTruthy()
+  expect(screen.queryByText("No repositories yet.")).toBeNull()
+
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+  expect(await screen.findByRole("button", { name: "acme/api" })).toBeTruthy()
+  expect(screen.queryByRole("alert")).toBeNull()
+})
+
+it("shows the GitHub relink banner when listing fails with expired GitHub auth", async () => {
+  vi.spyOn(api, "listReviewStyles").mockRejectedValue(
+    new ApiError(401, "GitHub token unavailable; re-login required")
+  )
+  render(
+    <QueryClientProvider client={client}>
+      <ReviewStylesPanel />
+    </QueryClientProvider>
+  )
+
+  expect(await screen.findByText("Link GitHub again")).toBeTruthy()
+  expect(screen.queryByText("Couldn't load review styles")).toBeNull()
+})
 
 it("removes a repo from the list immediately and restores it when deletion fails", async () => {
   vi.spyOn(window, "confirm").mockReturnValue(true)
