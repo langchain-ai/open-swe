@@ -138,7 +138,7 @@ async def api_act_on_pull_request(
     finally:
         # Every open view of it, and its shared status, are stale now; a failed merge
         # may already have resolved its conversations.
-        await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, number))
+        await Topic.wrote_to_github(PullRequestKey.of(owner, repo, number))
 
 
 @router.get("/repos/{owner}/{repo}/pulls/{number}/thread")
@@ -180,4 +180,4 @@ async def api_resolve_review_threads(
                 github.repo(owner, repo).pull_request(number), body.thread_ids
             )
     finally:
-        await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, number))
+        await Topic.wrote_to_github(PullRequestKey.of(owner, repo, number))

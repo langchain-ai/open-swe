@@ -153,8 +153,9 @@ async def _github_changed() -> None:
     from openswe.ui_invalidations.topics import Topic
 
     for pull in fakes.PULLS:
-        await Topic.PULL_REQUESTS.invalidate(
-            key=PullRequestKey.of(pull["owner"], pull["repo"], pull["number"])
+        await Topic.invalidate_pull_request(
+            PullRequestKey.of(pull["owner"], pull["repo"], pull["number"]),
+            *Topic.for_pull_request_event("pull_request"),
         )
 
 

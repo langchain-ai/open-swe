@@ -313,7 +313,9 @@ async def _work_after_answer(delivery: GitHubDelivery, pull_request: Any) -> Non
     fields = {"github_event": delivery.event, "github_delivery": delivery.delivery_id}
     if pull_request is not None:
         try:
-            await Topic.for_pull_request_event(delivery.event).invalidate(key=pull_request)
+            await Topic.invalidate_pull_request(
+                pull_request, *Topic.for_pull_request_event(delivery.event)
+            )
         except Exception:
             logger.warning(
                 "Refreshing a pull request's dashboard state failed", extra=fields, exc_info=True

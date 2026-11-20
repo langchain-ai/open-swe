@@ -33,6 +33,8 @@ type KeysAuthorizer = Callable[[Session, set[str]], Awaitable[set[str]]]
 
 # GitHub deliveries that name a pull request only through its checks.
 _CHECK_EVENTS = frozenset({"check_run", "check_suite", "workflow_run"})
+# GitHub deliveries about a pull request's conversation, which its status doesn't show.
+_CONVERSATION_EVENTS = frozenset({"issue_comment"})
 _CHECKS_MIN_INTERVAL_SECONDS = 15.0
 
 # Keys carry GitHub names, and a repository's may hold "_".
@@ -142,6 +144,12 @@ class Topic(BaseTopic):
     """Keyed: one pull request's live state and review page, from its GitHub
     reviews and comments to the reviewer's findings and the walkthrough."""
 
+    PULL_REQUEST_STATE: ClassVar[KeyedTopic[PullRequestKey]]
+    """Keyed: one pull request's state on GitHub, as its deliveries and Robin's own writes
+    there report it. Its shared status (``SharedPullRequestStatus``) is read again only
+    when this fires, not for Robin's own records of it, such as its reviewer's findings,
+    which fire ``PULL_REQUESTS`` many times a minute."""
+
     PULL_REQUEST_CHECKS: ClassVar[KeyedTopic[PullRequestKey]]
     """Keyed: one pull request's check runs, check suites and workflow runs. A CI
     run changes them many times a second, so a stream sends this at most every 15s."""
@@ -193,9 +201,28 @@ class Topic(BaseTopic):
         await self._publish(conn, self.name)
 
     @staticmethod
-    def for_pull_request_event(github_event: str) -> KeyedTopic[PullRequestKey]:
-        """The topic a GitHub delivery about a pull request makes stale."""
-        return Topic.PULL_REQUEST_CHECKS if github_event in _CHECK_EVENTS else Topic.PULL_REQUESTS
+    async def invalidate_pull_request(
+        key: PullRequestKey, *topics: KeyedTopic[PullRequestKey]
+    ) -> None:
+        """Mark ``topics`` stale for one pull request, in one write. Never raises."""
+        await outbox.invalidate_standalone(
+            *(name for topic in topics for name in (topic.name, topic.keyed(key)))
+        )
+
+    @staticmethod
+    async def wrote_to_github(key: PullRequestKey) -> None:
+        """Mark stale a pull request Robin just changed on GitHub: its views and its status,
+        without waiting on GitHub's webhook. Every dashboard write to GitHub calls this."""
+        await Topic.invalidate_pull_request(key, Topic.PULL_REQUESTS, Topic.PULL_REQUEST_STATE)
+
+    @staticmethod
+    def for_pull_request_event(github_event: str) -> tuple[KeyedTopic[PullRequestKey], ...]:
+        """The topics a GitHub delivery about a pull request makes stale."""
+        if github_event in _CHECK_EVENTS:
+            return (Topic.PULL_REQUEST_CHECKS,)
+        if github_event in _CONVERSATION_EVENTS:
+            return (Topic.PULL_REQUESTS,)
+        return (Topic.PULL_REQUESTS, Topic.PULL_REQUEST_STATE)
 
     async def authorize(self, session: Session, keys: set[str]) -> set[str]:
         return keys & {""}
@@ -344,6 +371,7 @@ Topic.REVIEW_STYLES = KeyedTopic("review-styles")
 Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.REQUIRED_CHECKS = KeyedTopic("required-checks", authorize_keys=_readable_required_checks)
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
+Topic.PULL_REQUEST_STATE = KeyedTopic("pull-request-state", authorize_keys=_readable_pull_requests)
 Topic.THREADS = ThreadListsTopic("threads", min_interval_seconds=5.0)
 Topic.PULL_REQUEST_CHECKS = KeyedTopic(
     "pull-request-checks",

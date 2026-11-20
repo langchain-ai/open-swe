@@ -445,4 +445,4 @@ async def api_set_review_thread_resolution(
             .pull_request(pr_number)
             .set_thread_resolved(thread_node_id, resolution.resolved)
         )
-    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, pr_number))
+    await Topic.wrote_to_github(PullRequestKey.of(owner, repo, pr_number))

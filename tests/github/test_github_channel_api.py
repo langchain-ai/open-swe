@@ -30,6 +30,7 @@ from openswe import dispatch
 from openswe.agent_api.tokens import verify_runtime_token
 from openswe.github import channel
 from openswe.github import webhook as github_webhooks
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.mda_channels import api, github_deliveries
 from openswe.users import User
 from openswe.webhooks import common as webhook_common
@@ -81,7 +82,7 @@ def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setenv("MDA_SERVICE_SECRET", SERVICE_SECRET)
     monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
     monkeypatch.setattr("openswe.github.channel.EventLog.record_once", AsyncMock(return_value=True))
-    monkeypatch.setattr(channel.Topic.PULL_REQUESTS, "invalidate", AsyncMock())
+    monkeypatch.setattr(channel.Topic, "invalidate_pull_request", AsyncMock())
     monkeypatch.setattr(channel.schedules, "plan_github_automations", AsyncMock(return_value=[]))
     monkeypatch.setattr(channel.schedules, "github_automation_rules", AsyncMock(return_value=[]))
     monkeypatch.setattr(github_webhooks, "conversation_started", AsyncMock(return_value=False))
@@ -195,7 +196,11 @@ async def test_a_delivery_is_logged_with_what_open_swe_knows_of_its_repository(
     assert "@openswe" in delivered.facts.tags
     channel.EventLog.record_once.assert_awaited_once()  # type: ignore[attr-defined]
     assert channel.EventLog.record_once.await_args.kwargs["delivery_id"] == "delivery-1"  # type: ignore[attr-defined]
-    channel.Topic.PULL_REQUESTS.invalidate.assert_awaited_once()  # type: ignore[attr-defined]
+    channel.Topic.invalidate_pull_request.assert_awaited_once_with(  # type: ignore[attr-defined]
+        PullRequestKey.of("acme", "api", 7),
+        channel.Topic.PULL_REQUESTS,
+        channel.Topic.PULL_REQUEST_STATE,
+    )
 
 
 async def test_automatic_review_is_only_read_for_pull_requests_and_pushes(

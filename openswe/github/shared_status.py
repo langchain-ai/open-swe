@@ -4,8 +4,10 @@ The dashboard refetches a pull request's status whenever its UI topics fire, in 
 open tab of everyone looking at it, and each read spends that viewer's own GitHub token
 on a heavy GraphQL query and the check APIs: enough to trip GitHub's secondary rate
 limit, which then stalls everything else the token does for a minute. A status read
-after the pull request's topics last fired is still the current one, so it is served to
-anyone who can read the repository until they fire again.
+after GitHub last reported a change to the pull request (``Topic.PULL_REQUEST_STATE``) is
+still the current one, so it is served to anyone who can read the repository until GitHub
+reports another; Robin's own records of the pull request, such as its reviewer's findings,
+refresh its views many times a minute without changing what GitHub says.
 
 Only the GraphQL read is rate limited that way, and only CI changes with no webhook
 saying so (Robin drops CI deliveries), so a kept status is rechecked against its head
@@ -382,7 +384,7 @@ class SharedPullRequestStatus:
     @staticmethod
     def _topics(pull: PullRequestClient, key: PullRequestKey) -> tuple[str, ...]:
         return (
-            Topic.PULL_REQUESTS.keyed(key),
+            Topic.PULL_REQUEST_STATE.keyed(key),
             Topic.PULL_REQUEST_CHECKS.keyed(key),
             Topic.REQUIRED_CHECKS.keyed(pull.repo.full_name.lower()),
         )

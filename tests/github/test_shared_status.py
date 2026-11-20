@@ -13,6 +13,8 @@ from openswe.github.http import CommitCI, GitHubClient, RepoClient
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import OpenPullRequest, PullRequestClient
 from openswe.github.shared_status import SharedPullRequestStatus
+from openswe.review import conversation
+from openswe.review import routes as review_routes
 from openswe.ui_invalidations.topics import Topic
 
 
@@ -39,7 +41,7 @@ def _statuses(store: dict[str, object]) -> dict[str, object]:
 
 async def _another_replica_claims(store: dict[str, object], *, ago: timedelta) -> datetime:
     """Leave a claim as another replica's read, begun ``ago``, would; its start."""
-    _, now = await Topic.last_changed(Topic.PULL_REQUESTS.keyed(_KEY))
+    _, now = await Topic.last_changed(Topic.PULL_REQUEST_STATE.keyed(_KEY))
     started_at = now - ago
     store[_CLAIM] = {"started_at": started_at.isoformat(), "done": False}
     return started_at
@@ -113,6 +115,38 @@ async def test_viewers_share_one_read_until_the_pull_request_changes(
     assert loads == 2
 
 
+async def test_robins_own_changes_to_a_pull_request_keep_its_shared_status(
+    registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    load = AsyncMock(return_value=_read())
+    _answers(monkeypatch, load)
+    assert await SharedPullRequestStatus.read(_pull()) is not None
+
+    # Such as its reviewer's findings, which refresh its views but not what GitHub says.
+    await Topic.PULL_REQUESTS.invalidate(key=_KEY)
+    assert await SharedPullRequestStatus.read(_pull()) is not None
+    assert load.await_count == 1
+
+    await Topic.invalidate_pull_request(_KEY, *Topic.for_pull_request_event("pull_request"))
+    assert await SharedPullRequestStatus.read(_pull()) is not None
+    assert load.await_count == 2
+
+
+@pytest.mark.parametrize(
+    ("event", "topics"),
+    [
+        ("pull_request", ["pull-requests", "pull-request-state"]),
+        ("pull_request_review", ["pull-requests", "pull-request-state"]),
+        ("issue_comment", ["pull-requests"]),
+        ("check_run", ["pull-request-checks"]),
+    ],
+)
+def test_only_deliveries_that_can_change_a_pull_requests_status_refresh_it(
+    event: str, topics: list[str]
+) -> None:
+    assert [topic.name for topic in Topic.for_pull_request_event(event)] == topics
+
+
 @pytest.mark.parametrize(
     "unread",
     [
@@ -177,14 +211,55 @@ async def test_a_failed_action_still_refreshes_the_shared_status(
     )
     monkeypatch.setattr(routes.GitHubClient, "as_user", lambda _: _OpenClient())
     invalidate = AsyncMock()
-    monkeypatch.setattr(Topic.PULL_REQUESTS, "invalidate", invalidate)
+    monkeypatch.setattr(Topic, "invalidate_pull_request", invalidate)
 
     with pytest.raises(HTTPException, match="not merged"):
         await routes.api_act_on_pull_request(
             "lc", "repo", 7, MagicMock(), session={"sub": "octocat"}
         )
 
-    invalidate.assert_awaited_once_with(key=PullRequestKey.of("lc", "repo", 7))
+    invalidate.assert_awaited_once_with(
+        PullRequestKey.of("lc", "repo", 7), Topic.PULL_REQUESTS, Topic.PULL_REQUEST_STATE
+    )
+
+
+@pytest.mark.parametrize(
+    "write",
+    [
+        lambda session: review_routes.api_update_pull_request_title(
+            "lc", "repo", 7, review_routes.PullRequestTitleUpdate(title="Fix"), session=session
+        ),
+        lambda session: review_routes.api_post_review_comment(
+            "lc", "repo", 7, MagicMock(), session=session
+        ),
+        lambda session: review_routes.api_submit_pull_request_review(
+            "lc", "repo", 7, review_routes.PullRequestReviewSubmit(event="APPROVE"), session=session
+        ),
+        lambda session: conversation.api_set_review_thread_resolution(
+            "lc", "repo", 7, "THREAD", conversation.ThreadResolution(resolved=True), session=session
+        ),
+    ],
+    ids=["title", "review comment", "review", "thread resolution"],
+)
+async def test_a_dashboard_write_to_github_refreshes_the_shared_status(
+    monkeypatch: pytest.MonkeyPatch, write: Callable[[dict[str, str]], Awaitable[object]]
+) -> None:
+    # A badge read right after approving must not be the status from before it.
+    for module in (review_routes, conversation):
+        monkeypatch.setattr(module, "require_repo_access_for_user", AsyncMock())
+        monkeypatch.setattr(module.GitHubClient, "as_user", lambda _: _OpenClient())
+    monkeypatch.setattr(PullRequestClient, "update_title", AsyncMock())
+    monkeypatch.setattr(PullRequestClient, "set_thread_resolved", AsyncMock())
+    monkeypatch.setattr(review_routes.PostedReviewComment, "post", AsyncMock())
+    monkeypatch.setattr(review_routes.SubmittedReview, "submit", AsyncMock())
+    invalidate = AsyncMock()
+    monkeypatch.setattr(Topic, "invalidate_pull_request", invalidate)
+
+    await write({"sub": "octocat"})
+
+    invalidate.assert_awaited_once_with(
+        PullRequestKey.of("lc", "repo", 7), Topic.PULL_REQUESTS, Topic.PULL_REQUEST_STATE
+    )
 
 
 class _OpenClient:
@@ -245,10 +320,10 @@ async def test_a_claim_from_before_the_last_change_or_long_ago_is_not_waited_on(
     _answers(monkeypatch, load)
 
     await _another_replica_claims(shared_cache, ago=timedelta(seconds=1))
-    await Topic.PULL_REQUESTS.invalidate(key=_KEY)
+    await Topic.PULL_REQUEST_STATE.invalidate(key=_KEY)
     await asyncio.wait_for(SharedPullRequestStatus.read(_pull()), timeout=0.2)
 
-    await Topic.PULL_REQUESTS.invalidate(key=_KEY)
+    await Topic.PULL_REQUEST_STATE.invalidate(key=_KEY)
     await _another_replica_claims(shared_cache, ago=timedelta(minutes=1))
     await asyncio.wait_for(SharedPullRequestStatus.read(_pull()), timeout=0.2)
 
@@ -282,7 +357,7 @@ async def _kept_from(
     store: dict[str, object], *, read: timedelta, checked: timedelta, status: OpenPullRequest
 ) -> None:
     """Leave a status fully read ``read`` ago, its CI last found unchanged ``checked`` ago."""
-    _, now = await Topic.last_changed(Topic.PULL_REQUESTS.keyed(_KEY))
+    _, now = await Topic.last_changed(Topic.PULL_REQUEST_STATE.keyed(_KEY))
     store[_STATUS] = {
         "read_at": (now - read).isoformat(),
         "checked_at": (now - checked).isoformat(),

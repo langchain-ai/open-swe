@@ -280,7 +280,7 @@ async def api_update_pull_request_title(
 ) -> None:
     async with _as_viewer(session, owner, repo) as repository:
         await repository.pull_request(pr_number).update_title(update.title)
-    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, pr_number))
+    await Topic.wrote_to_github(PullRequestKey.of(owner, repo, pr_number))
 
 
 class PullRequestDescriptionUpdate(BaseModel):
@@ -434,7 +434,7 @@ async def api_post_review_comment(
 ) -> PostedReviewComment:
     async with _as_viewer(session, owner, repo) as repository:
         posted = await PostedReviewComment.post(repository.pull_request(pr_number), comment)
-    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, pr_number))
+    await Topic.wrote_to_github(PullRequestKey.of(owner, repo, pr_number))
     return posted
 
 
@@ -460,7 +460,7 @@ async def api_submit_pull_request_review(
             body=review.body.strip(),
         )
     # Its reviewers and review decision changed; don't wait on GitHub's webhook.
-    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, pr_number))
+    await Topic.wrote_to_github(PullRequestKey.of(owner, repo, pr_number))
     return submitted
 
 
