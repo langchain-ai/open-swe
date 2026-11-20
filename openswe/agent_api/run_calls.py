@@ -495,7 +495,9 @@ class TokenRun:
         if events := _carried_events(self.config):
             # The events this run was started to carry are its input: it holds them now.
             await ThreadInbox(self.run.thread_id).receive(events=events)
-        state = call_state(request, self.kind.restore)
+        # Off the event loop: rebuilding a long conversation, or a review's diff line set,
+        # takes seconds of CPU that would stall every other request.
+        state = await asyncio.to_thread(call_state, request, self.kind.restore)
 
         async def prepared(runtime: Runtime) -> Prepared:
             result = await run_hooks(preparation, "before_agent", state, runtime)
@@ -615,7 +617,7 @@ class TokenRun:
             offered or await self.kind.tool(self.config, request.name), request
         ).run(
             config=self.config,
-            state=self._operation_state(request),
+            state=await asyncio.to_thread(self._operation_state, request),
             guards=ShellGuards(self.kind.shell_guards),
             client=client,
             ready=self._ready,
@@ -642,7 +644,8 @@ class TokenRun:
         return coordination.context_message()
 
     def _operation_state(self, request: RunOperation) -> dict[str, object]:
-        """The graph state an operation reads, as the call carries it."""
+        """The graph state an operation reads, as the call carries it; CPU-bound, so callers
+        run it off the event loop."""
         state: dict[str, object] = {
             key: decode_state(value) for key, value in request.state.items()
         }
@@ -746,7 +749,7 @@ class TokenRun:
 
     async def reply_on_behalf(self, request: ReplyOnBehalf) -> Done:
         """Post the model's final answer for it, after it ignored the reply tool."""
-        state = call_state(request, self.kind.restore)
+        state = await asyncio.to_thread(call_state, request, self.kind.restore)
 
         async def post() -> None:
             result = await send_slack_reply(request.text, "final", state=state)

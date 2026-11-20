@@ -1,5 +1,6 @@
 """Tool: ``add_finding``. Records one review finding on the reviewer thread."""
 
+import asyncio
 from typing import Annotated, Any
 
 from langgraph.prebuilt import InjectedState
@@ -143,5 +144,5 @@ async def _resolve_diff_context(
             token=token,
         )
         if diff_text is not None:
-            return compute_diff_line_set(diff_text), diff_text
+            return await asyncio.to_thread(compute_diff_line_set, diff_text), diff_text
     return None, ""

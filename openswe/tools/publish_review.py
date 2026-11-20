@@ -1,5 +1,6 @@
 """Tool: ``publish_review``. Post the findings list to GitHub as a PR Review."""
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from typing import Annotated, Any
@@ -1080,7 +1081,7 @@ async def _resolve_diff_line_set(
     diff_text = await fetch_pr_diff(owner=owner, repo=repo, pr_number=pr_number, token=token)
     if diff_text is None:
         return None
-    return compute_diff_line_set(diff_text)
+    return await asyncio.to_thread(compute_diff_line_set, diff_text)
 
 
 async def _filter_against_pr_diff(

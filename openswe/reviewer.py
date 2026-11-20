@@ -725,7 +725,9 @@ async def prepare_reviewer_run(
             if fetched_diff is None:
                 return "", None
             diff_text = fetched_diff
-        return diff_text, compute_diff_line_set(diff_text)
+        # Parsing a large diff takes seconds of CPU, which on the event loop would stall
+        # every other request this server is answering.
+        return diff_text, await asyncio.to_thread(compute_diff_line_set, diff_text)
 
     async def _fetch_pr_overview() -> tuple[str, str]:
         if not can_fetch_pr or github_token is None or not isinstance(pr_number, int):
@@ -820,7 +822,7 @@ async def prepare_reviewer_run(
             checkout.sandbox_backend,
             f"{checkout.work_dir}/{repo_name}",
             base_sha,
-            changed_files(diff_text),
+            await asyncio.to_thread(changed_files, diff_text),
         )
 
     async def _fetch_approval_policy() -> ApprovalPolicy | None:
