@@ -356,7 +356,6 @@ async def test_a_personal_automation_runs_on_auto_without_limits(
     surface = cast(ToolSurface, agent["surface"])
     # It runs as its creator and is billed to them, so like their own threads it is
     # routed on Auto, may use subagents, and has no token budget of its own.
-    assert not surface.loop.pinned_model
     assert surface.loop.routing is not None and surface.loop.routing.mode == "auto"
     assert surface.subagents
 

@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any
 _MIDDLEWARE_MODULES = {
     "DynamicToolMiddleware": ".dynamic_tools",
     "IntegrationGroup": ".dynamic_tools",
-    "ModelSelectionMiddleware": ".model_selection",
     "PrepareRunState": ".prepare_run",
     "BasePrepareRunMiddleware": ".prepare_run",
     "PullRequestCreationGuardMiddleware": ".pr_creation_guard",
@@ -16,7 +15,6 @@ _MIDDLEWARE_MODULES = {
 __all__ = [
     "DynamicToolMiddleware",
     "IntegrationGroup",
-    "ModelSelectionMiddleware",
     "BasePrepareRunMiddleware",
     "PrepareRunState",
     "PullRequestCreationGuardMiddleware",
@@ -26,7 +24,6 @@ __all__ = [
 
 if TYPE_CHECKING:
     from openswe.middleware.dynamic_tools import DynamicToolMiddleware, IntegrationGroup
-    from openswe.middleware.model_selection import ModelSelectionMiddleware
     from openswe.middleware.pr_creation_guard import PullRequestCreationGuardMiddleware
     from openswe.middleware.prepare_run import BasePrepareRunMiddleware, PrepareRunState
     from openswe.middleware.record_run_usage import record_run_usage

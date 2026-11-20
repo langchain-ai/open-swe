@@ -41,7 +41,6 @@ from langchain_core.exceptions import ModelError, ModelRefusalError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
-from langchain_openai import ChatOpenAI
 from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY, classify_exception, exception_fields
 from runtime_api.models import MODEL_CALL_BUDGET
 from runtime_api.provenance import Provenance
@@ -124,15 +123,6 @@ def _replayable(block: object, model: object) -> bool:
     if isinstance(model, ChatAnthropic):
         # Anthropic rejects an empty thinking block.
         return not (block.get("type") == "thinking" and not block.get("thinking"))
-    if isinstance(model, ChatOpenAI) and model.store is False:
-        # Without stored responses, OpenAI cannot resolve a reasoning item by id alone.
-        item_id = block.get("id")
-        return not (
-            block.get("type") == "reasoning"
-            and isinstance(item_id, str)
-            and item_id.startswith("rs_")
-            and not block.get("encrypted_content")
-        )
     return True
 
 

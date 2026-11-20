@@ -42,7 +42,6 @@ from managed_deepagents import (
 )
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, ConfigDict
-from rt.automation_budget import AutomationBudgetMiddleware
 from rt.backend import OpenSweBackend, RunContext
 from rt.browser import ReportedBrowserMiddleware
 from rt.factory_timing import FactoryTiming
@@ -273,7 +272,6 @@ def _parts(graph: Graph) -> _Parts:
                 read_ahead=[skill_files.list_ahead, RUN_GATEWAY.read_ahead],
             ),
             managed_sandbox,
-            AutomationBudgetMiddleware(backend),
             *reports,
             files,
             TaskErrorMiddleware(),

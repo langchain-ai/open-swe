@@ -12,29 +12,13 @@ from langsmith import trace, tracing_context
 from langsmith.run_trees import RunTree
 
 import openswe.server as server
-from openswe.agent_api.run_state import as_messages
 from openswe.agent_api.tokens import AgentTurnSettings
-from openswe.input_messages import human_input
-from openswe.middleware.model_selection import (
-    ModelSelectionMiddleware,
-    RouteSelection,
-    SelectedRoute,
-)
+from openswe.middleware.model_selection import SelectedRoute
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.model_request import ModelRequestIntent
 from openswe.prompt import SystemPrompt
 from openswe.utils.jev import JevDecision
 from openswe.utils.thread_settings import ThreadSettings
-
-
-def _said(text: str, message_id: str | None = None) -> HumanMessage:
-    """What a person wrote, as the backend builds it."""
-    [message] = as_messages(
-        [human_input(text, {"sender_id": "github:alice", "surface": "web", "kind": "human"})]
-    )
-    assert isinstance(message, HumanMessage)
-    message.id = message_id or message.id
-    return message
 
 
 @dataclass
@@ -243,32 +227,6 @@ async def test_preparing_a_turn_never_classifies_its_route(
         handoff.middleware._config["configurable"]["resolved_agent_model_id"]
         == "openai:gpt-6.1-sol"
     )
-
-
-@pytest.mark.parametrize("persist", [True, False])
-async def test_a_run_its_plan_answers_is_routed_and_attributed_as_it_prepares(
-    handoff: Handoff, monkeypatch: pytest.MonkeyPatch, persist: bool
-) -> None:
-    """A requested offload or incident runs no MDA loop, so no classifier there routes it."""
-    handoff.middleware._requested_models = None
-    handoff.middleware._model_selection = ModelSelectionMiddleware(
-        {"fast": "openai:gpt-6-luna", "default": "openai:gpt-6.1-sol"}, routing_mode="auto"
-    )
-    classify = AsyncMock(return_value=RouteSelection("fast", persist))
-    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
-
-    prepared = await handoff.prepare({"messages": [_said("Fix the typo")]})
-
-    # run_started, Slack replies and PR footers name the routed model.
-    assert (prepared["selected_model_id"], prepared["selected_effort"]) == (
-        "openai:gpt-6-luna",
-        "low",
-    )
-    assert handoff.middleware._config["configurable"]["resolved_agent_model_id"] == (
-        "openai:gpt-6-luna"
-    )
-    assert prepared.get("model_route") == ("fast" if persist else None)
-    classify.assert_awaited_once_with("Fix the typo")
 
 
 @pytest.mark.parametrize(

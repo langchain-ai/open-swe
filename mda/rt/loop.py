@@ -67,7 +67,6 @@ from runtime_api.operations import RunRequest
 from runtime_api.provenance import Provenance
 from runtime_api.route_questions import TaskRoute
 
-from rt.automation_budget import AutomationBudgetMiddleware
 from rt.backend import (
     OpenSweBackend,
     RunLocal,
@@ -388,8 +387,6 @@ class RunLoop:
         model = (
             None
             if self._models is None
-            else self._models.model
-            if self.rules.pinned_model
             else model_for(self._models, {**current, "model_route": self._backend.run.route})
         )
         system_prompt, execution_prompt, thread_prompt = self._system_prompt(current)
@@ -742,7 +739,6 @@ class RunLoop:
             run_id=current,
             replies=_json_dicts.validate_python(messages_to_dict(replies)),
             invocation_id=self._backend.invocation_id,
-            automation_usage=AutomationBudgetMiddleware.usage(state),
         )
         outbox.notify(RUN_ENDED, ended)
 

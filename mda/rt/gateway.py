@@ -99,8 +99,7 @@ class RunGateway:
             models = run.catalog.models
             selected = kept_route(run.route)
             if (
-                not rules.pinned_model
-                and rules.routing is not None
+                rules.routing is not None
                 and rules.routing.mode == "auto"
                 and selected in ROUTES
                 and models is not None

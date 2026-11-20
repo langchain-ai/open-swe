@@ -11,8 +11,6 @@ from openswe.utils.user_messages import warning
 
 logger = logging.getLogger(__name__)
 
-_LIMIT_MARKER = "Model call limits exceeded"
-
 
 async def notify_step_limit() -> None:
     """Tell the run's Slack thread the run stopped at its step limit, as the run."""

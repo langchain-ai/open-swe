@@ -12,7 +12,7 @@ import time
 import warnings
 from collections.abc import Awaitable, Mapping, Sequence
 from functools import cache, cached_property, partial
-from typing import Any, Final, Self, cast
+from typing import Any, Final, Self
 from uuid import UUID
 
 from runtime_api.provenance import Provenance
@@ -102,9 +102,8 @@ from openswe.mcp.runtime import (
 from openswe.middleware import (
     BasePrepareRunMiddleware,
     DynamicToolMiddleware,
-    ModelSelectionMiddleware,
 )
-from openswe.middleware.model_selection import ModelSelectionState, RoutingMode, SelectedRoute
+from openswe.middleware.model_selection import RoutingMode
 from openswe.middleware.plugin_chat import PluginChatTools
 from openswe.middleware.prepare_run import PrepareRunState
 from openswe.middleware.require_user_reply import (
@@ -1110,8 +1109,7 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
     """Ready an agent run's turn: its prompt and model, and who it speaks with.
 
     Built from what starting the run decided (``AgentTurnSettings``), so preparing a turn
-    plans nothing. MDA's loop classifies the route of a run it loops itself, alongside this;
-    a run its plan answers is routed here. A thread
+    plans nothing. MDA's loop classifies the route alongside this. A thread
     whose sandbox MDA keeps (``sandbox_id``, its name) is not reached here: its work dir is
     the sandbox's own, and MDA readied the sandbox as it opened it. Nor is one MDA is still
     opening (``sandbox_pending``), which the thread is bound to only after the turn is ready.
@@ -1125,15 +1123,11 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
         repo_instructions: str | None,
         sandbox_id: str | None = None,
         sandbox_pending: bool = False,
-        model_selection: ModelSelectionMiddleware | None = None,
     ) -> None:
         cfg = RunConfig.from_config(config)
         if cfg.thread_id is None:
             raise ValueError("An agent run needs a thread")
         self._config = config
-        # A run its plan answers routes its turn here, as before MDA routed: its loop runs no
-        # classifier of its own. None for the runs MDA's loop routes.
-        self._model_selection = model_selection
         self._turn = turn
         self._thread_id = cfg.thread_id
         self._sandbox_id = sandbox_id
@@ -1419,8 +1413,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 option = self._requested_models[requested_model]
                 requested_effort = settings.get("effort") or option["default_effort"]
                 decision.requested_effort = requested_effort
-                if self._model_selection is not None:
-                    self._model_selection.use_requested_model(requested_model)
                 if decision.outcome != "reused_saved_choice":
                     decision.outcome = "accepted_request"
                     decision.reason = "validated_and_persisted"
@@ -1520,9 +1512,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             and cfg.model_selection_changed
         )
         async with aphase(self._thread_id, "prepare.participants"):
-            route, persist_route = await self._route(state, requested_model, reroute=reroute)
             attribution_model_id, attribution_effort = self._routing_defaults.get(
-                route or "default", (self._model_id, self._effort)
+                "default", (self._model_id, self._effort)
             )
             configurable["resolved_agent_model_id"] = attribution_model_id
             configurable["resolved_agent_effort"] = attribution_effort
@@ -1588,8 +1579,8 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
             "selected_effort": attribution_effort,
             **({"messages": added} if added else {}),
             **(
-                {"model_route": route}
-                if persist_route
+                {"model_route": "default"}
+                if requested_model
                 else {"model_route": None}
                 if reroute
                 else {}
@@ -1610,25 +1601,6 @@ class PrepareAgentRunMiddleware(BasePrepareRunMiddleware):
                 slack_team_id=(cfg.slack_thread.team_id if cfg.slack_thread else None),
                 slack_channel_id=(cfg.slack_thread.channel_id if cfg.slack_thread else None),
             )
-
-    async def _route(
-        self, state: PrepareRunState, requested_model: str | None, *, reroute: bool
-    ) -> tuple[SelectedRoute | None, bool]:
-        """The turn's route, and whether the thread keeps it; None for none chosen here.
-
-        MDA's loop classifies a run it routes itself, alongside this, so only a run its
-        plan answers is classified here.
-        """
-        if requested_model:
-            return "default", True
-        if self._model_selection is None:
-            return None, False
-        routing_state = cast(ModelSelectionState, state).copy()
-        if reroute:
-            routing_state.pop("model_route", None)
-            routing_state.pop("requested_model", None)
-        selection = await self._model_selection.select_route(routing_state)
-        return selection.route, selection.persist
 
     async def _render_system_prompt(self, cfg: RunConfig) -> SystemPrompt:
         """The thread's system prompt, from what holds for it as its first run starts."""

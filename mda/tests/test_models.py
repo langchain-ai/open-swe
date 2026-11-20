@@ -122,7 +122,6 @@ def test_a_baseten_model_uses_the_gateway() -> None:
         (LoopRules(routing=RoutingRules(mode="auto")), "fast", "auto"),
         (LoopRules(routing=RoutingRules(mode="fast")), "fast", "default"),
         (LoopRules(routing=RoutingRules(shadow=True)), "fast", "default"),
-        (LoopRules(pinned_model=True, routing=RoutingRules(mode="auto")), "fast", "default"),
         (LoopRules(routing=RoutingRules(mode="auto")), "performance", "default"),
     ],
 )

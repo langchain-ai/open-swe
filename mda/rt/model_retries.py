@@ -37,7 +37,6 @@ class ModelOutput(AsyncCallbackHandler):
 
     def __init__(self) -> None:
         self.streamed = False
-        self.deadline: asyncio.Timeout | None = None
         self._messages: dict[str, tuple[StreamMessagesHandler, StreamChunk]] = {}
 
     def _forward(self, source: StreamMessagesHandler, chunk: StreamChunk) -> None:
@@ -73,8 +72,6 @@ class ModelOutput(AsyncCallbackHandler):
 
     async def on_llm_new_token(self, token: object, **kwargs: object) -> None:
         self.streamed = True
-        if self.deadline is not None and not self.deadline.expired():
-            self.deadline.reschedule(None)
 
     async def on_llm_end(self, response: object, **kwargs: object) -> None:
         self.streamed = True

@@ -10,9 +10,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from langchain_core.messages import BaseMessage, HumanMessage
 from runtime_api.catalog import Nudge
-from runtime_api.provenance import Provenance
 
 from openswe.input_messages import (
     SystemIdentity,
@@ -44,15 +42,6 @@ def current_reply_surface(state: Mapping[str, Any]) -> ReplySurface:
         if state.get("reply_surface") == SLACK_REPLY_SURFACE
         else WEB_REPLY_SURFACE
     )
-
-
-def _starts_turn(message: BaseMessage) -> bool:
-    if not isinstance(message, HumanMessage):
-        return False
-    provenance = Provenance.of(message)
-    if provenance is not None and provenance.kind == "context":
-        return False
-    return provenance is None or provenance.sender != REPLY_GUARD["id"]
 
 
 def reply_nudge(
