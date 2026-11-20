@@ -14,6 +14,7 @@ from uuid import uuid7
 from langgraph_sdk.schema import ThreadSelectField
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 from sqlalchemy import RowMapping, text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe.agent_api.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.database.postgres import transaction
@@ -422,18 +423,23 @@ async def sync(thread_id: str, read: Callable[[], Awaitable[IndexedThread | None
         )
 
 
-async def get(thread_id: str) -> IndexedThread | None:
-    async with transaction() as conn:
-        row = (
-            (
-                await conn.execute(
-                    text(f"SELECT {_COLUMNS} FROM thread_index WHERE thread_id = :thread_id"),
-                    {"thread_id": thread_id},
-                )
+async def get(
+    thread_id: str, *, conn: AsyncConnection | None = None, for_update: bool = False
+) -> IndexedThread | None:
+    if conn is None:
+        async with transaction() as connection:
+            return await get(thread_id, conn=connection, for_update=for_update)
+    locked = " FOR UPDATE" if for_update else ""
+    row = (
+        (
+            await conn.execute(
+                text(f"SELECT {_COLUMNS} FROM thread_index WHERE thread_id = :thread_id{locked}"),
+                {"thread_id": thread_id},
             )
-            .mappings()
-            .first()
         )
+        .mappings()
+        .first()
+    )
     return None if row is None else IndexedThread.from_row(row)
 
 

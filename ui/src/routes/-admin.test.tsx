@@ -123,10 +123,55 @@ describe("UsersSection", () => {
 describe("AnnouncementsSection", () => {
   afterEach(() => vi.restoreAllMocks())
 
+  it("shows the saved scope and message before explicitly approving", async () => {
+    vi.spyOn(api, "listAnnouncements").mockResolvedValue({
+      recipients: 15,
+      items: [],
+      approvals: [
+        {
+          id: "approval-1",
+          thread_id: "thread-1",
+          text: "Saved *message*",
+          recipients: 12,
+          payload_digest: "digest-1",
+          created_at: "2026-01-01T00:00:00Z",
+          expires_at: "2026-01-02T00:00:00Z",
+        },
+      ],
+    })
+    const decide = vi
+      .spyOn(api, "decideAnnouncement")
+      .mockResolvedValue({ status: "approved" })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <AnnouncementsSection />
+      </QueryClientProvider>
+    )
+    expect(
+      await screen.findByText(/12 people with Slack connected at preparation/)
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Review and send" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("Saved *message*")).toBeTruthy()
+    expect(within(dialog).getByText("DM 12 people?")).toBeTruthy()
+    expect(decide).not.toHaveBeenCalled()
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Approve and send" })
+    )
+    await waitFor(() =>
+      expect(decide).toHaveBeenCalledWith("approval-1", "approve", "digest-1")
+    )
+    client.clear()
+  })
+
   it("sends to everyone only after the admin confirms the exact text", async () => {
     vi.spyOn(api, "listAnnouncements").mockResolvedValue({
       recipients: 12,
       items: [],
+      approvals: [],
     })
     const send = vi
       .spyOn(api, "sendAnnouncement")

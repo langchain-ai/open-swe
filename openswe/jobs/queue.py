@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from croniter import croniter
 from pydantic import BaseModel, JsonValue
 from sqlalchemy import RowMapping, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from openswe.database.postgres import transaction
 
@@ -233,12 +233,28 @@ async def schedule(
     metadata: Mapping[str, JsonValue] | None = None,
     by: uuid.UUID | None = None,
     replace: bool = True,
+    conn: AsyncConnection | None = None,
 ) -> Job:
     """Queue a job; one with ``key`` replaces the job queued under that key before.
 
     With ``replace=False``, an existing keyed job keeps its payload, schedule and claim.
     ``by`` is the person whose action queued it, ``None`` for the system's own work.
+    A supplied ``conn`` keeps the job in the caller's transaction.
     """
+    if conn is None:
+        async with transaction() as connection:
+            return await schedule(
+                kind,
+                payload,
+                due_at=due_at,
+                cron=cron,
+                timezone=timezone,
+                key=key,
+                metadata=metadata,
+                by=by,
+                replace=replace,
+                conn=connection,
+            )
     if cron is not None and not croniter.is_valid(cron):
         raise ValueError(f"Invalid cron schedule: {cron}")
     job = Job(
@@ -264,33 +280,30 @@ async def schedule(
         if replace
         else "key = EXCLUDED.key"
     )
-    async with transaction() as conn:
-        row = (
-            (
-                await conn.execute(
-                    text(
-                        f"""
-                    INSERT INTO job (id, kind, payload, due_at, cron, timezone, key, metadata,
-                                     created_by, updated_by)
-                    VALUES (:id, :kind, CAST(:payload AS jsonb), :due_at, :cron, :timezone,
-                            :key, CAST(:metadata AS jsonb), :by, :by)
-                    ON CONFLICT (key) DO UPDATE SET {updates}
-                    RETURNING {_COLUMNS}
-                    """
-                    ),
-                    {
-                        **job.model_dump(
-                            include={"id", "kind", "due_at", "cron", "timezone", "key"}
-                        ),
-                        "payload": json.dumps(job.payload),
-                        "metadata": json.dumps(job.metadata),
-                        "by": by,
-                    },
-                )
+    row = (
+        (
+            await conn.execute(
+                text(
+                    f"""
+                INSERT INTO job (id, kind, payload, due_at, cron, timezone, key, metadata,
+                                 created_by, updated_by)
+                VALUES (:id, :kind, CAST(:payload AS jsonb), :due_at, :cron, :timezone,
+                        :key, CAST(:metadata AS jsonb), :by, :by)
+                ON CONFLICT (key) DO UPDATE SET {updates}
+                RETURNING {_COLUMNS}
+                """
+                ),
+                {
+                    **job.model_dump(include={"id", "kind", "due_at", "cron", "timezone", "key"}),
+                    "payload": json.dumps(job.payload),
+                    "metadata": json.dumps(job.metadata),
+                    "by": by,
+                },
             )
-            .mappings()
-            .one()
         )
+        .mappings()
+        .one()
+    )
     return Job.from_row(row)
 
 

@@ -54,7 +54,6 @@ _TOOL_MODULES: Final = (
     "openswe.tools.search_pull_requests",
     "openswe.tools.list_review_findings",
     "openswe.tools.repair_data",
-    "openswe.tools.send_announcement",
 )
 
 

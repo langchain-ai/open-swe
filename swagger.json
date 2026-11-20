@@ -193,6 +193,19 @@
         "title": "AnnouncementCreate",
         "type": "object"
       },
+      "AnnouncementDecision": {
+        "properties": {
+          "payload_digest": {
+            "title": "Payload Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payload_digest"
+        ],
+        "title": "AnnouncementDecision",
+        "type": "object"
+      },
       "AnnouncementSent": {
         "properties": {
           "recipients": {
@@ -271,6 +284,13 @@
       },
       "AnnouncementsView": {
         "properties": {
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalView"
+            },
+            "title": "Approvals",
+            "type": "array"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/AnnouncementSummary"
@@ -285,7 +305,8 @@
         },
         "required": [
           "recipients",
-          "items"
+          "items",
+          "approvals"
         ],
         "title": "AnnouncementsView",
         "type": "object"
@@ -455,6 +476,52 @@
           "created_at"
         ],
         "title": "AppVersionModel",
+        "type": "object"
+      },
+      "ApprovalView": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "payload_digest": {
+            "title": "Payload Digest",
+            "type": "string"
+          },
+          "recipients": {
+            "title": "Recipients",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "thread_id",
+          "text",
+          "recipients",
+          "payload_digest",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "ApprovalView",
         "type": "object"
       },
       "ApprovalsFileStatus": {
@@ -11322,6 +11389,78 @@
           }
         ],
         "summary": "Api Send Announcement",
+        "tags": [
+          "dashboard",
+          "announcements"
+        ]
+      }
+    },
+    "/dashboard/api/admin/announcements/approvals/{approval_id}/{decision}": {
+      "post": {
+        "operationId": "api_decide_announcement_dashboard_api_admin_announcements_approvals__approval_id___decision__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Approval Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "decision",
+            "required": true,
+            "schema": {
+              "title": "Decision",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnouncementDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Api Decide Announcement Dashboard Api Admin Announcements Approvals  Approval Id   Decision  Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Decide Announcement",
         "tags": [
           "dashboard",
           "announcements"

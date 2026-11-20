@@ -5,7 +5,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { SkeletonLines } from "@/components/Skeleton"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 
-import type { AnnouncementSummary } from "@/lib/api"
+import type { AnnouncementApproval, AnnouncementSummary } from "@/lib/api"
 import { SettingsSection } from "@/components/AppShell"
 import { api } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
@@ -57,6 +57,7 @@ export function AnnouncementsSection() {
       description="DM a message from the Robin bot to everyone with a connected Slack account, such as news of a feature that just shipped. Admins can also ask Robin to do this from a Slack DM."
     >
       <div className="flex flex-col gap-space-2 p-space-4">
+        <PendingApprovals items={announcements.data?.approvals ?? []} />
         <Textarea
           aria-label="Announcement"
           size="md"
@@ -119,6 +120,112 @@ export function AnnouncementsSection() {
         </p>
       </ConfirmDialog>
     </SettingsSection>
+  )
+}
+
+function PendingApprovals({ items }: { items: Array<AnnouncementApproval> }) {
+  const qc = useQueryClient()
+  const [selected, setSelected] = useState<AnnouncementApproval | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const decide = useMutation({
+    mutationFn: ({
+      id,
+      decision,
+      payloadDigest,
+    }: {
+      id: string
+      decision: "approve" | "reject"
+      payloadDigest: string
+    }) => api.decideAnnouncement(id, decision, payloadDigest),
+    meta: { silent: true },
+    onSuccess: (result) => {
+      setSelected(null)
+      setError(
+        result.status === "approved" || result.status === "rejected"
+          ? null
+          : `Request is ${result.status}.`
+      )
+      void qc.invalidateQueries({ queryKey: QUERY_KEY })
+    },
+    onError: (e: Error) => {
+      setSelected(null)
+      setError(e.message)
+      void qc.invalidateQueries({ queryKey: QUERY_KEY })
+    },
+  })
+  if (!items.length && !error) return null
+  return (
+    <div
+      id="announcement-approvals"
+      className="flex flex-col gap-space-2 rounded-md bg-surface-level-2 p-space-3"
+    >
+      <span className="text-sm font-medium text-primary">
+        Pending approvals
+      </span>
+      {items.map((item) => (
+        <div key={item.id} className="flex flex-col gap-space-2">
+          <span className="text-xs text-secondary">
+            {pluralize(item.recipients)} with Slack connected at preparation ·
+            Expires {new Date(item.expires_at).toLocaleString()}
+          </span>
+          <p className="max-h-48 overflow-y-auto text-xs whitespace-pre-wrap text-primary">
+            {item.text}
+          </p>
+          <div className="flex gap-space-2">
+            <Button
+              size="sm"
+              disabled={decide.isPending}
+              onClick={() => setSelected(item)}
+            >
+              Review and send
+            </Button>
+            <Button
+              size="sm"
+              color="secondary"
+              variant="outlined"
+              disabled={decide.isPending}
+              onClick={() =>
+                decide.mutate({
+                  id: item.id,
+                  decision: "reject",
+                  payloadDigest: item.payload_digest,
+                })
+              }
+            >
+              Decline
+            </Button>
+          </div>
+        </div>
+      ))}
+      {error && (
+        <p role="alert" className="text-xs text-error-secondary">
+          {error}
+        </p>
+      )}
+      <ConfirmDialog
+        open={selected !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null)
+        }}
+        title={`DM ${pluralize(selected?.recipients ?? 0)}?`}
+        description="This sends to the saved audience of Slack-linked Robin users. A sent announcement cannot be recalled."
+        confirmLabel="Approve and send"
+        pendingLabel="Starting…"
+        pending={decide.isPending}
+        onConfirm={() => {
+          if (selected)
+            decide.mutate({
+              id: selected.id,
+              decision: "approve",
+              payloadDigest: selected.payload_digest,
+            })
+        }}
+      >
+        <p className="max-h-48 overflow-y-auto rounded-md border border-default p-space-2 text-xs whitespace-pre-wrap text-primary">
+          {selected?.text}
+        </p>
+      </ConfirmDialog>
+    </div>
   )
 }
 

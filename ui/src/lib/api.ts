@@ -546,9 +546,20 @@ export interface AnnouncementSummary {
   failed: number
 }
 
+export interface AnnouncementApproval {
+  id: string
+  thread_id: string
+  text: string
+  recipients: number
+  payload_digest: string
+  created_at: string
+  expires_at: string
+}
+
 export interface AnnouncementsView {
   recipients: number
   items: Array<AnnouncementSummary>
+  approvals: Array<AnnouncementApproval>
 }
 
 export interface AdminUsersPage {
@@ -1720,6 +1731,18 @@ export const api = {
       `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
     ),
   listAnnouncements: () => request<AnnouncementsView>("/admin/announcements"),
+  decideAnnouncement: (
+    id: string,
+    decision: "approve" | "reject",
+    payloadDigest: string
+  ) =>
+    request<{ status: string }>(
+      `/admin/announcements/approvals/${encodeURIComponent(id)}/${decision}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ payload_digest: payloadDigest }),
+      }
+    ),
   sendAnnouncement: (text: string, test: boolean) =>
     request<{ test: boolean; recipients: number }>("/admin/announcements", {
       method: "POST",
