@@ -18,11 +18,8 @@ from openswe.config import ENV
 __all__ = [
     "DEFAULT_MODEL_EFFORT",
     "DEFAULT_MODEL_ID",
-    "DEPRECATED_MODEL_IDS",
-    "DEPRECATED_MODEL_REPLACEMENTS",
     "FABLE_MODEL_IDS",
     "NON_DEFAULT_MODEL_IDS",
-    "RETIRED_MODEL_REPLACEMENTS",
     "SUPPORTED_MODELS",
     "SUPPORTED_MODEL_IDS",
     "ModelOption",
@@ -35,7 +32,6 @@ __all__ = [
     "model_supports_effort",
     "model_supports_images",
     "normalize_model_choice",
-    "provider_fallback_pair",
 ]
 
 
@@ -53,39 +49,6 @@ def available_requested_models(*, fable_enabled: bool) -> dict[str, ModelOption]
         for model in SUPPORTED_MODELS
         if fable_enabled or model["id"] not in FABLE_MODEL_IDS
     }
-
-
-DEPRECATED_MODEL_IDS: frozenset[str] = frozenset(
-    {
-        "anthropic:claude-opus-4-8",
-        "anthropic:claude-sonnet-5",
-        "anthropic:claude-haiku-4-5",
-        "anthropic:claude-fable-5",
-        "openai:gpt-5.5",
-        "openai:gpt-5.6-sol",
-        "openai:gpt-5.6-terra",
-        "openai:gpt-5.6-luna",
-        "openai:gpt-6-sol",
-        "google_genai:gemini-3.5-flash",
-        "google_genai:gemini-3.6-flash",
-        "google_genai:gemini-3.7-flash",
-        "fireworks:accounts/fireworks/models/kimi-k2p7-code",
-        "fireworks:accounts/fireworks/models/kimi-k3-code",
-        "fireworks:accounts/fireworks/models/glm-5p2",
-        "fireworks:accounts/fireworks/models/glm-5p3",
-        "fireworks:accounts/fireworks/models/glm-5p3-flash",
-        "fireworks:accounts/fireworks/models/deepseek-v4-pro",
-    }
-)
-
-DEPRECATED_MODEL_REPLACEMENTS: dict[str, str] = dict.fromkeys(DEPRECATED_MODEL_IDS, "")
-
-# Retired ids whose saved selections move to a named successor. Any other
-# unsupported id is still rejected when written or configured.
-RETIRED_MODEL_REPLACEMENTS: dict[str, str] = {
-    "google_genai:gemini-4-argon": "google_genai:gemini-4-carbon",
-    "google_genai:gemini-3.8-flash": "google_genai:gemini-4-hydrogen",
-}
 
 
 def fable_disabled_fallback(effort: object = None) -> tuple[str, str]:
@@ -114,32 +77,9 @@ DEFAULT_MODEL_ID: str = "openai:gpt-6.1-sol"
 DEFAULT_MODEL_EFFORT: str = "medium"
 
 
-def _provider_of(model_id: str) -> str | None:
-    provider, _, rest = model_id.partition(":")
-    return provider if rest else None
-
-
-def _claude_family_of(model_id: str) -> str | None:
-    provider, _, name = model_id.partition(":")
-    if provider != "anthropic" or not name.startswith("claude-"):
-        return None
-    parts = name.split("-")
-    if len(parts) < 2:
-        return None
-    return "-".join(parts[:2])
-
-
 def _fallback_effort_for(model: ModelOption, effort: object) -> str | None:
-    if not isinstance(effort, str):
-        return None
-    if effort in model["efforts"]:
+    if isinstance(effort, str) and effort in model["efforts"]:
         return effort
-    if (
-        model["id"].startswith("google_genai:")
-        and effort == "none"
-        and "minimal" in model["efforts"]
-    ):
-        return "minimal"
     return None
 
 
@@ -154,47 +94,10 @@ def normalize_model_choice(model_id: object, effort: object) -> tuple[str | None
     return model_id, effort
 
 
-def provider_fallback_pair(model_id: object, effort: object = None) -> tuple[str, str] | None:
-    """Newest supported ``(model_id, effort)`` for the same provider/family.
-
-    Keeps a stored selection on its original provider when its exact id has
-    dropped out of the supported set (e.g. an Opus minor-version bump), preferring
-    the same Claude family when available instead of falling through to the
-    cross-provider global default. Preserves ``effort`` when the fallback model
-    supports it, otherwise uses that model's default effort. Returns ``None`` when
-    no supported model shares the provider.
-
-    A retired id moves to its successor in ``RETIRED_MODEL_REPLACEMENTS``.
-    Explicitly deprecated ids inherit the global default instead.
-    """
-    if not isinstance(model_id, str) or model_id in DEPRECATED_MODEL_IDS:
-        return None
-    successor = RETIRED_MODEL_REPLACEMENTS.get(model_id)
-    for m in SUPPORTED_MODELS:
-        if m["id"] == successor:
-            return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
-    provider = _provider_of(model_id)
-    if provider is None:
-        return None
-    family = _claude_family_of(model_id)
-    if family is not None:
-        for m in SUPPORTED_MODELS:
-            if _provider_of(m["id"]) == provider and _claude_family_of(m["id"]) == family:
-                return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
-    for m in SUPPORTED_MODELS:
-        if _provider_of(m["id"]) == provider:
-            return m["id"], _fallback_effort_for(m, effort) or m["default_effort"]
-    return None
-
-
 def default_model_pair() -> tuple[str, str]:
     """Deployment fallback used when the global settings do not set a default."""
     model_id = ENV.LLM_MODEL_ID.get(DEFAULT_MODEL_ID)
     effort = ENV.LLM_REASONING_EFFORT.get()
-    if model_id in RETIRED_MODEL_REPLACEMENTS and (
-        pair := provider_fallback_pair(model_id, effort)
-    ):
-        return pair
     for model in SUPPORTED_MODELS:
         if model["id"] == model_id and model.get("can_be_default", True):
             effort = (

@@ -131,7 +131,7 @@ async def test_agent_ignores_disabled_fable_profile() -> None:
             "openswe.server.load_profile",
             new_callable=AsyncMock,
             return_value={
-                "default_model": "anthropic:claude-fable-5-1",
+                "default_model": "anthropic:claude-fable-5-2",
                 "reasoning_effort": "high",
             },
         ),

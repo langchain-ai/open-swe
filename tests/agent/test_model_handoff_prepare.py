@@ -278,7 +278,7 @@ async def test_a_run_its_plan_answers_is_routed_and_attributed_as_it_prepares(
         ("fireworks:accounts/fireworks/models/kimi-k3", "image_url", "image"),
         ("fireworks:accounts/fireworks/models/kimi-k3", None, None),
         ("anthropic:claude-opus-5-5", "image", None),
-        ("anthropic:claude-fable-5-1", None, "unavailable"),
+        ("anthropic:claude-fable-5-2", None, "unavailable"),
         ("openai:gpt-6.1-sol", None, "unavailable"),
         ("openai:gpt-6.1-sol", None, "persistence"),
     ],

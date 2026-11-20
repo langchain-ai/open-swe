@@ -26,7 +26,7 @@ from openswe.webhooks.event_matches import EventMatch
 from openswe.webhooks.event_subscriptions import EventSubscription
 from tests.conftest import serve_threads_from
 
-MODEL = "openai:gpt-6-astra"
+MODEL = "openai:gpt-6.2-astra"
 COORDINATOR = str(uuid4())
 OWNER = "owner"
 WORKSPACE_MODEL = "anthropic:claude-sonnet-5-5"
@@ -91,7 +91,7 @@ async def test_worker_model_overrides_and_defaults(monkeypatch: pytest.MonkeyPat
     )
     assert await service.model_choice({}, None, None) == (WORKSPACE_MODEL, "low")
     assert await service.model_choice(
-        {"model": "anthropic:claude-fable-5-1", "effort": "high"}, None, None
+        {"model": "anthropic:claude-fable-5-2", "effort": "high"}, None, None
     ) == (WORKSPACE_MODEL, "low")
     with pytest.raises(ValueError, match="not supported"):
         await service.model_choice(metadata, None, "none")

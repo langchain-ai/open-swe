@@ -1,5 +1,3 @@
-import pytest
-
 from openswe.utils.thread_settings import normalize_thread_settings
 
 
@@ -10,37 +8,29 @@ def test_normalize_thread_settings_rejects_invalid_values() -> None:
     assert changed is True
 
 
-@pytest.mark.parametrize(
-    ("effort", "expected_effort"), [("medium", "medium"), ("minimal", "high"), (None, "high")]
-)
-def test_retired_thread_models_use_the_successor(effort: str | None, expected_effort: str) -> None:
+def test_unrecognized_thread_models_are_dropped_to_fall_back_to_default() -> None:
     settings, changed = normalize_thread_settings(
         {
-            "model_id": "google_genai:gemini-3.8-flash",
-            "effort": effort,
-            "subagent_model_id": "google_genai:gemini-3.8-flash",
-            "subagent_effort": effort,
-            "requested_model": "google_genai:gemini-3.8-flash",
+            "model_id": "anthropic:claude-fable-5-1",
+            "effort": "high",
+            "subagent_model_id": "openai:gpt-6-astra",
+            "subagent_effort": "low",
+            "requested_model": "unknown:model",
             "model_routing_enabled": False,
             "routing_models": {
-                "fast": {"model_id": "google_genai:gemini-3.8-flash", "effort": effort},
+                "fast": {"model_id": "google_genai:gemini-3.8-flash", "effort": "medium"},
                 "balanced": {"model_id": "openai:gpt-6.1-sol", "effort": "medium"},
             },
         }
     )
 
     assert changed is True
-    assert (settings["model_id"], settings["effort"]) == (
-        "google_genai:gemini-4-hydrogen",
-        expected_effort,
-    )
-    assert (settings["subagent_model_id"], settings["subagent_effort"]) == (
-        "google_genai:gemini-4-hydrogen",
-        expected_effort,
-    )
-    assert settings["requested_model"] == "google_genai:gemini-4-hydrogen"
+    assert "model_id" not in settings
+    assert "effort" not in settings
+    assert "subagent_model_id" not in settings
+    assert "subagent_effort" not in settings
+    assert settings["requested_model"] is None
     assert settings["routing_models"] == {
-        "fast": {"model_id": "google_genai:gemini-4-hydrogen", "effort": expected_effort},
         "balanced": {"model_id": "openai:gpt-6.1-sol", "effort": "medium"},
     }
     assert settings["model_routing_enabled"] is False

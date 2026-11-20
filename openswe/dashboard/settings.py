@@ -17,15 +17,13 @@ from openswe.audit_logs.models import SettingsChange
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.dashboard.options import (
-    DEPRECATED_MODEL_IDS,
     FABLE_MODEL_IDS,
     NON_DEFAULT_MODEL_IDS,
-    RETIRED_MODEL_REPLACEMENTS,
     SUPPORTED_MODEL_IDS,
     default_model_pair,
     gate_fable_model,
     model_supports_effort,
-    provider_fallback_pair,
+    normalize_model_choice,
 )
 from openswe.dashboard.settings_records import INSTANCE_SETTINGS
 from openswe.database import postgres
@@ -234,12 +232,9 @@ class SettingsUpdate(BaseModel):
     @model_validator(mode="after")
     def _validate_model_pairs(self) -> SettingsUpdate:
         for model_field, effort_field, role in _MODEL_PAIRS:
-            model, effort = _normalize_stale_model_pair(
-                getattr(self, model_field), getattr(self, effort_field)
+            _validate_model_effort_pair(
+                getattr(self, model_field), getattr(self, effort_field), role
             )
-            setattr(self, model_field, model)
-            setattr(self, effort_field, effort)
-            _validate_model_effort_pair(model, effort, role)
         return self
 
     def apply_fable_policy(self, *, fable_enabled: bool) -> None:
@@ -273,16 +268,6 @@ def _validate_model_effort_pair(model: str | None, effort: str | None, role: str
         raise ValueError(f"unsupported {role} model: {model}")
     if effort is None or not model_supports_effort(model, effort):
         raise ValueError(f"effort {effort!r} not supported by {role} model {model!r}")
-
-
-def _normalize_stale_model_pair(
-    model: str | None, effort: str | None
-) -> tuple[str | None, str | None]:
-    if model in DEPRECATED_MODEL_IDS:
-        return None, None
-    if model in RETIRED_MODEL_REPLACEMENTS:
-        return provider_fallback_pair(model, effort) or (model, effort)
-    return model, effort
 
 
 # Each (model, reasoning effort) pair of fields, and the role validation errors name it by.
@@ -319,10 +304,7 @@ def normalize_settings_for_response(settings: dict[str, Any]) -> dict[str, Any]:
         model = value.get(model_field)
         effort = value.get(effort_field)
         if isinstance(model, str):
-            value[model_field], value[effort_field] = _normalize_stale_model_pair(
-                model,
-                effort if isinstance(effort, str) else None,
-            )
+            value[model_field], value[effort_field] = normalize_model_choice(model, effort)
     return value
 
 
@@ -415,7 +397,8 @@ def _set_fields(record: Mapping[str, Any] | None) -> dict[str, Any]:
     """
     if not record:
         return {}
-    return {k: v for k, v in record.items() if v is not None and k not in _STALE_FIELDS}
+    normalized = normalize_settings_for_response(dict(record))
+    return {k: v for k, v in normalized.items() if v is not None and k not in _STALE_FIELDS}
 
 
 def _finish(merged: dict[str, Any]) -> Settings:
@@ -507,7 +490,7 @@ async def upsert_instance_settings(update: SettingsUpdate) -> dict[str, Any]:
 
 
 def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
-    """Supported pair if valid, else same-provider fallback, else global default."""
+    """Supported pair if valid, else global default."""
     if (
         isinstance(model, str)
         and isinstance(effort, str)
@@ -516,9 +499,6 @@ def _resolve_default_pair(model: object, effort: object) -> tuple[str, str]:
         and model_supports_effort(model, effort)
     ):
         return model, effort
-    provider_pair = provider_fallback_pair(model, effort)
-    if provider_pair is not None:
-        return provider_pair
     return default_model_pair()
 
 
@@ -584,11 +564,8 @@ class Settings(Mapping[str, Any]):
     def default_model(self, role: Literal["agent", "reviewer"]) -> tuple[str, str]:
         """The default ``(model_id, reasoning_effort)`` for ``role``.
 
-        Always a valid pair, resolved in order: the configured pair if still
-        supported; otherwise the newest supported model for the same provider
-        (so a stale Anthropic/OpenAI selection stays on its provider rather
-        than jumping cross-provider); otherwise the hardcoded global default
-        from :func:`openswe.dashboard.options.default_model_pair`.
+        Always a valid pair: the configured pair if still supported, otherwise
+        the global default from :func:`openswe.dashboard.options.default_model_pair`.
         """
         if role == "agent":
             model = self.get("default_agent_model")

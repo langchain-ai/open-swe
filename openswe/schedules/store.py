@@ -39,10 +39,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from openswe import event_claims
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.options import (
-    RETIRED_MODEL_REPLACEMENTS,
     gate_fable_model,
     normalize_model_choice,
-    provider_fallback_pair,
 )
 from openswe.dashboard.profiles import get_profile, get_valid_access_token
 from openswe.dashboard.repo_access import (
@@ -1169,13 +1167,7 @@ async def _agent_run_config(
         configurable["repo"] = repo
     if admin_thread:
         configurable["admin_thread"] = True
-    stored_model = record.get("model")
-    pair = (
-        provider_fallback_pair(stored_model, record.get("effort"))
-        if isinstance(stored_model, str) and stored_model in RETIRED_MODEL_REPLACEMENTS
-        else normalize_model_choice(stored_model, record.get("effort"))
-    )
-    model, effort = pair or (None, None)
+    model, effort = normalize_model_choice(record.get("model"), record.get("effort"))
     if model and effort:
         model, effort = gate_fable_model(
             model, effort, fable_enabled=(await get_settings()).fable_enabled

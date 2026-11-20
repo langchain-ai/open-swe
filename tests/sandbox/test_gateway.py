@@ -286,7 +286,7 @@ def test_make_model_refuses_unsupported_gateway_provider(monkeypatch: pytest.Mon
 @pytest.mark.parametrize(
     ("model_id", "path_prefix"),
     [
-        ("openai:gpt-6-astra", "/openai/v1/responses"),
+        ("openai:gpt-6.2-astra", "/openai/v1/responses"),
         ("baseten:zai-org/GLM-5", "/baseten/v1/chat/completions"),
         ("anthropic:claude-haiku-5-5", "/anthropic/v1/messages"),
         ("fireworks:accounts/fireworks/models/glm-5p2", "/fireworks/v1/chat/completions"),

@@ -66,7 +66,7 @@ CASES = (
     Case(
         "enabled model",
         "Use Fable to fix the bug",
-        ModelRequestIntent(requested_model="anthropic:claude-fable-5-1"),
+        ModelRequestIntent(requested_model="anthropic:claude-fable-5-2"),
         fable_enabled=True,
     ),
 )

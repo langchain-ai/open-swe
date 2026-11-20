@@ -1854,13 +1854,20 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         else None
     )
     stored_model = thread_settings.get("model_id")
-    if isinstance(stored_model, str) and not reset_model_selection:
-        model_id = stored_model
-        profile_effort = thread_settings.get("effort")
-        subagent_model_id = thread_settings.get("subagent_model_id") or stored_model
-        subagent_effort = thread_settings.get("subagent_effort")
-        adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
-        logger.info("Using stored thread settings: model=%s effort=%s", model_id, profile_effort)
+    stored_subagent_model = thread_settings.get("subagent_model_id")
+    if not reset_model_selection:
+        if isinstance(stored_model, str):
+            model_id = stored_model
+            profile_effort = thread_settings.get("effort")
+            subagent_model_id = stored_subagent_model or stored_model
+            subagent_effort = thread_settings.get("subagent_effort")
+            adaptive_model_routing = thread_settings.get("model_routing_enabled", False)
+            logger.info(
+                "Using stored thread settings: model=%s effort=%s", model_id, profile_effort
+            )
+        elif isinstance(stored_subagent_model, str):
+            subagent_model_id = stored_subagent_model
+            subagent_effort = thread_settings.get("subagent_effort")
 
     if cfg.model_selection == "explicit":
         adaptive_model_routing = False

@@ -6,31 +6,18 @@ from openswe.dashboard import options
 from openswe.dashboard.options import (
     FABLE_MODEL_IDS,
     fable_disabled_fallback,
-    provider_fallback_pair,
 )
 from openswe.dashboard.profiles import normalize_profile_for_response
 from openswe.dashboard.settings import (
+    Settings,
     SettingsUpdate,
+    _set_fields,
+    normalize_settings_for_response,
 )
 
-STALE_ANTHROPIC = "anthropic:claude-opus-5"
 SUPPORTED_ANTHROPIC = "anthropic:claude-opus-5-5"
 SUPPORTED_OPENAI = "openai:gpt-6.1-sol"
-SUPPORTED_ASTRA = "openai:gpt-6-astra"
-SUPPORTED_KIMI = "fireworks:accounts/fireworks/models/kimi-k3"
-DEPRECATED_ANTHROPIC = "anthropic:claude-opus-4-8"
-DEPRECATED_OPENAI = "openai:gpt-5.5"
 DEPRECATED_GLM = "fireworks:accounts/fireworks/models/glm-5p2"
-FABLE = "anthropic:claude-fable-5-1"
-
-
-def test_provider_fallback_preserves_provider_and_effort() -> None:
-    assert provider_fallback_pair(STALE_ANTHROPIC, "xhigh") == (SUPPORTED_ANTHROPIC, "xhigh")
-
-
-@pytest.mark.parametrize("model_id", ["unknown:model", "no-colon", "", None, 123])
-def test_provider_fallback_returns_none_without_provider_match(model_id: object) -> None:
-    assert provider_fallback_pair(model_id, "high") is None
 
 
 @pytest.mark.parametrize(
@@ -89,36 +76,26 @@ def test_fable_disabled_fallback_is_non_fable_anthropic() -> None:
     assert effort == "high"
 
 
-@pytest.mark.parametrize(
-    ("retired", "successor", "effort"),
-    [
-        ("gemini-4-argon", "gemini-4-carbon", "medium"),
-        ("gemini-3.8-flash", "gemini-4-hydrogen", "high"),
-    ],
-)
-def test_retired_deployment_default_keeps_its_provider(
-    monkeypatch: pytest.MonkeyPatch, retired: str, successor: str, effort: str
-) -> None:
-    monkeypatch.setenv("LLM_MODEL_ID", f"google_genai:{retired}")
-    assert options.default_model_pair() == (f"google_genai:{successor}", effort)
+def test_unrecognized_stored_settings_fall_back_to_default() -> None:
+    stored = {
+        "default_agent_model": "openai:gpt-6-astra",
+        "default_agent_reasoning_effort": "low",
+        "default_agent_routing_performance_model": "anthropic:claude-fable-5-1",
+        "default_agent_routing_performance_reasoning_effort": "high",
+    }
+    normalized = normalize_settings_for_response(stored)
+    assert normalized["default_agent_model"] is None
+    assert normalized["default_agent_reasoning_effort"] is None
+    assert normalized["default_agent_routing_performance_model"] is None
+    assert normalized["default_agent_routing_performance_reasoning_effort"] is None
 
+    settings = Settings(stored)
+    assert settings.default_model("agent") == options.default_model_pair()
+    assert settings.agent_routing_models["performance"] == options.default_model_pair()
 
-@pytest.mark.parametrize(
-    ("retired", "successor", "effort", "expected_effort"),
-    [
-        ("gemini-4-argon", "gemini-4-carbon", "high", "high"),
-        ("gemini-3.8-flash", "gemini-4-hydrogen", "medium", "medium"),
-        ("gemini-3.8-flash", "gemini-4-hydrogen", "minimal", "high"),
-    ],
-)
-def test_global_settings_carry_a_retired_model_to_its_successor(
-    retired: str, successor: str, effort: str, expected_effort: str
-) -> None:
-    update = SettingsUpdate(
-        default_agent_model=f"google_genai:{retired}", default_agent_reasoning_effort=effort
-    )
-    assert update.default_agent_model == f"google_genai:{successor}"
-    assert update.default_agent_reasoning_effort == expected_effort
+    update = SettingsUpdate.model_validate({**_set_fields(stored), "review_draft_prs": True})
+    assert update.default_agent_model is None
+    assert update.review_draft_prs is True
 
 
 def test_an_unknown_model_is_rejected_rather_than_remapped(

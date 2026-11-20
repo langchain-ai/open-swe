@@ -357,7 +357,7 @@ async def test_a_breakout_mda_cant_open_starts_no_run(
     ("model", "effort"),
     [
         ("unknown:model", None),
-        ("anthropic:claude-fable-5-1", None),
+        ("anthropic:claude-fable-5-2", None),
         ("anthropic:claude-opus-5-5", "none"),
     ],
 )
@@ -379,7 +379,7 @@ async def test_breakout_rejects_invalid_model_settings_without_creating_thread(
     options = result["available_models"]
     assert isinstance(options, list)
     assert any(option["id"] == "anthropic:claude-opus-5-5" for option in options)
-    assert all(option["id"] != "anthropic:claude-fable-5-1" for option in options)
+    assert all(option["id"] != "anthropic:claude-fable-5-2" for option in options)
     if effort is not None:
         assert result["available_efforts"] == ["low", "medium", "high", "xhigh", "max"]
     assert "thread_create" not in captured

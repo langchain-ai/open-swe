@@ -21,7 +21,6 @@ from openswe.agent_api.connections import SENDER_USER_KEY
 from openswe.bridge.local_access_policy import LocalAccess
 from openswe.config import ENV
 from openswe.dashboard.options import (
-    DEPRECATED_MODEL_IDS,
     default_vision_model_pair,
     gate_fable_model,
     model_supports_images,
@@ -237,10 +236,9 @@ async def _resolve_agent_model_choice(
 ) -> tuple[str, str]:
     settings = await get_settings()
     resolved_model, resolved_effort = settings.default_model("agent")
-    if model_id not in DEPRECATED_MODEL_IDS:
-        chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
-        if chosen_model and chosen_effort:
-            resolved_model, resolved_effort = chosen_model, chosen_effort
+    chosen_model, chosen_effort = normalize_model_choice(model_id, effort)
+    if chosen_model and chosen_effort:
+        resolved_model, resolved_effort = chosen_model, chosen_effort
     resolved_model, resolved_effort = gate_fable_model(
         resolved_model,
         resolved_effort,
@@ -1152,11 +1150,13 @@ async def _enrich_run_start_command(
             run_model, run_effort = (
                 (chosen_model, chosen_effort) if chosen_model else thread_model_choice(metadata)
             )
-            if command_images and run_model and run_effort:
+            if command_images:
+                if not run_model or not run_effort:
+                    run_model, run_effort = (await get_settings()).default_model("agent")
                 run_model, run_effort = _with_vision_fallback(
                     run_model, run_effort, has_images=True
                 )
-            _image_blocks(command_images, model_id=run_model)
+                _image_blocks(command_images, model_id=run_model)
 
         overrides["local_access_bridge_id"] = await LocalAccess.offer_for_run(
             client_configurable.get("local_access_bridge_id"),

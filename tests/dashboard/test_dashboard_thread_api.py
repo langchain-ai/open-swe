@@ -53,7 +53,7 @@ pytestmark = pytest.mark.usefixtures("registry_db")
 
 _TEXT_ONLY_MODEL = "fireworks:accounts/fireworks/models/kimi-k3"
 _VISION_MODEL = "openai:gpt-6.1-sol"
-_FABLE = "anthropic:claude-fable-5-1"
+_FABLE = "anthropic:claude-fable-5-2"
 _PAIR = ("openai:gpt-6.1-sol", "medium")
 
 

@@ -67,8 +67,8 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "context_window": 1_000_000,
     },
     {
-        "id": "anthropic:claude-fable-5-1",
-        "label": "Fable 5.1",
+        "id": "anthropic:claude-fable-5-2",
+        "label": "Fable 5.2",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "high",
         "supports_images": True,
@@ -76,8 +76,8 @@ SUPPORTED_MODELS: list[ModelOption] = [
         "can_be_default": False,
     },
     {
-        "id": "openai:gpt-6-astra",
-        "label": "GPT-6 Astra",
+        "id": "openai:gpt-6.2-astra",
+        "label": "GPT-6.2 Astra",
         "efforts": ["low", "medium", "high", "xhigh", "max"],
         "default_effort": "low",
         "supports_images": True,
@@ -644,7 +644,7 @@ def model_for(models: RunModels, held: Mapping[str, object]) -> ModelSpec:
     (``selected_model_id``), each with its effort.
     """
     requested = held.get("requested_model")
-    if isinstance(requested, str) and requested:
+    if isinstance(requested, str) and requested in SUPPORTED_MODEL_IDS:
         return chosen_model(
             requested, held.get("requested_effort"), fallback_model_id=models.fallback_model_id
         )
@@ -653,7 +653,11 @@ def model_for(models: RunModels, held: Mapping[str, object]) -> ModelSpec:
     if routed is not None:
         return routed
     selected = held.get("selected_model_id")
-    if isinstance(selected, str) and selected and selected != models.model.model_id:
+    if (
+        isinstance(selected, str)
+        and selected in SUPPORTED_MODEL_IDS
+        and selected != models.model.model_id
+    ):
         return chosen_model(
             selected, held.get("selected_effort"), fallback_model_id=models.fallback_model_id
         )

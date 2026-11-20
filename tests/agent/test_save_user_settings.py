@@ -164,7 +164,7 @@ async def test_unavailable_thread_scope_fails_closed(
         {"recent_thread_context_enabled": False, "auto_fix_ci": False},
         {"default_model": "unknown-model"},
         {"default_model": "openai:gpt-5.5"},
-        {"default_model": "anthropic:claude-fable-5-1"},
+        {"default_model": "anthropic:claude-fable-5-2"},
         {"default_subagent_model": None, "subagent_reasoning_effort": "high"},
         {"branch_prefix": "new/", "default_visibility": "invalid"},
         {"experimental_classify": None, "auto_fix_ci": False},

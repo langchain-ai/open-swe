@@ -1896,7 +1896,7 @@ async def test_performance_directive_switches_unless_quoted(
         AsyncMock(
             return_value={
                 "routing_models": {
-                    "performance": {"model_id": "openai:gpt-6-astra", "effort": "low"}
+                    "performance": {"model_id": "openai:gpt-6.2-astra", "effort": "low"}
                 }
             }
         ),
@@ -1943,7 +1943,7 @@ async def test_performance_directive_switches_unless_quoted(
         feedback.assert_not_awaited()
     else:
         assert feedback.call_args.args == ("run-perf", "performance_model_switch_slack")
-        assert configurable["agent_model_id"] == "openai:gpt-6-astra"
+        assert configurable["agent_model_id"] == "openai:gpt-6.2-astra"
         assert configurable["model_selection"] == "explicit"
         assert notice.call_args.args[:2] == ("C123", "U123")
         # Slack never names the model.

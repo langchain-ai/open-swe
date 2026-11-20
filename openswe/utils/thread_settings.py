@@ -17,10 +17,9 @@ from typing import Any, TypedDict
 from pydantic import TypeAdapter, ValidationError
 
 from openswe.dashboard.options import (
-    RETIRED_MODEL_REPLACEMENTS,
     SUPPORTED_MODEL_IDS,
+    model_supports_effort,
     normalize_model_choice,
-    provider_fallback_pair,
 )
 from openswe.utils import ttl_cache
 
@@ -70,21 +69,40 @@ def normalize_thread_settings(settings: Mapping[str, Any]) -> tuple[ThreadSettin
         value = _THREAD_SETTINGS_ADAPTER.validate_python(settings, strict=True)
     except ValidationError:
         return {}, bool(settings)
-    if value.get("model_id") in RETIRED_MODEL_REPLACEMENTS:
-        if pair := provider_fallback_pair(value.get("model_id"), value.get("effort")):
-            value["model_id"], value["effort"] = pair
-    if value.get("subagent_model_id") in RETIRED_MODEL_REPLACEMENTS:
-        if pair := provider_fallback_pair(
-            value.get("subagent_model_id"), value.get("subagent_effort")
+    if (model_id := value.get("model_id")) is not None:
+        if model_id not in SUPPORTED_MODEL_IDS:
+            value.pop("model_id", None)
+            value.pop("effort", None)
+        elif (effort := value.get("effort")) is not None and not model_supports_effort(
+            model_id, effort
         ):
-            value["subagent_model_id"], value["subagent_effort"] = pair
-    requested_model = value.get("requested_model")
-    if requested_model in RETIRED_MODEL_REPLACEMENTS:
-        value["requested_model"] = RETIRED_MODEL_REPLACEMENTS[requested_model]
-    for route in value.get("routing_models", {}).values():
-        if route["model_id"] in RETIRED_MODEL_REPLACEMENTS:
-            if pair := provider_fallback_pair(route["model_id"], route["effort"]):
-                route["model_id"], route["effort"] = pair
+            value["effort"] = None
+    if (subagent_model := value.get("subagent_model_id")) is not None:
+        if subagent_model not in SUPPORTED_MODEL_IDS:
+            value.pop("subagent_model_id", None)
+            value.pop("subagent_effort", None)
+        elif (
+            subagent_effort := value.get("subagent_effort")
+        ) is not None and not model_supports_effort(subagent_model, subagent_effort):
+            value["subagent_effort"] = None
+    if (requested := value.get("requested_model")) is not None and (
+        requested not in SUPPORTED_MODEL_IDS
+    ):
+        value["requested_model"] = None
+    if (routing_models := value.get("routing_models")) is not None:
+        value["routing_models"] = {
+            route: {
+                "model_id": entry["model_id"],
+                "effort": (
+                    entry["effort"]
+                    if entry["effort"] is not None
+                    and model_supports_effort(entry["model_id"], entry["effort"])
+                    else None
+                ),
+            }
+            for route, entry in routing_models.items()
+            if entry["model_id"] in SUPPORTED_MODEL_IDS
+        }
     return value, value != settings
 
 

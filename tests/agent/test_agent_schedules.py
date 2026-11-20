@@ -1278,17 +1278,9 @@ async def test_open_swe_events_do_not_trigger_automations(
 @pytest.mark.parametrize(
     ("model_id", "effort", "expected"),
     [
-        ("anthropic:claude-fable-5-1", "high", fable_disabled_fallback("high")),
-        (
-            "google_genai:gemini-3.8-flash",
-            "medium",
-            ("google_genai:gemini-4-hydrogen", "medium"),
-        ),
-        (
-            "google_genai:gemini-3.8-flash",
-            "minimal",
-            ("google_genai:gemini-4-hydrogen", "high"),
-        ),
+        ("anthropic:claude-fable-5-2", "high", fable_disabled_fallback("high")),
+        ("google_genai:gemini-3.8-flash", "medium", None),
+        ("openai:gpt-6-astra", "low", None),
     ],
 )
 async def test_launch_scheduled_agent_run_resolves_saved_models(
@@ -1303,7 +1295,11 @@ async def test_launch_scheduled_agent_run_resolves_saved_models(
     assert (await schedules.launch_scheduled_agent_run(SCHED_1))["status"] == "started"
 
     configurable = fake_client.runs.created[0]["config"]["configurable"]
-    assert (configurable["agent_model_id"], configurable["agent_effort"]) == expected
+    if expected is None:
+        assert "agent_model_id" not in configurable
+        assert "agent_effort" not in configurable
+    else:
+        assert (configurable["agent_model_id"], configurable["agent_effort"]) == expected
 
 
 @pytest.mark.parametrize("creator", [None, "alice"])
