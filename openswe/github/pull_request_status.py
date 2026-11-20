@@ -1755,17 +1755,31 @@ class PullRequestClient:
         Without ``details`` only ``listed`` (a search hit) is used, and nothing is read;
         a live read that fails falls back to it too.
         """
+        status, _ = await self.load_with_ci(details=details, listed=listed, wanted=wanted)
+        return status
+
+    async def load_with_ci(
+        self,
+        *,
+        details: bool = True,
+        listed: Mapping[str, object] | None = None,
+        wanted: Collection[PullRequestState] = _ANY_STATE,
+    ) -> tuple[OpenPullRequest | None, CommitCI | None]:
+        """``load``'s status, with the head commit's CI it was read from, if any."""
         with MeteredTransport.attributed():
             read = await or_none(self._read_status()) if details else None
         if read is None:
             if "open" not in wanted:
-                return None
-            return OpenPullRequest.listed(
-                self.repo.full_name, self.number, listed or {}, details_loading=not details
+                return None, None
+            return (
+                OpenPullRequest.listed(
+                    self.repo.full_name, self.number, listed or {}, details_loading=not details
+                ),
+                None,
             )
         state = read.state
         if state is None or state not in wanted:
-            return None
+            return None, None
         pull = read.pull
         mergeability = await self._settled_mergeability(read)
         result = OpenPullRequest(
@@ -1789,7 +1803,7 @@ class PullRequestClient:
             result.required_checks_passing = True
         sha = read.head_sha
         if sha is None:
-            return result
+            return result, None
         result.head_sha = sha
         with MeteredTransport.attributed():
             checks, reviewers, review_threads = await asyncio.gather(
@@ -1827,7 +1841,7 @@ class PullRequestClient:
                 not check.reported_by(passing_approvals, []) for check in approval_checks
             )
         if runs is None or statuses is None:
-            return result
+            return result, checks
         ci_runs = [run for run in runs if run.get("name") != APPROVAL_CHECK_RUN_NAME]
         failed, _, _ = _normalize_checks(ci_runs, statuses)
         failures = [_as_str(check["name"], "Unnamed check") for check in failed]
@@ -1875,7 +1889,7 @@ class PullRequestClient:
                     runs,
                     statuses,
                 )
-        return result
+        return result, checks
 
 
 async def get_pull_request_statuses(

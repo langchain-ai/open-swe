@@ -1,6 +1,7 @@
 """A pull request's dashboard status is read from GitHub once per change."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
@@ -8,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.github import pull_request_dashboard_routes as routes
-from openswe.github.http import GitHubClient
+from openswe.github.http import CommitCI, GitHubClient, RepoClient
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import OpenPullRequest, PullRequestClient
 from openswe.github.shared_status import SharedPullRequestStatus
@@ -45,8 +46,23 @@ async def _another_replica_claims(store: dict[str, object], *, ago: timedelta) -
 
 
 _KEY = PullRequestKey.of("lc", "repo", 7)
-_CLAIM = f"openswe:pull-request-status:v2:claim:{_KEY}"
-_STATUS = f"openswe:pull-request-status:v2:{_KEY}"
+_CLAIM = f"openswe:pull-request-status:v3:claim:{_KEY}"
+_STATUS = f"openswe:pull-request-status:v3:{_KEY}"
+
+
+_CI = CommitCI([{"name": "test", "status": "completed", "conclusion": "success"}], [])
+
+
+def _answers(
+    monkeypatch: pytest.MonkeyPatch,
+    load: Callable[[PullRequestClient], Awaitable[OpenPullRequest | None]],
+) -> None:
+    """Have the full read answer ``load``'s status, read beside ``_CI``."""
+
+    async def load_with_ci(pull: PullRequestClient) -> tuple[OpenPullRequest | None, CommitCI]:
+        return await load(pull), _CI
+
+    monkeypatch.setattr(PullRequestClient, "load_with_ci", load_with_ci)
 
 
 def _pull() -> PullRequestClient:
@@ -61,6 +77,8 @@ def _read(title: str = "Fix") -> OpenPullRequest:
         title=title,
         status_available=True,
         ci="passing",
+        head_sha="abc123",
+        mergeable=True,
         reviewers=[],
         unresolved_threads=0,
     )
@@ -78,7 +96,7 @@ async def test_viewers_share_one_read_until_the_pull_request_changes(
         await answer.wait()
         return _read()
 
-    monkeypatch.setattr(PullRequestClient, "load", load)
+    _answers(monkeypatch, load)
 
     # Every open tab refetches on the same notification.
     tabs = asyncio.gather(*(SharedPullRequestStatus.read(_pull()) for _ in range(3)))
@@ -111,7 +129,7 @@ async def test_a_read_github_did_not_fully_answer_is_not_shared(
     unread: dict[str, object],
 ) -> None:
     load = AsyncMock(return_value=_read().model_copy(update=unread))
-    monkeypatch.setattr(PullRequestClient, "load", load)
+    _answers(monkeypatch, load)
 
     await SharedPullRequestStatus.read(_pull())
     await SharedPullRequestStatus.read(_pull())
@@ -133,7 +151,7 @@ async def test_viewers_waiting_on_a_degraded_read_make_their_own(
             await answer.wait()
         return status
 
-    monkeypatch.setattr(PullRequestClient, "load", load)
+    _answers(monkeypatch, load)
 
     first = asyncio.ensure_future(SharedPullRequestStatus.read(_pull()))
     await asyncio.sleep(0.05)
@@ -181,13 +199,15 @@ async def test_a_replica_waits_on_another_replicas_read_instead_of_its_own(
     registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     load = AsyncMock(return_value=_read("Mine"))
-    monkeypatch.setattr(PullRequestClient, "load", load)
+    _answers(monkeypatch, load)
     started_at = await _another_replica_claims(shared_cache, ago=timedelta(seconds=1))
 
     async def the_other_replica_finishes() -> None:
         await asyncio.sleep(0.3)
         shared_cache[_STATUS] = {
             "read_at": started_at.isoformat(),
+            "checked_at": started_at.isoformat(),
+            "ci": None,
             "status": _read("Theirs").model_dump(mode="json"),
         }
 
@@ -203,7 +223,7 @@ async def test_a_replica_reads_itself_once_the_one_it_waits_on_shares_nothing(
     registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     load = AsyncMock(return_value=_read("Mine"))
-    monkeypatch.setattr(PullRequestClient, "load", load)
+    _answers(monkeypatch, load)
     started_at = await _another_replica_claims(shared_cache, ago=timedelta(seconds=1))
 
     async def the_other_replica_gets_a_partial_read() -> None:
@@ -222,7 +242,7 @@ async def test_a_claim_from_before_the_last_change_or_long_ago_is_not_waited_on(
     registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     load = AsyncMock(return_value=_read())
-    monkeypatch.setattr(PullRequestClient, "load", load)
+    _answers(monkeypatch, load)
 
     await _another_replica_claims(shared_cache, ago=timedelta(seconds=1))
     await Topic.PULL_REQUESTS.invalidate(key=_KEY)
@@ -244,7 +264,7 @@ async def test_a_replicas_own_read_is_claimed_then_released(
         claimed_while_reading.append(_claim_done(shared_cache))
         return _read()
 
-    monkeypatch.setattr(PullRequestClient, "load", load)
+    _answers(monkeypatch, load)
 
     await SharedPullRequestStatus.read(_pull())
 
@@ -256,3 +276,109 @@ def _claim_done(store: dict[str, object]) -> object:
     claim = store[_CLAIM]
     assert isinstance(claim, dict)
     return claim["done"]
+
+
+async def _kept_from(
+    store: dict[str, object], *, read: timedelta, checked: timedelta, status: OpenPullRequest
+) -> None:
+    """Leave a status fully read ``read`` ago, its CI last found unchanged ``checked`` ago."""
+    _, now = await Topic.last_changed(Topic.PULL_REQUESTS.keyed(_KEY))
+    store[_STATUS] = {
+        "read_at": (now - read).isoformat(),
+        "checked_at": (now - checked).isoformat(),
+        "ci": SharedPullRequestStatus._fingerprint(_CI),
+        "status": status.model_dump(mode="json"),
+    }
+
+
+def _ci_now(monkeypatch: pytest.MonkeyPatch, ci: CommitCI) -> AsyncMock:
+    rest = AsyncMock(return_value=ci)
+    monkeypatch.setattr(RepoClient, "commit_ci_over_rest", rest)
+    return rest
+
+
+def _checked_at(store: dict[str, object]) -> object:
+    kept = store[_STATUS]
+    assert isinstance(kept, dict)
+    return kept["checked_at"]
+
+
+async def test_a_status_whose_ci_has_not_moved_is_kept_without_a_full_read(
+    registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    load = AsyncMock(return_value=_read("New"))
+    _answers(monkeypatch, load)
+    rest = _ci_now(monkeypatch, _CI)
+    await _kept_from(
+        shared_cache, read=timedelta(minutes=2), checked=timedelta(minutes=2), status=_read()
+    )
+    checked = _checked_at(shared_cache)
+
+    status = await SharedPullRequestStatus.read(_pull())
+
+    assert status is not None and status.title == "Fix"
+    load.assert_not_awaited()
+    rest.assert_awaited_once_with("abc123")
+    assert _checked_at(shared_cache) != checked
+    # Rechecked just now, so the next viewer reads nothing at all.
+    assert await SharedPullRequestStatus.read(_pull()) == status
+    rest.assert_awaited_once()
+
+
+async def test_a_status_whose_ci_moved_is_read_again_in_full(
+    registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    load = AsyncMock(return_value=_read("New"))
+    _answers(monkeypatch, load)
+    _ci_now(
+        monkeypatch,
+        CommitCI([{"name": "test", "status": "completed", "conclusion": "failure"}], []),
+    )
+    await _kept_from(
+        shared_cache, read=timedelta(minutes=2), checked=timedelta(minutes=2), status=_read()
+    )
+
+    status = await SharedPullRequestStatus.read(_pull())
+
+    assert status is not None and status.title == "New"
+    load.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("read", "status"),
+    [
+        (timedelta(minutes=6), _read()),
+        # GitHub had not settled whether it merges.
+        (timedelta(minutes=2), _read().model_copy(update={"mergeable": None})),
+    ],
+)
+async def test_a_status_too_old_or_unsettled_is_read_again_without_a_recheck(
+    registry_db: None,
+    shared_cache: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    read: timedelta,
+    status: OpenPullRequest,
+) -> None:
+    load = AsyncMock(return_value=_read("New"))
+    _answers(monkeypatch, load)
+    rest = _ci_now(monkeypatch, _CI)
+    await _kept_from(shared_cache, read=read, checked=timedelta(minutes=2), status=status)
+
+    assert (await SharedPullRequestStatus.read(_pull())) == _read("New")
+    load.assert_awaited_once()
+    rest.assert_not_awaited()
+
+
+async def test_a_status_checked_within_a_minute_is_served_as_is(
+    registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    load = AsyncMock(return_value=_read("New"))
+    _answers(monkeypatch, load)
+    rest = _ci_now(monkeypatch, _CI)
+    await _kept_from(
+        shared_cache, read=timedelta(minutes=4), checked=timedelta(seconds=10), status=_read()
+    )
+
+    assert (await SharedPullRequestStatus.read(_pull())) == _read()
+    load.assert_not_awaited()
+    rest.assert_not_awaited()
