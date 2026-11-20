@@ -908,13 +908,14 @@ def proxy_writes(
     return written
 
 
-async def test_mda_writes_the_whole_proxy_config_behind_the_runs_preparation(
+async def test_mda_writes_the_whole_proxy_config_before_a_preparation_in_the_sandbox(
     backend_calls: BackendCalls,
     proxy_writes: list[tuple[str, object]],
 ) -> None:
-    """Where the catalog says MDA writes the sandbox's proxy config, MDA writes it once the run
-    has prepared, as the backend hands it over: never one without the backend's rules, which
-    it would wipe."""
+    """Where the catalog says MDA writes the sandbox's proxy config and the run prepares in its
+    sandbox, as a review fetching its pull request does, MDA writes it before the run prepares,
+    as the backend hands it over: the backend writes none, so preparing would otherwise have no
+    GitHub credentials. Never one without the backend's rules, which it would wipe."""
     await _run(
         InMemoryStore(),
         "thread-1",
@@ -922,7 +923,7 @@ async def test_mda_writes_the_whole_proxy_config_behind_the_runs_preparation(
     )
 
     hooks = [hook for hook, _, _ in backend_calls]
-    assert hooks.index("prepare") < hooks.index("sandbox_proxy") < hooks.index("proxy_config")
+    assert hooks.index("sandbox_proxy") < hooks.index("proxy_config") < hooks.index("prepare")
     assert "refresh_github_proxy" not in hooks
     assert proxy_writes == [("sandbox-thread-1", {"rules": [_TOOLS_RULE]})]
 
@@ -932,9 +933,12 @@ async def test_a_runs_first_model_call_goes_ahead_while_its_sandbox_boots_and_no
     backend_calls: BackendCalls,
     proxy_writes: list[tuple[str, object]],
     sandbox_commands: list[str],
+    prepared: Prepared,
+    bound: Bound,
 ) -> None:
-    """The proxy config MDA writes, which waits for the sandbox to boot, is written behind the
-    run's first model call; its first tool call, one the backend runs included, waits for it."""
+    """Where the run prepares without its sandbox, the proxy config MDA writes, which waits
+    for the sandbox to boot, is written behind the run's first model call; its first tool
+    call, one the backend runs included, waits for it."""
     answering = threading.Event()
     booted_behind_the_model: list[bool] = []
     resolve = mda_runtime._resolve_managed_sandbox
@@ -956,7 +960,7 @@ async def test_a_runs_first_model_call_goes_ahead_while_its_sandbox_boots_and_no
 
     monkeypatch.setattr(mda_runtime, "_resolve_managed_sandbox", boot)
     monkeypatch.setattr(agent, "_DEFAULT_MODEL", GenericFakeChatModel(messages=replies()))
-    catalog = _catalog("web_search", "g1", snapshot="a", writes_proxy=True)
+    catalog = _catalog("web_search", "g1", snapshot="a", writes_proxy=True, bind_after_prepare=True)
 
     await _run(InMemoryStore(), "thread-1", _context("agent", "token-1", catalog))
 
@@ -1263,9 +1267,9 @@ async def test_a_replacement_sandbox_is_created_with_the_backends_rules_then_wri
     assert replacement.options["snapshot_id"] == "b"
     proxy_hooks = {"prepare", "sandbox_replaced", "sandbox_proxy", "proxy_config"}
     assert [hook for hook, _, _ in backend_calls if hook in proxy_hooks] == [
-        "prepare",
         "sandbox_proxy",
         "proxy_config",
+        "prepare",
         "sandbox_replaced",
         "sandbox_proxy",
         "proxy_config",

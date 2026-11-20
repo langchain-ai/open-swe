@@ -460,7 +460,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # of it once it is open, and the run's first tool call waits for that.
             binding.start(self._backend, run_id(), opening, refresh_github_proxy=proxy_due)
         try:
-            opened = OpenedSandbox() if binds_later else await opening
+            opened = OpenedSandbox() if binds_later else await self._proxied(runtime, await opening)
             # Not behind the outbox: what an earlier run left unsent changes nothing here.
             prepared = await call(
                 self._backend,
@@ -549,6 +549,24 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
     async def _load_tool_specs(self) -> None:
         async with trace("tool_specs.load", run_type="chain"):
             await self._backend.run.load_tool_specs(run_id())
+
+    async def _proxied(self, runtime: Runtime, opened: OpenedSandbox) -> OpenedSandbox:
+        """``opened``, once it has booted with the first proxy config MDA writes there, where MDA
+        writes it; or why it could not be.
+
+        Preparing works in the sandbox here (a review fetches its pull request there, a task
+        worker attaches to its coordinator's), and the backend writes no proxy config where
+        MDA does, so without this first write those commands have no GitHub credentials.
+        """
+        if (
+            opened.sandbox_id is None
+            or self._boot_sandbox is None
+            or not self._backend.run.sandbox.writes_proxy
+        ):
+            return opened
+        async with trace("sandbox.proxy_first_write", run_type="chain"):
+            booted = await self._boot_sandbox(runtime)
+        return opened if booted.error is None else booted
 
     async def _opened(self, runtime: Runtime) -> OpenedSandbox:
         if self._open_sandbox is None:

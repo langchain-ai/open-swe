@@ -415,7 +415,8 @@ async def opened_sandbox(runtime: Runtime) -> OpenedSandbox:
     preparation; one that cannot boot is reported by the first call that needs it
     (``booted_sandbox``).
     Where MDA writes the proxy config, writing it waits for the sandbox to boot, so the first
-    write is left to the boot.
+    write is left to the boot; where the run prepares in the sandbox, that boot comes before
+    it prepares (``BackendRunMiddleware._proxied``).
     """
     planned = _planned(runtime)
     opened = await _opening(
