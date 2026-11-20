@@ -155,6 +155,10 @@ test.describe("thread pull requests", () => {
     await openThreadViaSlackLink(page);
     const threadId = threadIdFromUrl(page);
     await expectTranscriptVisible(page);
+    await openThreadActionsMenu(page);
+    await expect(page.getByText("Open in Slack")).toBeVisible();
+    await expect.poll(() => latestPrBody(page)).toContain("Slack thread");
+    await page.keyboard.press("Escape");
 
     const summary = page.getByTestId("pr-summary-fakeorg/demo-1");
     const fixButton = page.getByRole("button", { name: "Fix PR #1" });
@@ -332,19 +336,6 @@ test.describe("thread pull requests", () => {
       "Handle the null response before reading the payload.",
     );
     await expect(page.getByText(new RegExp(fixPrompt)).first()).toBeVisible();
-  });
-
-  // Public and private need separate runs: the PR body is written at
-  // open_pull_request time, so the repo's visibility has to be set before it.
-  test("includes the originating Slack thread in public PR bodies", async ({
-    page,
-  }) => {
-    await loginAs(page, SAME_USER);
-    await openThreadViaSlackLink(page);
-
-    await openThreadActionsMenu(page);
-    await expect(page.getByText("Open in Slack")).toBeVisible();
-    await expect.poll(() => latestPrBody(page)).toContain("Slack thread");
   });
 
   test("exposes the originating Slack thread for private repos", async ({

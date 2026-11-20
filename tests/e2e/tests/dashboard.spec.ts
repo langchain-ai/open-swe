@@ -1064,7 +1064,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     ).toBe(true);
   });
 
-  test("keeps the live activity row below a Slack reply sent mid-run", async ({
+  test("keeps live and settled work ordered between Slack replies", async ({
     page,
   }) => {
     await loginAs(page, SAME_USER);
@@ -1078,16 +1078,6 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
       page.getByText("Found the cause.", { exact: true }),
       page.getByRole("button", { name: /^Running · sleep 10 · 1 action$/ }),
     ]);
-  });
-
-  test("folds each stretch of settled work between its replies", async ({
-    page,
-  }) => {
-    await loginAs(page, SAME_USER);
-    await page.request.post("/control/reset");
-    const threadId = await sendSegmentedReplies(page);
-
-    await page.goto(`/agents/${threadId}`);
     await expect(page.getByText("Fixed it.", { exact: true })).toBeVisible({
       timeout: 60_000,
     });

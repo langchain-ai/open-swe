@@ -38,7 +38,7 @@ export default defineConfig({
   testDir: "./tests",
   testIgnore: ["desktop.spec.ts", "account_recovery.spec.ts"],
   globalSetup: "./global-setup.ts",
-  fullyParallel: false,
+  fullyParallel: true,
   workers: 1,
   forbidOnly: !!process.env.CI,
   // One retry in CI keeps a flake from failing the run; CI lists every test that only

@@ -348,7 +348,7 @@ jobs:
           fi
 
   browser-e2e:
-    name: Browser E2E (${{ matrix.shard }}/3)
+    name: Browser E2E (${{ matrix.shard }}/6)
     needs: e2e-changes
     if: ${{ needs.e2e-changes.outputs.browser == 'true' }}
     runs-on: ubuntu-latest
@@ -356,7 +356,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6]
     services:
       postgres:
         image: postgres:16
@@ -385,15 +385,29 @@ jobs:
         working-directory: mda
         run: uv sync --locked
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Cache the mda CLI
+        id: mda-cache
+        uses: actions/cache@v6
+        with:
+          path: vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_binaries/mda
+          key: mda-cli-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile', 'vendor/managed-deepagents-sdk/Cargo.*', 'vendor/managed-deepagents-sdk/UPSTREAM', 'vendor/managed-deepagents-sdk/crates/**') }}
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: steps.mda-cache.outputs.cache-hit != 'true'
         with:
           workspaces: vendor/managed-deepagents-sdk
       - name: Build the mda CLI
         timeout-minutes: 15
-        run: make mda-cli
+        env:
+          CACHE_HIT: ${{ steps.mda-cache.outputs.cache-hit }}
+        run: |
+          if [ "$CACHE_HIT" = true ]; then
+            touch vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_binaries/mda
+          else
+            make --always-make mda-cli
+          fi
       - run: npm install --global pnpm@11.22.0
-      # Chromium and the dashboard build are identical across the three shards
-      # and change only with their own inputs, so all three restore them rather
+      # Chromium and the dashboard build are identical across the six shards
+      # and change only with their own inputs, so all six restore them rather
       # than each spending ~50s redoing the work. Both keys are computed before
       # `pnpm install` writes ui/node_modules, which would otherwise dominate
       # the ui/** hash and never hit.
@@ -435,7 +449,7 @@ jobs:
           # apt leaves its lock and partial/ readable only by root; the cache saves as the runner.
           sudo chown -R "$(id -u):$(id -g)" ~/.cache/apt-archives
       - name: Run browser E2E
-        run: pnpm run test:e2e --shard=${{ matrix.shard }}/3
+        run: pnpm run test:e2e --shard=${{ matrix.shard }}/6
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
@@ -480,12 +494,26 @@ jobs:
         working-directory: mda
         run: uv sync --locked
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Cache the mda CLI
+        id: mda-cache
+        uses: actions/cache@v6
+        with:
+          path: vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_binaries/mda
+          key: mda-cli-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile', 'vendor/managed-deepagents-sdk/Cargo.*', 'vendor/managed-deepagents-sdk/UPSTREAM', 'vendor/managed-deepagents-sdk/crates/**') }}
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: steps.mda-cache.outputs.cache-hit != 'true'
         with:
           workspaces: vendor/managed-deepagents-sdk
       - name: Build the mda CLI
         timeout-minutes: 15
-        run: make mda-cli
+        env:
+          CACHE_HIT: ${{ steps.mda-cache.outputs.cache-hit }}
+        run: |
+          if [ "$CACHE_HIT" = true ]; then
+            touch vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_binaries/mda
+          else
+            make --always-make mda-cli
+          fi
       - run: npm install --global pnpm@11.22.0
       - name: Install workspace dependencies
         timeout-minutes: 5
