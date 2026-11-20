@@ -5,6 +5,7 @@ from pydantic import JsonValue
 from sqlalchemy import text
 
 from openswe.database.postgres import transaction
+from openswe.github.pull_requests import PullRequest
 from openswe.threads import index, status
 from openswe.threads.index import Runtime, ThreadStatus
 from openswe.ui_invalidations import Topic, outbox
@@ -135,3 +136,29 @@ async def test_reviewer_status_reconciliation_refreshes_its_open_review_page(
 
     await status.refresh_thread_status("reviewer")
     assert await outbox.invalidated_since({topic: 60}) == set()
+
+
+async def test_a_pull_request_thread_starting_and_settling_refreshes_its_open_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await index.create("fixer", runtime="mda")
+    await PullRequest(owner="Acme", repo="Widgets", number=42).link_thread("fixer")
+    await PullRequest(owner="Acme", repo="Widgets", number=7, state="merged").save()
+    await PullRequest(owner="Acme", repo="Widgets", number=7).link_thread("fixer")
+    open_page, merged_page = "pull-requests/acme/widgets/42", "pull-requests/acme/widgets/7"
+    monkeypatch.setattr(status, "RUNTIMES", _Runtimes({"fixer": "idle"}))
+
+    async def invalidated() -> set[str]:
+        topics = await outbox.invalidated_since({open_page: 60, merged_page: 60})
+        async with transaction() as conn:
+            await conn.execute(text("DELETE FROM ui_invalidation"))
+        return topics
+
+    await invalidated()
+    await index.set_status("fixer", "busy")
+    assert await invalidated() == {open_page}
+    await index.set_status("fixer", "busy")
+    assert await invalidated() == set()
+
+    assert await status.refresh_thread_status("fixer") == "idle"
+    assert await invalidated() == {open_page}

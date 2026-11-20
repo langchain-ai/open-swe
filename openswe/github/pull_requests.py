@@ -50,7 +50,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, insert
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 
 from openswe.config import ENV
@@ -59,6 +59,7 @@ from openswe.database.orm import NOW, Base
 from openswe.github.comments import PrState, derive_pr_state
 from openswe.github.http import or_none
 from openswe.github.org_membership import INTERNAL_BOT_LOGINS, OPEN_SWE_GITHUB_LOGINS
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import PullRequestClient, pull_request_identity
 from openswe.github.repositories import Repository
 from openswe.review.findings import REVIEWER_THREAD_KIND
@@ -520,6 +521,18 @@ class PullRequest(Base):
                 .where(ThreadLink.thread_id == thread_id, cls.state.in_(("open", "draft")))
             )
             return list(rows.unique())
+
+    @classmethod
+    async def open_keys_for_thread(
+        cls, conn: AsyncConnection, thread_id: str
+    ) -> list[PullRequestKey]:
+        """The open pull requests linked to ``thread_id``, read in ``conn``'s transaction."""
+        rows = await conn.execute(
+            select(cls.owner, cls.repo, cls.number)
+            .join(ThreadLink)
+            .where(ThreadLink.thread_id == thread_id, cls.state.in_(("open", "draft")))
+        )
+        return [PullRequestKey.of(owner, repo, number) for owner, repo, number in rows]
 
     async def link_thread(self, thread_id: str, *, source: str = "") -> Self:
         """Associate a thread with this PR, as primary when it has none yet."""

@@ -12,11 +12,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Final
 
 from openswe.dispatch import channel_of
-from openswe.github.pull_request_key import PullRequestKey
 from openswe.threads import index
 from openswe.threads.index import ThreadStatus
 from openswe.threads.runtimes import RUNTIMES
-from openswe.ui_invalidations import Topic
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +47,6 @@ async def refresh_thread_status(
         status = await runtime.status(thread_id)
     if status is not None:
         await index.set_status(thread_id, status)
-        if status != thread.status and thread.metadata.get("kind") == "reviewer":
-            pr = thread.metadata.get("pr")
-            if isinstance(pr, dict):
-                owner, repo, number = pr.get("owner"), pr.get("name"), pr.get("number")
-                if isinstance(owner, str) and isinstance(repo, str) and isinstance(number, int):
-                    await Topic.PULL_REQUESTS.invalidate(key=PullRequestKey.of(owner, repo, number))
     return status
 
 

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe.agent_api.client import MDA_RUNTIME, RUNTIME_METADATA_KEY
 from openswe.database.postgres import transaction
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.sandboxes.this_mac import MacSandbox
 from openswe.thread_ids import mda_successor_thread_id
 from openswe.threads.creation import TITLE_LOCKED_KEY
@@ -181,6 +182,20 @@ class IndexedThread(BaseModel):
         """Whether someone stopped the thread at or after ``moment_ms``."""
         stopped = self.metadata.get(STOPPED_AT_KEY)
         return isinstance(stopped, int) and stopped >= moment_ms
+
+    async def pull_requests(self, conn: AsyncConnection) -> set[PullRequestKey]:
+        """The open pull requests whose pages show this thread: those it works on, or the one it reviews."""
+        # Imported on use: the pull request registry's imports reach back into this module.
+        from openswe.github.pull_requests import PullRequest
+
+        keys = set(await PullRequest.open_keys_for_thread(conn, self.thread_id))
+        if self.metadata.get("kind") == "reviewer" and isinstance(
+            pr := self.metadata.get("pr"), dict
+        ):
+            owner, repo, number = pr.get("owner"), pr.get("name"), pr.get("number")
+            if isinstance(owner, str) and isinstance(repo, str) and isinstance(number, int):
+                keys.add(PullRequestKey.of(owner, repo, number))
+        return keys
 
     def as_langgraph(self, select: Sequence[SelectField] | None = None) -> dict[str, JsonValue]:
         """The thread as the Agent Server serves it; its state stays with the runtime."""
@@ -494,15 +509,28 @@ async def update(
 
 
 async def set_status(thread_id: str, status: ThreadStatus) -> None:
+    """Record the thread's status; starting or stopping work makes its pull requests' pages stale."""
     async with transaction() as conn:
-        await conn.execute(
-            text(
-                "UPDATE thread_index SET status = :status, updated_at = clock_timestamp(), "
-                "status_since = CASE WHEN status = :status THEN status_since "
-                "ELSE clock_timestamp() END WHERE thread_id = :thread_id"
-            ),
-            {"thread_id": thread_id, "status": status},
+        row = (
+            (
+                await conn.execute(
+                    text(
+                        "UPDATE thread_index SET status = :status, updated_at = clock_timestamp(), "
+                        "status_since = CASE WHEN previous_status = :status THEN status_since "
+                        "ELSE clock_timestamp() END FROM (SELECT status AS previous_status "
+                        "FROM thread_index WHERE thread_id = :thread_id FOR UPDATE) AS previous "
+                        f"WHERE thread_id = :thread_id RETURNING {_COLUMNS}, previous_status"
+                    ),
+                    {"thread_id": thread_id, "status": status},
+                )
+            )
+            .mappings()
+            .first()
         )
+        if row is None or (row["previous_status"] == "busy") == (status == "busy"):
+            return
+        for key in await IndexedThread.from_row(row).pull_requests(conn):
+            await Topic.PULL_REQUESTS.invalidate(conn, key=key)
 
 
 async def delete(thread_id: str) -> bool:
