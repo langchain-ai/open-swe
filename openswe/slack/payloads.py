@@ -458,6 +458,7 @@ class SlackChannelContext(SlackPayload):
     is_pending_ext_shared: bool | None = None
     is_im: bool | None = None
     is_mpim: bool | None = None
+    is_private: bool | None = None
     lookup_retry_after: int | None = Field(default=None, exclude=True)
 
     def dump(self) -> JsonObject:
@@ -581,4 +582,5 @@ class SlackChannelPayload(SlackPayload):
             is_pending_ext_shared=self.is_pending_ext_shared,
             is_im=self.is_im,
             is_mpim=self.is_mpim,
+            is_private=self.is_private,
         )

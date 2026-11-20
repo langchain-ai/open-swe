@@ -46,6 +46,7 @@ from runtime_api.operations import CHECK_SHELL, ShellCheck
 from rt.auto_review import PATH_ARGUMENTS
 from rt.backend import OpenSweBackend, RunLocal
 from rt.git_evidence import OBSERVED_TOOLS, turn_git
+from rt.memory_policy import MemoryPolicy
 from rt.middleware import reported
 from rt.prompts import prompt
 from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
@@ -227,6 +228,8 @@ class FileToolsMiddleware(AgentMiddleware):
                     ),
                 ),
             )
+        # Any call may reach memory, a search from ``/`` included, so each meets its policy.
+        run = partial(self._in_memory, handler=run)
         # The transcript records a call the guards refuse, with their reason, as any other.
         return await reported(
             self._backend,
@@ -350,6 +353,16 @@ class FileToolsMiddleware(AgentMiddleware):
                 status="error",
             )
         return await _invoked(self._skill_tool(request, tool), request)
+
+    async def _in_memory(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
+        """``handler``'s call, unless the memory policy refuses it."""
+        call_ = request.tool_call
+        policy = MemoryPolicy(self._backend.run.catalog.memory)
+        if (refusal := policy.refusal(call_["name"], call_["args"])) is None:
+            return await handler(request)
+        return ToolMessage(
+            content=refusal, tool_call_id=call_["id"] or "", name=call_["name"], status="error"
+        )
 
     async def _run_own(self, request: ToolCallRequest) -> ToolMessage | Command:
         """A code mode call, run by the tool the model's own call of it runs."""

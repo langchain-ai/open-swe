@@ -1,0 +1,10 @@
+{% if kind == "outsiders" %}
+{{ path }} isn't available here: people outside the company may see this conversation, so memory isn't used.
+{% elif kind == "delete" %}
+Nothing was deleted: memory files are never deleted. Edit {{ path }} instead.
+{% elif kind == "public" %}
+Nothing was saved to {{ path }}: Robin's memory is only saved from a public channel.
+You can still save the sender's own memory under /memories/user/.
+{% else %}
+Nothing was saved to {{ path }}: memory is saved under /memories/user/ or /memories/agent/.
+{% endif %}

@@ -93,6 +93,7 @@ from runtime_api.catalog import (
     FilesSpec,
     InboxSpec,
     LoopRules,
+    MemoryScope,
     ModelSpec,
     RunModels,
     SandboxCreate,
@@ -2404,7 +2405,10 @@ async def test_memory_files_stay_in_mda_without_a_sandbox(
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
     backend = _run_backend(
-        catalog=Catalog(files=FilesSpec(backend_paths=["/memories/"], checks=["agents_md"]))
+        catalog=Catalog(
+            files=FilesSpec(backend_paths=["/memories/"], checks=["agents_md"]),
+            memory=MemoryScope(),
+        )
     )
     monkeypatch.setattr(backend.outbox, "started", MagicMock())
     monkeypatch.setattr(backend.outbox, "finished", MagicMock())

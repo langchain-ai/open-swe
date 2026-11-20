@@ -31,6 +31,7 @@ from runtime_api.models import model_spec
 
 from openswe.agent_api.connections import operation_connections
 from openswe.agent_api.git_metadata import trace_actor
+from openswe.agent_api.memory_scope import RunMemoryScope
 from openswe.agent_api.operations import Injections
 from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.run_sandbox import RunSandbox
@@ -342,6 +343,7 @@ class RunCatalog:
                 },
                 "trace_tags": catalog.loop.trace_tags,
                 "sandbox": spec,
+                "memory": RunMemoryScope.for_run(self.config),
                 "operations": [
                     operation.model_copy(
                         update={

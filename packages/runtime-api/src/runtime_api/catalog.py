@@ -340,6 +340,20 @@ class BrowserSpec(BaseModel):
     session_domains: list[str] = []
 
 
+class MemoryScope(BaseModel):
+    """Where a run was asked from, which decides what memory it may use (``rt.memory_policy``)."""
+
+    # ``public``: a public Slack channel inside the company.
+    # ``other``: anywhere else inside the company, like a DM, private channel or group DM.
+    # ``external``: anywhere people outside the company may see, or that couldn't be confirmed.
+    thread: Literal["public", "other", "external"] = "other"
+
+    @property
+    def internal(self) -> bool:
+        """Whether only people in the company can see the run's conversation."""
+        return self.thread != "external"
+
+
 class Catalog(BaseModel):
     """The operations, subagents and models of the graph this run plays."""
 
@@ -387,6 +401,8 @@ class Catalog(BaseModel):
     # catalog leaves out from code, and how the model reads the search.
     search_tools: bool = False
     search_tools_description: str | None = None
+    # Where the run was asked from, for its memory; None uses no memory.
+    memory: MemoryScope | None = None
     # The digest the backend keeps every tool the run may call by, which the run reads
     # once per process to search and resolve them itself (``runtime_api.tool_search``);
     # None searches on the backend.
