@@ -23,6 +23,9 @@ from openswe.utils.startup_trace import apm_span
 logger = logging.getLogger(__name__)
 
 
+_APP_UNAVAILABLE = "Robin cannot reach this repository's GitHub App installation."
+
+
 @dataclass(frozen=True, slots=True)
 class DashboardReviewRequest:
     pr_ref: GitHubPrRef
@@ -46,7 +49,9 @@ class DashboardReviewRequest:
                     auto_merge=active.auto_merge,
                 )
             try:
-                result = await ExpeditedReviewNomination(pr, self.origin, self.token).start(
+                result = await ExpeditedReviewNomination(
+                    pr, self.origin, self.token, read_as_app=True
+                ).start(
                     active.slack_channel_id,
                     active.slack_thread_ts,
                     inline_summary=inline_summary,
@@ -54,6 +59,8 @@ class DashboardReviewRequest:
                 )
             except ExpeditedReviewIneligible as exc:
                 return RequestResult(success=False, error=str(exc))
+            except GitHubAppUnavailable:
+                return RequestResult(success=False, error=_APP_UNAVAILABLE)
             if not result["success"]:
                 return RequestResult(success=False, error=str(result["error"]))
             approval = await HumanReviewRequest.get(UUID(str(result["approval_id"])))
@@ -87,7 +94,7 @@ class DashboardReviewRequest:
                         with apm_span("human_review.expedited", span_tags):
                             try:
                                 result = await ExpeditedReviewNomination(
-                                    pr, self.origin, self.token
+                                    pr, self.origin, self.token, read_as_app=True
                                 ).start(
                                     target.id,
                                     inline_summary=inline_summary,
@@ -121,10 +128,7 @@ class DashboardReviewRequest:
                                 ),
                             )
             except GitHubAppUnavailable:
-                return RequestResult(
-                    success=False,
-                    error="Robin cannot reach this repository's GitHub App installation.",
-                )
+                return RequestResult(success=False, error=_APP_UNAVAILABLE)
         with apm_span("human_review.standard", span_tags):
             return await request_review(
                 pr, self.origin, channel=channel, inline_summary=inline_summary

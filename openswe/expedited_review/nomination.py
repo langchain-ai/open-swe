@@ -54,6 +54,10 @@ class ExpeditedReviewNomination:
     pr_ref: GitHubPrRef
     origin: Origin
     token: str
+    # Read GitHub as the App rather than with ``token``: for callers that already checked
+    # the requester can read the repository, so a token their own dashboard tabs pushed
+    # over GitHub's secondary rate limit can't hold the request up for a minute.
+    read_as_app: bool = False
 
     def failure(self, error: str) -> JsonObject:
         return {"success": False, "error": error}
@@ -232,7 +236,11 @@ class ExpeditedReviewNomination:
         coverage: tuple[ApprovalCondition | None, list[ExcludedHunk]] | None = None
         author_registered = False
         span_tags = {"pull_request.url": pr_ref.url}
-        async with GitHubClient.connect(token=token) as github:
+        async with (
+            GitHubClient.as_app(self.pr_ref.owner, self.pr_ref.repo)
+            if self.read_as_app
+            else GitHubClient.connect(token=self.token)
+        ) as github:
             pull = github.repo(pr_ref.owner, pr_ref.repo).pull_request(pr_ref.number)
             with apm_span("expedited_review.read_pull_request", span_tags):
                 pr, files = await asyncio.gather(

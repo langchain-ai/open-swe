@@ -188,8 +188,7 @@ async def test_dashboard_selects_review_workflow(
         return [ChangedFile(filename="app.py", additions=30 if case == "large" else 1, patch="+x")]
 
     target = SlackChannel(id="C1", name="reviews")
-    github = GitHubClient.connect(token="token")
-    app_github = GitHubClient.connect(token="token")
+    client = GitHubClient.connect
     for method in ("broadcast_configured", "remove_superseded"):
         monkeypatch.setattr(ReviewCard, method, AsyncMock())
     monkeypatch.setattr(ReviewCard, "prompt_author_ready", AsyncMock(return_value=""))
@@ -211,8 +210,10 @@ async def test_dashboard_selects_review_workflow(
             "active_for",
             AsyncMock(return_value=approval if case.startswith("active") else None),
         ),
-        patch.object(GitHubClient, "connect", return_value=github),
-        patch.object(GitHubClient, "as_app", return_value=app_github),
+        patch.object(
+            GitHubClient, "connect", side_effect=lambda **_: client(token="token")
+        ) as as_requester,
+        patch.object(GitHubClient, "as_app", side_effect=lambda *_, **__: client(token="token")),
         patch(
             "openswe.human_review.dashboard.review_blockers",
             AsyncMock(return_value=["it is a draft"] if case == "draft" else []),
@@ -277,6 +278,9 @@ async def test_dashboard_selects_review_workflow(
         result = await DashboardReviewRequest(pr_ref, Origin(requester=requester), "token").request(
             channel="C1", inline_summary="Custom summary." if case == "custom_summary" else None
         )
+    # Never the requester's own token: their dashboard tabs may have pushed it over
+    # GitHub's secondary rate limit, which would hold the request up for a minute.
+    as_requester.assert_not_called()
     if case == "active_post_failed":
         assert not result.success
         assert "post_failed" in result.error
