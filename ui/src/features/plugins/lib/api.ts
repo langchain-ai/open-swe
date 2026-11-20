@@ -673,7 +673,8 @@ export const pluginsApi = {
   },
   searchPulls: async (
     id: string,
-    role: PullRequestRole
+    role: PullRequestRole,
+    page?: number
   ): Promise<PullRequestSearch> => {
     const found = await agentsRequest<{
       pulls: Array<{
@@ -687,7 +688,8 @@ export const pluginsApi = {
         updated_at: string | null
       }>
       incomplete: boolean
-    }>(`${plugin(id)}/github/pulls${query({ role })}`)
+      next_page: number | null
+    }>(`${plugin(id)}/github/pulls${query({ role, page })}`)
     return {
       pulls: found.pulls.map((pull) => ({
         repository: pull.repository,
@@ -700,6 +702,7 @@ export const pluginsApi = {
         updatedAt: pull.updated_at,
       })),
       incomplete: found.incomplete,
+      nextPage: found.next_page ?? null,
     }
   },
   openPull: async (

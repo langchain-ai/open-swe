@@ -8,7 +8,7 @@ Always record one with `record_app_review_outcome`:
   The diff changes nothing visible, or the changed frontend has no preview, or the review guidelines name no base for it.
 - `blocked`: something fixable.
   The preview is deploying, failed or doesn't serve the head commit, a sign-in failed, or the guidelines name no base at all.
-  When no preview is up yet, as on a pull request that just opened, say only that the preview isn't deployed yet.
+  When no preview is up yet, as on a just-opened pull request, say only that it isn't deployed yet.
 - `failed`: a capture or save error.
 - `complete`: only after saving at least one matched pair.
 
@@ -31,6 +31,8 @@ Always record one with `record_app_review_outcome`:
    Judge only what the diff changes.
 1. **Shoot.**
    For up to ten changed pages or states, reach the same state on both sides at one viewport, such as 1440×900, and run `return await shoot('<id>-before')` (`-after` on the preview) to save `/workspace/design-qa/<id>-before.png`, never a full page.
+   Shoot each dark too (`<id>-before-dark`, `-after-dark`) via `page.emulateMedia({ colorScheme: 'dark' })` or else the app's theme toggle, then switch back.
+   Skip dark if a side lacks it, noting so in `layout_warnings`.
 1. **Record.**
    For up to three states whose motion matters (a popover, menu or dialog opening, a hover, a transition), `browser_record` `start` with `path` `/workspace/design-qa/<id>-before.mp4` (`-after` on the preview), interact, wait a second, `stop`; under 20 seconds, no passwords.
 1. **Compare** each pair with `read_file`, ignoring timing differences.
@@ -45,7 +47,8 @@ Always record one with `record_app_review_outcome`:
   "video_status": "recorded",
   "design_system": {"sources": ["DESIGN.md", "macaw-design skill"],
    "findings": [{"severity": "error", "title": "Hand-rolled dropdown", "body": "A div with raw colors.", "rule": "Macaw · Select", "location": "src/Members.tsx:42", "scenario": "settings"}]},
-  "scenarios": [{"id": "settings", "title": "Settings page", "path": "/settings", "before_url": "settings-before.png", "after_url": "settings-after.png", "width": 1440, "height": 900,
+  "scenarios": [{"id": "settings", "title": "Settings page", "path": "/settings", "before_url": "settings-before.png", "after_url": "settings-after.png",
+   "before_dark_url": "settings-before-dark.png", "after_dark_url": "settings-after-dark.png", "width": 1440, "height": 900,
    "actions": ["Open the account menu"], "before_video_url": "settings-before.mp4", "after_video_url": "settings-after.mp4",
    "annotations": [{"x": 120, "y": 64, "width": 300, "height": 40, "title": "Label clipped", "body": "Cut off at this width.", "severity": "error"}]}]}}
 ```
@@ -55,7 +58,7 @@ Always record one with `record_app_review_outcome`:
 - `findings`, worst first: `error` breaks a written rule or looks broken, such as a hand-rolled component, raw or off-scale value, missing focus, poor contrast, clipping or a broken theme; `warning` is only inconsistent.
   `rule` cites the design system, `location` is the diff's `file:line`, and `scenario` is an `id`.
   Empty `sources` means the repository has no design system, so check against the surrounding UI.
-- `annotations`: at most three areas of the after screenshot, with `severity` `error`, `warning` or `info`.
+- `annotations`: at most three areas of the light after screenshot, with `severity` `error`, `warning` or `info`.
 - `path` is the real browser path and query; for a modal, the parent route with the steps in `actions`.
 - `auth_mode` is `dummy` if you signed in; names use letters, digits, `.`, `_`, `-`; ids are unique; `width` and `height` are the viewport; add `layout_warnings` when the sides can't match.
 

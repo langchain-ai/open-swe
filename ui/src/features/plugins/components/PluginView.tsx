@@ -105,6 +105,22 @@ export function PluginView({
           if (onScreen())
             void navigate({ to: "/agents/$threadId", params: { threadId } })
         }}
+        openReview={(repository, number) => {
+          if (!onScreen()) return
+          const [owner = "", repo = ""] = repository.split("/")
+          const params = { owner, repo, number: String(number) }
+          if (window.openSweDesktop)
+            void navigate({
+              to: "/agents/reviews/$owner/$repo/$number",
+              params,
+            })
+          else
+            window.open(
+              `${import.meta.env.BASE_URL.replace(/\/$/, "")}/agents/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}`,
+              "_blank",
+              "noopener,noreferrer"
+            )
+        }}
         setTitle={setTitle}
         visible={onScreen}
         confirmLink={async (url) =>

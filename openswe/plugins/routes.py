@@ -994,6 +994,8 @@ class PullRequestSearch(BaseModel):
     incomplete: bool
     """Whether some are missing because GitHub's search timed out or a later page failed.
     Its search never lists more than its first 1000 results."""
+    next_page: int | None = None
+    """The page to ask for next, when one page was asked for and GitHub has more."""
 
 
 class PullRequestBody(BaseModel):
@@ -1165,21 +1167,28 @@ async def api_plugin_commit(
 
 @router.get("/{installation_id}/github/pulls")
 async def api_plugin_search_pulls(
-    plugin: PluginDep, role: Literal["review-requested", "author"]
+    plugin: PluginDep,
+    role: Literal["review-requested", "author"],
+    page: Annotated[int | None, Query(ge=1)] = None,
 ) -> PullRequestSearch:
-    """Open pull requests in the repositories the person shared and can read, by their role."""
+    """Open pull requests in the repositories the person shared and can read, by their role.
+
+    Without ``page`` every page of GitHub's search; with it only that page, and the next
+    one's number while GitHub has more, so a caller can show the first page at once.
+    """
     with _as_http():
         plugin.require(PluginPermission.GITHUB_READ, PluginPermission.GITHUB_WRITE)
         readable = await plugin.readable_repositories()
         if not readable:
             return PullRequestSearch(pulls=[], incomplete=False)
         pulls: list[OpenPullRequest] = []
-        page: int | None = 1
+        first = page or 1
+        current: int | None = first
         incomplete = False
         async with GitHubClient.as_user(plugin.user.github_login) as github:
             # GitHub's review-requested qualifier includes requests to the person's teams,
             # which often run past a page.
-            while page is not None and not incomplete:
+            while current is not None and not incomplete:
                 try:
                     found = await list_open_pull_requests(
                         github,
@@ -1187,19 +1196,23 @@ async def api_plugin_search_pulls(
                         ",".join(readable),
                         scope="mine" if role == "author" else "review-requested",
                         lightweight=True,
-                        page=page,
+                        page=current,
                     )
                 except HTTPException:
-                    if page == 1:
+                    if current == first:
                         raise
                     # A later page failing, as past GitHub's search rate limit, keeps the rest.
                     logger.warning("A later page of a plugin's PR search failed", exc_info=True)
                     incomplete = True
                     break
                 pulls += found.pull_requests
-                page, incomplete = found.next_page, found.incomplete
+                current, incomplete = found.next_page, found.incomplete
+                if page is not None:
+                    break
     return PullRequestSearch(
-        pulls=[PullRequestSummary.of(pull) for pull in pulls], incomplete=incomplete
+        pulls=[PullRequestSummary.of(pull) for pull in pulls],
+        incomplete=incomplete,
+        next_page=current if page is not None and not incomplete else None,
     )
 
 

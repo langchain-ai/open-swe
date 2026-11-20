@@ -80,6 +80,9 @@ export interface FrontendScenario {
   /** The `*_url` fields name attachments of the capture's document. */
   before_url: string | null
   after_url: string | null
+  /** The same state in dark mode; null when the site has none. */
+  before_dark_url: string | null
+  after_dark_url: string | null
   before_video_url: string | null
   after_video_url: string | null
   width: number | null
@@ -95,6 +98,16 @@ export interface FrontendScenario {
   after_error: string | null
   layout_warnings: string[]
   error: string | null
+}
+
+/** The color scheme a scenario's screenshots were taken in. */
+export type ShotTheme = "light" | "dark"
+
+/** A scenario's base and PR screenshots in one theme. */
+export interface ScenarioShots {
+  before: string | null
+  after: string | null
+  theme: ShotTheme
 }
 
 export interface FrontendReport {
@@ -282,6 +295,26 @@ export class StoredCapture {
     }
   }
 
+  /** Whether `scenario` was also shot in dark mode on both sides. */
+  static hasDark(scenario: FrontendScenario): boolean {
+    return scenario.before_dark_url !== null && scenario.after_dark_url !== null
+  }
+
+  /** `scenario`'s screenshots in `theme`, or its light ones when it has no dark pair. */
+  static shots(scenario: FrontendScenario, theme: ShotTheme): ScenarioShots {
+    return theme === "dark" && StoredCapture.hasDark(scenario)
+      ? {
+          before: scenario.before_dark_url,
+          after: scenario.after_dark_url,
+          theme,
+        }
+      : {
+          before: scenario.before_url,
+          after: scenario.after_url,
+          theme: "light",
+        }
+  }
+
   /** When a UUIDv7 id was made, from its first 48 bits; null for any other id. */
   static createdAt(id: string): string | null {
     const hex = id.replaceAll("-", "")
@@ -339,6 +372,8 @@ export class StoredCapture {
       ),
       before_url: found.text("before_url"),
       after_url: found.text("after_url"),
+      before_dark_url: found.text("before_dark_url"),
+      after_dark_url: found.text("after_dark_url"),
       before_video_url: found.text("before_video_url"),
       after_video_url: found.text("after_video_url"),
       width: found.count("width"),

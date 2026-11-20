@@ -201,6 +201,11 @@ export interface PullRequestSearch {
   pulls: PullRequestSummary[]
   /** Whether some are missing because GitHub's search timed out or a later page failed; it lists at most 1000. */
   incomplete: boolean
+  /**
+   * The page to search next, when one `page` was asked for and GitHub has
+   * more; `null` (or absent, from an older web UI) when this is the last.
+   */
+  nextPage?: number | null
 }
 
 /**
@@ -509,7 +514,18 @@ export interface HostApi extends RpcTarget {
   openThread(threadId: string): Promise<void>
   /** Opens a web link in a new tab; outside github.com, only once the person agrees. */
   openExternal(url: string): Promise<void>
+  /**
+   * Opens Robin's review page of pull request `number` in `repository`, one the
+   * person shared: in a new tab, or in the desktop app's window.
+   */
+  openReview(repository: string, number: number): Promise<void>
   toast(toast: Toast): Promise<void>
+  /**
+   * Counts that the person did `action` in the plugin, in Robin's product
+   * analytics beside the plugin's name: lowercase letters, digits and `_`, at
+   * most 40. Nothing else about it is sent.
+   */
+  track(action: string): Promise<void>
   /** Shows `title` beside the plugin's name above its frame and names the browser tab "<title> · Open SWE"; `null` clears it. */
   setTitle(title: string | null): Promise<void>
   /** The app's newest release when the person runs an older one; `null` when they're up to date. */
@@ -538,9 +554,10 @@ export interface HostApi extends RpcTarget {
   github(repository: string): Promise<GitHubRepositoryApi>
   /**
    * Open pull requests in every repository the person shared and can still
-   * read, by the person's part in them, newest activity first.
+   * read, by the person's part in them, newest activity first: every page of
+   * GitHub's search, or only `page` (1 to 10) of it.
    */
-  searchPulls(role: PullRequestRole): Promise<PullRequestSearch>
+  searchPulls(role: PullRequestRole, page?: number): Promise<PullRequestSearch>
   /**
    * Agent threads from `options.source` the person may read, most recently
    * updated first. These and the other thread calls need `threads:read`.

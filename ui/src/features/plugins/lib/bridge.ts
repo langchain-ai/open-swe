@@ -122,7 +122,11 @@ export interface BridgeHost {
   subscribe: (listener: (event: HostEvent) => void) => () => void
   navigate: (path: string, replace: boolean) => void
   openThread: (threadId: string) => void
+  /** Opens Robin's review page of a pull request in a shared repository. */
+  openReview: (repository: string, number: number) => void
   toast: (toast: Toast) => void
+  /** Counts an action the person took in the plugin. */
+  track: (action: string) => void
   /** The page's title, before " · Open SWE"; `null` is the plugin's name. */
   setTitle: (title: string | null) => void
   /** The app's newest release when it's newer than the one running; `null` otherwise. */
@@ -275,6 +279,7 @@ function pathName(
 
 const COLLECTION = /^[a-z][a-z0-9_-]{0,63}$/
 const DOCUMENT_KEY = /^[A-Za-z0-9._:@/-]{1,200}$/
+const APP_ACTION = /^[a-z][a-z0-9_]{0,39}$/
 const FIELD_PATH = /^[A-Za-z0-9_-]{1,64}(\.[A-Za-z0-9_-]{1,64}){0,7}$/
 
 function cursor(value: unknown, name: string): CursorWire | undefined {
@@ -744,6 +749,21 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     )
   }
 
+  openReview(repository: string, number: number): Promise<void> {
+    return this.#budget.run(() => {
+      const host = this.#host()
+      const name = text(repository, "repository", 200).toLowerCase()
+      if (!host.plugin.repositories.some((one) => one.toLowerCase() === name))
+        throw new BridgeRequestError(
+          `${name} is not shared with the plugin`,
+          403
+        )
+      if (!Number.isInteger(number) || number < 1 || number > 2 ** 31 - 1)
+        invalid("number must be a pull request number")
+      host.openReview(name, number)
+    })
+  }
+
   openExternal(link: string): Promise<void> {
     return this.#budget.run(async () => {
       const url = webUrl(link).toString()
@@ -764,6 +784,14 @@ export class PluginHostApi extends RpcTarget implements HostApi {
             ? intent
             : undefined,
       })
+    })
+  }
+
+  track(action: string): Promise<void> {
+    return this.#budget.run(() => {
+      if (typeof action !== "string" || !APP_ACTION.test(action))
+        invalid("action must be lowercase letters, digits and _, at most 40")
+      this.#host().track(action)
     })
   }
 
@@ -859,10 +887,22 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     )
   }
 
-  searchPulls(role: PullRequestRole): Promise<PullRequestSearch> {
-    return this.#budget.run(() =>
-      pluginsApi.searchPulls(this.#host().plugin.id, pullRole(role))
-    )
+  searchPulls(
+    role: PullRequestRole,
+    page?: number
+  ): Promise<PullRequestSearch> {
+    return this.#budget.run(() => {
+      if (
+        page !== undefined &&
+        (!Number.isInteger(page) || page < 1 || page > 10)
+      )
+        invalid("page must be an integer from 1 to 10")
+      return pluginsApi.searchPulls(
+        this.#host().plugin.id,
+        pullRole(role),
+        page
+      )
+    })
   }
 
   listThreads(options: ThreadListOptions): Promise<ThreadPage> {

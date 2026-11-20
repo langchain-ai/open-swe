@@ -210,6 +210,9 @@ Other navigation:
 
 - `host.nav.openThread(threadId)` opens an agent thread in the web UI.
 - `host.nav.openExternal(url)` opens a web link in a new tab. github.com links open directly; anything else opens only after the person confirms it.
+- `host.nav.openReview(repository, number)` opens Robin's review page of a pull request in a repository the person shared, in a new tab, or in the desktop app's window.
+- `host.analytics.track(action)` counts that the person did `action` (lowercase letters, digits and `_`, at most 40) in Robin's product analytics, beside your plugin's name; nothing else about it is sent.
+  The web UI also counts each time your plugin's page comes on screen.
 - `host.ui.toast({ title, description, intent })` shows a web UI toast (`intent` is `success`, `error` or `info`), its title led by your plugin's name.
 - `host.ui.setTitle(title)` shows `title` beside the plugin's name in the bar above it, and names the browser tab "title · Open SWE".
   Up to 120 characters; `null` clears it, and the tab goes back to the plugin's name.
@@ -421,6 +424,12 @@ const { pulls, incomplete } = await host.pulls.search({ role: "review-requested"
 
 `review-requested` includes requests to the person's teams.
 `incomplete` says some are missing because GitHub's search timed out or a later page failed; its search lists at most 1000.
+Reading every page can take a few seconds per hundred pull requests, so to show the first ones sooner, ask for one `page` (1 to 10) at a time and follow `nextPage` until it is `null`:
+
+```ts
+const first = await host.pulls.search({ role: "author", page: 1 })
+// first.nextPage: 2 while GitHub has more, else null
+```
 
 A commit carries at most 100 files and 100 deletions.
 `openPull` also takes `body` and `draft`.

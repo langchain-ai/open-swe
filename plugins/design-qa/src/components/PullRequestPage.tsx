@@ -9,7 +9,11 @@ import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOu
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { useEffect, useState, type MouseEvent } from "react"
 
-import type { FrontendReviewRun, FrontendScenario } from "../lib/capture"
+import type {
+  FrontendReviewRun,
+  FrontendScenario,
+  ShotTheme,
+} from "../lib/capture"
 import {
   chatName,
   clip,
@@ -33,10 +37,12 @@ import {
   useTitle,
 } from "../lib/queries"
 import { useRouter } from "../lib/router"
+import { Usage } from "../lib/usage"
 import { ReportView } from "./ReportView"
 import { Author } from "./Author"
 import { CaptureAction } from "./CaptureAction"
 import { PinButton } from "./PinButton"
+import { RobinIcon } from "./RobinIcon"
 import { ShareRepositories } from "./ShareRepositories"
 import { UpdateBanner } from "./UpdateBanner"
 
@@ -54,28 +60,45 @@ export function PullRequestPage({
   useTitle(clip(label, MAX_LABEL))
   const runs = useRuns(pr)
   useCaptureChanges(pr)
+  useEffect(() => Usage.record(host, "pull_opened"), [host])
   const current = runs.data?.pull
   const selectedId = runId ?? runs.data?.runs[0]?.id
   const detail = useRun(pr, selectedId)
   const run = detail.data
   // The scenario last asked about, kept in the shared context until the person
   // asks about another or opens another run.
-  const [asked, setAsked] = useState<{ run: string; scenario: string } | null>(
-    null
-  )
+  const [asked, setAsked] = useState<{
+    run: string
+    scenario: string
+    theme: ShotTheme
+  } | null>(null)
   const askedScenario =
     run && asked?.run === run.id
       ? run.report?.scenarios.find(({ id }) => id === asked.scenario)
       : undefined
-  usePullRequestChat(pr, run, current, askedScenario)
+  usePullRequestChat(pr, run, current, askedScenario, asked?.theme ?? "light")
   const author = current?.author ?? null
   const people = usePeople([author])
   const empty = runs.isSuccess && !selectedId
   const title = current?.title ?? `Pull request #${pr.number}`
   const github = pullRequestUrl(pr)
   const openGitHub = (event: MouseEvent) => {
+    if (event.type === "auxclick" && event.button !== 1) return
     event.preventDefault()
+    Usage.record(host, "github_opened")
     void host.nav.openExternal(github)
+  }
+  const openReview = () => {
+    Usage.record(host, "robin_view_opened")
+    return host.nav
+      .openReview(repositoryOf(pr), pr.number)
+      .catch((error: unknown) =>
+        host.ui.toast({
+          title: "Could not open Robin's PR view",
+          description: errorMessage(error),
+          intent: "error",
+        })
+      )
   }
   const options = (runs.data?.runs ?? []).map(runOption)
   if (run && !options.some((option) => option.value === run.id))
@@ -115,23 +138,44 @@ export function PullRequestPage({
             <h1 className="text-xl font-semibold tracking-tight text-primary">
               <a
                 href={github}
+                target="_blank"
+                rel="noreferrer"
                 title="Open on GitHub"
                 className="rounded-sm underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
                 onClick={openGitHub}
+                onAuxClick={openGitHub}
               >
                 {title}
               </a>
             </h1>
           </div>
-          <div className="flex items-center gap-space-3">
+          <div className="flex flex-wrap items-center gap-space-3">
             <PinButton pr={pr} title={title} />
             <Link
+              as={
+                <button
+                  type="button"
+                  className="rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                />
+              }
+              variant="sm"
+              leftDecorator={RobinIcon}
+              rightDecorator={ArrowSquareOutIcon}
+              aria-label="Open Robin PR view in a new tab"
+              onClick={() => void openReview()}
+            >
+              Robin PR view
+            </Link>
+            <Link
               href={github}
+              target="_blank"
+              rel="noreferrer"
               variant="sm"
               leftDecorator={GithubLogoIcon}
               rightDecorator={ArrowSquareOutIcon}
-              aria-label="Open on GitHub"
+              aria-label="Open on GitHub in a new tab"
               onClick={openGitHub}
+              onAuxClick={openGitHub}
             >
               GitHub
             </Link>
@@ -192,8 +236,12 @@ export function PullRequestPage({
               pr={pr}
               run={run}
               currentHeadSha={current?.headSha}
-              onAsk={(scenario) =>
-                setAsked({ run: run.id, scenario: scenario.id })
+              onAsk={(scenario, shots) =>
+                setAsked({
+                  run: run.id,
+                  scenario: scenario.id,
+                  theme: shots.theme,
+                })
               }
             />
           )}
@@ -217,20 +265,23 @@ function usePullRequestChat(
   pr: PullRequestRef,
   run: FrontendReviewRun | undefined,
   current: PullRequest | null | undefined,
-  asked: FrontendScenario | undefined
+  asked: FrontendScenario | undefined,
+  theme: ShotTheme
 ) {
   const host = usePluginHost()
   const name = chatName(pr)
   const repository = repositoryOf(pr)
   const known = { title: current?.title, headSha: current?.headSha }
   const label = clip(
-    asked ? `${pullRequestLabel(pr)} · ${asked.title}` : pullRequestLabel(pr),
+    asked
+      ? `${pullRequestLabel(pr)} · ${asked.title}${theme === "dark" ? " · Dark" : ""}`
+      : pullRequestLabel(pr),
     MAX_LABEL
   )
   const context = run
     ? JSON.stringify(
         asked
-          ? scenarioContext(pr, run, asked, known)
+          ? scenarioContext(pr, run, asked, known, theme)
           : pullRequestContext(pr, run, known)
       )
     : null

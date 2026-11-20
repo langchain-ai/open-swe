@@ -364,6 +364,11 @@ describe("product analytics", () => {
       "private event name",
       { prompt: "private prompt" },
     ])
+    analytics.track("apps_app_opened", { app: "design-qa" })
+    analytics.track("apps_app_action", {
+      app: "design-qa",
+      action: "private app text",
+    })
     await vi.advanceTimersByTimeAsync(6000)
     const serialized = JSON.stringify(network.requests)
     expect(network.requests).toHaveLength(1)
@@ -382,8 +387,11 @@ describe("product analytics", () => {
       "private filename",
       "private mode",
       "private event name",
+      "private app text",
     ])
       expect(serialized).not.toContain(forbidden)
+    expect(serialized).toContain('"event":"apps_app_opened"')
+    expect(serialized).toContain('"app":"design-qa"')
     expect(serialized).toContain('"path":"/agents/:id"')
     expect(serialized).toContain('"ip":"0.0.0.0"')
     expect(serialized).toContain('"product":"open-swe"')

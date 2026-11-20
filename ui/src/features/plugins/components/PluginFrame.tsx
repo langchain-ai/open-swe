@@ -40,6 +40,7 @@ import {
   PLUGIN_SANDBOX,
   pluginShell,
 } from "@/features/plugins/lib/shell"
+import { productAnalytics } from "@/lib/analytics"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { useIsInBaseOrg, useSession } from "@/lib/session"
 import { useResolvedTheme } from "@/lib/theme"
@@ -67,6 +68,7 @@ export function PluginFrame({
   path,
   navigate,
   openThread,
+  openReview,
   setTitle,
   visible,
   confirmLink,
@@ -83,6 +85,7 @@ export function PluginFrame({
   path: string
   navigate: (path: string, replace: boolean) => void
   openThread: (threadId: string) => void
+  openReview: (repository: string, number: number) => void
   setTitle: (title: string | null) => void
   /** Whether the frame is on screen; a hidden one shows no toasts. */
   visible: () => boolean
@@ -159,6 +162,7 @@ export function PluginFrame({
       navigate(next, replace)
     },
     openThread,
+    openReview,
     setTitle,
     toast: ({ title, description, intent }) => {
       if (!visible()) return
@@ -171,6 +175,8 @@ export function PluginFrame({
       // Named for the plugin, so it cannot pass for the web UI's own.
       show(`${plugin.manifest.displayName}: ${title}`, { description })
     },
+    track: (action) =>
+      productAnalytics.track("apps_app_action", { app: plugin.name, action }),
     confirmLink,
     pickRepositories,
     newerRelease,

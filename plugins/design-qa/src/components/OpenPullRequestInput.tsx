@@ -38,16 +38,14 @@ export function OpenPullRequestInput({
     >
       <div className="flex items-start gap-space-2">
         <Input
-          size="md"
+          size="sm"
           className="min-w-0 flex-1"
           debounceMs={0}
           aria-label="Open Design QA for a pull request"
           isError={invalid}
           aria-describedby={invalid ? hintId : undefined}
           placeholder={
-            numbers
-              ? "PR number, owner/repo#123, or GitHub link"
-              : "owner/repo#123 or GitHub link"
+            numbers ? "PR number or link" : "owner/repo#123 or PR link"
           }
           value={value}
           onChange={(next) => {
@@ -55,7 +53,7 @@ export function OpenPullRequestInput({
             setInvalid(false)
           }}
         />
-        <Button size="md" type="submit">
+        <Button size="sm" type="submit">
           Open PR
         </Button>
       </div>

@@ -46,6 +46,8 @@ const FEATURES = [
   "findings",
 ] as const
 export type ProductFeature = (typeof FEATURES)[number]
+/** An app's name, or an action an app names: a lowercase token, never free text. */
+const APP_TOKEN = /^[a-z][a-z0-9_-]{0,63}$/
 type ActionResult = "accepted" | "failed"
 type FailureKind =
   | "none"
@@ -79,6 +81,10 @@ type ProductEvents = {
     end_reason: "death" | "quit" | "cap"
   }
   trace_flight_submit_rejected: { reason: string }
+  /** An app's page came on screen, by the app's name. */
+  apps_app_opened: { app: string }
+  /** Something the person did in an app, as the app names it. */
+  apps_app_action: { app: string; action: string }
 }
 
 type SegmentClient = Pick<
@@ -261,6 +267,8 @@ export class ProductAnalytics {
         "trace_flight_opened",
         "trace_flight_run_finished",
         "trace_flight_submit_rejected",
+        "apps_app_opened",
+        "apps_app_action",
       ].includes(name)
     )
       return
@@ -443,6 +451,12 @@ export class ProductAnalytics {
         ].includes(value)
       )
     }
+    if (name === "apps_app_opened" || name === "apps_app_action")
+      return (
+        (key === "app" || (key === "action" && name === "apps_app_action")) &&
+        typeof value === "string" &&
+        APP_TOKEN.test(value)
+      )
     if (name === "agents_thread_created")
       return key === "has_attachments" && typeof value === "boolean"
     if (name === "agents_message_submitted") {

@@ -5,11 +5,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
 import { repositoryOf, type PullRequestRef } from "../lib/pullRequest"
+import { Usage } from "../lib/usage"
 import {
   errorMessage,
   keys,
-  type Inbox,
   type PullRequestRuns,
+  type RepositoryCaptures,
 } from "../lib/queries"
 
 /**
@@ -46,16 +47,12 @@ export function CaptureAction({
       keys.runs(pr),
       (value) => value && { ...value, outcome: next }
     )
-    client.setQueriesData<Inbox>(
-      { queryKey: keys.inboxPages },
+    client.setQueryData<RepositoryCaptures>(
+      keys.repositoryCaptures(repository),
       (value) =>
         value && {
           ...value,
-          items: value.items.map((item) =>
-            item.repository === repository && item.pull.number === pr.number
-              ? { ...item, outcome: next }
-              : item
-          ),
+          outcomes: new Map(value.outcomes).set(pr.number, next),
         }
     )
   }
@@ -64,12 +61,14 @@ export function CaptureAction({
     onMutate: async () => {
       await Promise.all([
         client.cancelQueries({ queryKey: keys.runs(pr) }),
-        client.cancelQueries({ queryKey: ["inbox"] }),
+        client.cancelQueries({
+          queryKey: keys.repositoryCaptures(repository),
+        }),
       ])
       const previous = client.getQueryData<PullRequestRuns>(keys.runs(pr))
-      const inboxes = client.getQueriesData<Inbox>({
-        queryKey: keys.inboxPages,
-      })
+      const captures = client.getQueryData<RepositoryCaptures>(
+        keys.repositoryCaptures(repository)
+      )
       update({
         id: "requesting",
         head_sha: "",
@@ -77,14 +76,17 @@ export function CaptureAction({
         reason: "Requesting capture…",
         created_at: new Date().toISOString(),
       })
-      return { previous, inboxes }
+      return { previous, captures }
     },
     onSuccess: (result) => update(result),
     onError: (error, _variables, context) => {
       if (context?.previous)
         client.setQueryData(keys.runs(pr), context.previous)
-      for (const [key, value] of context?.inboxes ?? [])
-        client.setQueryData(key, value)
+      if (context?.captures)
+        client.setQueryData(
+          keys.repositoryCaptures(repository),
+          context.captures
+        )
       void host.ui.toast({
         title: "Could not request capture",
         description: errorMessage(error),
@@ -123,7 +125,10 @@ export function CaptureAction({
         variant="outlined"
         loading={capture.isPending}
         disabled={disabled || queued}
-        onClick={() => capture.mutate()}
+        onClick={() => {
+          Usage.record(host, "capture_requested")
+          capture.mutate()
+        }}
       >
         {queued
           ? "Capture queued"

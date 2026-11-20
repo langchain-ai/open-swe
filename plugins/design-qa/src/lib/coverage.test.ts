@@ -13,6 +13,8 @@ const scenario = (
   status: "complete",
   before_url: `${id}-before.png`,
   after_url: `${id}-after.png`,
+  before_dark_url: null,
+  after_dark_url: null,
   before_video_url: null,
   after_video_url: null,
   width: 100,

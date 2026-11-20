@@ -1,7 +1,8 @@
-import type { PluginHost, PullRequest } from "@openswe/plugin-sdk"
+import { HostError, type PluginHost } from "@openswe/plugin-sdk"
 import { describe, expect, it } from "vitest"
 
-import { DesignQa, keys as queryKeys } from "./queries"
+import { Limiter } from "./limiter"
+import { DesignQa } from "./queries"
 
 const REPOSITORY = "acme/web"
 
@@ -9,19 +10,9 @@ const REPOSITORY = "acme/web"
 const key = (pull: number, order: number) =>
   `pulls/${pull}/0190${String(order).padStart(4, "0")}-0000-7000-8000-000000000000`
 
-function host(keys: string[], searched: number[]): PluginHost {
-  const stored = [...keys].sort().map((name) => ({
-    key: name,
-    document: { status: "complete" },
-    updatedAt: null,
-  }))
+/** A host whose storage holds `documents` by collection, and refuses an empty prefix as the web UI does. */
+function host(documents: Record<string, Record<string, object>>): PluginHost {
   return {
-    pulls: {
-      search: async () => ({
-        pulls: searched.map((number) => ({ repository: REPOSITORY, number })),
-        incomplete: false,
-      }),
-    },
     storage: {
       collection: (collection: string) => ({
         query: async ({
@@ -29,80 +20,107 @@ function host(keys: string[], searched: number[]): PluginHost {
           startAfter,
           limit,
         }: {
-          prefix: string
+          prefix?: string
           startAfter?: string
           limit: number
-        }) =>
-          (collection === "captures" ? stored : [])
+        }) => {
+          if (prefix === "")
+            throw new Error("prefix must be a non-empty string")
+          return Object.entries(documents[collection] ?? {})
+            .sort(([a], [b]) => (a < b ? -1 : 1))
             .filter(
-              ({ key: name }) =>
-                name.startsWith(prefix) &&
+              ([name]) =>
+                name.startsWith(prefix ?? "") &&
                 (startAfter === undefined || name > startAfter)
             )
-            .slice(0, limit),
+            .slice(0, limit)
+            .map(([name, document]) => ({
+              key: name,
+              document,
+              updatedAt: null,
+            }))
+        },
       }),
     },
-    github: () => ({
-      pull: async (number: number) =>
-        ({ number, state: "open" }) as PullRequest,
-    }),
   } as unknown as PluginHost
 }
 
-describe("DesignQa.inbox", () => {
-  it("keeps uncaptured pull requests and selects the newest capture across pages", async () => {
+describe("DesignQa", () => {
+  it("selects each pull request's newest capture across pages", async () => {
     // Enough captures of other pull requests to fill more than one page.
-    const others = Array.from({ length: 600 }, (_, index) =>
-      key(1000 + index, 1)
+    const captures = Object.fromEntries(
+      [
+        key(7, 1),
+        key(7, 2),
+        key(9, 1),
+        ...Array.from({ length: 600 }, (_, index) => key(1000 + index, 1)),
+      ].map((name) => [name, { status: "complete" }])
     )
-    const qa = DesignQa.of(
-      host([key(7, 1), key(7, 2), key(9, 1), ...others], [7, 8, 9, 1599])
-    )
+    const qa = DesignQa.of(host({ captures }))
 
-    const search = await qa.search("review-requested")
-    const inbox = await qa.inbox(search.pulls)
+    const { runs } = await qa.repositoryCaptures(REPOSITORY)
 
-    expect(
-      inbox.items.map(({ pull, run }) => [pull.number, run?.id ?? null])
-    ).toEqual([
-      [7, key(7, 2).split("/")[2]],
-      [8, null],
-      [9, key(9, 1).split("/")[2]],
-      [1599, key(1599, 1).split("/")[2]],
-    ])
-    expect(inbox.incomplete).toBe(false)
+    expect(runs.get(7)?.id).toBe(key(7, 2).split("/")[2])
+    expect(runs.get(9)?.id).toBe(key(9, 1).split("/")[2])
+    expect(runs.get(1599)?.id).toBe(key(1599, 1).split("/")[2])
+    expect(runs.has(8)).toBe(false)
   })
-})
 
-it("reads captures and GitHub only for the pull requests of one page", async () => {
-  const read: string[] = []
-  const qa = DesignQa.of(host([key(7, 1), key(9, 1)], [7, 8, 9]))
-  const captures = (repository: string) => {
-    read.push(repository)
-    return qa.repositoryCaptures(repository)
-  }
-  const search = await qa.search("mine")
+  it("reads every pin without a key prefix", async () => {
+    const qa = DesignQa.of(
+      host({
+        pins: {
+          "acme/web/7": {
+            repository: "acme/web",
+            number: 7,
+            title: "Fix",
+            pinnedAt: "2026-11-19T10:00:00Z",
+          },
+        },
+      })
+    )
 
-  const inbox = await qa.inbox(search.pulls.slice(1), captures)
+    expect((await qa.pins()).map(({ number }) => number)).toEqual([7])
+  })
 
-  expect(inbox.items.map(({ pull }) => pull.number)).toEqual([8, 9])
-  expect(read).toEqual([REPOSITORY])
-})
+  it("reads hundreds of pull requests a few at a time, and lets a rate limit be retried", async () => {
+    let running = 0
+    let most = 0
+    const qa = DesignQa.of({
+      github: () => ({
+        pull: async (number: number) => {
+          running += 1
+          most = Math.max(most, running)
+          await new Promise((done) => setTimeout(done, 1))
+          running -= 1
+          if (number === 429) throw new HostError("Too many requests", 429)
+          if (number === 404) throw new HostError("Not found", 404)
+          return { number }
+        },
+      }),
+    } as unknown as PluginHost)
 
-it("keys an inbox page by when GitHub last updated each pull request", () => {
-  const pull = {
-    repository: REPOSITORY,
-    number: 7,
-    title: "Old",
-    url: "",
-    draft: false,
-    author: null,
-    createdAt: null,
-    updatedAt: "2026-11-18T10:00:00Z",
-  }
-  expect(queryKeys.inboxPage("mine", [pull])).not.toEqual(
-    queryKeys.inboxPage("mine", [
-      { ...pull, updatedAt: "2026-11-18T11:00:00Z" },
-    ])
-  )
+    const read = await Promise.all(
+      Array.from({ length: 300 }, (_, index) =>
+        qa.currentPull("acme/web", index + 1000)
+      )
+    )
+
+    expect(read.every((pull) => pull !== null)).toBe(true)
+    expect(most).toBeLessThanOrEqual(6)
+    await expect(qa.currentPull("acme/web", 429)).rejects.toThrow(HostError)
+    expect(await qa.currentPull("acme/web", 404)).toBeNull()
+  })
+
+  it("frees a limiter slot when a task throws before returning its promise", async () => {
+    const limiter = new Limiter(1)
+    const failing = () =>
+      limiter.run<number>(() => {
+        throw new Error("boom")
+      })
+
+    await expect(failing()).rejects.toThrow("boom")
+    await expect(failing()).rejects.toThrow("boom")
+    await expect(limiter.run(async () => 1)).resolves.toBe(1)
+  })
 })

@@ -546,6 +546,29 @@ async def test_a_plugins_search_reads_past_githubs_first_page(monkeypatch, last_
 
     assert [pull.number for pull in found.pulls] == ([1, 2, 3] if last_page == "read" else [1, 2])
     assert found.incomplete is (last_page != "read")
+    assert found.next_page is None
+
+
+async def test_a_plugins_search_reads_one_page_when_asked(monkeypatch):
+    listing = AsyncMock(
+        return_value=prs.OpenPullRequests(
+            pull_requests=[prs.OpenPullRequest(repo="acme/app", number=2, title="")],
+            next_page=3,
+            incomplete=False,
+            updated_at="2026-01-01T00:00:00Z",
+        )
+    )
+    monkeypatch.setattr(plugin_routes, "list_open_pull_requests", listing)
+    monkeypatch.setattr(github_http.GitHubClient, "as_user", Mock(return_value=MagicMock()))
+    plugin = Mock(readable_repositories=AsyncMock(return_value=["acme/app"]))
+    plugin.user.github_login = "octocat"
+
+    found = await plugin_routes.api_plugin_search_pulls(plugin, "author", page=2)
+
+    assert [pull.number for pull in found.pulls] == [2]
+    assert found.next_page == 3
+    assert listing.await_count == 1
+    assert listing.await_args.kwargs["page"] == 2
 
 
 async def _reviewers(monkeypatch, first, *later):

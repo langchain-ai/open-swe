@@ -1,7 +1,8 @@
 import { useMatch } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { PluginPage } from "@/features/plugins/components/PluginPage"
+import { productAnalytics } from "@/lib/analytics"
 import { cn } from "@/lib/utils"
 
 /**
@@ -20,6 +21,9 @@ export function PluginTabs() {
   const [paths, setPaths] = useState<Readonly<Record<string, string>>>({})
   if (active && !opened.includes(active)) setOpened([...opened, active])
   if (active && paths[active] !== path) setPaths({ ...paths, [active]: path })
+  useEffect(() => {
+    if (active) productAnalytics.track("apps_app_opened", { app: active })
+  }, [active])
 
   return opened.map((name) => (
     <div

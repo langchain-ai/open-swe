@@ -6496,6 +6496,17 @@
             "title": "Incomplete",
             "type": "boolean"
           },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page"
+          },
           "pulls": {
             "items": {
               "$ref": "#/components/schemas/PullRequestSummary"
@@ -17040,7 +17051,7 @@
     },
     "/dashboard/api/plugins/{installation_id}/github/pulls": {
       "get": {
-        "description": "Open pull requests in the repositories the person shared and can read, by their role.",
+        "description": "Open pull requests in the repositories the person shared and can read, by their role.\n\nWithout ``page`` every page of GitHub's search; with it only that page, and the next\none's number while GitHub has more, so a caller can show the first page at once.",
         "operationId": "api_plugin_search_pulls_dashboard_api_plugins__installation_id__github_pulls_get",
         "parameters": [
           {
@@ -17064,6 +17075,23 @@
               ],
               "title": "Role",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page"
             }
           }
         ],

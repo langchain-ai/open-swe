@@ -9,30 +9,39 @@ import {
   MAX_IMAGE_BYTES,
   type Attachment,
 } from "../lib/ask"
-import type { FrontendReviewRun, FrontendScenario } from "../lib/capture"
+import type {
+  FrontendReviewRun,
+  FrontendScenario,
+  ScenarioShots,
+} from "../lib/capture"
 import { PixelChange } from "../lib/pixelChange"
 import { repositoryOf, type PullRequestRef } from "../lib/pullRequest"
 import { errorMessage, isForbidden, keys, useDesignQa } from "../lib/queries"
+import { useUsage } from "../lib/usage"
 
 /**
  * Opens the pull request's chat in the agent dock with a question about one
- * scenario, its original screenshots attached, for the person to edit and send.
+ * scenario, its original screenshots in the theme shown attached, for the
+ * person to edit and send.
  * `onAsk` lets the page narrow what it shares with the agent to the scenario.
  */
 export function AskAboutChange({
   pr,
   run,
   scenario,
+  shots,
   currentHeadSha,
   onAsk,
 }: {
   pr: PullRequestRef
   run: FrontendReviewRun
   scenario: FrontendScenario
+  shots: ScenarioShots
   currentHeadSha: string | null | undefined
   onAsk: () => void
 }) {
   const host = usePluginHost()
+  const record = useUsage()
   const qa = useDesignQa()
   const queryClient = useQueryClient()
   const [loading, setLoading] = useState(false)
@@ -51,8 +60,8 @@ export function AskAboutChange({
     setLoading(true)
     try {
       const sides = [
-        ["Base", scenario.before_url],
-        ["PR", scenario.after_url],
+        ["Base", shots.before],
+        ["PR", shots.after],
       ] as const
       const screenshots: Attachment[] = await Promise.all(
         sides.flatMap(([side, name]) =>
@@ -68,7 +77,7 @@ export function AskAboutChange({
                     side,
                     blob,
                     // Robin may keep a PNG as a WebP, so the name follows the file's type.
-                    name: `design-qa-${run.id}-${scenario.id}-${side.toLowerCase()}.${blob.type.split("/")[1] || "png"}`,
+                    name: `design-qa-${run.id}-${scenario.id}-${side.toLowerCase()}${shots.theme === "dark" ? "-dark" : ""}.${blob.type.split("/")[1] || "png"}`,
                   })),
               ]
             : []
@@ -79,14 +88,10 @@ export function AskAboutChange({
         screenshots.find(({ side }) => side === "PR")?.blob,
       ]
       const change =
-        base && head && scenario.before_url && scenario.after_url
+        base && head && shots.before && shots.after
           ? await queryClient
               .fetchQuery({
-                queryKey: keys.change(
-                  media,
-                  scenario.before_url,
-                  scenario.after_url
-                ),
+                queryKey: keys.change(media, shots.before, shots.after),
                 queryFn: () => PixelChange.between(base, head),
                 staleTime: Infinity,
               })
@@ -108,6 +113,7 @@ export function AskAboutChange({
           pr,
           run,
           scenario,
+          shots,
           currentHeadSha,
           attached,
           tooLarge,
@@ -133,9 +139,12 @@ export function AskAboutChange({
       size="sm"
       color="secondary"
       variant="outlined"
-      disabled={loading || (!scenario.before_url && !scenario.after_url)}
+      disabled={loading || (!shots.before && !shots.after)}
       title="Attach the saved screenshots and replay steps to the agent. Review before sending."
-      onClick={() => void ask()}
+      onClick={() => {
+        record("ask_opened")
+        void ask()
+      }}
     >
       {loading ? "Attaching evidence…" : "Ask about this change"}
     </Button>

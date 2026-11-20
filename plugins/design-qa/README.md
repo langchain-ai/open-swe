@@ -8,18 +8,22 @@ The app itself uses only the generic app API.
 ## Inbox
 
 The inbox lists open pull requests, including those without captures, in the repositories you shared with the app: **Requested from you** (GitHub's `review-requested`, which includes your teams) and **My PRs**.
-**Pinned** lists the pull requests you pinned from a card or a pull request's page, closed ones included, until you unpin them, each read from GitHub so it filters and sorts like the other tabs; pins are kept in your private storage, and a pin in a repository you stop sharing is hidden until you share it again.
+**Pinned** lists the pull requests you pinned from a card or a pull request's page, closed ones included, until you unpin them; a pin shows in it at once, and each card is then read from GitHub; pins are kept in your private storage, and a pin in a repository you stop sharing is hidden until you share it again.
 Pull requests the review skipped and never captured, such as ones that change no frontend file, are hidden; **Show N skipped** lists them again.
 Each tab lists 10, 15 (the default), 20, 50 or 100 pull requests a page, sorted by recent updates, highest or lowest risk, most design system issues, or newest or oldest; Design QA keeps both choices for you in its private storage.
 Pull requests with no risk score or design system check follow the rest when sorting by those.
 When a newer Design QA release is out, a banner at the top offers to update; the web UI confirms it, asking about any new permissions, and reloads Design QA on the new release.
-One GitHub search lists every pull request, and the filter covers all of them; captures and each pull request's current state on GitHub are read only for the page shown, and a repository's captures stay cached between its pages.
+GitHub's search is read a page at a time: the first page's cards show as soon as it answers while the rest load, and until then the tab shows the list its last search found, kept in your private storage.
+The filter and sorts cover every pull request loaded so far.
+Every shared repository's captures load beside the search, the other tabs' first page and your pins load in the background, and each pull request's current state on GitHub is read only for a card that has a capture or a pin, on the page shown and the next one, filling in its card as it answers.
 The tab and page are part of the app's path (`/mine`, `/mine/2`, `/requested/3`), so going back from a pull request returns to them.
 Share more repositories from the inbox; a repository you stop sharing, or can no longer read, drops out.
 It reads each repository's captures in one query rather than one per pull request, shows a capture a review saves within seconds without searching GitHub again, and searches again every five minutes and when you come back to the tab.
 
-Cards show the first paired screenshot, the title, who opened the pull request and the latest capture's date, with badges only for what needs attention: a later capture attempt that was blocked or failed (its reason on hover), a capture of an earlier commit than the pull request's head, a capture or review still running, the risk score and the design system result.
+Cards show the first paired screenshot, in the dashboard's theme when the review shot it in both, the title, who opened the pull request and the latest capture's date, with badges only for what needs attention: a later capture attempt that was blocked or failed (its reason on hover), a capture of an earlier commit than the pull request's head, a capture or review still running, the risk score and the design system result.
 **Open PR** takes `owner/repo#number`, a GitHub pull request URL, or a bare number when you share one repository, and opens it when you press **Open PR** or Enter; pasting only fills the field.
+
+Design QA counts what people do in it, by action name only (switching tabs, opening a pull request, pinning, requesting a capture, switching theme or comparison, asking the agent, opening GitHub or Robin's PR view), with `analytics.track` in Robin's product analytics.
 
 ## Comparing
 
@@ -27,8 +31,10 @@ Each capture's scenarios render as cards offering **2-up**, **Swipe** and **Onio
 A pane scrolls only when its screenshot is larger than it; otherwise the wheel scrolls the page.
 A screenshot read again, as when a review writes a capture, keeps showing until its replacement decodes.
 Original screenshot colors stay independent of the app's theme; no pixel tint is painted over them.
+A scenario the review also shot in dark mode gets a **Light**/**Dark** switch on its card; it starts on the dashboard's theme, changes only that card, and its comparison, pixel change and **Ask about this change** use the pair shown.
+Notes stay where the review placed them on the light screenshot, at the same viewport in both themes.
 Each card shows the share of pixels that differ between its two screenshots, which the app measures in the page once both load (`PixelChange`); it is the extent of a change, not its severity.
-A pull request's page names who opened it, and its title opens it on GitHub, as does the **GitHub** link beside **Pin**.
+A pull request's page names who opened it, and its title opens it on GitHub in a new tab, as does the **GitHub** link beside **Pin**; **Robin PR view** opens Robin's review of it.
 The recap shows the risk score from 1 to 5, with its one-line reason on hover (green for 1–2, amber for 3, red for 4–5, as Robin's code review scores risk), the design system result as a badge, and up to three notes; selecting a note highlights its area on both screenshots, outlined in red for an error and amber for a warning.
 Below it, each design system finding takes one line: its severity, title and file, and a link to the scenario that shows it, with the reviewer's explanation and the rule it breaks on hover or focus; each scenario card counts its own findings.
 The latest capture attempt's reason shows above the captures only when it didn't capture, such as a blocked or failed attempt.
@@ -48,7 +54,7 @@ A review of a pull request that changes none of them leaves Design QA out and re
 The review also records `skipped`, not `blocked`, when the frontend it changes has no preview or no base to compare against; `blocked` is kept for something fixable, such as a preview still deploying or a failed sign-in.
 When the diff changes what people see and a preview is up, the review works as a design system engineer: it reads the repository's `DESIGN.md` files, the UI guidance in its `AGENTS.md` files, its design system skills, and the docs and tokens of the component library the app uses (Macaw's from its installed package or `langchain-ai/macaw-design-system`), then checks every frontend line the diff changes against them: components, tokens, icons, states, themes, accessibility, layout patterns and copy.
 It records each departure as an error or warning finding, scores the change's risk from 1 to 5, and keeps the recap to at most four points.
-It then signs its browser in, screenshots each changed route on the base and on the preview at one viewport size, records up to three interactions whose motion matters (a popover, menu or dialog opening, a hover, a transition) on both sides with its browser's recorder, looks at each pair, and saves one capture with `save_app_document`: a document under `pulls/<number>/` with the screenshots as attachments.
+It then signs its browser in, screenshots each changed route on the base and on the preview at one viewport size, in light mode and again in dark (switching the page with `prefers-color-scheme`, or the app's own theme setting when it ignores that, and leaving dark out when a side has none), records up to three interactions whose motion matters (a popover, menu or dialog opening, a hover, a transition) on both sides with its browser's recorder, looks at each pair, and saves one capture with `save_app_document`: a document under `pulls/<number>/` with the screenshots as attachments.
 Each screenshot waits for the page to settle: fonts, images in view and loading indicators finish, CSS and web animations freeze, and it's taken again until two takes in a row match.
 Anything that keeps moving, such as a carousel, is hidden on both sides where it can be and named in a warning, and the review doesn't note a difference that comes only from when a page rendered.
 Previews usually deploy after the review finishes, so name the check that passes once a preview is deployed under **Preview checks**; when it passes, Robin captures against that preview.
@@ -80,8 +86,9 @@ It does not renew that watch indefinitely and starts at most five recovery revie
 Drafts follow the author's existing draft-review preference, falling back to the instance default.
 
 Publishing and merging are separate steps.
-Build version 0.4.0 from this directory, publish `bundle/index.html` as a new release of the existing app, update the installed app in Settings → Apps, and have an instance admin approve that same release globally under Defaults → Apps in reviews.
+Build version 0.5.0 from this directory, publish `bundle/index.html` as a new release of the existing app, update the installed app in Settings → Apps, and have an instance admin approve that same release globally under Defaults → Apps in reviews.
 Reviews follow `review.md` and `paths` from the approved release only, so the design system check, recordings and frontend-only triage start once that release is approved, and triage once the backend that reads `paths` is deployed; an earlier backend ignores them.
+Dark captures start once 0.5.0 is approved; reading the inbox's search a page at a time and **Robin PR view** need a web UI and backend with the paged search and `nav.openReview`, and an earlier web UI reads every page at once.
 
 Before capture, verify Preview checks names the actual deployment check, review guidelines identify a comparison base, and Review browser lists only the allowed review/base domains and an existing tool name from Robin's bot kit.
 A legacy `connection/tool` sign-in setting is invalid in the current backend and must be corrected before saving settings.

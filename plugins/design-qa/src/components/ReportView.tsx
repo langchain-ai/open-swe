@@ -5,17 +5,23 @@ import { Link } from "@langchain/macaw-components/Link"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { cn } from "@langchain/macaw-components/utils/cn"
 import { StatusBadge } from "@langchain/macaw-components/StatusBadge"
-import { usePluginHost } from "@openswe/plugin-sdk/react"
+import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
+import { useHostContext, usePluginHost } from "@openswe/plugin-sdk/react"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
-import { useRef, useState } from "react"
+import { MoonIcon } from "@phosphor-icons/react/dist/ssr/Moon"
+import { SunIcon } from "@phosphor-icons/react/dist/ssr/Sun"
+import { useRef, useState, type Ref } from "react"
 
 import { Assessment } from "../lib/assessment"
-import type {
-  DesignSystemReview,
-  FrontendAnnotation,
-  FrontendReviewRun,
-  FrontendRunStatus,
-  FrontendScenario,
+import {
+  StoredCapture,
+  type DesignSystemReview,
+  type FrontendAnnotation,
+  type FrontendReviewRun,
+  type FrontendRunStatus,
+  type FrontendScenario,
+  type ScenarioShots,
+  type ShotTheme,
 } from "../lib/capture"
 import { pairedScenarios } from "../lib/coverage"
 import { useNearViewport } from "../lib/media"
@@ -24,6 +30,7 @@ import { scenarioLinks } from "../lib/links"
 import { repositoryOf, type PullRequestRef } from "../lib/pullRequest"
 import { AskAboutChange } from "./AskAboutChange"
 import { EvidenceViewer } from "./EvidenceViewer"
+import { useUsage } from "../lib/usage"
 
 const STATUS_LABELS: Record<FrontendRunStatus, string> = {
   pending: "Queued",
@@ -43,8 +50,8 @@ export function ReportView({
   pr: PullRequestRef
   run: FrontendReviewRun
   currentHeadSha?: string | null
-  /** The person asked the agent about `scenario`. */
-  onAsk: (scenario: FrontendScenario) => void
+  /** The person asked the agent about `scenario`, in the theme of `shots`. */
+  onAsk: (scenario: FrontendScenario, shots: ScenarioShots) => void
 }) {
   const host = usePluginHost()
   const report = run.report
@@ -179,98 +186,25 @@ export function ReportView({
         </Card>
       )}
       {scenarios.map((scenario, index) => (
-        <section
+        <ScenarioCard
           key={scenario.id}
-          aria-label={scenario.title}
           ref={(element) => {
             if (element) sections.current.set(scenario.id, element)
             else sections.current.delete(scenario.id)
           }}
-          className="scroll-mt-space-4 min-w-0 overflow-hidden rounded-lg border border-default bg-surface-level-2"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-space-3 px-space-4 py-space-3">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-space-2">
-                <h3 className="text-sm font-semibold">
-                  <span className="mr-space-2 text-secondary">
-                    {index + 1}.
-                  </span>
-                  {scenario.title}
-                </h3>
-                {reviewed && report.design_system && (
-                  <ScenarioFindings
-                    review={report.design_system}
-                    scenarioId={scenario.id}
-                  />
-                )}
-              </div>
-              <div className="mt-space-1 flex flex-wrap items-center gap-x-space-3 gap-y-space-1 text-xs text-secondary">
-                <ChangedShare media={media} scenario={scenario} />
-                {scenarioLinks(run, scenario.path).map(({ label, href }) => (
-                  <Link
-                    key={label}
-                    href={href}
-                    variant="xs"
-                    rightDecorator={ArrowSquareOutIcon}
-                    title={href}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      void host.nav.openExternal(href)
-                    }}
-                  >
-                    {label}
-                  </Link>
-                ))}
-              </div>
-            </div>
-            <AskAboutChange
-              pr={pr}
-              run={run}
-              scenario={scenario}
-              currentHeadSha={currentHeadSha}
-              onAsk={() => onAsk(scenario)}
-            />
-          </div>
-          {scenario.before_error ||
-          scenario.after_error ||
-          scenario.layout_warnings.length ? (
-            <div className="flex flex-col gap-space-1 border-t border-default px-space-4 py-space-2 text-xs text-warning-secondary">
-              {scenario.before_error && <p>Base: {scenario.before_error}</p>}
-              {scenario.after_error && <p>PR: {scenario.after_error}</p>}
-              {scenario.layout_warnings.map((warning) => (
-                <p key={warning}>{warning}</p>
-              ))}
-            </div>
-          ) : null}
-          <EvidenceViewer
-            media={media}
-            scenario={scenario}
-            annotation={
-              selection?.scenarioId === scenario.id ? selection.note : undefined
-            }
-            onClearAnnotation={() => setSelection(null)}
-          />
-          {scenario.actions.length || scenario.annotations.length ? (
-            <details className="border-t border-default px-space-4 py-space-2 text-xs text-secondary">
-              <summary className="w-fit cursor-pointer">
-                {scenario.interaction ? "Interaction & notes" : "Review notes"}
-              </summary>
-              {scenario.actions.length ? (
-                <ol className="mt-space-2 list-inside list-decimal">
-                  {scenario.actions.map((action, actionIndex) => (
-                    <li key={actionIndex}>{action}</li>
-                  ))}
-                </ol>
-              ) : null}
-              {scenario.annotations.map((note, noteIndex) => (
-                <p key={noteIndex} className="mt-space-2">
-                  <span className="font-medium text-primary">{note.title}</span>{" "}
-                  · {note.body}
-                </p>
-              ))}
-            </details>
-          ) : null}
-        </section>
+          pr={pr}
+          run={run}
+          scenario={scenario}
+          index={index}
+          media={media}
+          designSystem={reviewed ? report.design_system : null}
+          currentHeadSha={currentHeadSha}
+          annotation={
+            selection?.scenarioId === scenario.id ? selection.note : undefined
+          }
+          onClearAnnotation={() => setSelection(null)}
+          onAsk={onAsk}
+        />
       ))}
       <details className="text-xs text-secondary">
         <summary className="w-fit cursor-pointer">
@@ -318,18 +252,161 @@ export function ReportView({
 }
 
 /**
+ * One scenario: its links, pixel change and screenshots, in light or, when it
+ * was also shot in dark mode, dark. The theme starts on the dashboard's and
+ * switching it changes only this card.
+ */
+function ScenarioCard({
+  ref,
+  pr,
+  run,
+  scenario,
+  index,
+  media,
+  designSystem,
+  currentHeadSha,
+  annotation,
+  onClearAnnotation,
+  onAsk,
+}: {
+  ref: Ref<HTMLElement>
+  pr: PullRequestRef
+  run: FrontendReviewRun
+  scenario: FrontendScenario
+  index: number
+  media: RunMedia
+  /** The run's design system check, once reviewed. */
+  designSystem: DesignSystemReview | null
+  currentHeadSha: string | null | undefined
+  annotation: FrontendAnnotation | undefined
+  onClearAnnotation: () => void
+  onAsk: (scenario: FrontendScenario, shots: ScenarioShots) => void
+}) {
+  const host = usePluginHost()
+  const { theme: dashboard } = useHostContext()
+  const [chosen, setChosen] = useState<ShotTheme | null>(null)
+  const record = useUsage()
+  const dark = StoredCapture.hasDark(scenario)
+  const shots = StoredCapture.shots(scenario, chosen ?? dashboard)
+  return (
+    <section
+      aria-label={scenario.title}
+      ref={ref}
+      className="scroll-mt-space-4 min-w-0 overflow-hidden rounded-lg border border-default bg-surface-level-2"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-space-3 px-space-4 py-space-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-space-2">
+            <h3 className="text-sm font-semibold">
+              <span className="mr-space-2 text-secondary">{index + 1}.</span>
+              {scenario.title}
+            </h3>
+            {designSystem && (
+              <ScenarioFindings
+                review={designSystem}
+                scenarioId={scenario.id}
+              />
+            )}
+          </div>
+          <div className="mt-space-1 flex flex-wrap items-center gap-x-space-3 gap-y-space-1 text-xs text-secondary">
+            <ChangedShare media={media} shots={shots} />
+            {scenarioLinks(run, scenario.path).map(({ label, href }) => (
+              <Link
+                key={label}
+                href={href}
+                variant="xs"
+                rightDecorator={ArrowSquareOutIcon}
+                title={href}
+                onClick={(event) => {
+                  event.preventDefault()
+                  void host.nav.openExternal(href)
+                }}
+              >
+                {label}
+              </Link>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-space-2">
+          {dark && (
+            <GroupedTabs
+              size="sm"
+              value={shots.theme}
+              onChange={(next) => {
+                record(next === "dark" ? "theme_dark" : "theme_light")
+                setChosen(next)
+              }}
+              options={[
+                { value: "light", display: "Light", icon: SunIcon },
+                { value: "dark", display: "Dark", icon: MoonIcon },
+              ]}
+            />
+          )}
+          <AskAboutChange
+            pr={pr}
+            run={run}
+            scenario={scenario}
+            shots={shots}
+            currentHeadSha={currentHeadSha}
+            onAsk={() => onAsk(scenario, shots)}
+          />
+        </div>
+      </div>
+      {scenario.before_error ||
+      scenario.after_error ||
+      scenario.layout_warnings.length ? (
+        <div className="flex flex-col gap-space-1 border-t border-default px-space-4 py-space-2 text-xs text-warning-secondary">
+          {scenario.before_error && <p>Base: {scenario.before_error}</p>}
+          {scenario.after_error && <p>PR: {scenario.after_error}</p>}
+          {scenario.layout_warnings.map((warning) => (
+            <p key={warning}>{warning}</p>
+          ))}
+        </div>
+      ) : null}
+      <EvidenceViewer
+        media={media}
+        scenario={scenario}
+        shots={shots}
+        annotation={annotation}
+        onClearAnnotation={onClearAnnotation}
+      />
+      {scenario.actions.length || scenario.annotations.length ? (
+        <details className="border-t border-default px-space-4 py-space-2 text-xs text-secondary">
+          <summary className="w-fit cursor-pointer">
+            {scenario.interaction ? "Interaction & notes" : "Review notes"}
+          </summary>
+          {scenario.actions.length ? (
+            <ol className="mt-space-2 list-inside list-decimal">
+              {scenario.actions.map((action, actionIndex) => (
+                <li key={actionIndex}>{action}</li>
+              ))}
+            </ol>
+          ) : null}
+          {scenario.annotations.map((note, noteIndex) => (
+            <p key={noteIndex} className="mt-space-2">
+              <span className="font-medium text-primary">{note.title}</span> ·{" "}
+              {note.body}
+            </p>
+          ))}
+        </details>
+      ) : null}
+    </section>
+  )
+}
+
+/**
  * The share of a pair's pixels that differ, measured once its card comes near
  * the screen, as its screenshots load.
  */
 function ChangedShare({
   media,
-  scenario,
+  shots,
 }: {
   media: RunMedia
-  scenario: FrontendScenario
+  shots: ScenarioShots
 }) {
   const [ref, near] = useNearViewport<HTMLSpanElement>()
-  const change = usePixelChange(media, scenario, near)
+  const change = usePixelChange(media, shots, near)
   return (
     <span ref={ref}>
       {change.data ? (

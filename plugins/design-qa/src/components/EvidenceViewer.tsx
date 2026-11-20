@@ -5,7 +5,12 @@ import { Slider } from "@langchain/macaw-components/Slider"
 import { cn } from "@langchain/macaw-components/utils/cn"
 import { useEffect, useRef, useState, type PointerEvent } from "react"
 
-import type { FrontendAnnotation, FrontendScenario } from "../lib/capture"
+import {
+  StoredCapture,
+  type FrontendAnnotation,
+  type FrontendScenario,
+  type ScenarioShots,
+} from "../lib/capture"
 import { useImage, useNearViewport, type LoadedImage } from "../lib/media"
 import {
   errorMessage,
@@ -15,6 +20,7 @@ import {
 } from "../lib/queries"
 import { ComparisonViewport } from "./ComparisonViewport"
 import { ShareAgainButton } from "./ShareRepositories"
+import { useUsage } from "../lib/usage"
 
 type ViewMode = "split" | "swipe" | "onion"
 
@@ -65,6 +71,8 @@ function Screenshot({
 interface EvidenceViewerProps {
   media: RunMedia
   scenario: FrontendScenario
+  /** The pair to compare: the scenario's light or dark screenshots. */
+  shots: ScenarioShots
   annotation?: FrontendAnnotation
   onClearAnnotation?: () => void
 }
@@ -103,17 +111,26 @@ function pairError(before: LoadedImage, after: LoadedImage): string | null {
 function LoadedEvidence({
   media,
   scenario,
+  shots,
   annotation,
   onClearAnnotation,
 }: EvidenceViewerProps) {
   const [mode, setMode] = useState<ViewMode>("split")
+  const record = useUsage()
   const [swipe, setSwipe] = useState(50)
   const [opacity, setOpacity] = useState(50)
-  const beforeFile = useMedia(media, scenario.before_url)
-  const afterFile = useMedia(media, scenario.after_url)
+  const beforeFile = useMedia(media, shots.before)
+  const afterFile = useMedia(media, shots.after)
   const before = useImage(beforeFile.data)
   const after = useImage(afterFile.data)
   const failed = beforeFile.error ?? afterFile.error
+  const other = StoredCapture.shots(
+    scenario,
+    shots.theme === "dark" ? "light" : "dark"
+  )
+  const shown = Boolean(before.image && after.image)
+  useMedia(media, other.before, shown)
+  useMedia(media, other.after, shown)
 
   function moveDivider(event: PointerEvent<HTMLDivElement>) {
     const bounds = event.currentTarget.parentElement?.getBoundingClientRect()
@@ -139,25 +156,25 @@ function LoadedEvidence({
         )}
       </div>
     )
-  if (!scenario.before_url || !scenario.after_url) {
-    const single = scenario.after_url ? after : before
+  if (!shots.before || !shots.after) {
+    const single = shots.after ? after : before
     return (
       <div className="flex flex-col gap-space-3 p-space-4 text-sm text-secondary">
         <p>
           {scenario.error ??
             "No paired screenshots. This state has not been visually compared."}
         </p>
-        {(scenario.before_url || scenario.after_url) && (
+        {(shots.before || shots.after) && (
           <figure>
             <figcaption className="mb-space-2 text-xs">
-              {scenario.after_url ? "PR state only" : "Base state only"} · No
-              pixel comparison available
+              {shots.after ? "PR state only" : "Base state only"} · No pixel
+              comparison available
             </figcaption>
             {single.image ? (
               <img
                 src={single.image.url}
                 alt={
-                  scenario.after_url
+                  shots.after
                     ? "PR interaction state"
                     : "Base interaction state"
                 }
@@ -327,7 +344,10 @@ function LoadedEvidence({
         <GroupedTabs
           size="sm"
           value={mode}
-          onChange={setMode}
+          onChange={(next) => {
+            record(`compare_${next}`)
+            setMode(next)
+          }}
           options={[
             { value: "split", display: "2-up" },
             { value: "swipe", display: "Swipe" },

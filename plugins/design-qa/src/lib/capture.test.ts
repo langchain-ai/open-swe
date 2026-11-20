@@ -91,6 +91,45 @@ describe("StoredCapture.read", () => {
     })
   })
 
+  it("shows a scenario's dark pair only when both sides have one", () => {
+    const scenarios = StoredCapture.read({
+      key: "pulls/7/latest",
+      updatedAt: null,
+      document: {
+        report: {
+          scenarios: [
+            {
+              id: "home",
+              before_url: "home-before.png",
+              after_url: "home-after.png",
+              before_dark_url: "home-before-dark.png",
+              after_dark_url: "home-after-dark.png",
+            },
+            {
+              id: "menu",
+              before_url: "menu-before.png",
+              after_url: "menu-after.png",
+              before_dark_url: "menu-before-dark.png",
+            },
+          ],
+        },
+      },
+    }).report?.scenarios
+    const [home, menu] = scenarios ?? []
+    if (!home || !menu) throw new Error("Both scenarios should read")
+
+    expect(StoredCapture.shots(home, "dark")).toEqual({
+      before: "home-before-dark.png",
+      after: "home-after-dark.png",
+      theme: "dark",
+    })
+    expect(StoredCapture.shots(menu, "dark")).toEqual({
+      before: "menu-before.png",
+      after: "menu-after.png",
+      theme: "light",
+    })
+  })
+
   it("reads a capture that never reported, such as a blocked one, without a report", () => {
     const capture = StoredCapture.read({
       key: "pulls/7/latest",

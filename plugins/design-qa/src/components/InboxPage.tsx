@@ -10,6 +10,7 @@ import { Switch } from "@langchain/macaw-components/Switch"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { cn } from "@langchain/macaw-components/utils/cn"
 import type { Person, ReviewOutcome } from "@openswe/plugin-sdk"
+import { useHostContext } from "@openswe/plugin-sdk/react"
 import { CaretLeftIcon } from "@phosphor-icons/react/dist/ssr/CaretLeft"
 import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
@@ -18,7 +19,11 @@ import { useQueryClient } from "@tanstack/react-query"
 import { Fragment, useState } from "react"
 
 import { Assessment } from "../lib/assessment"
-import type { FrontendReviewRun } from "../lib/capture"
+import {
+  StoredCapture,
+  type FrontendReviewRun,
+  type FrontendScenario,
+} from "../lib/capture"
 import { runOverview } from "../lib/coverage"
 import { useImage, useNearViewport } from "../lib/media"
 import { splitRepository } from "../lib/pullRequest"
@@ -31,6 +36,7 @@ import {
   useInboxPreferences,
   useInboxSearch,
   usePeople,
+  usePrefetchInbox,
   useRepositoryCaptures,
   useMedia,
   useRepositories,
@@ -48,6 +54,7 @@ import { ShareRepositories } from "./ShareRepositories"
 import { CaptureAction } from "./CaptureAction"
 import { PinButton } from "./PinButton"
 import { UpdateBanner } from "./UpdateBanner"
+import { useUsage, type UsageAction } from "../lib/usage"
 
 /** Open pull requests and their capture status, as cards. */
 export function InboxPage() {
@@ -57,18 +64,18 @@ export function InboxPage() {
   const { route, inbox, navigate } = useRouter()
   const current = route.page === "inbox" ? route : inbox
   const shared = repositories.data?.map((one) => one.fullName) ?? []
+  const record = useUsage()
   useInboxChanges(shared)
+  usePrefetchInbox(current.scope)
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-space-5 px-space-5 py-space-6 sm:px-space-6">
       <UpdateBanner />
-      <header className="grid items-start gap-space-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
-        <div className="max-w-xl">
-          <h1 className="text-2xl font-semibold tracking-tight text-primary">
-            Design QA
-          </h1>
-        </div>
-        <div className="min-w-0">
+      <header className="flex flex-wrap items-center justify-between gap-space-3">
+        <h1 className="text-2xl font-semibold tracking-tight text-primary">
+          Design QA
+        </h1>
+        <div className="w-full max-w-sm min-w-0 sm:w-80">
           <OpenPullRequestInput shared={shared} />
         </div>
       </header>
@@ -91,7 +98,10 @@ export function InboxPage() {
               size="sm"
               className="w-fit"
               value={current.scope}
-              onChange={(scope) => navigate({ page: "inbox", scope, index: 0 })}
+              onChange={(scope) => {
+                record(TAB_ACTIONS[scope])
+                navigate({ page: "inbox", scope, index: 0 })
+              }}
               options={[
                 {
                   value: "review-requested",
@@ -128,6 +138,12 @@ export function InboxPage() {
   )
 }
 
+const TAB_ACTIONS = {
+  "review-requested": "tab_requested",
+  mine: "tab_mine",
+  pinned: "tab_pinned",
+} as const satisfies Record<InboxScope, UsageAction>
+
 const DESCRIPTIONS: Record<InboxScope, string> = {
   "review-requested":
     "Open PRs with a GitHub review request for you or a team you belong to, in the repositories you shared. Comment mentions are not included.",
@@ -146,7 +162,7 @@ const EMPTY: Record<InboxScope, { title: string; body: string }> = {
     body: "Your open PRs appear here, including those without captures. Open any PR above to view its QA page.",
   },
   pinned: {
-    title: "No pinned PRs",
+    title: "You don't have anything pinned yet! Get to pinning!",
     body: "Pin a PR from its card or its QA page to keep it here.",
   },
 }
@@ -165,15 +181,14 @@ function PullRequests({
   const [text, setText] = useState("")
   const [showSkipped, setShowSkipped] = useState(false)
   const { preferences, change } = useInboxPreferences()
+  const record = useUsage()
   const { pageSize, sort } = preferences
   const readable = new Set(shared.map((name) => name.toLowerCase()))
   // A pin stays in storage while its repository isn't shared, out of the list.
-  const pulls = (search.data?.pulls ?? []).filter(
+  const pulls = (search.pulls ?? []).filter(
     ({ repository }) => scope !== "pinned" || readable.has(repository)
   )
-  const captures = useRepositoryCaptures([
-    ...new Set(pulls.map(({ repository }) => repository)),
-  ])
+  const captures = useRepositoryCaptures(shared)
   // A pin is kept on purpose, even of a PR Design QA skipped.
   const skipped =
     scope === "pinned"
@@ -196,28 +211,25 @@ function PullRequests({
     sort
   )
   const pageCount = Math.max(1, Math.ceil(ordered.length / pageSize))
-  const index = Math.min(route.index, pageCount - 1)
+  const index = search.more ? route.index : Math.min(route.index, pageCount - 1)
   const first = index * pageSize
   const shown = ordered.slice(first, first + pageSize)
-  const page = useInboxPage(scope, shown)
-  // A page still loading shows the last one's cards, but not one just unpinned.
-  const listed = new Set(
-    ordered.map(({ repository, number }) => `${repository}#${number}`)
+  const page = useInboxPage(
+    scope,
+    shown,
+    ordered.slice(first + pageSize, first + 2 * pageSize),
+    captures.byRepository
   )
-  const items =
-    shown.length > 0
-      ? (page.data?.items ?? []).filter(({ repository, pull }) =>
-          listed.has(`${repository}#${pull.number}`)
-        )
-      : []
+  const items = page.items
   const people = usePeople(items.map(({ pull }) => pull.author))
-  if (isForbidden(search.error) || isForbidden(page.error))
-    return <ShareRepositories unshared />
+  if (isForbidden(search.error)) return <ShareRepositories unshared />
 
   const loading =
-    search.isPending || captures.pending || (shown.length > 0 && page.isPending)
-  const fetching = search.isFetching || page.isFetching
-  const failed = search.error ?? captures.error ?? page.error
+    search.pulls === undefined
+      ? !search.error
+      : captures.pending || (shown.length === 0 && search.more)
+  const fetching = search.fetching || page.fetching
+  const failed = search.error ?? captures.error
   const turnTo = (next: number) => navigate({ ...route, index: next })
 
   return (
@@ -253,14 +265,15 @@ function PullRequests({
           renderValue={(option) => `Sort: ${option.label ?? option.value}`}
           onChange={(next) => {
             if (!next) return
+            record("sort_changed")
             change({ sort: next })
             if (route.index !== 0) turnTo(0)
           }}
         />
         <span className="text-xs text-secondary" aria-live="polite">
-          {search.isPending
+          {search.pulls === undefined
             ? "Loading pull requests…"
-            : `${matching.length} PR${matching.length === 1 ? "" : "s"}${filter ? " match" : ""}`}
+            : `${matching.length}${search.more ? "+" : ""} PR${matching.length === 1 && !search.more ? "" : "s"}${filter ? " match" : ""}${search.more ? " · loading more…" : ""}`}
         </span>
         {skipped.length > 0 && (
           <Switch
@@ -297,7 +310,7 @@ function PullRequests({
           {errorMessage(failed)}
         </Card>
       )}
-      {(search.data?.incomplete || page.data?.incomplete) && (
+      {(search.incomplete || page.incomplete) && (
         <p role="status" className="mb-space-4 text-sm text-warning-secondary">
           GitHub returned a partial list. Some pull requests may be missing;
           refresh to try again.
@@ -336,11 +349,8 @@ function PullRequests({
         </Card>
       ) : (
         <div
-          aria-busy={page.isPlaceholderData}
-          className={cn(
-            "grid auto-rows-fr gap-space-4 transition-opacity sm:grid-cols-2 xl:grid-cols-3",
-            page.isPlaceholderData && "opacity-60"
-          )}
+          aria-busy={search.remembered}
+          className="grid auto-rows-fr gap-space-4 sm:grid-cols-2 xl:grid-cols-3"
         >
           {items.map((item) => (
             <PullRequestCard
@@ -374,6 +384,7 @@ function PullRequests({
                 options={PAGE_SIZES.map((size) => ({ value: String(size) }))}
                 onChange={(next) => {
                   if (!next) return
+                  record("page_size_changed")
                   change({ pageSize: Number(next) })
                   if (route.index !== 0) turnTo(0)
                 }}
@@ -517,7 +528,7 @@ function PullRequestCard({
               pull: pr.number,
               run: run?.id ?? "",
             }}
-            name={run ? (runOverview(run).cover?.after_url ?? null) : null}
+            cover={run ? runOverview(run).cover : undefined}
           />
         </div>
         <div className="flex flex-1 flex-col gap-space-2 p-space-4">
@@ -594,9 +605,20 @@ function PullRequestCard({
   )
 }
 
-/** The PR screenshot of the state that changed most, read once the card nears the screen. */
-function Thumbnail({ media, name }: { media: RunMedia; name: string | null }) {
+/**
+ * The PR screenshot of the first paired state, in the dashboard's theme when
+ * the review shot it in both, read once the card nears the screen.
+ */
+function Thumbnail({
+  media,
+  cover,
+}: {
+  media: RunMedia
+  cover: FrontendScenario | undefined
+}) {
+  const { theme } = useHostContext()
   const [container, near] = useNearViewport<HTMLDivElement>()
+  const name = cover ? StoredCapture.shots(cover, theme).after : null
   const file = useMedia(media, name, near)
   const { image } = useImage(file.data)
   return (

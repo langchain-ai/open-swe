@@ -149,6 +149,9 @@ export class PluginHost {
     },
     openThread: (threadId: string) => settle(this.api.openThread(threadId)),
     openExternal: (url: string) => settle(this.api.openExternal(url)),
+    /** Opens Robin's review page of a pull request in a repository the person shared. */
+    openReview: (repository: string, number: number) =>
+      settle(this.api.openReview(repository, number)),
   }
 
   /** The repositories the person shared with the plugin, the only ones it reaches. */
@@ -181,6 +184,12 @@ export class PluginHost {
     toast: (toast: Toast) => settle(this.api.toast(toast)),
     /** Shows `title` beside the plugin's name above its frame and names the browser tab "<title> · Open SWE"; `null` clears it. */
     setTitle: (title: string | null) => settle(this.api.setTitle(title)),
+  }
+
+  /** How people use the plugin, counted in Robin's product analytics. */
+  readonly analytics = {
+    /** Counts one `action` the person took, such as `pin`: lowercase letters, digits and `_`, at most 40. */
+    track: (action: string) => settle(this.api.track(action)),
   }
 
   /** The app itself: whether a newer release is out, and updating to it. */
@@ -230,9 +239,11 @@ export class PluginHost {
     /**
      * Open pull requests in every shared repository the person can still
      * read, by their part in them; `review-requested` includes their teams'.
+     * With `page`, only that page of GitHub's search, so the first can show
+     * before the rest load; follow `nextPage` for the others.
      */
-    search: (options: { role: PullRequestRole }) =>
-      settle(this.api.searchPulls(options.role)),
+    search: (options: { role: PullRequestRole; page?: number }) =>
+      settle(this.api.searchPulls(options.role, options.page)),
   }
 
   /**

@@ -7,7 +7,13 @@ import {
   type PullRequestRef,
 } from "./pullRequest"
 
-import type { FrontendReviewRun, FrontendScenario } from "./capture"
+import {
+  StoredCapture,
+  type FrontendReviewRun,
+  type FrontendScenario,
+  type ScenarioShots,
+  type ShotTheme,
+} from "./capture"
 import type { PixelChange } from "./pixelChange"
 
 /**
@@ -71,13 +77,15 @@ export function pullRequestContext(
   }
 }
 
-/** The pull request's context narrowed to one scenario, within the dock's size limit. */
+/** The pull request's context narrowed to one scenario in `theme`, within the dock's size limit. */
 export function scenarioContext(
   pr: PullRequestRef,
   run: FrontendReviewRun,
   scenario: FrontendScenario,
-  current: CurrentPullRequest
+  current: CurrentPullRequest,
+  theme: ShotTheme = "light"
 ): JsonObject {
+  const shots = StoredCapture.shots(scenario, theme)
   const blocker = (text: string | null) => (text ? clip(text, 400) : null)
   const build = (items: number): JsonObject => ({
     ...pullRequestContext(pr, run, current),
@@ -87,8 +95,10 @@ export function scenarioContext(
       path: clip(scenario.path, 500),
       interaction: scenario.interaction,
       status: scenario.status,
-      baseScreenshot: scenario.before_url !== null,
-      prScreenshot: scenario.after_url !== null,
+      theme: shots.theme,
+      darkScreenshots: StoredCapture.hasDark(scenario),
+      baseScreenshot: shots.before !== null,
+      prScreenshot: shots.after !== null,
       replaySteps: scenario.actions
         .slice(0, items)
         .map((step) => clip(step, 200)),
@@ -120,6 +130,7 @@ export function askDraft({
   pr,
   run,
   scenario,
+  shots,
   currentHeadSha,
   attached,
   tooLarge,
@@ -128,6 +139,8 @@ export function askDraft({
   pr: PullRequestRef
   run: FrontendReviewRun
   scenario: FrontendScenario
+  /** The pair shown, and so attached: light or dark. */
+  shots: ScenarioShots
   currentHeadSha: string | null | undefined
   attached: readonly Attachment[]
   tooLarge: readonly Attachment[]
@@ -148,13 +161,14 @@ export function askDraft({
       ? `Stale capture: the current PR commit is ${currentHeadSha}.`
       : null,
     `Build verification: ${run.report?.build_verification ?? "unverified"}`,
+    `Theme: ${shots.theme === "dark" ? "dark mode" : "light mode"}`,
     `Attached screenshots: ${
       attached.length
         ? attached.map(({ side, name }) => `${side} (${name})`).join("; ")
         : "none"
     }`,
-    scenario.before_url ? null : "Base screenshot: not captured.",
-    scenario.after_url ? null : "PR screenshot: not captured.",
+    shots.before ? null : "Base screenshot: not captured.",
+    shots.after ? null : "PR screenshot: not captured.",
     ...tooLarge.map(
       ({ side, blob }) =>
         `${side} screenshot: not attached, ${megabytes(blob)} MB is over the 10 MB limit.`
@@ -178,6 +192,9 @@ export function askDraft({
     ...scenario.annotations.map(
       (note) => `Review note: ${note.title}: ${clip(note.body, 1_000)}`
     ),
+    shots.theme === "dark" && scenario.annotations.length
+      ? "Review notes were written about the light mode PR screenshot."
+      : null,
     "These are the original saved screenshots; viewer overlays, local masks, and crops are not included. Planned steps alone do not establish successful coverage.",
   ].filter((line): line is string => line !== null)
   return clip(
