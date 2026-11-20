@@ -65,11 +65,11 @@ class _PrLinks:
         if not self.github_mark:
             return match.group().replace(github, review)
         if match["md"]:
-            return f"[{match['md_label']}]({review}) [({_GITHUB_LABEL})]({github})"
+            return f"[{match['md_label']}]({review}) - [({_GITHUB_LABEL})]({github})"
         label = match["slack_label"] or f"{repo}#{number}"
         if match["slack"] or self.mrkdwn:
-            return f"<{review}|{label}> <{github}|({_GITHUB_LABEL})>"
-        return f"[{label}]({review}) [({_GITHUB_LABEL})]({github})"
+            return f"<{review}|{label}> - <{github}|({_GITHUB_LABEL})>"
+        return f"[{label}]({review}) - [({_GITHUB_LABEL})]({github})"
 
     def block(self, value: object) -> object:
         if isinstance(value, list):

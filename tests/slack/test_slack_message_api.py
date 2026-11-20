@@ -92,7 +92,7 @@ async def test_review_claim_callback_opens_robin_and_preserves_delivery_controls
     async def handle(request: httpx2.Request) -> httpx2.Response:
         assert json.loads(request.content) == {
             **payload,
-            "text": f"You're down to review <{target}|app#7> <{url}|(GitHub)>. Auto-merge is off; a person must merge it.",
+            "text": f"You're down to review <{target}|app#7> - <{url}|(GitHub)>. Auto-merge is off; a person must merge it.",
         }
         return httpx2.Response(200, text="ok")
 
@@ -446,9 +446,9 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
     assert payload["text"] == f"[PR]({fallback_target}), <{target}|PR> and {target}.\n{code}"
     sent_blocks = payload["blocks"]
     assert sent_blocks[0]["text"] == (
-        f"[PR]({target}) [(GitHub)]({url}), <{target}|PR> <{url}|(GitHub)> and [app#7]({target}) [(GitHub)]({url}).\n{code}"
+        f"[PR]({target}) - [(GitHub)]({url}), <{target}|PR> - <{url}|(GitHub)> and [app#7]({target}) - [(GitHub)]({url}).\n{code}"
     )
-    assert sent_blocks[1]["text"]["text"] == f"<{target}|PR> <{url}|(GitHub)>"
+    assert sent_blocks[1]["text"]["text"] == f"<{target}|PR> - <{url}|(GitHub)>"
     assert sent_blocks[2]["elements"][0]["url"] == target
     assert sent_blocks[2]["elements"][0]["value"] == url
     assert sent_blocks[3] == blocks[3]
@@ -520,7 +520,7 @@ async def test_direct_github_reply_override_is_scoped_to_one_delivery(
     assert slack_api.calls[-1][1]["blocks"] == blocks
     await slack_utils.post_slack_top_level_message_with_ts("C1", url)
     sent = slack_api.calls[-1][1]["text"]
-    assert sent == f"<https://openswe.example/agents/reviews/acme/app/7|app#7> <{url}|(GitHub)>"
+    assert sent == f"<https://openswe.example/agents/reviews/acme/app/7|app#7> - <{url}|(GitHub)>"
     assert await review_links.pr_review_links(sent, None) == (sent, None)
     fetched = (
         f"<https://openswe.example/agents/reviews/acme/app/7|app#7><{url}|:arrow_upper_right:>"
