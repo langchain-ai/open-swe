@@ -12,7 +12,10 @@ Every mark is measured from when the person posted the message, by Slack's own c
 The run's completion webhook reads both from the run's own replies, and each goes to an
 OTLP latency histogram labelled by sandbox, once per run. When MDA's Slack channel opened a
 LangSmith trace for the message (``SlackSendTrace``), the webhook also adds a span per stage
-the run went through and closes the trace.
+the run went through and closes the trace. Two spans there time the whole wait from the
+message: to the run's start (``time_to_run_start``), when Trigger Server shows the agent's
+working status in the thread (on MDA's ``run.started``), and to the first reply
+(``time_to_first_reply``).
 """
 
 import asyncio
@@ -77,6 +80,8 @@ class SlackRunTimeline:
         "first_generation": "first_generation",
         "first_reply": "first_reply",
     }
+    # The span from the message to its run's start, when Slack shows the working status.
+    RUN_START: ClassVar[str] = "time_to_run_start"
     _settling: ClassVar[set[asyncio.Task[None]]] = set()
 
     def __init__(
@@ -93,6 +98,7 @@ class SlackRunTimeline:
         # Output before the run started is an earlier run's: a message sent while one
         # worked queues a run that starts only once that one ends.
         self._since_ms = max(posted_at_ms, started_at_ms or 0)
+        self.started_at_ms = started_at_ms
         self.created_at_ms = created_at_ms
         self.trace = trace
         self.marks: dict[str, int] = {}
@@ -251,12 +257,27 @@ class SlackRunTimeline:
         if timeline.trace is not None and not await timeline.trace.ended():
             try:
                 timeline.trace.record_stages(
-                    [*timeline.stages(), *timeline.first_reply_stage()],
+                    [
+                        *timeline.stages(),
+                        *timeline.run_start_stage(),
+                        *timeline.first_reply_stage(),
+                    ],
                     run_id=timeline.run_id,
                 )
             except Exception:
                 logger.warning("Failed to trace a Slack message's stages", exc_info=True)
             await timeline.trace.close(run, failed=failed)
+
+    def run_start_stage(self) -> list[tuple[str, int, int]]:
+        """The span from the message to its run's start, once the run started.
+
+        Slack shows the agent's working status as the run starts, so this is how long the
+        person waits to see their message was picked up. A message sent while another run
+        worked waits for it: its run starts only once that one ends.
+        """
+        if self.started_at_ms is None:
+            return []
+        return [(self.RUN_START, self.posted_at_ms, max(self.started_at_ms, self.posted_at_ms))]
 
     def first_reply_stage(self) -> list[tuple[str, int, int]]:
         """The span from the message to the first reply the person saw, once there was one."""

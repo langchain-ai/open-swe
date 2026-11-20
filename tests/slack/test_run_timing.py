@@ -413,6 +413,8 @@ async def test_run_completion_adds_the_runs_stages_to_the_messages_trace_and_clo
     assert [(span["name"], span["outputs"]) for span in client.runs] == [
         ("first_generation", {"elapsed_ms": 2_123}),
         ("first_reply", {"elapsed_ms": 2_000}),
+        # Until the run started and Slack showed the working status, its late start included.
+        ("time_to_run_start", {"elapsed_ms": 180_877}),
         # The person's whole wait, from posting the message, the run's late start included.
         ("time_to_first_reply", {"elapsed_ms": 185_000}),
     ]
@@ -464,3 +466,15 @@ async def test_a_closed_trace_is_not_closed_again(monkeypatch: pytest.MonkeyPatc
 
     assert client.runs == []
     assert client.updates == []
+
+
+def test_a_run_that_never_started_has_no_run_start_span() -> None:
+    timeline = SlackRunTimeline(POSTED_MS, run_id="run-1")
+
+    assert timeline.run_start_stage() == []
+
+
+def test_a_run_start_before_the_message_by_slacks_clock_is_not_negative() -> None:
+    timeline = SlackRunTimeline(POSTED_MS, run_id="run-1", started_at_ms=POSTED_MS - 500)
+
+    assert timeline.run_start_stage() == [("time_to_run_start", POSTED_MS, POSTED_MS)]
