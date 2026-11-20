@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "demo",
+  "language": "python",
+  "instructions": "  # Plain\n\nIndented heading kept as written.\n",
+  "model": "openai:gpt-6-luna",
+  "sandbox": false,
+  "memory": "agent",
+  "channels": []
+}

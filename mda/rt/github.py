@@ -26,11 +26,11 @@ from uuid import UUID
 
 from langgraph_sdk.schema import MultitaskStrategy
 from managed_deepagents import (
-    ChannelRun,
     GitHubChannelThread,
     GitHubEvent,
     GitHubEventResult,
     GitHubPayload,
+    GitHubRun,
 )
 from pydantic import JsonValue
 from runtime_api.github import (
@@ -98,7 +98,7 @@ async def on_event[Payload: GitHubPayload](
         ),
         msg_id=f"msg_{event.delivery_id}_act",
     )
-    runs: list[ChannelRun] = []
+    runs: list[GitHubRun] = []
     if mention is not None and issue_run is not None and acted.issue_run is not None:
         runs += await _issue_runs(mention, issue_run, acted.issue_run)
     runs += [_thread_run(run) for run in acted.automations]
@@ -197,14 +197,14 @@ def _no_run(reason: str, delivery_id: str) -> None:
 
 async def _issue_runs(
     mention: IssueMention, request: GitHubIssueRunRequest, planned: PlannedGitHubIssueRun
-) -> list[ChannelRun]:
+) -> list[GitHubRun]:
     """The issue's run on its conversation, or, while it waits, what points it to the decision."""
     if not planned.starts:
         return []
     if planned.run is None or request.input is None:
         return [{"input": ACTS_WHILE_WAITING}]
     await mention.acknowledge()
-    run: ChannelRun = {
+    run: GitHubRun = {
         "input": request.input,
         "context": planned.run.context,
         "metadata": planned.run.metadata,
@@ -216,9 +216,9 @@ async def _issue_runs(
 
 def _thread_run(
     run: GitHubThreadRun, *, multitask_strategy: MultitaskStrategy | None = None
-) -> ChannelRun:
+) -> GitHubRun:
     """A run on the thread the backend planned it on: an automation's, or the pull request's."""
-    started: ChannelRun = {
+    started: GitHubRun = {
         "input": run.input,
         "context": run.context,
         "metadata": run.metadata,

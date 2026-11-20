@@ -18,7 +18,7 @@ from langchain_core.tools import tool
 from langgraph.runtime import Runtime
 from pydantic import Field
 
-from managed_deepagents._channels.slack import files
+from managed_deepagents._channels.slack import files, link_previews
 from managed_deepagents._identity_runtime import _field
 from managed_deepagents._managed_tools import ManagedDeepAgentRuntime  # noqa: TC001 - tool schema
 
@@ -83,8 +83,16 @@ class SlackFileTransferMiddleware(AgentMiddleware[AgentState[object], None, obje
         self, state: AgentState[object], runtime: Runtime[None]
     ) -> dict[str, list[HumanMessage]] | None:
         _ = state
-        status = await files.stage_files(cast("ManagedDeepAgentRuntime", runtime))
-        return {"messages": [status]} if status else None
+        current = cast("ManagedDeepAgentRuntime", runtime)
+        # Slack's link previews arrive while the files transfer.
+        previews = asyncio.ensure_future(link_previews.link_previews(current))
+        try:
+            status = await files.stage_files(current)
+        except BaseException:
+            previews.cancel()
+            raise
+        messages = [message for message in (await previews, status) if message is not None]
+        return {"messages": messages} if messages else None
 
     def wrap_model_call(
         self,

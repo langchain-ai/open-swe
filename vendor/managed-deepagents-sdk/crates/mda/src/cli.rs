@@ -19,9 +19,11 @@ use crate::logs::{self, LogsOptions};
 use crate::secret_input::ValueSource;
 use crate::telemetry::{
     deliver_at_exit, hold_for_exit, init_facts, is_telemetry_disabled, otel_logger,
-    posthog_transport, report_panics, OtelLogger, ReportableFacts,
+    posthog_transport, report_panics, segment_transport, OtelLogger, ReportableFacts, Sink,
 };
-use crate::{coding_agent, compile, init, styled_help_template, termination, version};
+use crate::{
+    coding_agent, compile, fleet_export, init, styled_help_template, termination, version,
+};
 use anyhow::{Context, Result};
 use clap::{Arg, ArgAction, Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 
@@ -46,7 +48,7 @@ const CONNECTIONS_HELP_EXAMPLES: &str = "  # OAuth services `--oauth` recognizes
   # General OAuth from the catalog
   mda connections create github --oauth github --client-id CLIENT_ID
 
-  # Connections this project's deployment uses
+  # Connections this project's Agent Server uses
   mda connections list
   mda connections list --json
 
@@ -89,7 +91,7 @@ const CONNECTION_CREATE_HELP_EXAMPLES: &str = "  # Opaque secret
   mda connections create my-notion --mcp https://mcp.notion.com/mcp --authorize
 
   # Authorize a deployed agent without a local project
-  mda connections create my-notion --mcp https://mcp.notion.com/mcp --authorize --workspace-id WORKSPACE_ID --deployment-id DEPLOYMENT_ID";
+  mda connections create my-notion --mcp https://mcp.notion.com/mcp --authorize --workspace-id WORKSPACE_ID --agent-server-id AGENT_SERVER_ID";
 
 const PYTHON_DOCS_AFTER_HELP: &str =
     "  https://docs.langchain.com/langsmith/python/managed-deep-agents-quickstart";
@@ -132,6 +134,8 @@ enum Command {
     Deploy(DeployArgs),
     /// Pull remote instructions and skills into an existing local project.
     Pull(crate::pull::PullOptions),
+    /// Upload files into a deployed agent's memory.
+    Memory(MemoryArgs),
     /// Prepare a checked-out Deep Agent project for a LangSmith build job
     /// (Context Hub sync, compile, sandbox bake). Run by the build runner.
     #[command(hide = true)]
@@ -139,7 +143,7 @@ enum Command {
     /// Manage workspace connections (opaque secrets and OAuth slots).
     #[command(name = "connections", alias = "connection")]
     Connection(ConnectionArgs),
-    /// Initialize an external messaging channel, or set up the project's channels for its deployment.
+    /// Initialize an external messaging channel, or set up the project's channels for its Agent Server.
     #[command(name = "channels", alias = "channel")]
     Channel(ChannelArgs),
     /// Tail the Agent Server logs of a deployed Deep Agent.
@@ -174,7 +178,7 @@ struct InitArgs {
     #[arg(long, value_enum, value_name = "SCOPE")]
     memory: Option<init::MemoryChoice>,
 
-    /// Model the agent runs on, as provider:model (for example openai:gpt-5.6-terra).
+    /// Model the agent runs on, as provider:model (for example openai:gpt-6-luna).
     #[arg(long, value_name = "SPEC")]
     model: Option<String>,
 
@@ -192,8 +196,52 @@ struct InitArgs {
         num_args = 1,
         action = ArgAction::Append
     )]
-    channels: Vec<init::InitChannel>,
+    channels: Vec<channel::ChannelKind>,
+
+    /// Export this Fleet agent into the new project.
+    #[arg(long, value_name = "AGENT_ID", conflicts_with_all = FROM_CONFLICTS)]
+    from: Option<String>,
+
+    /// Export a Fleet agent an earlier --from saved (its .data/<agent-id>
+    /// directory), without network access.
+    #[arg(
+        long,
+        value_name = "DIR",
+        hide = true,
+        conflicts_with = "from",
+        conflicts_with_all = FROM_CONFLICTS
+    )]
+    from_snapshot: Option<PathBuf>,
+
+    /// Workspace of the Fleet agent (overrides LANGSMITH_WORKSPACE_ID).
+    #[arg(long, requires = "from", conflicts_with = "from_snapshot")]
+    workspace_id: Option<String>,
+
+    /// Host backend URL override (advanced).
+    #[arg(long, hide = true, requires = "from", conflicts_with = "from_snapshot")]
+    host_url: Option<String>,
+
+    /// Read environment variables from this file instead of the .env in the
+    /// current directory. Prompted credentials are saved back to it.
+    #[arg(
+        long,
+        value_name = "PATH",
+        requires = "from",
+        conflicts_with = "from_snapshot"
+    )]
+    env_file: Option<PathBuf>,
 }
+
+/// `mda init` flags that set what a Fleet export already decides.
+const FROM_CONFLICTS: [&str; 7] = [
+    "coding_agent",
+    "instructions",
+    "instructions_file",
+    "memory",
+    "model",
+    "no_sandbox",
+    "channels",
+];
 
 #[derive(Args)]
 struct BuildArgs {
@@ -286,18 +334,18 @@ struct DeployArgs {
     #[arg(default_value = ".")]
     path: PathBuf,
 
-    /// Deployment name (defaults to the static agent `name`, or `agent` for a dynamic entry).
+    /// Agent Server name (defaults to the static agent `name`, or `agent` for a dynamic entry).
     #[arg(short = 'n', long)]
     name: Option<String>,
 
-    /// Agent environment to target; the deployment name is used as the agent ID
+    /// Agent environment to target; the Agent Server name is used as the agent ID
     /// (requires agent mode enabled for the workspace). Defaults to
     /// LANGSMITH_AGENT_ENVIRONMENT in .env.
     #[arg(long, value_enum)]
     agent_environment: Option<AgentEnvironment>,
 
-    /// Deployment type when creating.
-    #[arg(long, value_enum, default_value_t = DeploymentType::Serverless)]
+    /// Agent Server type when creating.
+    #[arg(long = "agent-server-type", alias = "deployment-type", value_enum, value_name = "TYPE", default_value_t = DeploymentType::Serverless)]
     deployment_type: DeploymentType,
 
     /// Workspace ID to deploy into (overrides LANGSMITH_WORKSPACE_ID).
@@ -346,15 +394,19 @@ struct PrepareArgs {
     #[arg(long)]
     out: Option<PathBuf>,
 
-    /// Deployment this build belongs to.
-    #[arg(long, value_name = "UUID")]
+    /// Agent Server this build belongs to.
+    #[arg(
+        long = "agent-server-id",
+        alias = "deployment-id",
+        value_name = "AGENT_SERVER_ID"
+    )]
     deployment_id: String,
 
     /// Revision this build belongs to.
     #[arg(long, value_name = "UUID")]
     revision_id: String,
 
-    /// JSON object file holding the deployment's secrets.
+    /// JSON object file holding the Agent Server's secrets.
     #[arg(long, value_name = "PATH")]
     env_json: Option<PathBuf>,
 
@@ -362,13 +414,42 @@ struct PrepareArgs {
     #[arg(long, hide = true)]
     host_url: Option<String>,
 
-    /// Prepare a preview deployment: never reconcile schedules or channels.
+    /// Prepare a preview Agent Server: never reconcile schedules or channels.
     #[arg(long)]
     preview: bool,
 
-    /// Deployment name whose sandbox snapshots this build shares.
+    /// Agent Server name whose sandbox snapshots this build shares.
     #[arg(long, value_name = "NAME")]
     snapshot_owner: Option<String>,
+
+    /// Part of prepare to run. Build runners run `compile` without
+    /// credentials, then `provision` on its output.
+    #[arg(long, value_enum, default_value = "all")]
+    phase: PreparePhaseArg,
+
+    /// Deployment name, required with `--phase compile`.
+    #[arg(long, value_name = "NAME")]
+    deployment_name: Option<String>,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum PreparePhaseArg {
+    All,
+    Compile,
+    Provision,
+}
+
+#[derive(Args)]
+struct MemoryArgs {
+    #[command(subcommand)]
+    command: MemoryCommand,
+}
+
+#[derive(Subcommand)]
+enum MemoryCommand {
+    /// Upload a folder of files into a deployed agent's memory
+    /// (memories/agent/). Files the agent's memory already has are skipped.
+    Upload(crate::memory::MemoryUploadArgs),
 }
 
 #[derive(Args)]
@@ -529,8 +610,12 @@ struct ConnectionCreateArgs {
     #[arg(long, help_heading = OAUTH_HEADING)]
     authorize: bool,
 
-    /// Deployment ID for agent-owned secrets or OAuth grants, without a local project.
-    #[arg(long, value_name = "ID")]
+    /// Agent Server ID for agent-owned secrets or OAuth grants, without a local project.
+    #[arg(
+        long = "agent-server-id",
+        alias = "deployment-id",
+        value_name = "AGENT_SERVER_ID"
+    )]
     deployment_id: Option<String>,
 
     /// MCP server URL. Discovers OAuth and registers a client automatically.
@@ -603,7 +688,7 @@ struct ChannelArgs {
 enum ChannelCommand {
     /// Initialize a channel in the current project.
     Init(ChannelInitArgs),
-    /// Set up the project's channels for its deployment, as `mda deploy` does.
+    /// Set up the project's channels for its Agent Server, as `mda deploy` does.
     ///
     /// Needs a deployed agent. In a terminal, asks which channels to set up and runs
     /// their setup. Without a terminal, or with --json, only reports which channels are
@@ -617,17 +702,17 @@ struct ChannelSetupArgs {
     #[arg(value_enum)]
     channel: Option<channel::ChannelKind>,
 
-    /// Deployment name (defaults to the agent `name` in the agent file).
+    /// Agent Server name (defaults to the agent `name` in the agent file).
     #[arg(short = 'n', long)]
     name: Option<String>,
 
-    /// Agent environment to target; the deployment name is used as the agent ID
+    /// Agent environment to target; the Agent Server name is used as the agent ID
     /// (requires agent mode enabled for the workspace). Defaults to
     /// LANGSMITH_AGENT_ENVIRONMENT in .env.
     #[arg(long, value_enum)]
     agent_environment: Option<AgentEnvironment>,
 
-    /// Workspace ID the deployment lives in (overrides LANGSMITH_WORKSPACE_ID).
+    /// Workspace ID the Agent Server lives in (overrides LANGSMITH_WORKSPACE_ID).
     #[arg(long)]
     workspace_id: Option<String>,
 
@@ -668,7 +753,7 @@ struct LogsArgs {
     #[arg(default_value = ".")]
     path: PathBuf,
 
-    /// Deployment name (defaults to the agent `name` from the project).
+    /// Agent Server name (defaults to the agent `name` from the project).
     #[arg(short = 'n', long)]
     name: Option<String>,
 
@@ -708,17 +793,17 @@ struct DeleteArgs {
     #[arg(default_value = ".")]
     path: PathBuf,
 
-    /// Deployment name (defaults to the agent `name` in the agent file).
+    /// Agent Server name (defaults to the agent `name` in the agent file).
     #[arg(short = 'n', long)]
     name: Option<String>,
 
-    /// Agent environment to target; the deployment name is used as the agent ID
+    /// Agent environment to target; the Agent Server name is used as the agent ID
     /// (requires agent mode enabled for the workspace). Defaults to
     /// LANGSMITH_AGENT_ENVIRONMENT in .env.
     #[arg(long, value_enum)]
     agent_environment: Option<AgentEnvironment>,
 
-    /// Workspace ID the deployment lives in (overrides LANGSMITH_WORKSPACE_ID).
+    /// Workspace ID the Agent Server lives in (overrides LANGSMITH_WORKSPACE_ID).
     #[arg(long)]
     workspace_id: Option<String>,
 
@@ -846,10 +931,13 @@ pub fn run() -> ExitCode {
     };
 
     let telemetry_enabled = !is_telemetry_disabled(|key| std::env::var(key).ok());
-    let posthog = telemetry_enabled.then(posthog_transport).flatten();
     let otel_logger = telemetry_enabled.then(OtelLogger::install).flatten();
     if telemetry_enabled {
-        hold_for_exit(otel_logger, posthog);
+        let sinks = [
+            posthog_transport().map(|sink| Box::new(sink) as Sink),
+            segment_transport().map(|sink| Box::new(sink) as Sink),
+        ];
+        hold_for_exit(otel_logger, sinks.into_iter().flatten().collect());
         report_panics();
         let (facts, client) = ReportableFacts::detect(&command, &matches);
         init_facts(facts);
@@ -864,6 +952,7 @@ pub fn run() -> ExitCode {
         Command::Chat(args) => run_chat(args),
         Command::Deploy(args) => run_deploy(args),
         Command::Pull(args) => run_pull(args),
+        Command::Memory(args) => run_memory(args),
         Command::Prepare(args) => run_prepare(args, build_artifacts_token),
         Command::Connection(args) => run_connection(args),
         Command::Channel(args) => run_channel(args),
@@ -918,19 +1007,35 @@ fn run_init(args: InitArgs) -> Result<CommandCompletion> {
             name
         }
     };
+    let fleet_source = match (args.from, args.from_snapshot) {
+        (Some(agent_id), _) => Some(fleet_export::Source::Fleet {
+            agent_id,
+            workspace_id: args.workspace_id,
+            host_url: args.host_url,
+            env_file: deploy::resolve_env_file_flag(args.env_file)?,
+        }),
+        (None, Some(dir)) => Some(fleet_export::Source::Snapshot(dir)),
+        (None, None) => None,
+    };
+    if let Some(source) = fleet_source {
+        if !prompts_for_name {
+            init::begin()?;
+        }
+        return fleet_export::run(&cwd, &name, language, source);
+    }
     let blueprint = init::Blueprint {
         instructions: instructions(args.instructions, args.instructions_file.as_deref())?,
         memory: args.memory,
         model: args.model,
         sandbox: !args.no_sandbox,
-        channels: args.channels,
+        channels: args.channels.iter().map(|&kind| kind.into()).collect(),
         ..init::Blueprint::new(name, language)
     };
     if !prompts_for_name {
         init::begin()?;
     }
     let summary = init::init(&cwd, &blueprint)?;
-    channel::warn_experimental(&blueprint.channels)?;
+    channel::warn_experimental(&args.channels)?;
     if coding_agent_handoff {
         init::show_interactive_created(&summary.root)?;
         let outcome = init::offer_handoff(&summary.root, init::coding_agent_prompt())?;
@@ -1036,7 +1141,18 @@ fn run_prepare(
     args: PrepareArgs,
     build_artifacts_token: Option<std::ffi::OsString>,
 ) -> Result<CommandCompletion> {
+    let phase = match (args.phase, args.deployment_name) {
+        (PreparePhaseArg::All, _) => deploy::prepare::PreparePhase::All,
+        (PreparePhaseArg::Provision, _) => deploy::prepare::PreparePhase::Provision,
+        (PreparePhaseArg::Compile, Some(deployment_name)) => {
+            deploy::prepare::PreparePhase::Compile { deployment_name }
+        }
+        (PreparePhaseArg::Compile, None) => {
+            anyhow::bail!("--deployment-name is required with --phase compile")
+        }
+    };
     deploy::prepare::run(deploy::prepare::PrepareOptions {
+        phase,
         build_artifacts_token,
         path: args.path,
         out: args.out,
@@ -1123,7 +1239,7 @@ fn run_channel(args: ChannelArgs) -> Result<CommandCompletion> {
                 ChannelInitCommand::GitHub => channel::ChannelKind::GitHub,
                 ChannelInitCommand::Linear => channel::ChannelKind::Linear,
             };
-            let path = channel::init_channel(Path::new("."), kind)?;
+            let path = channel::init_channel(Path::new("."), &kind.into())?;
             channel::show_added(kind, &path)?;
         }
         ChannelCommand::Setup(args) => {
@@ -1143,8 +1259,17 @@ fn run_channel(args: ChannelArgs) -> Result<CommandCompletion> {
 }
 
 fn run_pull(mut args: crate::pull::PullOptions) -> Result<CommandCompletion> {
-    args.env_file = deploy::resolve_env_file_flag(args.env_file)?;
+    args.target.env_file = deploy::resolve_env_file_flag(args.target.env_file.take())?;
     crate::pull::run(args)
+}
+
+fn run_memory(args: MemoryArgs) -> Result<CommandCompletion> {
+    match args.command {
+        MemoryCommand::Upload(mut args) => {
+            args.target.env_file = deploy::resolve_env_file_flag(args.target.env_file.take())?;
+            crate::memory::upload(args)
+        }
+    }
 }
 
 fn run_logs(args: LogsArgs) -> Result<CommandCompletion> {
@@ -1245,10 +1370,13 @@ mod tests {
             panic!("expected pull")
         };
         assert_eq!(args.path, PathBuf::from("./project"));
-        assert_eq!(args.name.as_deref(), Some("my-agent"));
-        assert_eq!(args.agent_environment, Some(AgentEnvironment::Staging));
-        assert_eq!(args.workspace_id.as_deref(), Some("workspace"));
-        assert_eq!(args.env_file, Some(PathBuf::from("custom.env")));
+        assert_eq!(args.target.name.as_deref(), Some("my-agent"));
+        assert_eq!(
+            args.target.agent_environment,
+            Some(AgentEnvironment::Staging)
+        );
+        assert_eq!(args.target.workspace_id.as_deref(), Some("workspace"));
+        assert_eq!(args.target.env_file, Some(PathBuf::from("custom.env")));
         assert!(args.dry_run);
         assert!(args.yes);
         let Command::Pull(defaults) = Cli::try_parse_from(["mda", "pull"]).unwrap().command else {
@@ -1260,6 +1388,42 @@ mod tests {
         assert_eq!(
             analytics_for(&["mda", "pull", "--yes"]).command_path,
             "pull"
+        );
+    }
+
+    #[test]
+    fn memory_upload_parses_folder_and_project_options() {
+        let cli = Cli::try_parse_from([
+            "mda",
+            "memory",
+            "upload",
+            "fleet_export_files/memories",
+            "--project",
+            "./project",
+            "--name",
+            "my-agent",
+            "--agent-environment",
+            "staging",
+            "--dry-run",
+        ])
+        .unwrap();
+        let Command::Memory(MemoryArgs {
+            command: MemoryCommand::Upload(args),
+        }) = cli.command
+        else {
+            panic!("expected memory upload")
+        };
+        assert_eq!(args.folder, PathBuf::from("fleet_export_files/memories"));
+        assert_eq!(args.path, PathBuf::from("./project"));
+        assert_eq!(args.target.name.as_deref(), Some("my-agent"));
+        assert_eq!(
+            args.target.agent_environment,
+            Some(AgentEnvironment::Staging)
+        );
+        assert!(args.dry_run);
+        assert_eq!(
+            analytics_for(&["mda", "memory", "upload", "memories"]).command_path,
+            "memory upload"
         );
     }
 
@@ -1431,7 +1595,7 @@ mod tests {
             "{help}"
         );
         assert!(
-            help.contains("\n  # Connections this project's deployment uses\n"),
+            help.contains("\n  # Connections this project's Agent Server uses\n"),
             "{help}"
         );
         assert!(help.contains("\n  # One connection's metadata\n"), "{help}");
@@ -1695,6 +1859,42 @@ mod tests {
         assert!(args.authorize);
         assert_eq!(args.deployment_id.as_deref(), Some("deployment"));
         assert_eq!(args.common.workspace_id.as_deref(), Some("workspace"));
+    }
+
+    #[test]
+    fn agent_server_id_accepts_legacy_aliases_without_changing_analytics() {
+        for flag in ["--agent-server-id", "--deployment-id"] {
+            let argv = [
+                "mda",
+                "connections",
+                "create",
+                "notion",
+                flag,
+                "agent-server",
+            ];
+            let ConnectionCommand::Create(args) = connection_command(&argv) else {
+                panic!("expected create");
+            };
+            assert_eq!(args.deployment_id.as_deref(), Some("agent-server"));
+            assert_eq!(
+                serde_json::to_value(analytics_for(&argv)).unwrap(),
+                json!({"command_path": "connections create", "flags_present": ["deployment-id"]})
+            );
+            let Command::Prepare(args) = Cli::try_parse_from([
+                "mda",
+                "prepare",
+                flag,
+                "agent-server",
+                "--revision-id",
+                "revision",
+            ])
+            .unwrap()
+            .command
+            else {
+                panic!("expected prepare");
+            };
+            assert_eq!(args.deployment_id, "agent-server");
+        }
     }
 
     #[test]
@@ -2055,7 +2255,7 @@ mod tests {
                 unreachable!();
             };
             assert_eq!(init.name.as_deref(), Some("my-agent"), "{args:?}");
-            assert_eq!(init.channels, vec![init::InitChannel::Slack], "{args:?}");
+            assert_eq!(init.channels, vec![channel::ChannelKind::Slack], "{args:?}");
         }
     }
 
@@ -2068,7 +2268,7 @@ mod tests {
         };
         assert_eq!(
             init.channels,
-            vec![init::InitChannel::GitHub, init::InitChannel::Slack]
+            vec![channel::ChannelKind::GitHub, channel::ChannelKind::Slack]
         );
     }
 
@@ -2127,13 +2327,17 @@ mod tests {
     }
 
     #[test]
-    fn deploy_help_lists_deployment_type_values_and_hides_host_url() {
+    fn deploy_help_lists_agent_server_type_values_and_hides_legacy_flags() {
         let cli = Cli::command();
         let deploy = cli.find_subcommand("deploy").expect("deploy subcommand");
         let mut help = Vec::new();
         deploy.clone().write_long_help(&mut help).unwrap();
         let help = String::from_utf8(help).unwrap();
 
+        assert!(help.contains("Agent Server name"));
+        assert!(help.contains("Agent Server type when creating"));
+        assert!(help.contains("--agent-server-type <TYPE>"));
+        assert!(!help.contains("--deployment-type"));
         assert!(help.contains("[default: serverless]"));
         assert!(help.contains("[possible values: serverless, dedicated]"));
         assert!(help.contains("static agent `name`, or `agent` for a dynamic entry"));
@@ -2141,6 +2345,30 @@ mod tests {
             !help.contains("--host-url"),
             "advanced --host-url should be hidden from default help"
         );
+    }
+
+    #[test]
+    fn resource_commands_use_agent_server_names_in_help() {
+        let cli = Cli::command();
+        for name in ["deploy", "pull", "logs", "delete"] {
+            let mut command = cli.find_subcommand(name).unwrap().clone();
+            let help = command.render_long_help().to_string();
+            assert!(help.contains("Agent Server name"), "{name}: {help}");
+            assert!(!help.contains("Deployment name"), "{name}: {help}");
+        }
+        let mut create = cli
+            .find_subcommand("connections")
+            .unwrap()
+            .find_subcommand("create")
+            .unwrap()
+            .clone();
+        let help = create.render_long_help().to_string();
+        assert!(
+            help.contains("--agent-server-id <AGENT_SERVER_ID>"),
+            "{help}"
+        );
+        assert!(!help.contains("--deployment-id"), "{help}");
+        assert!(help.contains("Agent Server ID"), "{help}");
     }
 
     #[test]
@@ -2160,21 +2388,33 @@ mod tests {
             ("dev", DeploymentType::Dev),
             ("prod", DeploymentType::Dedicated),
         ] {
-            let cli = Cli::try_parse_from(["mda", "deploy", "--deployment-type", value]).unwrap();
-            let Command::Deploy(args) = cli.command else {
-                panic!("expected deploy command");
-            };
-            assert_eq!(args.deployment_type, expected, "{value}");
+            for flag in ["--agent-server-type", "--deployment-type"] {
+                let cli = Cli::try_parse_from(["mda", "deploy", flag, value]).unwrap();
+                let Command::Deploy(args) = cli.command else {
+                    panic!("expected deploy command");
+                };
+                assert_eq!(args.deployment_type, expected, "{flag} {value}");
+            }
+        }
+    }
+
+    #[test]
+    fn agent_server_type_keeps_legacy_analytics_names() {
+        for flag in ["--agent-server-type", "--deployment-type"] {
+            assert_eq!(
+                serde_json::to_value(analytics_for(&["mda", "deploy", flag, "dedicated"])).unwrap(),
+                json!({"command_path": "deploy", "flags_present": ["deployment-type"]})
+            );
         }
     }
 
     #[test]
     fn deploy_rejects_invalid_deployment_type_at_parse_time() {
-        let err = match Cli::try_parse_from(["mda", "deploy", ".", "--deployment-type", "staging"])
-        {
-            Err(err) => err,
-            Ok(_) => panic!("expected parse failure for invalid deployment type"),
-        };
+        let err =
+            match Cli::try_parse_from(["mda", "deploy", ".", "--agent-server-type", "staging"]) {
+                Err(err) => err,
+                Ok(_) => panic!("expected parse failure for invalid deployment type"),
+            };
         let rendered = err.to_string();
         assert!(
             rendered.contains("invalid value") || rendered.contains("possible values"),

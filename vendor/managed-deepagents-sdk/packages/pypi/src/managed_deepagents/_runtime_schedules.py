@@ -161,8 +161,8 @@ class _Spec(BaseModel):
     @field_validator("metadata")
     @classmethod
     def validate_metadata(cls, value: dict[str, JsonValue]) -> dict[str, JsonValue]:
-        if any(key.startswith("mda_") for key in value):
-            raise ValueError("Metadata keys starting with mda_ are reserved")
+        if any(key.startswith("mda_") or key == "owner" for key in value):
+            raise ValueError("Metadata keys starting with mda_, and owner, are reserved")
         return value
 
 
@@ -362,7 +362,7 @@ def _record(wire: _Wire, ctx: _Context, *, now: datetime | None = None) -> Sched
             {
                 key: value
                 for key, value in wire.metadata.items()
-                if not key.startswith(("mda_", THREAD_RECORD_METADATA_PREFIX))
+                if key != "owner" and not key.startswith(("mda_", THREAD_RECORD_METADATA_PREFIX))
             },
             strict=True,
         ),
@@ -504,8 +504,11 @@ def _new_thread_record(
     sender = thread.thread.origin.sender if thread.thread.origin is not None else None
     person = execution["mda_user_id"]
     owned = execution.get("mda_user_kind") != "service" and is_person_principal(person)
+    # Its runs are the schedule's, not this run's, so the channel's reply applies.
+    channel: ChannelBinding = {**origin}
+    channel.pop("reply", None)
     record = ThreadRecord(
-        origin=origin_from_binding(origin, sender.id if sender is not None else None),
+        origin=origin_from_binding(channel, sender.id if sender is not None else None),
         participants={person: "owner"} if owned else {},
     )
     return thread_record_metadata(record)

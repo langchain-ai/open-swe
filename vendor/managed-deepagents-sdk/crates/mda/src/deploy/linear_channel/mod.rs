@@ -1,10 +1,10 @@
 //! Linear channel setup during `mda deploy`.
 //!
-//! A Linear channel needs a Linear OAuth app installed with `actor=app` in the
-//! workspace, its webhook pointed at the deployment. Linear has no public API
-//! to create apps, so a workspace admin creates it from a page deploy fills
-//! in, and pastes back its client ID, client secret and webhook signing
-//! secret. Deploy brings them into Agent Auth as an app the deployment owns,
+//! A Linear channel needs a Linear OAuth app in the workspace, with client
+//! credentials turned on and its webhook pointed at the deployment. Linear has
+//! no public API to create apps, so a workspace admin creates it from a page
+//! deploy fills in, and pastes back its client ID, client secret and webhook
+//! signing secret. Deploy brings them into Agent Auth as an app the deployment owns,
 //! which keeps:
 //!
 //! - the app's OAuth connection, `mda/linear-app/{deployment}`, whose token
@@ -17,9 +17,14 @@
 //! slugs as plain workspace connections, which only a workspace admin can
 //! delete: setup keeps using them, and says so when they have to go.
 //!
+//! Agent Auth gets the app's token with Linear's client-credentials grant, so
+//! no one approves an install. Apps an earlier mda set up keep the install a
+//! workspace admin approved.
+//!
 //! The CLI never reads the app's token. It goes by what Agent Auth records
 //! about the agent's grant: none, active, or lapsed and waiting for consent
-//! again, which only needs the admin to approve the install once more.
+//! again. Agent Auth gets a lapsed grant back by itself with client
+//! credentials; an approved install needs the admin to approve it once more.
 //!
 //! Setup runs once the deployment is live, because the app's webhook points at
 //! the Agent Server URL. `mda delete` removes the Agent Auth app (see
@@ -75,35 +80,29 @@ const SIGNING_SECRET_PREFIX: &str = "lin_wh_";
 /// ([`WEBHOOK_SECRET_SUFFIX`]).
 pub(crate) const SLUGS: AppSlugs = AppSlugs::new("mda/linear-app/");
 
-const INSTALL_MESSAGES: OAuthWaitMessages = OAuthWaitMessages {
-    failed: "The Linear app install did not complete. Check that a Linear workspace admin approved it and that the app's Redirect URIs include Agent Auth's callback, then run `mda deploy` again.",
-    expired: "The Linear app install was not approved in time; run `mda deploy` again.",
-    unexpected: "The Linear app install returned an unexpected status",
-};
-
 const CONSENT_MESSAGES: OAuthWaitMessages = OAuthWaitMessages {
-    failed: "Approving the Linear app again did not complete. Check that a Linear workspace admin approved it, then run `mda deploy` again. If the app was deleted in Linear, `mda delete` removes the deployment with its Linear app in Agent Auth; deploy again to set up a new app.",
+    failed: "Approving the Linear app again did not complete. Check that a Linear workspace admin approved it, then run `mda deploy` again. If the app was deleted in Linear, `mda delete` removes the Agent Server with its Linear app in Agent Auth; deploy again to set up a new app.",
     expired: "The Linear app was not approved again in time; run `mda deploy` again.",
     unexpected: "Approving the Linear app again returned an unexpected status",
 };
 
 const NO_EVENTS: &str = "The Linear channel handles no events, so no Linear app is set up. Add handlers with `channels.linear({ onEvent: { ... } })`, or turn agent sessions on, and deploy again.";
 
-const LAPSED_GRANT: &str = "Linear stopped renewing this deployment's Linear app access, so a Linear workspace admin has to approve the app again. The app and its connection stay as they are.";
+const LAPSED_GRANT: &str = "Linear stopped renewing this Agent Server's Linear app access, so deploy gets it again. The app and its connection stay as they are.";
 
-const REVOKED_GRANT: &str = "This deployment's access to the Linear app was revoked, so a Linear workspace admin has to approve the app again. The app and its connection stay as they are.";
+const REVOKED_GRANT: &str = "This Agent Server's access to the Linear app was revoked, so deploy gets it again. The app and its connection stay as they are.";
 
 /// An Agent Auth grant status this CLI does not know: setup keeps the app as
 /// it is and says so, rather than treating the grant as healthy unremarked.
 fn unknown_grant_warning(status: &str) -> String {
     format!(
-        "Agent Auth reports this deployment's Linear app access as `{status}`, a status this version of mda does not know. Keeping the app as it is; if Linear events do not arrive, have a Linear workspace admin approve the app again, or update mda."
+        "Agent Auth reports this Agent Server's Linear app access as `{status}`, a status this version of mda does not know. Keeping the app as it is; if Linear events do not arrive, update mda."
     )
 }
 
 const MISSING_SECRET: &str = "The Linear app is installed, but its webhook signing secret is not stored. Set MDA_LINEAR_WEBHOOK_SECRET to the app's signing secret (lin_wh_…, on the app's settings page in Linear) and run `mda deploy` again.";
 
-const SKIPPED_SETUP: &str = "Continuing without the Linear channel. The deployment is live, but it receives no Linear events until you run `mda deploy` again and finish setting up the Linear app.";
+const SKIPPED_SETUP: &str = "Continuing without the Linear channel. The Agent Server is live, but it receives no Linear events until you run `mda deploy` again and finish setting up the Linear app.";
 
 /// Why the plain workspace connections an earlier mda set up must go, and who
 /// can delete them.
@@ -111,7 +110,7 @@ fn legacy_connections_message(deployment_id: &str) -> String {
     let connection = SLUGS.connection(deployment_id);
     let secret = SLUGS.secret(deployment_id, WEBHOOK_SECRET_SUFFIX);
     format!(
-        "An earlier version of mda stored this deployment's Linear app as the workspace connections {connection} and {secret}, and setting the app up again means deleting them first, which only a LangSmith workspace admin can do. Ask one to run `mda connections delete {secret}` and `mda connections delete {connection}`, or `mda deploy` once themselves, then run `mda deploy` again."
+        "An earlier version of mda stored this Agent Server's Linear app as the workspace connections {connection} and {secret}, and setting the app up again means deleting them first, which only a LangSmith workspace admin can do. Ask one to run `mda connections delete {secret}` and `mda connections delete {connection}`, or `mda deploy` once themselves, then run `mda deploy` again."
     )
 }
 
@@ -210,14 +209,15 @@ pub(crate) trait SetupEnv: SetupUi {
     ) -> Result<AppConnection>;
     /// Store the signing secret next to an earlier mda's app connection.
     fn store_webhook_secret(&mut self, secret: &str) -> Result<()>;
-    /// Start the install, or the consent again, that a workspace admin
-    /// approves.
+    /// Start getting the app's token: at once with client credentials, or
+    /// through the consent again that a workspace admin approves.
     fn start_install(&mut self, connection_id: &str) -> Result<OAuthAuthorizationSession>;
-    /// Ask whether the app lists the redirect URI Agent Auth sends Linear.
+    /// Ask whether the app lists the redirect URI Agent Auth sends Linear for
+    /// consent again.
     fn confirm_redirect_uri(&mut self, actual: &str) -> Result<bool>;
     /// Ask whether an app from the env is set as deploy listed.
     fn confirm_app_settings(&mut self) -> Result<bool>;
-    /// Show and open the consent page.
+    /// Show and open the page where an admin approves the app again.
     fn open_install_page(&mut self, url: &str) -> Result<()>;
     /// Wait for the install to change and return its status.
     fn next_install_status(&mut self, session_id: &str) -> Result<String>;
@@ -229,7 +229,8 @@ pub(crate) trait SetupEnv: SetupUi {
     fn deployment_id(&self) -> &str;
     /// Where this deployment receives the app's events.
     fn webhook_url(&self) -> &str;
-    /// Agent Auth's OAuth callback, which a new app lists as its redirect URI.
+    /// Agent Auth's OAuth callback, which an app an admin approves lists as its
+    /// redirect URI.
     fn redirect_uri(&self) -> &str;
 }
 
@@ -327,10 +328,10 @@ pub(crate) fn status(
 fn app_status(connection: Option<&AppConnection>) -> ChannelStatus {
     let needs = |message: &str| ChannelStatus::NeedsSetup(message.to_string());
     let Some(connection) = connection else {
-        return needs("No Linear app is set up for this deployment yet.");
+        return needs("No Linear app is set up for this Agent Server yet.");
     };
     match &connection.grant {
-        AgentGrant::Missing => needs("The Linear app was not approved by a workspace admin yet."),
+        AgentGrant::Missing => needs("Agent Auth has no token for the Linear app yet."),
         AgentGrant::AuthorizationRequired => needs(LAPSED_GRANT),
         AgentGrant::Revoked => needs(REVOKED_GRANT),
         _ if !connection.has_webhook_secret() => {
@@ -351,6 +352,7 @@ const CREDENTIALS_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from
 /// Linear may change, says nothing, and deploy goes on.
 fn check_credentials(credentials: &AppCredentials) -> Result<()> {
     let response = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(CREDENTIALS_CHECK_TIMEOUT)
         .build()
         .and_then(|http| {
@@ -403,7 +405,7 @@ fn unattended_setup_message(create_url: Option<&str>, workspace_known: bool) -> 
         format!(" Set {WORKSPACE_ENV} to the workspace's URL key, as in https://linear.app/<key>/, so the link opens in that workspace.")
     };
     format!(
-        "This agent's Linear channel needs a Linear app, and without a terminal deploy cannot ask for it. Have an admin of the Linear workspace create one{page}, or use an app the workspace has, then set {CLIENT_ID_ENV}, {CLIENT_SECRET_ENV} and {WEBHOOK_SECRET_ENV} in the shell or .env and run `mda deploy` again. Deploy prints the install link to approve.{workspace}"
+        "This agent's Linear channel needs a Linear app, and without a terminal deploy cannot ask for it. Have an admin of the Linear workspace create one{page}, or use an app the workspace has, then set {CLIENT_ID_ENV}, {CLIENT_SECRET_ENV} and {WEBHOOK_SECRET_ENV} in the shell or .env and run `mda deploy` again.{workspace}"
     )
 }
 
@@ -435,7 +437,7 @@ pub(crate) fn run_setup(env: &mut dyn SetupEnv, channel: &LinearChannel) -> Resu
         |key| format!("https://linear.app/{key}/{APPS_PATH}"),
     );
     env.info(&format!(
-        "Linear has no API to change an app, so later deploys keep it as it is now. If the channel's app name, description or icon change, or this deployment moves to another URL, change them on the app's settings page ({page})."
+        "Linear has no API to change an app, so later deploys keep it as it is now. If the channel's app name, description or icon change, or this Agent Server moves to another URL, change them on the app's settings page ({page})."
     ))
 }
 
@@ -455,7 +457,7 @@ fn set_up_app(
             store_missing_secret(env, &connection)?;
         }
         // The grant lapsed or was revoked: the app and its secret stay, and
-        // the admin approves it again.
+        // Agent Auth gets the token again.
         AgentGrant::AuthorizationRequired | AgentGrant::Revoked => {
             let reason = if connection.grant == AgentGrant::Revoked {
                 REVOKED_GRANT
@@ -464,7 +466,7 @@ fn set_up_app(
             };
             env.warning(reason)?;
             store_missing_secret(env, &connection)?;
-            approve(env, &connection.connection_id, &CONSENT_MESSAGES)?;
+            renew_access(env, &connection.connection_id)?;
         }
         // A status Agent Auth added after this CLI: warn, naming it, and
         // keep going without consent, so a harmless new status does not
@@ -508,19 +510,13 @@ fn install_new_app(env: &mut dyn SetupEnv, channel: &LinearChannel) -> Result<()
             env.show_existing_app_settings(&existing_app_settings(
                 channel,
                 env.webhook_url(),
-                env.redirect_uri(),
                 env.configured_workspace_key().as_deref(),
             ))?;
             env.ask_credentials()?
         }
         None => {
             let workspace = env.workspace_key()?;
-            let url = create_app_url(
-                workspace.as_deref(),
-                channel,
-                env.webhook_url(),
-                env.redirect_uri(),
-            )?;
+            let url = create_app_url(workspace.as_deref(), channel, env.webhook_url())?;
             if !env.interactive() {
                 bail!(unattended_setup_message(Some(&url), workspace.is_some()));
             }
@@ -529,7 +525,7 @@ fn install_new_app(env: &mut dyn SetupEnv, channel: &LinearChannel) -> Result<()
         }
     };
     let app = env.create_app(channel, &credentials)?;
-    let result = approve(env, &app.connection_id, &INSTALL_MESSAGES);
+    let result = get_first_token(env, &app.connection_id);
     if result.is_err() {
         // The next attempt asks for the credentials again, so leave nothing
         // behind that could hold wrong ones.
@@ -542,13 +538,25 @@ fn install_new_app(env: &mut dyn SetupEnv, channel: &LinearChannel) -> Result<()
     result
 }
 
-/// Have a workspace admin approve the app on its connection: the first
-/// install, or consent again once the grant lapsed.
-fn approve(
-    env: &mut dyn SetupEnv,
-    connection_id: &str,
-    messages: &OAuthWaitMessages,
-) -> Result<()> {
+/// Have Agent Auth get a new app's first token with client credentials. The
+/// session completes as it starts: no one approves it.
+fn get_first_token(env: &mut dyn SetupEnv, connection_id: &str) -> Result<()> {
+    let session = env.start_install(connection_id).context(
+        "Agent Auth could not get the Linear app's token. Check that client credentials are turned on on the app's settings page in Linear",
+    )?;
+    if session.status != "completed" {
+        bail!(
+            "Agent Auth did not get the Linear app's token: the install is `{}`, not `completed`.",
+            session.status
+        );
+    }
+    Ok(())
+}
+
+/// Get the agent's grant on the app back once it lapsed or was revoked. With
+/// client credentials Agent Auth gets a new token at once; an app an earlier
+/// mda set up needs a workspace admin to approve it again.
+fn renew_access(env: &mut dyn SetupEnv, connection_id: &str) -> Result<()> {
     let session = env.start_install(connection_id)?;
     if session.status != "completed" {
         if let Some(actual) = redirect_uri_of(&session.verification_url) {
@@ -561,49 +569,49 @@ fn approve(
     poll_oauth_session(
         &session.status,
         || env.next_install_status(&session.id),
-        messages,
+        &CONSENT_MESSAGES,
     )
 }
 
 /// An app from the env was made outside deploy, so it may not point at this
 /// deployment, and Linear has no API that says what it has set: list the
 /// settings, and in a terminal wait until they are set. "No" asks again, since
-/// Linear refuses the install without the redirect URI; Escape stops setting
+/// Agent Auth gets no token without client credentials; Escape stops setting
 /// up the channel.
 fn confirm_app_settings(env: &mut dyn SetupEnv, channel: &LinearChannel) -> Result<()> {
     let settings = app_settings(
         channel,
         env.webhook_url(),
-        env.redirect_uri(),
         env.configured_workspace_key().as_deref(),
     );
     env.warning(&format!(
-        "{settings} Linear can't tell deploy what the app has set, so check these before the install is approved."
+        "{settings} Linear can't tell deploy what the app has set, so check these before deploy installs the app."
     ))?;
     if !env.interactive() {
         return Ok(());
     }
     while !env.confirm_app_settings()? {
         env.info(
-            "Linear refuses the install until the app lists the redirect URI above. Set it, then answer Yes, or press Esc to stop setting up the Linear channel.",
+            "Agent Auth can't get the app's token until client credentials are turned on. Turn them on, then answer Yes, or press Esc to stop setting up the Linear channel.",
         )?;
     }
     Ok(())
 }
 
-/// Agent Auth sends Linear a redirect URI the new app may not list: say so,
-/// and in a terminal wait until it is added. "No" asks again, since Linear
-/// refuses the install until then; Escape stops setting up the channel.
+/// Agent Auth sends Linear a redirect URI the app may not list, for example
+/// after the Agent Auth URL changed: say so, and in a terminal wait until it
+/// is added. "No" asks again, since Linear refuses the approval until then;
+/// Escape stops setting up the channel.
 fn confirm_redirect_uri(env: &mut dyn SetupEnv, actual: &str) -> Result<()> {
     env.warning(&format!(
-        "Agent Auth expects Linear to redirect to {actual}. Add it under Redirect URIs on the Linear app's settings page before approving the install, or Linear answers \"Invalid redirect_uri\"."
+        "Agent Auth expects Linear to redirect to {actual}. Add it under Redirect URIs on the Linear app's settings page before approving the app again, or Linear answers \"Invalid redirect_uri\"."
     ))?;
     if !env.interactive() {
         return Ok(());
     }
     while !env.confirm_redirect_uri(actual)? {
         env.info(&format!(
-            "Linear refuses the install until the app lists {actual} under Redirect URIs. Add it, then answer Yes, or press Esc to stop setting up the Linear channel."
+            "Linear refuses the approval until the app lists {actual} under Redirect URIs. Add it, then answer Yes, or press Esc to stop setting up the Linear channel."
         ))?;
     }
     Ok(())
@@ -649,7 +657,6 @@ pub(crate) fn create_app_url(
     workspace: Option<&str>,
     channel: &LinearChannel,
     webhook_url: &str,
-    redirect_uri: &str,
 ) -> Result<String> {
     let base = match workspace {
         Some(key) => format!(
@@ -675,8 +682,9 @@ pub(crate) fn create_app_url(
         "oauth": {
             "client_name": channel.app_name,
             "client_uri": "https://www.langchain.com/langsmith",
-            "redirect_uris": [redirect_uri],
-            "grant_types": ["authorization_code"],
+            // Linear requires authorization_code, and redirect URIs only
+            // without client_credentials.
+            "grant_types": ["authorization_code", "client_credentials"],
         },
         "webhook": {
             "url": webhook_url,
@@ -696,30 +704,24 @@ pub(crate) fn create_app_url(
 pub(crate) fn existing_app_settings(
     channel: &LinearChannel,
     webhook_url: &str,
-    redirect_uri: &str,
     workspace: Option<&str>,
 ) -> String {
     format!(
         "{} Then copy its client ID, client secret and webhook signing secret into the prompts below.",
-        app_settings(channel, webhook_url, redirect_uri, workspace)
+        app_settings(channel, webhook_url, workspace)
     )
 }
 
 /// The settings an app must have for this deployment, and what changing its
 /// webhook does.
-fn app_settings(
-    channel: &LinearChannel,
-    webhook_url: &str,
-    redirect_uri: &str,
-    workspace: Option<&str>,
-) -> String {
+fn app_settings(channel: &LinearChannel, webhook_url: &str, workspace: Option<&str>) -> String {
     let page = workspace.map_or_else(
         || "Settings → Administration → API in Linear".to_string(),
         |key| format!("https://linear.app/{key}/{APPS_PATH}"),
     );
     format!(
-        "Point your Linear app at this deployment on its settings page ({page}):\n\
-         \n  Redirect URIs: add {redirect_uri}\n\
+        "Point your Linear app at this Agent Server on its settings page ({page}):\n\
+         \n  Client credentials: turn on\n\
          \x20 Webhooks: turn on, URL {webhook_url}\n\
          \x20   events: {}\n\
          \nLinear sends an app's webhooks to one URL, so whatever received this app's \
@@ -820,7 +822,7 @@ fn lookup_app_connection(
     let (connection_id, store) = match app {
         Some(app) => (
             app.connection_id.context(
-                "Agent Auth returned the deployment's Linear app without its connection",
+                "Agent Auth returned the Agent Server's Linear app without its connection",
             )?,
             AppStore::App { id: app.id },
         ),
@@ -1048,14 +1050,14 @@ impl SetupEnv for LiveSetup<'_> {
     }
 
     fn confirm_redirect_uri(&mut self, _actual: &str) -> Result<bool> {
-        cliclack::confirm("Added it? Deploy opens the install page next.")
+        cliclack::confirm("Added it? Deploy opens the approval page next.")
             .initial_value(true)
             .interact()
             .context("failed to confirm the Linear app's redirect URI")
     }
 
     fn confirm_app_settings(&mut self) -> Result<bool> {
-        cliclack::confirm("Set them? Deploy opens the install page next.")
+        cliclack::confirm("Set them? Deploy installs the app next.")
             .initial_value(true)
             .interact()
             .context("failed to confirm the Linear app's settings")
@@ -1066,12 +1068,12 @@ impl SetupEnv for LiveSetup<'_> {
             // Whoever runs deploy, e.g. a coding agent, hands this link to a
             // Linear workspace admin.
             log::step(format!(
-                "Install the Linear app: a Linear workspace admin opens this link and approves it. Deploy waits for it.\n{url}"
+                "Approve the Linear app again: a Linear workspace admin opens this link and approves it. Deploy waits for it.\n{url}"
             ))?;
             return Ok(());
         }
         log::step(format!(
-            "Install the Linear app in your browser: a Linear workspace admin approves it. If it does not open, visit:\n{url}\nPress Ctrl-C to skip."
+            "Approve the Linear app again in your browser: a Linear workspace admin approves it. If it does not open, visit:\n{url}\nPress Ctrl-C to skip."
         ))?;
         crate::langsmith::login::open_browser(url);
         Ok(())
@@ -1085,7 +1087,7 @@ impl SetupEnv for LiveSetup<'_> {
         self.agent_auth
             .delete_agent_app(app_id)
             .map(|_| ())
-            .context("failed to delete the deployment's Linear app from Agent Auth")
+            .context("failed to delete the Agent Server's Linear app from Agent Auth")
     }
 
     fn delete_connection(&mut self, connection_id: &str) -> Result<()> {

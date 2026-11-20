@@ -25,15 +25,6 @@ class PendingCredential(TypedDict, total=False):
     provider: str
 
 
-#: Tool metadata key naming the credential a tool needs before its first call.
-CONNECT_ON_USE_METADATA = "mda_connect_on_use"
-
-
-class ConnectOnUse(TypedDict):
-    server: str
-    credential: PendingCredential
-
-
 class CredentialAuthorizationRequiredInterrupt(TypedDict):
     """Interrupt payload when the caller has not granted one or more connections."""
 
@@ -82,11 +73,18 @@ _defer_interrupts: ContextVar[bool] = ContextVar("mda_defer_credential_interrupt
 
 
 class CredentialAuthorizationDeferredError(Exception):
-    """Missing credentials raised instead of interrupting, for the caller to merge."""
+    """Missing credentials raised instead of interrupting, for the caller to merge.
 
-    def __init__(self, credentials: Sequence[PendingCredential]) -> None:
+    ``tools`` are the ones the consumer loaded anyway (its other servers), kept
+    when the person answers without connecting.
+    """
+
+    def __init__(
+        self, credentials: Sequence[PendingCredential], tools: Sequence[object] = ()
+    ) -> None:
         super().__init__([credential.get("slug") for credential in credentials])
         self.credentials = list(credentials)
+        self.tools = list(tools)
 
 
 def defer_credential_interrupts() -> None:
@@ -176,8 +174,6 @@ def _interrupt(payload: CredentialAuthorizationRequiredInterrupt) -> None:
 
 
 __all__ = [
-    "CONNECT_ON_USE_METADATA",
-    "ConnectOnUse",
     "CredentialAuthorizationDeferredError",
     "CredentialAuthorizationRequiredInterrupt",
     "PendingCredential",

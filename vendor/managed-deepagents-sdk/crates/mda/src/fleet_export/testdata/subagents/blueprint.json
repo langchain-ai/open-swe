@@ -1,0 +1,110 @@
+{
+  "version": 2,
+  "name": "demo",
+  "language": "python",
+  "instructions": "Delegate to your subagents.",
+  "model": "openai:gpt-5.6-terra",
+  "sandbox": false,
+  "memory": "agent",
+  "channels": [],
+  "mcp_definitions": [
+    {
+      "name": "mcp",
+      "servers": [
+        {
+          "key": "notion",
+          "url": "https://mcp.notion.com/mcp",
+          "connection": {
+            "slug": "notion",
+            "owner": "user"
+          },
+          "include_tools": [
+            "create_page",
+            "search"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "web_researcher_subagent_mcp",
+      "servers": [
+        {
+          "key": "tavily",
+          "url": "https://api.smith.langchain.com/v1/managed-tools/servers/tavily/mcp",
+          "langsmith_auth": true,
+          "include_tools": [
+            "tavily_search"
+          ]
+        },
+        {
+          "key": "notion",
+          "url": "https://mcp.notion.com/mcp",
+          "connection": {
+            "slug": "notion",
+            "owner": "user"
+          },
+          "include_tools": [
+            "search"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "issue_triager_subagent_mcp",
+      "servers": [
+        {
+          "key": "linear",
+          "url": "https://mcp.linear.app/mcp",
+          "connection": {
+            "slug": "linear",
+            "owner": "user"
+          },
+          "include_tools": [
+            "create_issue"
+          ]
+        }
+      ]
+    }
+  ],
+  "subagents": [
+    {
+      "name": "Web Researcher",
+      "description": "Searches the web and Notion.",
+      "system_prompt": "You research topics and cite sources.",
+      "model": "anthropic:claude-sonnet-4-6",
+      "mcp": [
+        "web_researcher_subagent_mcp"
+      ],
+      "interrupt_on": {
+        "tavily_tavily_search": {
+          "allowed_decisions": [
+            "approve",
+            "reject"
+          ]
+        }
+      }
+    },
+    {
+      "name": "summarizer",
+      "description": "Summarizes text it is given.",
+      "system_prompt": "You summarize.",
+      "mcp": []
+    },
+    {
+      "name": "notion helper",
+      "description": "Same tools as the lead.",
+      "system_prompt": "You help with Notion.",
+      "mcp": [
+        "mcp"
+      ]
+    },
+    {
+      "name": "issue triager",
+      "description": "Files Linear issues.",
+      "system_prompt": "You triage issues.",
+      "mcp": [
+        "issue_triager_subagent_mcp"
+      ]
+    }
+  ]
+}

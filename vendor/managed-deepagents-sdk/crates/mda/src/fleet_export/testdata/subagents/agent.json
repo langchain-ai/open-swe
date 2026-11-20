@@ -1,0 +1,73 @@
+{
+  "agent": {
+    "id": "88888888-8888-8888-8888-888888888888",
+    "name": "Lead",
+    "system_prompt": "Delegate to your subagents.",
+    "model": { "id": "openai:gpt-5.6-terra" },
+    "tools": {
+      "tools": [
+        { "name": "search", "mcp_server_url": "https://mcp.notion.com/mcp", "mcp_server_name": "Notion" },
+        { "name": "create_page", "mcp_server_url": "https://mcp.notion.com/mcp", "mcp_server_name": "Notion" }
+      ],
+      "interrupt_config": {}
+    },
+    "subagents": [
+      {
+        "name": "Web Researcher",
+        "description": "Searches the web and Notion.",
+        "model": { "id": "anthropic:claude-sonnet-4-6" },
+        "system_prompt": "You research topics and cite sources.",
+        "instructions": "You research topics and cite sources.",
+        "tools": {
+          "tools": [
+            { "name": "search", "mcp_server_url": "https://mcp.notion.com/mcp", "mcp_server_name": "Notion" },
+            { "name": "tavily_search", "mcp_server_url": "https://api.smith.langchain.com/v1/managed-tools/servers/tavily/mcp", "mcp_server_name": "Tavily" },
+            { "name": "github_create_issue" }
+          ],
+          "interrupt_config": {
+            "tavily_search": { "allowed_decisions": ["approve", "reject"], "args_schema": {} },
+            "removed_tool": true
+          }
+        }
+      },
+      {
+        "name": "summarizer",
+        "description": "Summarizes text it is given.",
+        "system_prompt": "You summarize.",
+        "instructions": "You summarize."
+      },
+      {
+        "name": "notion helper",
+        "description": "Same tools as the lead.",
+        "system_prompt": "You help with Notion.",
+        "instructions": "You help with Notion.",
+        "tools": {
+          "tools": [
+            { "name": "create_page", "mcp_server_url": "https://mcp.notion.com/mcp", "mcp_server_name": "Notion" },
+            { "name": "search", "mcp_server_url": "https://mcp.notion.com/mcp/", "mcp_server_name": "Notion" }
+          ]
+        }
+      },
+      {
+        "name": "issue triager",
+        "description": "Files Linear issues.",
+        "system_prompt": "",
+        "instructions": "You triage issues.",
+        "tools": {
+          "tools": [
+            { "name": "create_issue", "mcp_server_url": "https://mcp.linear.app/mcp", "mcp_server_name": "Linear" },
+            { "name": "lookup", "mcp_server_url": "https://gone.example.com/mcp", "mcp_server_name": "Gone" }
+          ]
+        }
+      }
+    ]
+  },
+  "schedules": [],
+  "mcp_servers": [
+    { "name": "Notion", "url": "https://mcp.notion.com/mcp", "auth_type": "oauth", "headers": [] },
+    { "name": "Linear", "url": "https://mcp.linear.app/mcp", "auth_type": "oauth", "headers": [] }
+  ],
+  "connections": [
+    { "slug": "notion", "kind": "oauth2" }
+  ]
+}

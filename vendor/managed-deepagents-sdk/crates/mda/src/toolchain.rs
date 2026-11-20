@@ -245,6 +245,15 @@ pub(crate) fn python3() -> Command {
     Command::new(python3_program())
 }
 
+/// `python3 -I` for scripts that only parse project source: the working
+/// directory, `PYTHON*` env, and user site can't shadow the stdlib modules
+/// they import, so project files never run inside them.
+pub(crate) fn isolated_python3() -> Command {
+    let mut command = python3();
+    command.arg("-I");
+    command
+}
+
 /// Whether a working Python 3 interpreter is on PATH.
 #[cfg(test)]
 pub(crate) fn python3_available() -> bool {
@@ -334,6 +343,26 @@ fn probe_version(program: impl AsRef<OsStr>) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn isolated_python_ignores_modules_in_the_working_directory() {
+        if !python3_available() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("ast.py"),
+            "raise SystemExit('project code ran')\n",
+        )
+        .unwrap();
+        let output = isolated_python3()
+            .args(["-c", "import ast; print(ast.parse('x').body[0].value.id)"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "x");
+    }
 
     #[test]
     fn npm_candidates_prefer_cmd_on_windows() {

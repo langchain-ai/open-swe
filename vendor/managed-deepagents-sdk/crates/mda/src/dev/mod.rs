@@ -1228,11 +1228,18 @@ fn feature_summary_lines(
 fn format_memory_line(memory: &MemoryDecision) -> String {
     match memory {
         MemoryDecision::Declared(summary) => {
-            let scope = match (summary.scope.agent, summary.scope.user) {
-                (true, true) => "agent, user",
-                (true, false) => "agent",
-                (false, true) => "user",
-                (false, false) => "none",
+            let layers: Vec<_> = [
+                ("agent", summary.scope.agent),
+                ("assistant", memory.assistant_enabled()),
+                ("user", summary.scope.user),
+            ]
+            .into_iter()
+            .filter_map(|(name, enabled)| enabled.then_some(name))
+            .collect();
+            let scope = if layers.is_empty() {
+                "none".to_string()
+            } else {
+                layers.join(", ")
             };
             format!(
                 "Memory         {scope}\n│                 {}",
@@ -1614,7 +1621,8 @@ fn stage_dev_env_file(
             || (src.is_some()
                 && (key.starts_with("MDA_")
                     || (key == LANGSMITH_PROJECT_ENV && preserve_generated_tracing_project)
-                    || crate::deploy::is_cli_session_env_entry(project_env, key, value)))
+                    || crate::deploy::is_cli_session_env_entry(project_env, key, value)
+                    || is_shell_mirrored_env_entry(key, value)))
         {
             continue;
         }
@@ -1654,7 +1662,22 @@ const DEV_LANGSMITH_STAGED_ENV_KEYS: &[&str] = &[
     WORKSPACE_ID_ENV,
     LANGSMITH_PROJECT_ENV,
     LANGCHAIN_PROJECT_ENV,
+    "LANGSMITH_AGENT_ID",
+    "LANGSMITH_AGENT_ENVIRONMENT",
 ];
+
+/// Whether a staged entry already holds the shell value that
+/// [`ensure_dev_langsmith_env`] mirrors after every restage. Removing it would
+/// only see it written straight back: two mtime bumps on the file LangGraph
+/// watches, so a full server restart per rebuild.
+fn is_shell_mirrored_env_entry(key: &str, value: &str) -> bool {
+    key != API_KEY_ENV
+        && DEV_LANGSMITH_STAGED_ENV_KEYS.contains(&key)
+        && std::env::var(key).is_ok_and(|shell| {
+            let shell = shell.trim();
+            !shell.is_empty() && shell == value
+        })
+}
 
 /// Keys injected into the long-lived `langgraph dev` server process.
 const DEV_LANGSMITH_SERVER_ENV_KEYS: &[&str] = &[
@@ -1911,7 +1934,20 @@ fn ensure_dev_tracing_destination(
     local_environment_project: impl FnOnce(&BTreeMap<String, String>, &str) -> Option<String>,
 ) -> Result<()> {
     let staged = out_dir.join(".env");
-    let env = crate::deploy::env_file::parse_env_file(&staged);
+    let mut env = crate::deploy::env_file::parse_env_file(&staged);
+    if lookup_env_file("LANGSMITH_AGENT_ID", &env).is_some() {
+        crate::deploy::env_file::set_env_key(&staged, "LANGSMITH_AGENT_ENVIRONMENT", "local")?;
+        for key in [
+            LANGSMITH_PROJECT_ENV,
+            LANGCHAIN_PROJECT_ENV,
+            MDA_DEV_TRACING_PROJECT_ENV,
+        ] {
+            crate::deploy::env_file::remove_env_key(&staged, key)?;
+        }
+        return Ok(());
+    }
+    crate::deploy::env_file::remove_env_key(&staged, "LANGSMITH_AGENT_ENVIRONMENT")?;
+    env.remove("LANGSMITH_AGENT_ENVIRONMENT");
     let current = lookup_env_file(LANGSMITH_PROJECT_ENV, &env);
     if lookup_env_file(LANGCHAIN_PROJECT_ENV, &env).is_some()
         || current.as_deref().is_some_and(|project| {
@@ -1966,6 +2002,12 @@ fn dev_local_environment_project(
 /// it restarts workers without an immutable process value overriding them.
 fn apply_staged_langsmith_env(server: &mut Command, out_dir: &Path) {
     let staged = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
+    server.env_remove("LANGSMITH_AGENT_ENVIRONMENT");
+    if lookup_env_file("LANGSMITH_AGENT_ID", &staged).is_some() {
+        server.env("LANGSMITH_AGENT_ENVIRONMENT", "local");
+        server.env_remove(LANGSMITH_PROJECT_ENV);
+        server.env_remove(LANGCHAIN_PROJECT_ENV);
+    }
     for key in DEV_LANGSMITH_SERVER_ENV_KEYS {
         let process_set = std::env::var(key)
             .ok()
@@ -2464,7 +2506,7 @@ mod tests {
     #[test]
     fn missing_model_key_warning_names_the_env_file_and_reload() {
         let warning = model_api_key_warning(
-            "openai:gpt-5.6-terra",
+            "openai:gpt-6-luna",
             &BTreeMap::new(),
             |_| None,
             Path::new("/work/my-agent/.env"),
@@ -2474,7 +2516,7 @@ mod tests {
 
         assert_eq!(
             warning,
-            "The agent model 'openai:gpt-5.6-terra' requires OPENAI_API_KEY in \
+            "The agent model 'openai:gpt-6-luna' requires OPENAI_API_KEY in \
              /work/my-agent/.env. Add `OPENAI_API_KEY=...` to /work/my-agent/.env, and \
              `mda dev` reloads it on save. Runs fail until then."
         );
@@ -2486,7 +2528,7 @@ mod tests {
 
         assert_eq!(
             model_api_key_warning(
-                "openai:gpt-5.6-terra",
+                "openai:gpt-6-luna",
                 &staged,
                 |_| None,
                 Path::new(".env"),
@@ -3424,6 +3466,48 @@ mod tests {
         assert_eq!(fs::read(&staged_path).unwrap(), before);
     }
 
+    /// A shell-exported LangSmith setting lives only in the staged copy, so
+    /// restage must leave it alone instead of deleting and re-mirroring it.
+    #[test]
+    fn stage_dev_env_file_keeps_shell_mirrored_langsmith_keys_untouched() {
+        let _lock = crate::test_support::LANGSMITH_API_KEY_ENV_LOCK
+            .lock()
+            .unwrap();
+        let previous = std::env::var(WORKSPACE_ID_ENV).ok();
+        std::env::set_var(WORKSPACE_ID_ENV, "ws-shell");
+
+        let root = tempfile::tempdir().unwrap();
+        let out_dir = root.path().join(".mda").join("build");
+        fs::create_dir_all(&out_dir).unwrap();
+        fs::write(root.path().join(".env"), "OPENAI_API_KEY=keep\n").unwrap();
+        let staged_path = out_dir.join(".env");
+        fs::write(
+            &staged_path,
+            "OPENAI_API_KEY=keep\nLANGSMITH_WORKSPACE_ID=ws-shell\nMDA_CHANNEL_API_URL=http://localhost:2024\n",
+        )
+        .unwrap();
+        let before = fs::read(&staged_path).unwrap();
+
+        let result = std::panic::catch_unwind(|| {
+            stage_dev_env_file(
+                &default_env(root.path()),
+                &out_dir,
+                TEST_ASSISTANT_ID,
+                "http://localhost:2024",
+            )
+            .unwrap();
+        });
+
+        match previous {
+            Some(value) => std::env::set_var(WORKSPACE_ID_ENV, value),
+            None => std::env::remove_var(WORKSPACE_ID_ENV),
+        }
+        result.expect("stage_dev_env_file panicked");
+
+        // Byte-identical: no write at all, so no watcher wake-up.
+        assert_eq!(fs::read(&staged_path).unwrap(), before);
+    }
+
     /// A watch rebuild must never enter the login prompt: it would render into
     /// the build-log stream and block the watch loop while the server runs.
     #[test]
@@ -3490,8 +3574,15 @@ mod tests {
         fs::write(root.path().join(".env"), "OPENAI_API_KEY=test\n").unwrap();
         fs::write(out_dir.join(".env"), "OPENAI_API_KEY=test\n").unwrap();
 
-        let previous = std::env::var("LANGSMITH_API_KEY").ok();
-        std::env::set_var("LANGSMITH_API_KEY", "lsv2_pt_from_shell");
+        let shell = [
+            ("LANGSMITH_API_KEY", "lsv2_pt_from_shell"),
+            ("LANGSMITH_AGENT_ID", "research"),
+            ("LANGSMITH_AGENT_ENVIRONMENT", "LOCAL"),
+        ];
+        let previous = shell.map(|(key, _)| (key, std::env::var(key).ok()));
+        for (key, value) in shell {
+            std::env::set_var(key, value);
+        }
         let result = std::panic::catch_unwind(|| {
             ensure_dev_langsmith_env(
                 &default_env(root.path()),
@@ -3501,17 +3592,18 @@ mod tests {
             )
             .unwrap()
         });
-        match previous {
-            Some(value) => std::env::set_var("LANGSMITH_API_KEY", value),
-            None => std::env::remove_var("LANGSMITH_API_KEY"),
+        for (key, value) in previous {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
         }
         result.expect("ensure_dev_langsmith_env panicked");
 
         let env = crate::deploy::env_file::parse_env_file(&out_dir.join(".env"));
-        assert_eq!(
-            env.get("LANGSMITH_API_KEY").map(String::as_str),
-            Some("lsv2_pt_from_shell")
-        );
+        for (key, value) in shell {
+            assert_eq!(env.get(key).map(String::as_str), Some(value));
+        }
         assert_eq!(env.get("OPENAI_API_KEY").map(String::as_str), Some("test"));
         let project = crate::deploy::env_file::parse_env_file(&root.path().join(".env"));
         assert_eq!(
@@ -3606,6 +3698,24 @@ mod tests {
             (picked, true, None, Some("research-env")),
             (picked, false, None, Some("research-env")),
             ("", true, None, Some("research-local")),
+            (
+                "LANGSMITH_AGENT_ID=\nLANGSMITH_AGENT_ENVIRONMENT=  \n",
+                true,
+                None,
+                Some("research-local"),
+            ),
+            (
+                "LANGSMITH_AGENT_ENVIRONMENT=staging\n",
+                true,
+                None,
+                Some("research-local"),
+            ),
+            (
+                "LANGSMITH_AGENT_ENVIRONMENT=staging\nLANGSMITH_PROJECT=custom\n",
+                false,
+                None,
+                Some("custom"),
+            ),
             ("", false, Some("research-env"), Some("research-env")),
             (generated, true, Some("research-env"), Some("research-env")),
             (
@@ -3642,6 +3752,81 @@ mod tests {
                 expected,
                 "{staged_env:?} recheck={recheck}"
             );
+            assert!(!staged.contains_key("LANGSMITH_AGENT_ENVIRONMENT"));
+        }
+    }
+
+    #[test]
+    fn ensure_dev_tracing_destination_respects_agent_address() {
+        for address in [
+            "LANGSMITH_AGENT_ID=research\nLANGSMITH_AGENT_ENVIRONMENT=staging\n",
+            "LANGSMITH_AGENT_ID=research\n",
+        ] {
+            for project in [
+                "",
+                "LANGSMITH_PROJECT=research-local\n",
+                "LANGSMITH_PROJECT=research-env\nMDA_DEV_TRACING_PROJECT=research-env\n",
+                "LANGSMITH_PROJECT=custom\nLANGCHAIN_PROJECT=legacy\n",
+            ] {
+                for recheck in [true, false] {
+                    let root = tempfile::tempdir().unwrap();
+                    let path = root.path().join(".env");
+                    fs::write(&path, format!("{address}{project}")).unwrap();
+
+                    ensure_dev_tracing_destination(root.path(), "research", recheck, |_, _| {
+                        panic!("agent-addressed tracing must not provision a project")
+                    })
+                    .unwrap();
+
+                    let staged = crate::deploy::env_file::parse_env_file(&path);
+                    assert!(!staged.contains_key(LANGSMITH_PROJECT_ENV));
+                    assert!(!staged.contains_key(LANGCHAIN_PROJECT_ENV));
+                    assert!(!staged.contains_key(MDA_DEV_TRACING_PROJECT_ENV));
+                    assert_eq!(
+                        staged.get("LANGSMITH_AGENT_ID").map(String::as_str),
+                        Some("research")
+                    );
+                    assert_eq!(
+                        staged
+                            .get("LANGSMITH_AGENT_ENVIRONMENT")
+                            .map(String::as_str),
+                        Some("local")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn apply_staged_langsmith_env_normalizes_agent_environment() {
+        for agent_id in [None, Some("research")] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join(".env");
+            fs::write(&path, "").unwrap();
+            if let Some(id) = agent_id {
+                crate::deploy::env_file::set_env_key(&path, "LANGSMITH_AGENT_ID", id).unwrap();
+            }
+            let mut command = Command::new("unused");
+            command.env("LANGSMITH_AGENT_ENVIRONMENT", "staging");
+            command.env(LANGSMITH_PROJECT_ENV, "shell-project");
+            command.env(LANGCHAIN_PROJECT_ENV, "shell-legacy");
+
+            apply_staged_langsmith_env(&mut command, root.path());
+
+            let child_env = command.get_envs().collect::<BTreeMap<_, _>>();
+            assert_eq!(
+                child_env[std::ffi::OsStr::new("LANGSMITH_AGENT_ENVIRONMENT")],
+                agent_id.map(|_| std::ffi::OsStr::new("local"))
+            );
+            for (key, value) in [
+                (LANGSMITH_PROJECT_ENV, "shell-project"),
+                (LANGCHAIN_PROJECT_ENV, "shell-legacy"),
+            ] {
+                assert_eq!(
+                    child_env[std::ffi::OsStr::new(key)],
+                    agent_id.is_none().then(|| std::ffi::OsStr::new(value))
+                );
+            }
         }
     }
 
@@ -4173,6 +4358,7 @@ mod tests {
                 path: PathBuf::from("memory.ts"),
                 scope: MemoryLayers {
                     agent: true,
+                    assistant: false,
                     user: false,
                 },
             }),
@@ -4235,6 +4421,19 @@ mod tests {
         assert!(
             joined.contains("Context        .mda/__contexthub__"),
             "{joined}"
+        );
+    }
+
+    #[test]
+    fn feature_summary_names_assistant_memory() {
+        let (_, mut summary) = summary_fixture();
+        let MemoryDecision::Declared(memory) = &mut summary.memory else {
+            unreachable!();
+        };
+        memory.scope.assistant = true;
+        assert_eq!(
+            format_memory_line(&summary.memory),
+            "Memory         agent, assistant\n│                 memory.ts"
         );
     }
 

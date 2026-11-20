@@ -13,6 +13,11 @@ use super::agent_auth::redact_secret;
 use super::github_app_setup::{AgentAuthApp, APPS_PATH};
 use super::Client;
 
+/// How Agent Auth gets the app's token. With Linear's client-credentials
+/// grant, no admin approves an install, and Agent Auth gets a new token
+/// before the old one expires.
+const GRANT_TYPE: &str = "client_credentials";
+
 /// A Linear app the workspace has, as its settings page shows it.
 pub(crate) struct ExistingLinearApp<'a> {
     pub(crate) client_id: &'a str,
@@ -45,6 +50,7 @@ impl Client {
                 "webhook_secret": app.webhook_secret,
                 "scopes": app.scopes,
                 "allowed_scopes": app.allowed_scopes,
+                "grant_type": GRANT_TYPE,
             },
         });
         let value = self
@@ -116,6 +122,7 @@ mod tests {
                     "webhook_secret": "lin_wh_signing",
                     "scopes": ["read", "write"],
                     "allowed_scopes": ["read", "write"],
+                    "grant_type": "client_credentials",
                 },
             })
         );

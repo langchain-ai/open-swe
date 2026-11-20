@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping
+from contextvars import ContextVar
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -12,10 +13,10 @@ from deepagents.backends import ContextHubBackend, FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol
 
 from managed_deepagents._identity_runtime import (
-    build_runtime_identity,
     resolve_runtime_configurable,
 )
-from managed_deepagents._memory.policy import is_slack_direct_message, resolve_user_memory_principal
+from managed_deepagents._memory.policy import resolve_user_memory_principal
+from managed_deepagents._run_local import RunLocal
 
 if TYPE_CHECKING:
     from deepagents.backends.protocol import (
@@ -43,15 +44,10 @@ def user_memory_repo_handle(deploy_handle: str, user_id: str) -> str:
     return f"{deploy_handle}{_USER_REPO_SEPARATOR}{digest.hexdigest()[:_USER_REPO_DIGEST_LENGTH]}"
 
 
-def can_mount_user_memory(run_config: Mapping[str, object] | None, context: object = None) -> bool:
-    """Default access requires a trusted person in a Slack one-to-one DM."""
-    configurable = resolve_runtime_configurable(run_config)
-    identity = build_runtime_identity(configurable)
-    return (
-        identity is not None
-        and identity["user"]["kind"] == "person"
-        and is_slack_direct_message(context, configurable)
-    )
+#: The user the call in progress may reach user memory as. MDA sets it around each
+#: step of a run from the run's resolved memory access (see ``ManagedCompiledAgent``);
+#: nothing the caller sends can set it.
+APPROVED_USER: ContextVar[str | None] = ContextVar("mda_approved_user", default=None)
 
 
 class UserMemoryBackend(BackendProtocol):
@@ -64,14 +60,14 @@ class UserMemoryBackend(BackendProtocol):
         filesystem_root: str | None,
         run_config: Mapping[str, object] | None,
         asserted_user_id: str | None = None,
-        allowed_user_id: str | None = None,
     ) -> None:
         self._deploy_handle = deploy_handle
         self._filesystem_root = filesystem_root
         self._run_config = run_config
         self._asserted_user_id = asserted_user_id
-        self._allowed_user_id = allowed_user_id
-        self._repos: dict[str, BackendProtocol] = {}
+        # Each run opens its own repo backends: a Context Hub backend keeps a snapshot
+        # of the repo, and a cached graph serves many runs with this one instance.
+        self._repos: RunLocal[dict[str, BackendProtocol]] = RunLocal(dict)
         self._lock = threading.Lock()
 
     def ls(self, path: str = "/") -> LsResult:
@@ -163,12 +159,13 @@ class UserMemoryBackend(BackendProtocol):
 
     def _backend(self) -> BackendProtocol:
         handle = self._repo_handle()
+        repos = self._repos.get()
         with self._lock:
-            existing = self._repos.get(handle)
+            existing = repos.get(handle)
             if existing is not None:
                 return existing
             backend = self._open(handle)
-            self._repos[handle] = backend
+            repos[handle] = backend
             return backend
 
     def _repo_handle(self) -> str:
@@ -185,7 +182,10 @@ class UserMemoryBackend(BackendProtocol):
         authenticated = principal.id
         if self._asserted_user_id is not None and self._asserted_user_id != authenticated:
             raise ValueError("user memory layer id must match the authenticated principal")
-        if self._allowed_user_id is None or authenticated != self._allowed_user_id:
+        # The user this call was approved for. A cached graph serves many users, so
+        # MDA sets it per call (APPROVED_USER) instead of baking one in at compile.
+        approved = APPROVED_USER.get()
+        if approved is None or authenticated != approved:
             raise ValueError("User memory requires the allowed caller for this run")
         return user_memory_repo_handle(self._deploy_handle, authenticated)
 

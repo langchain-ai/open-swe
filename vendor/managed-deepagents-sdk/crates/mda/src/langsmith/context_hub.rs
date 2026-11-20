@@ -191,11 +191,15 @@ impl ContextHubClient {
         DirectorySnapshot::from_value(decode_json_body(&text, "Context Hub directory")?)
     }
 
+    /// `during` and `command` name the caller in the error when someone else
+    /// commits first, e.g. "deploy" and "mda deploy".
     pub(crate) fn create_directory_commit(
         &self,
         repo: &str,
         parent_commit: Option<&str>,
         files: BTreeMap<String, Value>,
+        during: &str,
+        command: &str,
     ) -> Result<()> {
         let mut payload = json!({ "files": files });
         if let Some(parent_commit) = parent_commit {
@@ -211,7 +215,7 @@ impl ContextHubClient {
             Some(payload),
         )?;
         if status == StatusCode::CONFLICT {
-            bail!("Context Hub repo '{repo}' changed during deploy; rerun `mda deploy` to retry");
+            bail!("Context Hub repo '{repo}' changed during {during}; rerun `{command}` to retry");
         }
         if !status.is_success() {
             bail!(ApiError::from_response(status, &text));

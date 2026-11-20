@@ -9,13 +9,14 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Literal, NotRequired, cast
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import httpx
 from langgraph_sdk import Auth
 from pydantic import ConfigDict, TypeAdapter, ValidationError, with_config
 from typing_extensions import TypedDict
 
+from managed_deepagents._channels.http.studio import _GRAPH_NAMESPACE
 from managed_deepagents._channels.schedule_delivery import read_schedule_deliver_to
 from managed_deepagents._channels.source_providers import is_trusted_source_provider
 from managed_deepagents._identity_runtime import _auth_user_fields, _field, is_studio_auth_user
@@ -28,6 +29,7 @@ from managed_deepagents._thread_record import (
     THREAD_CONVERSATION_METADATA,
     THREAD_PARTICIPANTS_METADATA,
     THREAD_RECORD_METADATA,
+    is_person_principal,
     parse_thread_record,
     strip_thread_record_keys,
 )
@@ -48,6 +50,8 @@ _MAX_HANDOFF_SIZE = 8192
 
 SCHEDULE_HANDOFF_HEADER = "x-mda-schedule-handoff"
 THREAD_HANDOFF_HEADER = "x-mda-thread-handoff"
+SANDBOX_BINDING_HEADER = "x-mda-sandbox-binding"
+_SANDBOX_BINDING_USER = "mda:sandbox-binding"
 _SEARCH_PAGE = 100
 SCHEDULE_LIMIT_PREFIX = "Schedule limit reached"
 
@@ -89,12 +93,15 @@ class ScheduleAccess(TypedDict):
 class ScheduleHandoffUser(ExecutionUser, total=False):
     """Execution user returned by the schedule handoff; never validated as input.
 
-    ``mda_schedule_access`` is present for cron-route handoffs and absent for the
-    persistent-thread read. ``ExecutionUser`` keeps ``permissions`` required as a
-    ``list``, which ``langgraph_sdk.auth.types.MinimalUserDict`` cannot express.
+    ``mda_schedule_access`` is present for cron-route handoffs.
+    ``mda_schedule_thread`` is present instead for the persistent-thread create
+    and read, and names the only thread they may touch. ``ExecutionUser`` keeps
+    ``permissions`` required as a ``list``, which
+    ``langgraph_sdk.auth.types.MinimalUserDict`` cannot express.
     """
 
     mda_schedule_access: ScheduleAccess
+    mda_schedule_thread: str
 
 
 @with_config(ConfigDict(extra="forbid"))
@@ -126,6 +133,19 @@ class ThreadHandoffUser(ExecutionUser, total=False):
     mda_thread_handoff: ThreadHandoffGrant
 
 
+@with_config(ConfigDict(extra="forbid"))
+class SandboxBindingGrant(TypedDict):
+    """The thread whose sandbox binding the runtime reads or writes."""
+
+    thread: str
+
+
+class SandboxBindingUser(ExecutionUser):
+    """The runtime, reading or writing one thread's sandbox binding; never validated as input."""
+
+    mda_sandbox_binding: str
+
+
 class _CronRow(TypedDict, total=False):
     cron_id: str
     end_time: str | None
@@ -137,6 +157,7 @@ _CHANNEL = TypeAdapter(ChannelContext)
 _CRON_ROWS = TypeAdapter(list[_CronRow])
 _HANDOFF = TypeAdapter(ThreadHandoff)
 _HANDOFF_GRANT = TypeAdapter(ThreadHandoffGrant)
+_SANDBOX_BINDING = TypeAdapter(SandboxBindingGrant)
 _EXECUTION_KEYS = ExecutionUser.__required_keys__ | ExecutionUser.__optional_keys__
 _HANDOFF_TIMEOUT_SECONDS = 15
 
@@ -317,6 +338,41 @@ def thread_handoff_user(
     }
 
 
+def sandbox_binding_user(
+    headers: Mapping[str, object], path: str | None, method: str | None
+) -> SandboxBindingUser | None:
+    """The runtime, reading a thread or writing its sandbox binding, whoever owns the thread."""
+    raw = headers.get(SANDBOX_BINDING_HEADER)
+    if raw is None:
+        return None
+    grant = _SANDBOX_BINDING.validate_python(
+        json.loads(_verified_handoff(headers, raw)), strict=True
+    )
+    thread = grant["thread"]
+    UUID(thread)
+    if method not in {"PATCH", "GET"} or path != f"/threads/{thread}":
+        raise ValueError("Sandbox binding access is not permitted")
+    return {
+        "identity": _SANDBOX_BINDING_USER,
+        "permissions": [],
+        "mda_user_id": _SANDBOX_BINDING_USER,
+        "mda_user_kind": "service",
+        "mda_sandbox_binding": thread,
+    }
+
+
+def sandbox_binding_grant(user: object) -> str | None:
+    """The thread whose sandbox binding a caller may read and write, if it is the runtime."""
+    value = _field(user, "mda_sandbox_binding")
+    return value if isinstance(value, str) else None
+
+
+def schedule_thread_grant(user: object) -> str | None:
+    """The persistent thread a deploy schedule's handoff may create and read, if it is one."""
+    value = _field(user, "mda_schedule_thread")
+    return value if isinstance(value, str) else None
+
+
 def thread_handoff_grant(user: object) -> ThreadHandoffGrant | None:
     """The thread and the run's principal a handoff caller may move, if it is one."""
     value = _field(user, "mda_thread_handoff")
@@ -335,10 +391,15 @@ def schedule_handoff_user(
     if raw is None:
         return None
     access = _ACCESS.validate_python(json.loads(_verified_handoff(headers, raw)), strict=True)
-    UUID(access["assistant"])
+    # A person's API cron update names no assistant, so its limit search spans all of them.
+    if access["assistant"] or (method, path) != ("POST", "/runs/crons/search"):
+        UUID(access["assistant"])
     if "thread" in access:
         UUID(access["thread"])
-        if method != "GET" or path != f"/threads/{access['thread']}":
+        reads = method == "GET" and path == f"/threads/{access['thread']}"
+        # Only deploy creates a persistent thread, for an agent-owned schedule.
+        creates = method == "POST" and path == "/threads" and access["owner"] == "agent"
+        if not (reads or creates):
             raise ValueError("Schedule access is not permitted")
     elif not re.fullmatch(r"/(?:threads/[^/]+/)?runs/crons(?:/[^/]+)?", path or ""):
         raise ValueError("Schedule access is not permitted")
@@ -355,11 +416,12 @@ def schedule_handoff_user(
         not in (access["owner"].removeprefix("user:"), access.get("run_as", {}).get("id"))
         or not access["owner"].startswith("user:")
         or execution.get("mda_user_kind") == "service"
-        or not execution.get("mda_agent_auth_principal_id")
     ):
         raise ValueError("Schedule access is not permitted")
     user: ScheduleHandoffUser = {**execution}
-    if "thread" not in access:
+    if "thread" in access:
+        user["mda_schedule_thread"] = access["thread"]
+    else:
         user["mda_schedule_access"] = access
     return user
 
@@ -386,26 +448,33 @@ async def authorize_schedule(  # noqa: C901 - one branch per cron event check
     # ``CronsCreate`` / ``CronsUpdate`` TypedDicts do not declare it.
     data = cast("dict[str, object]", value)
     _guard_cron_record(action, data, access)
+    if access is None:
+        from managed_deepagents._identity_auth import is_local_dev_unscoped_user  # noqa: PLC0415
+
+        operator = is_studio_auth_user(user) or _is_local_dev_operator(user)
+        if operator or is_local_dev_unscoped_user(user):
+            if action == "delete" and not operator:
+                return {"mda_managed_by": "api"}
+            return await _authorize_studio_schedule(action, data, deploy=operator)
+        access = _person_access(user, action, data)
     metadata = data.get("metadata")
     payload = data.get("payload")
-    if access is None:
-        if not (is_studio_auth_user(user) or _is_local_dev_operator(user)):
-            raise ValueError("Schedule access is not permitted")
-        await _authorize_deploy_schedule(action, data)
-        return None
-    filters = {"mda_schedule_owner": access["owner"], "mda_schedule_assistant": access["assistant"]}
+    filters = {"mda_schedule_owner": access["owner"]}
+    if access["assistant"]:
+        filters["mda_schedule_assistant"] = access["assistant"]
     if action in {"update", "delete"}:
         filters["mda_managed_by"] = "runtime"
     if action == "create":
         if (
             not isinstance(payload, dict)
-            or payload.get("assistant_id") != access["assistant"]
+            or _assistant_id(payload.get("assistant_id"), _GRAPH_NAMESPACE) != access["assistant"]
             or not isinstance(metadata, dict)
             or metadata.get("mda_managed_by") != "runtime"
         ):
             raise ValueError("Schedule access is not permitted")
         metadata.update(filters)
         metadata["mda_managed"] = True
+        _stamp_owner(data, access["execution"])
         await _check_schedule_limit(access)
     _check_context(payload, access["execution"], "runtime")
     if action == "create" or (
@@ -423,6 +492,92 @@ async def authorize_schedule(  # noqa: C901 - one branch per cron event check
     if action == "update" and data.get("schedule") is not None:
         await _check_schedule_limit(access, str(data.get("cron_id")))
     return filters
+
+
+def _person_access(user: BaseUser, action: str, data: dict[str, object]) -> ScheduleAccess:
+    """A person's own API crons, which run as them like their runtime user schedules."""
+    user_id = _field(user, "mda_user_id")
+    if (
+        not is_person_principal(user_id)
+        or _field(user, "mda_user_kind") == "service"
+        or _field(user, "mda_source_provider") is not None
+    ):
+        raise ValueError("Schedule access is not permitted")
+    # Agent Auth resolves the principal from these identity fields when the cron fires.
+    execution = validate_execution(
+        {
+            **{key: _field(user, key) for key in _PERSON_IDENTITY_KEYS if _field(user, key)},
+            "identity": user_id,
+            "permissions": [],
+            "mda_user_id": user_id,
+            "mda_source_provider": "schedule",
+            "mda_scheduled_run": True,
+        }
+    )
+    payload = data.get("payload")
+    if action == "create":
+        _prepare_person_cron(data)
+    # Context and config carry a runtime schedule's routing and principal; recreate to change them.
+    elif (isinstance(payload, dict) and {"assistant_id", "context", "config"} & payload.keys()) or (
+        isinstance(data.get("metadata"), dict)
+        and "owner" in cast("dict[str, object]", data["metadata"])
+    ):
+        raise ValueError("Schedule access is not permitted")
+    return {
+        "owner": f"user:{user_id}",
+        "assistant": _assistant_id(_field(payload, "assistant_id"), _GRAPH_NAMESPACE) or "",
+        "execution": execution,
+    }
+
+
+_PERSON_IDENTITY_KEYS = (
+    "mda_agent_auth_principal_id",
+    "mda_identity_provider",
+    "mda_identity_issuer",
+    "mda_identity_subject",
+)
+
+
+def _prepare_person_cron(data: dict[str, object]) -> None:
+    """Tag a person's new API cron as their runtime user schedule."""
+    if data.get("thread_id"):
+        raise Auth.exceptions.HTTPException(
+            status_code=403,
+            detail="Schedule access is not permitted: API crons must create a new thread per run",
+        )
+    metadata = data.get("metadata")
+    if metadata is None:
+        metadata = data["metadata"] = {}
+    payload = data.get("payload")
+    if (
+        not isinstance(metadata, dict)
+        or any(key.startswith("mda_") or key == "owner" for key in metadata)
+        or not isinstance(payload, dict)
+    ):
+        raise ValueError("Schedule access is not permitted")
+    metadata["mda_managed_by"] = "runtime"
+    _wrap_person_context(payload)
+
+
+def _wrap_person_context(payload: dict[str, object]) -> None:
+    """Add the schedule name runtime crons carry to the caller's authored context."""
+    _check_api_context(payload)
+    context = payload.get("context") or {}
+    payload["context"] = {
+        "mda_schedule": {"name": str(uuid4())},
+        **cast("dict[str, object]", context),
+    }
+
+
+def _assistant_id(value: object, namespace: UUID = NAMESPACE_URL) -> str | None:
+    """An assistant UUID, or a UUID derived from a graph name."""
+    if not isinstance(value, str):
+        return None
+    try:
+        UUID(value)
+    except ValueError:
+        return str(uuid5(namespace, value))
+    return value
 
 
 def _guard_cron_record(action: str, data: dict[str, object], access: ScheduleAccess | None) -> None:
@@ -491,30 +646,41 @@ def _is_local_dev_operator(user: object) -> bool:
     )
 
 
-async def _authorize_deploy_schedule(action: str, data: dict[str, object]) -> None:
-    # Studio identity is reachable by any workspace API key: allow only a deploy-managed
-    # create (stamped below), never an update, and leave read/search/delete unscoped so
-    # `mda deploy` (and `mda dev` locally) can still list and tear down managed crons.
+async def _authorize_studio_schedule(
+    action: str, data: dict[str, object], *, deploy: bool
+) -> FilterType | None:
+    # Studio identity is reachable by any workspace API key. It may create a deploy-managed
+    # cron or an untagged one, which is stamped "api" and is the only kind it may update.
+    # Read/search stay unscoped, and delete too for the operator, so `mda deploy` (and
+    # `mda dev` locally) can still list and tear down managed crons.
     if action == "update":
-        raise ValueError("Schedule access is not permitted")
+        return _authorize_api_schedule_update(data)
     if action != "create":
-        return
+        return None
     metadata = data.get("metadata")
     payload = data.get("payload")
+    if metadata is None:
+        metadata = data["metadata"] = {}
     if (
         not isinstance(metadata, dict)
-        or metadata.get("mda_managed") is not True
-        or metadata.get("mda_managed_by") != "deploy"
         or not isinstance(payload, dict)
         or not isinstance(payload.get("assistant_id"), str)
     ):
         raise ValueError("Schedule access is not permitted")
-    assistant = payload["assistant_id"]
-    try:
-        UUID(assistant)
-    except ValueError:
-        assistant = str(uuid5(NAMESPACE_URL, assistant))
-    metadata.update(mda_schedule_owner="agent", mda_schedule_assistant=assistant)
+    api = not any(map(is_managed_key, metadata))
+    # Plain `mda dev` callers get API crons only; `schedules/` stays the operator's.
+    if not api and (
+        not deploy
+        or metadata.get("mda_managed") is not True
+        or metadata.get("mda_managed_by") != "deploy"
+    ):
+        raise ValueError("Schedule access is not permitted")
+    assistant = str(_assistant_id(payload["assistant_id"]))
+    if api:
+        # Not `mda_managed`: deploy reconciliation and runtime schedule tools leave it alone.
+        metadata["mda_managed_by"] = "api"
+    else:
+        metadata.update(mda_schedule_owner="agent", mda_schedule_assistant=assistant)
     execution: ExecutionUser = {
         "identity": f"mda:schedule:{assistant}",
         "permissions": [],
@@ -524,7 +690,7 @@ async def _authorize_deploy_schedule(action: str, data: dict[str, object]) -> No
         "mda_scheduled_run": True,
     }
     if data.get("thread_id"):
-        await _check_persistent_thread(
+        await _ensure_persistent_thread(
             {
                 "owner": "agent",
                 "assistant": assistant,
@@ -532,8 +698,45 @@ async def _authorize_deploy_schedule(action: str, data: dict[str, object]) -> No
                 "thread": str(data["thread_id"]),
             }
         )
-    _check_context(payload, execution, "deploy")
+    if api:
+        _check_api_context(payload)
+    else:
+        _check_context(payload, execution, "deploy")
     _stamp_execution(payload, execution)
+    _stamp_owner(data, execution)
+    return None
+
+
+def _stamp_owner(data: dict[str, object], execution: ExecutionUser) -> None:
+    """Own a new cron's threads by its execution, never its assistant's owner.
+
+    A cron's threads take its metadata over its assistant's, and person-owned
+    assistants carry their creator under ``owner``.
+    """
+    from managed_deepagents._identity_auth import _thread_owner_key  # noqa: PLC0415
+
+    metadata = data.get("metadata")
+    if isinstance(metadata, dict):
+        metadata["owner"] = _thread_owner_key(execution)
+
+
+def _authorize_api_schedule_update(data: dict[str, object]) -> FilterType:
+    """An API cron keeps its stamped assistant and principal; only its other fields change."""
+    metadata = data.get("metadata")
+    payload = data.get("payload")
+    if (isinstance(metadata, dict) and any(map(is_managed_key, metadata))) or (
+        isinstance(payload, dict) and {"assistant_id", "config"} & payload.keys()
+    ):
+        raise ValueError("Schedule access is not permitted")
+    _check_api_context(payload)
+    return {"mda_managed_by": "api"}
+
+
+def _check_api_context(payload: object) -> None:
+    """An API cron's context is authored only: no managed schedule or channel routing."""
+    context = _field(payload, "context")
+    if context is not None and (not isinstance(context, dict) or any(map(is_managed_key, context))):
+        raise ValueError("Invalid schedule config")
 
 
 def _stamp_execution(payload: dict[str, object], execution: ExecutionUser) -> None:
@@ -581,17 +784,32 @@ def _check_context(
         raise ValueError("Invalid schedule config")
 
 
-async def _check_persistent_thread(access: ScheduleAccess) -> None:
+async def _ensure_persistent_thread(access: ScheduleAccess) -> None:
+    """Check the schedule can read its thread, and create the thread when it is missing.
+
+    The schedule identity creates it, so the thread is its own. The create
+    raises on an existing thread: ``if_exists: "do_nothing"`` would merge the
+    stamped owner into a thread another caller owns and take it over. That
+    conflict refuses the schedule.
+    """
     base, headers = schedule_request_config(access)
-    async with (
-        httpx.AsyncClient(timeout=15, follow_redirects=False) as client,
-        client.stream(
-            "GET",
-            f"{base}/threads/{access['thread']}",
-            headers=headers,
-        ) as response,
-    ):
-        if not response.is_success:
+    async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+        async with client.stream(
+            "GET", f"{base}/threads/{access['thread']}", headers=headers
+        ) as response:
+            if response.is_success:
+                return
+            if response.status_code != HTTPStatus.NOT_FOUND:
+                raise ValueError("Schedule access is not permitted")
+        created = await client.post(
+            f"{base}/threads", headers=headers, json={"thread_id": access["thread"]}
+        )
+        if created.status_code == HTTPStatus.CONFLICT:
+            raise ValueError(
+                f"Schedule access is not permitted: thread {access['thread']} "
+                "belongs to another caller"
+            )
+        if not created.is_success:
             raise ValueError("Schedule access is not permitted")
 
 
@@ -617,7 +835,7 @@ async def _check_schedule_limit(access: ScheduleAccess, cron_id: str | None = No
                 f"{base}/runs/crons/search",
                 headers=headers,
                 json={
-                    "assistant_id": access["assistant"],
+                    **({"assistant_id": access["assistant"]} if access["assistant"] else {}),
                     "metadata": {"mda_managed_by": "runtime"},
                     "select": ["cron_id", "end_time"],
                     "limit": _SEARCH_PAGE,

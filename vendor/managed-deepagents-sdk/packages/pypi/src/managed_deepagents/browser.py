@@ -37,7 +37,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDict, TypeVar, cast
 
 import httpx
-import websockets
 from deepagents.backends import CompositeBackend, StateBackend
 from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
 from deepagents.middleware.async_subagents import (
@@ -68,7 +67,10 @@ from langsmith.sandbox import AsyncSandbox, AsyncSandboxClient, ResourceNotFound
 from langsmith.utils import get_env_var
 from pydantic import TypeAdapter, ValidationError
 from stagehand import BrowserContext, Page, Stagehand, get_extension_archive, local_browser
-from stagehand.browser import _invalidate_browser  # no public way to drop the CDP connection
+from stagehand.browser import (
+    StagehandBrowser,
+    _invalidate_browser,  # no public way to drop the CDP connection
+)
 from stagehand.rpc_client import RPCError
 from stagehand_middleware.facade import (
     StagehandFacadeExecutionError,
@@ -80,7 +82,7 @@ from stagehand_middleware.facade import (
 from stagehand_middleware.facade.tools import sanitize_error_message
 
 from managed_deepagents._managed_tools import ManagedToolRuntime  # noqa: TC001 - tool annotations
-from managed_deepagents.define_browser import BROWSER_TOOL_PREFIX
+from managed_deepagents.define_browser import BROWSER_TOOL_PREFIX, BrowserDefinition, define_browser
 from managed_deepagents.identity import ManagedServerInfo
 from managed_deepagents.runtime import (
     _LazyManagedSandboxBackend,
@@ -89,16 +91,17 @@ from managed_deepagents.runtime import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Awaitable, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 
     from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
+    from langsmith.sandbox import SandboxProxyConfig
 
 T = TypeVar("T")
 _Content = TypeVar("_Content", bound=str | list[Any])  # what a tool returns the model
 Scope = Literal["thread", "user"]
 
 #: The client and the browser's extension must match; ``mda`` pins this in deployments.
-STAGEHAND_VERSION = "4.3.0"
+STAGEHAND_VERSION = "4.4.0"
 _WORKSPACE = "/workspace"  # where run code's screenshots land in the agent's files
 _INSTRUCTIONS = (
     # The facade's text and errors name its tools `run` and so on; ours gain `browser_`.
@@ -152,6 +155,8 @@ _WAKE_TEXT: dict[BrowserHandoffStatus, str] = {
 }
 _NOT_FROM_USER = "This is not a message from the user."
 _RELEASE_AFTER_S = 60.0  # a run that raises or interrupts never reaches aafter_agent
+_ATTACH_RETRY_S = 2.0  # how often to try a browser another live client holds
+_DISCONNECT_S = 20.0  # Stagehand bounds disconnect(): 10 s to close, 10 s to detach
 #: Without a sandbox a saved file lives in thread state, which every later checkpoint carries.
 _MAX_SAVED_BYTES = 5_000_000
 _REPLACED = (  # before what the call returned, once the thread's browser was made again
@@ -207,23 +212,15 @@ class _Session:
     # replaces mid-run keeps its name but gets a new handle.
     shared: SandboxBackendProtocol | None = None
     local_url: str = ""  # this window's CDP inside the browser sandbox, for the recorder
+    allow_list: tuple[str, ...] | None = None  # the browser's, as this client opened it
 
     @property
     def disconnected(self) -> bool:
-        """Whether the client lost Chrome, as when browserd restarts it: for good.
-
-        Stagehand closes its client once the connection ends, with no public way to ask.
-        """
-        client = self.stagehand._rpc_client  # noqa: SLF001
-        return client is not None and client._closed  # noqa: SLF001
+        """Whether the client lost Chrome, as when browserd restarts it: for good."""
+        return not self.stagehand.browser.connected
 
     async def close(self) -> None:
-        # Not `browser.close()`, which closes the browser. Closing Stagehand frees the
-        # extension; dropping the CDP connection lets the browser idle out.
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(self.stagehand.close(), 3)
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(_invalidate_browser(self.stagehand.browser), 3)
+        await _let_go(self.stagehand.browser)
         await asyncio.to_thread(shutil.rmtree, self.artifacts, ignore_errors=True)
 
 
@@ -313,11 +310,14 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
         *,
         scope: Scope = "thread",
         idle_ttl_seconds: int = 600,
+        allow_list: Sequence[str] | None = None,
         backend: BackendProtocol | None = None,
     ) -> None:
         super().__init__()
         self.scope: Scope = scope
-        self.idle_ttl_seconds = idle_ttl_seconds
+        self.browser = define_browser(
+            scope=scope, idle_ttl_seconds=idle_ttl_seconds, allow_list=allow_list
+        )
         self.backend = backend if backend is not None else StateBackend()
         self.tools = self._tools()
         self._arguments = {tool.name: set(tool.args) for tool in self.tools}
@@ -354,11 +354,15 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
         async with _LOCKS.setdefault(key, asyncio.Lock()):
             try:
                 if (session := _SESSIONS.get(key)) and (
-                    session.window != window or session.disconnected
+                    session.window != window
+                    or session.disconnected
+                    or session.allow_list != self.browser.allow_list
                 ):
-                    await _release(key)  # another of the user's threads, or Chrome restarted
+                    # Another of the user's threads, Chrome restarted, or a run that
+                    # chose another allow list: opening applies it to the browser.
+                    await _release(key)
                 if key not in _SESSIONS:
-                    _SESSIONS[key] = await _open(key, window, self.idle_ttl_seconds)
+                    _SESSIONS[key] = await _open(key, window, self.browser)
                 await self._share(_SESSIONS[key], _SESSIONS[key].browser, key, runtime)
                 box = _SESSIONS[key].box
                 return await fn(_SESSIONS[key]), box
@@ -458,9 +462,7 @@ class BrowserMiddleware(AgentMiddleware[BrowserState, Any, Any]):
             async with _LOCKS.setdefault(key, asyncio.Lock()):
                 await _release(key)
                 try:
-                    browser, window_id, url, box = await _hand_over(
-                        key, window, self.idle_ttl_seconds
-                    )
+                    browser, window_id, url, box = await _hand_over(key, window, self.browser)
                 except Exception as err:  # noqa: BLE001 - reported to the model
                     failed = f"error: {sanitize_error_message(f'{type(err).__name__}: {err}')}"
                     return _with_recording(failed, ended)
@@ -960,47 +962,68 @@ async def _usable_browser(
     sandboxes: AsyncSandboxClient,
     browsers: str,
     key: str,
-    idle_ttl_seconds: int,
+    browser: BrowserDefinition,
 ) -> tuple[str, AsyncSandbox]:
     """``key``'s browser, created or started as needed, and its sandbox.
 
     A browser that is being deleted, or broke, can't be used or recreated under
-    its name, so ``key`` moves on to its next generation.
+    its name, so ``key`` moves on to its next generation. One that already
+    existed gets ``browser``'s allow list, so changing it reaches the browser.
     """
     for generation in range(_BROWSER_GENERATIONS):
         name = _browser_name(key, generation)
-        await _create(api, browsers, name, idle_ttl_seconds)
+        existed = await _create(api, browsers, name, browser)
         try:
             box = await sandboxes.get_sandbox(name)
         except ResourceNotFoundError:  # it finished deleting since: its name is free
-            await _create(api, browsers, name, idle_ttl_seconds)
+            existed = await _create(api, browsers, name, browser)
             box = await sandboxes.get_sandbox(name)
         if box.status in _UNUSABLE:
             continue
         if box.status == "stopped":
             box = await sandboxes.start_sandbox(name, timeout=300) or box
+        if existed:  # replaces the rules: needs a ready box
+            await sandboxes.update_sandbox(name, proxy_config=_proxy_config(browser))
         return name, box
     msg = "could not find or create a usable browser"
     raise RuntimeError(msg)
 
 
-async def _create(api: httpx.AsyncClient, browsers: str, name: str, idle_ttl_seconds: int) -> None:
-    """Create browser ``name``, unless it exists."""
+async def _create(
+    api: httpx.AsyncClient, browsers: str, name: str, browser: BrowserDefinition
+) -> bool:
+    """Create browser ``name``, unless it exists. Says whether it existed."""
+    # HiDPI renders at twice the resolution, so a person watching or driving the
+    # window sees it sharp; it can only be chosen at creation.
+    create: dict[str, object] = {
+        "name": name,
+        "idle_ttl_seconds": browser.idle_ttl_seconds,
+        "hidpi": True,
+    }
+    if browser.allow_list is not None:
+        create["proxy_config"] = _proxy_config(browser)
     try:
-        # HiDPI renders at twice the resolution, so a person watching or driving the
-        # window sees it sharp; it can only be chosen at creation.
-        create = {"name": name, "idle_ttl_seconds": idle_ttl_seconds, "hidpi": True}
         await api.post(browsers, json=create)
     except httpx.HTTPStatusError as err:
         if err.response.status_code != httpx.codes.CONFLICT:  # conflict: it exists
             raise
+        return True
+    return False
+
+
+def _proxy_config(browser: BrowserDefinition) -> SandboxProxyConfig:
+    """The browser's proxy rules: its allow list, or none."""
+    if browser.allow_list is None:
+        return {"rules": []}
+    return {"rules": [], "access_control": {"allow_list": list(browser.allow_list)}}
 
 
 # --- LangSmith: create the browser, put Stagehand's extension on it, connect -------
 
 _BROWSER_GENERATIONS = 5
 _UNUSABLE = {"deleting", "deleted", "failed", "error"}  # browser states to move past
-_EXTENSION_DIR = f"/var/lib/browserd/extensions/stagehand-{STAGEHAND_VERSION}"
+_EXTENSIONS_DIR = "/var/lib/browserd/extensions"  # browserd loads the highest version of each name
+_EXTENSION_DIR = f"{_EXTENSIONS_DIR}/stagehand-{STAGEHAND_VERSION}"
 _EXTENSION_ZIP = "/tmp/mda-stagehand.zip"  # noqa: S108 - in the browser sandbox
 _WINDOWS_FILE = "/var/lib/browserd/attachments.json"  # browserd's windows and their ports
 _LOCALHOST_WINDOW = "mda-localhost"  # shares a sandbox's localhost with every window
@@ -1031,7 +1054,7 @@ def _endpoint() -> str:
     return (get_env_var("ENDPOINT") or "https://api.smith.langchain.com").rstrip("/")
 
 
-async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
+async def _open(key: str, window_name: str, browser: BrowserDefinition) -> _Session:
     """Attach Stagehand to a window of ``key``'s browser, creating either as needed.
 
     The client reaches Chrome through the API's CDP proxy; the extension, inside the
@@ -1045,9 +1068,10 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
         httpx.AsyncClient(headers=headers, timeout=90, event_hooks={"response": [_raise]}) as api,
         AsyncSandboxClient(api_key=headers["X-Api-Key"], headers=headers) as sandboxes,
     ):
-        name, box = await _usable_browser(api, sandboxes, browsers, key, idle_ttl_seconds)
+        name, box = await _usable_browser(api, sandboxes, browsers, key, browser)
         await _install_extension(box)
-        await api.post(f"{browsers}/{name}/extensions/load")  # a no-op once loaded
+        # A no-op once loaded; relaunches Chrome when this replaces an older Stagehand.
+        await api.post(f"{browsers}/{name}/extensions/load")
         window = await _window(api, f"{browsers}/{name}", window_name)
         if window.get("controller") == "user":
             controller = f"{browsers}/{name}/attachments/{window['id']}/controller"
@@ -1058,17 +1082,37 @@ async def _open(key: str, window_name: str, idle_ttl_seconds: int) -> _Session:
         port = await _window_port(box, window["id"])
 
     local_url = f"ws://127.0.0.1:{port}/devtools/browser/{window['id']}"
-    try:
-        return await _connect(key, window_name, name, cdp_url, local_url, headers, box=box.id)
-    except Exception as err:
-        if "already initialized" not in str(err):
-            raise
-    # A client that never closed (a crash, another replica) left its claim in the
-    # extension; reloading it clears the claim without restarting Chrome.
-    # Known limit: two live clients of one browser (two replicas, user scope) take it from
-    # each other; the loser fails a call (~13 s RPC timeout) and reopens, never on the wrong window.
-    await _reload_extension(cdp_url, headers)
-    return await _connect(key, window_name, name, cdp_url, local_url, headers, box=box.id)
+    return await _when_free(
+        lambda: _connect(
+            key,
+            window_name,
+            name,
+            cdp_url,
+            local_url,
+            headers,
+            box=box.id,
+            allow_list=browser.allow_list,
+        )
+    )
+
+
+async def _when_free(attach: Callable[[], Awaitable[T]]) -> T:
+    """``attach``, tried again while another live client holds the browser.
+
+    Stagehand's extension serves one live client per browser, and drops one whose
+    connection ended (a crash) when the next attaches. A run that raised or paused on
+    another replica keeps its client until it idles out, after ``_RELEASE_AFTER_S``,
+    and lets go once its ``disconnect()`` returns, so attaching waits that long before
+    failing with "A Stagehand client is already connected".
+    """
+    deadline = time.monotonic() + _RELEASE_AFTER_S + _DISCONNECT_S + _ATTACH_RETRY_S
+    while True:
+        try:
+            return await attach()
+        except Exception as err:
+            if "already connected" not in str(err) or time.monotonic() >= deadline:
+                raise
+        await asyncio.sleep(_ATTACH_RETRY_S)
 
 
 async def _window(api: httpx.AsyncClient, browser: str, name: str) -> dict[str, Any]:
@@ -1081,7 +1125,7 @@ async def _window(api: httpx.AsyncClient, browser: str, name: str) -> dict[str, 
 
 
 async def _hand_over(
-    key: str, window_name: str, idle_ttl_seconds: int
+    key: str, window_name: str, browser: BrowserDefinition
 ) -> tuple[str, str, str, str | None]:
     """Give the user ``key``'s window, creating either as needed.
 
@@ -1094,7 +1138,7 @@ async def _hand_over(
         httpx.AsyncClient(headers=headers, timeout=90, event_hooks={"response": [_raise]}) as api,
         AsyncSandboxClient(api_key=headers["X-Api-Key"], headers=headers) as sandboxes,
     ):
-        name, box = await _usable_browser(api, sandboxes, browsers, key, idle_ttl_seconds)
+        name, box = await _usable_browser(api, sandboxes, browsers, key, browser)
         window = await _window(api, f"{browsers}/{name}", window_name)
         window_api = f"{browsers}/{name}/attachments/{window['id']}"
         await api.post(f"{window_api}/controller", json={"controller": "user"})
@@ -1147,6 +1191,7 @@ async def _connect(
     headers: dict[str, str],
     *,
     box: str | None = None,
+    allow_list: tuple[str, ...] | None = None,
 ) -> _Session:
     browser = await local_browser.connect(
         cdp_url=cdp_url, extension_cdp_url=local_url, headers=headers
@@ -1154,8 +1199,7 @@ async def _connect(
     try:
         stagehand = await Stagehand.create(browser=browser)
     except BaseException:
-        with contextlib.suppress(Exception):
-            await _invalidate_browser(browser)
+        await _let_go(browser)
         raise
     # File work runs off the event loop: `langgraph dev` turns blocking calls on it away.
     artifacts = await asyncio.to_thread(lambda: tempfile.mkdtemp(prefix="mda-browser-"))
@@ -1169,8 +1213,32 @@ async def _connect(
     # The facade acts on Chrome's focused tab, which is often in a window this client
     # cannot see (another thread's, or the shared localhost one), and `set_active_page`
     # does not move headless Chrome's focus. It has no hook for the page, so name ours.
-    tools._active_page = lambda: _newest_tab(browser.context)  # ty: ignore[invalid-assignment]  # noqa: SLF001
-    return _Session(window, stagehand, tools, artifacts, browser_name, box, local_url=local_url)
+    tools._active_page = lambda: _newest_tab(browser.context)  # noqa: SLF001
+    return _Session(
+        window,
+        stagehand,
+        tools,
+        artifacts,
+        browser_name,
+        box,
+        local_url=local_url,
+        allow_list=allow_list,
+    )
+
+
+async def _let_go(browser: StagehandBrowser) -> None:
+    """Close Stagehand and its CDP connection, but not the browser: it idles out."""
+    try:
+        # Bounded by Stagehand: 10 s to close Stagehand, 10 s for the detach.
+        await browser.disconnect()
+    except Exception:  # noqa: BLE001 - any failure can leave the connection open
+        # `disconnect()` drops the connection only once the extension acknowledges the
+        # detach, which browserd refuses while a person has control of the window. Left
+        # open, the connection keeps the extension claimed. Dropping it without the
+        # acknowledgement is safe here: the extension closes a browser on a lost client
+        # only when Stagehand launched it.
+        with contextlib.suppress(Exception):
+            await _invalidate_browser(browser)
 
 
 async def _newest_tab(context: BrowserContext) -> Page:
@@ -1185,7 +1253,8 @@ async def _install_extension(box: AsyncSandbox) -> None:
         return
     archive = await asyncio.to_thread(get_extension_archive)  # zips its folder: blocking
     await box.write(_EXTENSION_ZIP, archive, timeout=300)
-    tmp = f"{_EXTENSION_DIR}.tmp"  # unpacked aside, so a partial copy never passes the check
+    # Unpacked aside, so a partial copy is never loaded: browserd skips dot-folders.
+    tmp = f"{_EXTENSIONS_DIR}/.stagehand-{STAGEHAND_VERSION}.tmp"
     unpacked = await box.run(
         f"rm -rf {tmp} && python3 -m zipfile -e {_EXTENSION_ZIP} {tmp} && "
         f"rm -rf {_EXTENSION_DIR} && mv {tmp} {_EXTENSION_DIR}",
@@ -1308,25 +1377,6 @@ def _recorder_command(folder: str, action: str, *args: str) -> str:
     """Run the take's own copy of the recorder, in ``folder``, on ``folder``."""
     words = " ".join(shlex.quote(arg) for arg in (f"{folder}/recorder.py", action, folder, *args))
     return f"PYTHONPATH={shlex.quote(_RECORDER_PACKAGES_DIR)} {_RECORDER_PYTHON} {words}"
-
-
-async def _reload_extension(cdp_url: str, headers: dict[str, str]) -> None:
-    """Load Stagehand's extension again over CDP, which reloads it in place.
-
-    Not uninstalled first: Chrome uninstalls over CDP only an extension loaded over
-    CDP, and browserd loads it otherwise when Chrome starts.
-    """
-    async with asyncio.timeout(30), websockets.connect(cdp_url, additional_headers=headers) as ws:
-        await ws.send(
-            json.dumps(
-                {"id": 0, "method": "Extensions.loadUnpacked", "params": {"path": _EXTENSION_DIR}}
-            )
-        )
-        while (reply := json.loads(await ws.recv())).get("id") != 0:
-            pass  # events share the socket
-        if "error" in reply:
-            msg = f"CDP Extensions.loadUnpacked failed: {reply['error']}"
-            raise RuntimeError(msg)
 
 
 async def _window_port(box: AsyncSandbox, window_id: str) -> int:

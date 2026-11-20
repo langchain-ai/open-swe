@@ -14,9 +14,6 @@ contribute its own — :mod:`managed_deepagents._extension` stays internal.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
-from deepagents.backends.protocol import SandboxBackendProtocol
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from managed_deepagents._channels.github import github_channel
@@ -25,7 +22,12 @@ from managed_deepagents._channels.linear import linear_channel
 from managed_deepagents._channels.trigger.channel import slack_channel
 from managed_deepagents._connectors.mcp import define_mcp
 from managed_deepagents.identity import auth
-from managed_deepagents.sandbox import ProxyConfig, SandboxDefinition, normalize_sandbox_options
+from managed_deepagents.sandbox import (
+    ProxyConfig,
+    SandboxDefinition,
+    SandboxResolve,
+    normalize_sandbox_options,
+)
 
 __all__ = ["auth", "channels", "define_mcp", "define_sandbox"]
 
@@ -81,10 +83,6 @@ class _LangSmithSandboxArgs(BaseModel):
     Unmodeled keys pass through as LangSmith create options. MDA owns naming,
     lifecycle, ``setup.sh`` bake, and cleanup — the envelope rejects the keys
     it owns. Reuse is always one box per thread.
-
-    The ``_openswe_*`` arguments of :func:`define_sandbox` exist only for Open
-    SWE's vendored copy and are not MDA's API: see Open SWE's
-    vendor/mda-changes/ for why, and what MDA should offer instead.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -100,11 +98,6 @@ class _LangSmithSandboxArgs(BaseModel):
 
 def define_sandbox(
     *,
-    _openswe_per_thread: bool = False,
-    _openswe_create_fields: dict[str, object] | None = None,
-    _openswe_no_manage_proxy: bool = False,
-    _openswe_select: Callable[[object], SandboxDefinition | None] | None = None,
-    _openswe_without_sandbox: SandboxBackendProtocol | None = None,
     idle_ttl_seconds: int | None = None,
     api_key: str | None = None,
     default_timeout: int | None = None,
@@ -113,9 +106,23 @@ def define_sandbox(
     docker_image: str | None = None,
     registry: dict[str, str] | None = None,
     proxy_config: ProxyConfig | dict[str, object] | None = None,
+    resolve: SandboxResolve | None = None,
+    _openswe_create_fields: dict[str, object] | None = None,
+    _openswe_no_manage_proxy: bool = False,
     **options: object,
 ) -> SandboxDefinition:
-    """Declare the managed execution environment for an agent."""
+    """Declare the managed execution environment for an agent.
+
+    ``resolve(runtime)`` picks each run's sandbox, once per run, from the runtime
+    the agent factory receives. Its definition overrides these options for that
+    run; ``None`` runs it without a sandbox.
+
+    The ``_openswe_*`` arguments exist only for Open SWE's vendored copy and are not
+    MDA's API: see Open SWE's vendor/mda-changes/ for why, and what MDA should offer
+    instead.
+    """
+    if resolve is not None and not callable(resolve):
+        raise TypeError("sandbox resolve must be a function")
     parsed = _LangSmithSandboxArgs.model_validate(
         {
             **options,
@@ -129,25 +136,22 @@ def define_sandbox(
         }
     )
     dumped = parsed.model_dump(exclude_none=True)
-    # Open SWE only; pydantic would treat underscored fields as private, so they skip the model.
+    # Pydantic serializes helper dataclasses; the unresolved template must retain them.
+    if proxy_config is not None:
+        dumped["proxy_config"] = proxy_config
+    # Open SWE only; pydantic would copy or reject these, so they skip the model.
     dumped.update(
         {
             key: value
             for key, value in {
-                "_openswe_per_thread": _openswe_per_thread or None,
                 "_openswe_create_fields": _openswe_create_fields,
                 "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,
-                "_openswe_select": _openswe_select,
-                "_openswe_without_sandbox": _openswe_without_sandbox,
             }.items()
             if value is not None
         }
     )
-    # Pydantic serializes helper dataclasses; the unresolved template must retain them.
-    if proxy_config is not None:
-        dumped["proxy_config"] = proxy_config
     normalized = normalize_sandbox_options(dumped)
-    return SandboxDefinition(normalized)
+    return SandboxDefinition(normalized, resolve)
 
 
 channels = _Channels()

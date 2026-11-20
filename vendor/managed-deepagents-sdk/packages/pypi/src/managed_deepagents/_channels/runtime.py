@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, Annotated, Literal, Protocol, TypeGuard, cast,
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter
 
 from managed_deepagents._channels.types import (
+    ChannelAddress,
     ChannelEvent,
     ChannelInfo,
     ChannelMessage,
-    ChannelTarget,
     JsonValue,
     PostedChannelMessage,
     PostedChannelThread,
@@ -54,14 +54,14 @@ def channel_info(
     provider: str,
     event: Mapping[str, object] | None,
     raw_event: JsonValue = None,
-    channel_target: ChannelTarget | None = None,
+    channel_address: ChannelAddress | None = None,
 ) -> ChannelInfo:
     return ChannelInfo(
         name,
         provider,
         cast("ChannelEvent | None", immutable_copy(event)),
         cast("JsonValue", immutable_copy(raw_event)),
-        channel_target,
+        channel_address,
     )
 
 
@@ -79,7 +79,7 @@ class ChannelPost(Protocol):
         new_thread: Literal[True],
         run: ChannelRunResult | None = None,
         hand_off: bool = False,
-        to: ChannelTarget | None = None,
+        to: ChannelAddress | None = None,
     ) -> Awaitable[PostedChannelThread]: ...
 
     def __call__(
@@ -89,7 +89,7 @@ class ChannelPost(Protocol):
         new_thread: bool = False,
         run: ChannelRunResult | None = None,
         hand_off: bool = False,
-        to: ChannelTarget | None = None,
+        to: ChannelAddress | None = None,
     ) -> Awaitable[PostedChannelMessage]:
         """Post in this thread, or with ``new_thread=True`` at top level.
 
@@ -99,9 +99,12 @@ class ChannelPost(Protocol):
         channel handler's run input. ``hand_off=True`` moves this conversation
         there instead: replies, Stop and decision buttons in the new provider
         thread reach this run's thread, with its history, and the old provider
-        thread no longer has a thread; not with ``run``. ``to`` starts the new
+        thread no longer has a thread; not with ``run``. The run's answer, its
+        decisions and the ``runtime.channel`` its tools read from then on name
+        the new conversation; a ``runtime.channel`` read before, such as the
+        agent factory's, still names the old one. ``to`` starts the new
         thread in another conversation of this channel, such as another Slack
-        channel the app is in: a ``ChannelTarget`` of the origin's provider with
+        channel the app is in: a ``ChannelAddress`` of the origin's provider with
         no thread. Only Trigger channels that name the new thread support it.
         ``new_thread``, ``run``, ``hand_off`` and ``to`` are experimental and
         may change in a minor release.
@@ -124,7 +127,7 @@ async def _start_new_thread(
     run: ChannelRunResult | None,
     *,
     hand_off: bool,
-    to: ChannelTarget | None,
+    to: ChannelAddress | None,
 ) -> PostedChannelThread:
     """A ``new_thread=True`` post, with its options checked."""
     if start_thread is None:
@@ -140,7 +143,7 @@ async def _start_new_thread(
 
 
 def _check_in_thread_post(
-    run: ChannelRunResult | None, *, hand_off: bool, to: ChannelTarget | None
+    run: ChannelRunResult | None, *, hand_off: bool, to: ChannelAddress | None
 ) -> None:
     """Refuse the options only a ``new_thread=True`` post takes."""
     if run is not None:
@@ -160,20 +163,20 @@ def create_runtime_channel(
     transport: ChannelMessagingAdapter | None = None,
     raw_event: JsonValue = None,
     start_thread: StartThread | None = None,
-    channel_target: ChannelTarget | None = None,
+    channel_address: ChannelAddress | None = None,
 ) -> RuntimeChannel:
     facts = channel_info(
         name=name,
         provider=provider,
         event=event,
         raw_event=raw_event,
-        channel_target=channel_target,
+        channel_address=channel_address,
     )
     # Keep the route private and copy it so authored code cannot change the target.
 
     if transport is None:
         return RuntimeChannel(
-            facts.name, facts.provider, facts.event, facts.raw_event, facts.target
+            facts.name, facts.provider, facts.event, facts.raw_event, facts.address
         )
     bound_target = json_copy(target)
     # Only a schedule event chooses a new provider thread.
@@ -187,7 +190,7 @@ def create_runtime_channel(
         new_thread: bool = False,
         run: ChannelRunResult | None = None,
         hand_off: bool = False,
-        to: ChannelTarget | None = None,
+        to: ChannelAddress | None = None,
     ) -> PostedChannelMessage:
         validate_message(message)
         copied = cast("ChannelMessage", json_copy(cast("JsonValue", message)))
@@ -206,7 +209,7 @@ def create_runtime_channel(
         facts.provider,
         facts.event,
         facts.raw_event,
-        facts.target,
+        facts.address,
         cast("ChannelPost", post),
     )
 

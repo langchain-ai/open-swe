@@ -143,6 +143,8 @@ struct FakeEnv {
     webhook_elsewhere: Option<String>,
     /// `MDA_GITHUB_APP_INSTALLATION_ID`.
     installation_env: Option<String>,
+    /// The installation Agent Auth recorded for the agent's token.
+    recorded_installation: Option<u64>,
     log: Vec<String>,
 }
 
@@ -231,6 +233,10 @@ impl SetupEnv for FakeEnv {
 
     fn installation_from_env(&self) -> Option<String> {
         self.installation_env.clone()
+    }
+
+    fn recorded_installation(&mut self, _connection: &AppConnection) -> Option<u64> {
+        self.recorded_installation
     }
 
     fn choose_installation(&mut self, installations: &[GitHubInstallation]) -> Result<String> {
@@ -586,6 +592,42 @@ fn a_token_on_one_of_several_unpinned_installations_is_not_checked() {
         "{:?}",
         env.log
     );
+}
+
+#[test]
+fn a_token_on_a_suspended_installation_is_not_checked_on_another() {
+    // The token was minted on 10, since suspended; 9 is another account's.
+    let mut env = installed_and_set_up();
+    let mut suspended = installed_twice();
+    suspended.installations[1].suspended_at = Some("2026-11-01T00:00:00Z".into());
+    env.syncs = VecDeque::from([GitHubSyncOutcome::Synced(Box::new(suspended))]);
+    env.recorded_installation = Some(10);
+    env.issued = VecDeque::from([Ok(failed("should-not-be-asked"))]);
+
+    run_setup(&mut env, &channel()).unwrap();
+
+    assert!(
+        !env.log.iter().any(|line| line.starts_with("issue ")),
+        "{:?}",
+        env.log
+    );
+    assert_eq!(
+        env.log.last().unwrap(),
+        "info: The agent's GitHub token is on GitHub App installation 10, which is not active, so deploy leaves it as it is. Set MDA_GITHUB_APP_INSTALLATION_ID to choose the installation it uses."
+    );
+}
+
+#[test]
+fn a_token_recorded_on_the_single_installation_is_checked() {
+    for recorded in [Some(9), None] {
+        let mut env = installed_and_set_up();
+        env.recorded_installation = recorded;
+        env.issued = VecDeque::from([Ok(session("completed"))]);
+
+        run_setup(&mut env, &channel()).unwrap();
+
+        assert_eq!(env.log.last().unwrap(), "issue 9", "{recorded:?}");
+    }
 }
 
 #[test]
@@ -1705,6 +1747,54 @@ fn a_pinned_installation_the_token_cannot_use_still_drops_a_narrowed_token() {
     let last = env.log.last().unwrap();
     assert!(last.contains("not installed as installation 777"), "{last}");
     assert!(last.contains("the agent has no GitHub token"), "{last}");
+}
+
+/// The App installed on acme (9) and on `others` user accounts after it.
+fn installed_on_many(others: usize) -> GitHubChannelStatus {
+    let mut many = status(true);
+    for index in 0..others {
+        let mut other = many.installations[0].clone();
+        other.id = 100 + index as u64;
+        other.account.login = format!("user{index}");
+        other.account.kind = "User".into();
+        // GitHub reports the agent's installation last.
+        many.installations.insert(0, other);
+    }
+    many
+}
+
+#[test]
+fn the_agents_installation_is_named_among_many() {
+    let mut env = FakeEnv::interactive();
+    env.connection = Some(connection(GitHubAppState::Created, true));
+    env.recorded_installation = Some(9);
+    env.syncs = VecDeque::from([GitHubSyncOutcome::Synced(Box::new(installed_on_many(112)))]);
+
+    run_setup(&mut env, &channel()).unwrap();
+
+    assert_eq!(
+        env.log,
+        vec![
+            "sync".to_string(),
+            "success: GitHub channel ready · App acme-triage (acme) · this agent uses acme/api · also installed on 112 other accounts (user111, user110, user109 and 109 more)".to_string(),
+            TOKEN.to_string(),
+        ]
+    );
+}
+
+#[test]
+fn the_installation_env_names_the_agents_installation_when_none_is_recorded() {
+    let mut env = FakeEnv::interactive();
+    env.connection = Some(connection(GitHubAppState::Created, true));
+    env.installation_env = Some("9".into());
+    env.syncs = VecDeque::from([GitHubSyncOutcome::Synced(Box::new(installed_on_many(2)))]);
+
+    run_setup(&mut env, &channel()).unwrap();
+
+    assert_eq!(
+        env.log[1],
+        "success: GitHub channel ready · App acme-triage (acme) · this agent uses acme/api · also installed on acme/api; acme/api"
+    );
 }
 
 const TEST_KEY: &str = "-----BEGIN RSA PRIVATE KEY-----\nMIIB\n-----END RSA PRIVATE KEY-----";

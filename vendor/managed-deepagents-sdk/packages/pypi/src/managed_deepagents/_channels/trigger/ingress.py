@@ -6,7 +6,7 @@ import asyncio
 import uuid
 from collections.abc import Mapping
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
@@ -47,6 +47,7 @@ IngressRunStatus = Literal["error", "success", "timeout", "interrupted"]
 class ObservedIngressRun(TypedDict):
     values: dict[str, Any]
     status: IngressRunStatus
+    taken: NotRequired[Literal[True]]
 
 
 class _IngressSource(TypedDict):
@@ -373,7 +374,10 @@ async def observe_ingress_agent(
     status = observed["status"]
     if not isinstance(status, str) or status not in {"error", "success", "timeout", "interrupted"}:
         raise ChannelError("channel_run_failed", "Agent Server returned an unknown run status")
-    return {"values": observed["values"], "status": status}
+    result: ObservedIngressRun = {"values": observed["values"], "status": status}
+    if observed.get("taken"):
+        result["taken"] = True
+    return result
 
 
 async def cancel_ingress_thread_runs(

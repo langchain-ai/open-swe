@@ -2358,7 +2358,7 @@ async def test_memory_files_stay_in_mda_without_a_sandbox(
         stream_writer=lambda event: None,
         tool_call_id="call-1",
         store=None,
-        backend=filesystem,
+        backend=filesystem,  # ty: ignore[invalid-argument-type] - a stand-in for the sandbox
     )
     for name, args in (
         (

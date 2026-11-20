@@ -18,12 +18,12 @@ from typing import Any, Literal, NotRequired, TypeAlias, TypedDict, cast
 
 __all__ = [
     "AgentMemoryLayer",
+    "AssistantMemoryLayer",
     "MemoryLayer",
     "MemoryLayerType",
     "MemoryLayers",
     "UserMemoryLayer",
     "has_agent_memory_layer",
-    "has_user_memory_layer",
     "normalize_memory_layers",
     "user_memory_layer",
 ]
@@ -33,6 +33,13 @@ class AgentMemoryLayer(TypedDict):
     """Deployment-shared memory. Every caller reads and writes the same tree."""
 
     type: Literal["agent"]
+    allow: NotRequired[Callable[[Any], bool | Awaitable[bool]]]
+
+
+class AssistantMemoryLayer(TypedDict):
+    """Assistant-scoped memory keyed by the trusted runtime assistant."""
+
+    type: Literal["assistant"]
     allow: NotRequired[Callable[[Any], bool | Awaitable[bool]]]
 
 
@@ -52,20 +59,16 @@ class UserMemoryLayer(UserMemoryLayerRequired, total=False):
 
 
 #: One mounted layer. The union mirrors ``CredentialOwner``.
-MemoryLayer: TypeAlias = AgentMemoryLayer | UserMemoryLayer
+MemoryLayer: TypeAlias = AgentMemoryLayer | AssistantMemoryLayer | UserMemoryLayer
 MemoryLayers: TypeAlias = list[MemoryLayer]
-MemoryLayerType: TypeAlias = Literal["agent", "user"]
+MemoryLayerType: TypeAlias = Literal["agent", "assistant", "user"]
 
 #: Layer types the runtime can mount, in mount order.
-_LAYER_ORDER: tuple[MemoryLayerType, ...] = ("agent", "user")
+_LAYER_ORDER: tuple[MemoryLayerType, ...] = ("agent", "assistant", "user")
 
 
 def has_agent_memory_layer(memory: MemoryLayers) -> bool:
     return any(layer["type"] == "agent" for layer in memory)
-
-
-def has_user_memory_layer(memory: MemoryLayers) -> bool:
-    return any(layer["type"] == "user" for layer in memory)
 
 
 def user_memory_layer(memory: MemoryLayers) -> UserMemoryLayer | None:
@@ -122,23 +125,30 @@ def _normalize_memory_layer(entry: MemoryLayer) -> MemoryLayer:
             "modes, and retention are not implemented yet."
         )
     layer_type = mapping.get("type")
-    if layer_type == "agent":
+    if layer_type in ("agent", "assistant"):
         if "id" in mapping:
             raise ValueError(
                 "define_memory(...) an agent layer takes no `id`: the deployment owns it. "
                 'Write `{"type": "agent"}`.'
+                if layer_type == "agent"
+                else "define_memory(...) an assistant layer takes no `id`: "
+                "the runtime resolves it. "
+                'Write `{"type": "assistant"}`.'
             )
-        layer: AgentMemoryLayer = {"type": "agent"}
+        layer = cast("AgentMemoryLayer | AssistantMemoryLayer", {"type": layer_type})
         if "allow" in mapping:
             allow = mapping["allow"]
             if not callable(allow):
-                raise ValueError("define_memory(...) an agent layer `allow` must be callable.")
+                raise ValueError(
+                    f"define_memory(...) an {layer_type} layer `allow` must be callable."
+                )
             layer["allow"] = cast("Callable[[Any], bool | Awaitable[bool]]", allow)
         return layer
     if layer_type == "user":
         return _normalize_user_layer(mapping)
     raise ValueError(
-        f'define_memory(...) unknown `scope` entry type {layer_type!r}. Use "agent" or "user".'
+        f"define_memory(...) unknown `scope` entry type {layer_type!r}. "
+        'Use "agent", "assistant", or "user".'
     )
 
 

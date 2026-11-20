@@ -30,6 +30,7 @@ from managed_deepagents._channels.binding import _TriggerTargetModel
 from managed_deepagents._channels.messaging_registry import (
     channel_auto_replies_for_name,
     channel_provider_for_name,
+    channel_shows_status_for_name,
     messaging_transport_for_name,
     paused_notice_for_name,
 )
@@ -521,6 +522,7 @@ async def _report_run_event(
             interrupts,
             message,
             tracer_session_id=await tracer_session_id(),
+            show_progress=channel_shows_status_for_name(binding["name"]),
         )
         await _best_effort(client.post_runtime_event(target.channel_id, body))
     except Exception as error:  # noqa: BLE001 - reporting a run event never fails the run

@@ -139,7 +139,7 @@ impl Client {
             Some(payload),
             LOGS_REQUEST_TIMEOUT,
         )?;
-        serde_json::from_value(response).context("failed to decode the deployment logs response")
+        serde_json::from_value(response).context("failed to decode the Agent Server logs response")
     }
 }
 

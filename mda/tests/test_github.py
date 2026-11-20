@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock
 import pytest
 import rt.github as github
 from managed_deepagents import (
-    ChannelRun,
     GitHubChannelThread,
     GitHubEvent,
     GitHubEventResult,
     GitHubPayload,
+    GitHubRun,
     SupportedEventKey,
 )
 from managed_deepagents._channels.github_types import GitHubRepository, GitHubSender
@@ -563,7 +563,7 @@ async def test_a_mention_while_the_thread_waits_only_points_to_the_decision(
     gh.acknowledged.assert_not_awaited()
 
 
-def _runs(started: GitHubEventResult) -> list[ChannelRun]:
+def _runs(started: GitHubEventResult) -> list[GitHubRun]:
     """The runs a handler started, as a list."""
     assert isinstance(started, list)
     return started

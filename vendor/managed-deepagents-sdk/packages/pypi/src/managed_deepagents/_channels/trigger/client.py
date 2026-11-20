@@ -33,6 +33,7 @@ LANGSMITH_MDA_TRIGGER_SERVER_URL_ENV = "LANGSMITH_MDA_TRIGGER_SERVER_URL"
 TRIGGER_HTTP_TIMEOUT_SECONDS = 30.0
 HTTP_SUCCESS_MIN = 200
 HTTP_SUCCESS_MAX = 300
+_RETRYABLE_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 
 TriggerClientOperation = Literal["actions", "events"]
 
@@ -152,6 +153,38 @@ class TriggerClient(TriggerClientLike):
         if self._user_id is not None:
             headers["x-user-id"] = self._user_id
         encoded_body = json.dumps(body, separators=(",", ":")).encode()
+        # Post retries reuse the server-side receipt when a response is lost.
+        action_id = body.get("action_id")
+        attempts = (
+            3
+            if operation == "actions"
+            and body.get("type") == "post"
+            and isinstance(action_id, str)
+            and action_id.strip()
+            else 1
+        )
+        for attempt in range(attempts):
+            try:
+                response = await self._request(operation, url, headers, encoded_body)
+                break
+            except TriggerClientError as error:
+                if attempt == attempts - 1 or (
+                    error.status is not None and error.status not in _RETRYABLE_STATUSES
+                ):
+                    raise
+                await asyncio.sleep(2**attempt)
+        try:
+            return json.loads(response["body"])
+        except (KeyError, TypeError, ValueError):
+            raise TriggerClientError(operation) from None
+
+    async def _request(
+        self,
+        operation: TriggerClientOperation,
+        url: str,
+        headers: Mapping[str, str],
+        encoded_body: bytes,
+    ) -> TriggerHttpResponse:
         try:
             response = await asyncio.to_thread(
                 self._fetch,
@@ -165,10 +198,7 @@ class TriggerClient(TriggerClientLike):
         status = response.get("status")
         if not isinstance(status, int) or not HTTP_SUCCESS_MIN <= status < HTTP_SUCCESS_MAX:
             raise TriggerClientError(operation, status if isinstance(status, int) else None)
-        try:
-            return json.loads(response["body"])
-        except (KeyError, TypeError, ValueError):
-            raise TriggerClientError(operation) from None
+        return response
 
 
 _THREAD = TypeAdapter(TriggerStartedThread)

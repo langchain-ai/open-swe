@@ -9,12 +9,21 @@ import importlib.util
 import inspect
 import json
 import os
+import shutil
+import signal
+import socket
+import subprocess
 import sys
-from contextlib import AbstractContextManager, nullcontext
+import tempfile
+import time
+from contextlib import AbstractContextManager, nullcontext, suppress
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote
 
 _SCHEMA_VERSION = "mda.eval-agent-result/v1"
+_SERVER_START_TIMEOUT_SECONDS = 120
+_IDLE_POLL_SECONDS = 0.5
 
 
 def main() -> int:
@@ -31,24 +40,39 @@ def main() -> int:
     instruction = instruction_path.read_text(encoding="utf-8")
     os.chdir(project_dir)
     identity = _load_identity_fixture()
-    # Pass model only at graph compile time. Including it in invoke
-    # `configurable` can make LangChain treat `openai:…` as a raw model id.
-    graph = _load_graph(
-        project_dir,
-        graph_name,
-        model=model_override,
-        app_dir=app_dir,
-        session_id=session_id,
-        identity=identity,
-    )
-    with _langsmith_tracing_context():
-        result = _invoke_graph(
-            graph,
-            instruction,
+    manifest = _manifest(project_dir)
+    # mda names each async subagent's graph `<lead graph>--<subagent>`.
+    has_async_subagents = any(name.startswith(f"{graph_name}--") for name in manifest["graphs"])
+    if has_async_subagents:
+        result = asyncio.run(
+            _run_on_agent_server(
+                project_dir,
+                manifest,
+                graph_name,
+                instruction,
+                identity=identity,
+                log_path=summary_path.parent / "agent-server.log",
+            )
+        )
+    else:
+        # Pass model only at graph compile time. Including it in invoke
+        # `configurable` can make LangChain treat `openai:…` as a raw model id.
+        graph = _load_graph(
+            project_dir,
+            graph_name,
+            model=model_override,
             app_dir=app_dir,
             session_id=session_id,
             identity=identity,
         )
+        with _langsmith_tracing_context():
+            result = _invoke_graph(
+                graph,
+                instruction,
+                app_dir=app_dir,
+                session_id=session_id,
+                identity=identity,
+            )
     answer = _extract_answer(result)
 
     result_path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,6 +92,234 @@ def main() -> int:
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return 0
+
+
+def _manifest(project_dir: Path) -> dict[str, Any]:
+    return json.loads((project_dir / "langgraph.json").read_text(encoding="utf-8"))
+
+
+async def _run_on_agent_server(
+    project_dir: Path,
+    manifest: dict[str, Any],
+    graph_name: str,
+    instruction: str,
+    *,
+    identity: dict[str, Any] | None,
+    log_path: Path,
+) -> Any:
+    from langgraph_sdk import get_client  # noqa: PLC0415
+
+    server_dir = Path(tempfile.mkdtemp(prefix="mda-eval-server-"))
+    config_path = _write_server_config(server_dir, project_dir, manifest, identity)
+    port = _free_port()
+    server = _start_server(config_path, port, server_dir, log_path)
+    try:
+        url = f"http://127.0.0.1:{port}"
+        await _wait_for_server(url, server, log_path)
+        return await _run_lead(
+            get_client(url=url), graph_name, instruction, identity=identity, log_path=log_path
+        )
+    finally:
+        _stop(server)
+        shutil.rmtree(server_dir, ignore_errors=True)
+
+
+async def _run_lead(
+    client: Any,
+    graph_name: str,
+    instruction: str,
+    *,
+    identity: dict[str, Any] | None,
+    log_path: Path,
+) -> Any:
+    thread_id = (await client.threads.create())["thread_id"]
+    run = await client.runs.create(
+        thread_id,
+        graph_name,
+        input={"messages": [{"role": "user", "content": instruction}]},
+        config=_server_run_config(identity),
+        headers=_harbor_trace_headers(nest_under_parent=True),
+    )
+    await client.runs.join(thread_id, run["run_id"])
+    run = await client.runs.get(thread_id, run["run_id"])
+    if run["status"] in ("error", "timeout"):
+        msg = f"the agent's run ended with status {run['status']!r}"
+        raise RuntimeError(f"{msg}:\n{_tail(log_path)}")
+    await _wait_until_idle(client)
+    thread = await client.threads.get(thread_id)
+    if thread["status"] == "error":
+        msg = "the agent's last run failed"
+        raise RuntimeError(f"{msg}:\n{_tail(log_path)}")
+    state = await client.threads.get_state(thread_id)
+    return state["values"]
+
+
+def _write_server_config(
+    server_dir: Path,
+    project_dir: Path,
+    manifest: dict[str, Any],
+    identity: dict[str, Any] | None,
+) -> Path:
+    # The build's config, outside the graded workspace. The runner env already
+    # holds `.env`, and a trial serves no HTTP routes or the project's own auth.
+    config = {key: value for key, value in manifest.items() if key not in ("env", "http", "auth")}
+    config["dependencies"] = [str(project_dir)]
+    config["graphs"] = {
+        name: str(project_dir / ref.removeprefix("./")) for name, ref in manifest["graphs"].items()
+    }
+    user = _identity_user(identity)
+    if user is not None:
+        auth_path = server_dir / "eval_auth.py"
+        auth_path.write_text(
+            "import json\n"
+            "from langgraph_sdk import Auth\n\n"
+            "auth = Auth()\n"
+            f"_USER = json.loads({json.dumps(json.dumps(user))})\n\n\n"
+            "@auth.authenticate\n"
+            "async def authenticate():\n"
+            "    return dict(_USER)\n",
+            encoding="utf-8",
+        )
+        # deepagents launches async subagents as Studio.
+        config["auth"] = {"path": f"{auth_path}:auth", "disable_studio_auth": True}
+    config_path = server_dir / "langgraph.json"
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    return config_path
+
+
+def _start_server(
+    config_path: Path, port: int, server_dir: Path, log_path: Path
+) -> subprocess.Popen[bytes]:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("ab") as log:
+        return subprocess.Popen(  # noqa: S603
+            [
+                _langgraph_cli(),
+                "dev",
+                "--config",
+                str(config_path),
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--no-browser",
+                "--no-reload",
+                # The Python dev server runs one job at a time unless told otherwise,
+                # and async subagents run alongside the lead.
+                "--n-jobs-per-worker",
+                "10",
+            ],
+            cwd=server_dir,
+            env=_server_env(),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+
+def _server_env() -> dict[str, str]:
+    # Harbor sends unset vars as "", and the server rejects LANGSMITH_TRACING="".
+    return {key: value for key, value in os.environ.items() if value}
+
+
+def _langgraph_cli() -> str:
+    beside = Path(sys.executable).parent / "langgraph"
+    found = str(beside) if beside.is_file() else shutil.which("langgraph")
+    if found is None:
+        msg = "the langgraph CLI is not installed in the trial; it runs async subagents"
+        raise RuntimeError(msg)
+    return found
+
+
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+async def _wait_for_server(url: str, server: subprocess.Popen[bytes], log_path: Path) -> None:
+    import httpx  # noqa: PLC0415
+
+    deadline = time.monotonic() + _SERVER_START_TIMEOUT_SECONDS
+    async with httpx.AsyncClient() as client:
+        while time.monotonic() < deadline:
+            if server.poll() is not None:
+                msg = f"the local Agent Server exited with status {server.returncode}"
+                raise RuntimeError(f"{msg}:\n{_tail(log_path)}")
+            try:
+                if (await client.get(f"{url}/ok")).status_code == 200:  # noqa: PLR2004
+                    return
+            except httpx.TransportError:
+                pass
+            await asyncio.sleep(0.25)
+    msg = f"the local Agent Server did not start in {_SERVER_START_TIMEOUT_SECONDS} s"
+    raise RuntimeError(f"{msg}:\n{_tail(log_path)}")
+
+
+def _server_run_config(identity: dict[str, Any] | None) -> dict[str, Any]:
+    configurable: dict[str, Any] = {}
+    provider = _identity_source_provider(identity)
+    if provider is not None:
+        configurable["mda_source_provider"] = provider
+    return {"configurable": configurable}
+
+
+def _harbor_trace_headers(*, nest_under_parent: bool = False) -> dict[str, str] | None:
+    """The Harbor trial's trace headers, flagged for MDA to nest a run under when asked."""
+    parent = os.environ.get("HARBOR_LANGSMITH_PARENT")
+    if not parent:
+        return None
+    harbor_baggage = os.environ.get("HARBOR_LANGSMITH_BAGGAGE")
+    if not nest_under_parent:
+        return {
+            "langsmith-trace": parent,
+            **({"baggage": harbor_baggage} if harbor_baggage else {}),
+        }
+    metadata: dict[str, Any] = {}
+    baggage = []
+    for item in (harbor_baggage or "").split(","):
+        key, _, value = item.partition("=")
+        if key == "langsmith-metadata":
+            with suppress(ValueError):
+                decoded = json.loads(unquote(value))
+                metadata = decoded if isinstance(decoded, dict) else {}
+        elif item:
+            baggage.append(item)
+    metadata["ls_nest_under_parent"] = True
+    baggage.append(f"langsmith-metadata={quote(json.dumps(metadata))}")
+    return {"langsmith-trace": parent, "baggage": ",".join(baggage)}
+
+
+async def _wait_until_idle(client: Any) -> None:
+    idle_checks = 0
+    while idle_checks < 2:  # noqa: PLR2004
+        await asyncio.sleep(_IDLE_POLL_SECONDS)
+        idle_checks = idle_checks + 1 if not await _has_active_runs(client) else 0
+
+
+async def _has_active_runs(client: Any) -> bool:
+    # A thread stays busy from run creation until its last active run ends.
+    return bool(await client.threads.search(status="busy", limit=1))
+
+
+def _stop(server: subprocess.Popen[bytes]) -> None:
+    if server.poll() is not None:
+        return
+    with suppress(ProcessLookupError):
+        os.killpg(server.pid, signal.SIGTERM)
+    try:
+        server.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        with suppress(ProcessLookupError):
+            os.killpg(server.pid, signal.SIGKILL)
+        server.wait()
+
+
+def _tail(path: Path, lines: int = 40) -> str:
+    try:
+        return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
+    except OSError:
+        return ""
 
 
 def _load_graph(
@@ -120,16 +372,12 @@ def _invoke_graph(
 
 
 def _langsmith_tracing_context() -> AbstractContextManager[Any]:
-    parent = os.environ.get("HARBOR_LANGSMITH_PARENT")
-    if not parent:
+    headers = _harbor_trace_headers()
+    if headers is None:
         return nullcontext()
 
     from langsmith.run_helpers import tracing_context  # noqa: PLC0415
 
-    headers = {"langsmith-trace": parent}
-    baggage = os.environ.get("HARBOR_LANGSMITH_BAGGAGE")
-    if baggage:
-        headers["baggage"] = baggage
     return tracing_context(parent=headers, enabled=True)
 
 
@@ -163,12 +411,22 @@ def _config(
 
 def _apply_identity_fixture(configurable: dict[str, Any], identity: dict[str, Any] | None) -> None:
     """Map checked-in eval ``identity.json`` onto ``langgraph_auth_user``."""
-    if not isinstance(identity, dict):
+    user = _identity_user(identity)
+    if user is None:
         return
+    configurable["langgraph_auth_user"] = user
+    provider = _identity_source_provider(identity)
+    if provider is not None:
+        configurable["mda_source_provider"] = provider
+
+
+def _identity_user(identity: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(identity, dict):
+        return None
     caller = identity.get("user")
     caller_id = caller.get("id") if isinstance(caller, dict) else None
     if not isinstance(caller_id, str) or not caller_id.strip():
-        return
+        return None
     user: dict[str, Any] = {
         "identity": caller_id,
         "permissions": [],
@@ -188,10 +446,13 @@ def _apply_identity_fixture(configurable: dict[str, Any], identity: dict[str, An
     claims = identity.get("claims")
     if isinstance(claims, dict):
         user["mda_claims"] = claims
-    configurable["langgraph_auth_user"] = user
-    source = identity.get("source")
-    if isinstance(source, dict) and isinstance(source.get("provider"), str):
-        configurable["mda_source_provider"] = source["provider"]
+    return user
+
+
+def _identity_source_provider(identity: dict[str, Any] | None) -> str | None:
+    source = identity.get("source") if isinstance(identity, dict) else None
+    provider = source.get("provider") if isinstance(source, dict) else None
+    return provider if isinstance(provider, str) else None
 
 
 def _load_identity_fixture() -> dict[str, Any] | None:
@@ -218,7 +479,7 @@ def _extract_answer(value: Any) -> str:
 
 
 def _message_text(value: Any) -> str:
-    content = getattr(value, "content", None)
+    content = value.get("content") if isinstance(value, dict) else getattr(value, "content", None)
     if isinstance(content, str):
         return content
     if isinstance(content, list):

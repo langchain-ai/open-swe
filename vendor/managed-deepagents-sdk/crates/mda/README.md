@@ -72,6 +72,15 @@ with a key that is still present there, remove `LANGSMITH_API_KEY` from the
 project `.env` (or replace it with a key you created in Settings) and run the
 command again.
 
+### HTTP redirects
+
+The CLI's shared HTTP client follows redirects only within the initial origin
+(the same scheme, host, and effective port), up to ten hops. Cross-origin
+redirects fail before credentials or request bodies are sent to the new origin.
+Configure the final trusted endpoint directly for self-hosted canonical-host
+redirects or endpoint migrations. Build-artifact reports, trigger/channel calls,
+and Linear credential checks refuse redirects entirely.
+
 ## Environment variables
 
 CLI-facing knobs the `mda` binary reads (or injects into the staged build).

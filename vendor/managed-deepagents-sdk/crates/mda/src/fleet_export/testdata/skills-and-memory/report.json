@@ -1,0 +1,33 @@
+{
+  "not_exported": [
+    {
+      "feature": "skills",
+      "summary": "Fleet's built-in skills",
+      "detail": "Fleet's built-in skills (presentation-builder, svg-builder, mermaid-diagram-builder, generate-skill, fleet-guide and others) ship with Fleet's runtime. The exported agent doesn't have them."
+    },
+    {
+      "feature": "linked skills",
+      "summary": "1",
+      "detail": "Fleet returned no files for these linked workspace skills: stale-link"
+    }
+  ],
+  "warnings": [],
+  "left_behind": [
+    "Conversations: past threads stay in Fleet. The deployment starts with none.",
+    "Traces: the deployment traces to a new LangSmith project. Past traces stay in the Fleet agent's project."
+  ],
+  "skills": [
+    "`mda deploy` uploads these skills from `skills/`: summarizer, triage.",
+    "The agent can't edit its skills anymore. In Fleet it could save what it learned into them; it now saves to `memories/agent/` instead.",
+    "Linked workspace skills are copies taken at export and won't receive updates: summarizer."
+  ],
+  "memory": [
+    "Fleet's `AGENTS.md` is now `instructions.md`.",
+    "`memory.py` gives the agent its own memory in `memories/agent/`. It starts empty, and the agent adds to it as it learns."
+  ],
+  "memory_files": [
+    "pricing.md",
+    "skills/README.md",
+    "wiki/INDEX.md"
+  ]
+}

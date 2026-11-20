@@ -28,7 +28,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from managed_deepagents import ManagedThread, RuntimeChannel, SlackChannelTarget
+from managed_deepagents import ManagedThread, RuntimeChannel, SlackChannelAddress
 from managed_deepagents._managed_thread import current_run_thread  # noqa: PLC2701
 from pydantic import JsonValue
 from runtime_api.endpoint import call
@@ -164,7 +164,7 @@ class SlackMoveMiddleware(AgentMiddleware):
         channel = _slack_channel(runtime)
         if channel is None or channel.post is None:
             return None
-        to = SlackChannelTarget(conversation_id=plan.channel_id) if plan.channel_id else None
+        to = SlackChannelAddress(conversation_id=plan.channel_id) if plan.channel_id else None
         try:
             posted = await channel.post(
                 {"type": "content", "content": plan.root_text},

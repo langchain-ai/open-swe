@@ -55,6 +55,8 @@ pub struct MemorySummary {
 pub struct MemoryLayers {
     /// Deployment-shared memory mounted at `/memories/agent/`.
     pub agent: bool,
+    /// Runtime-assistant-scoped memory mounted at `/memories/assistant/`.
+    pub assistant: bool,
     /// Caller-scoped memory mounted at `/memories/user/`.
     pub user: bool,
 }
@@ -73,6 +75,14 @@ impl MemoryDecision {
     pub fn agent_enabled(&self) -> bool {
         match self {
             Self::Declared(summary) => summary.scope.agent,
+            Self::None => false,
+        }
+    }
+
+    /// Whether runs mount memory keyed by the trusted runtime assistant ID.
+    pub fn assistant_enabled(&self) -> bool {
+        match self {
+            Self::Declared(summary) => summary.scope.assistant,
             Self::None => false,
         }
     }
@@ -176,10 +186,14 @@ pub(crate) fn declare_memory_snippet(language: Language) -> &'static str {
 enum MemoryLayersValue {
     /// `scope: [{ type: "agent" }]`.
     Agent,
+    /// `scope: [{ type: "assistant" }]`.
+    Assistant,
     /// `scope: [{ type: "user" }]`.
     User,
     /// Both layers, normalized agent first.
     AgentAndUser,
+    /// A combination containing assistant memory.
+    WithAssistant(MemoryLayers),
     /// `scope: []` / omitted.
     None,
     /// A layer type appeared more than once.
@@ -199,14 +213,22 @@ impl MemoryLayersValue {
         match self {
             Self::Agent => Ok(MemoryLayers {
                 agent: true,
+                assistant: false,
                 user: false,
             }),
+            Self::Assistant => Ok(MemoryLayers {
+                assistant: true,
+                ..MemoryLayers::default()
+            }),
+            Self::WithAssistant(layers) => Ok(*layers),
             Self::User => Ok(MemoryLayers {
                 agent: false,
+                assistant: false,
                 user: true,
             }),
             Self::AgentAndUser => Ok(MemoryLayers {
                 agent: true,
+                assistant: false,
                 user: true,
             }),
             Self::None => Ok(MemoryLayers::default()),
@@ -215,7 +237,7 @@ impl MemoryLayersValue {
             }
             Self::Shorthand(what) => bail!(
                 "{file_label} declares memory as {what}. A layer names whose memory \
-                 is mounted. Use named `agent` and `user` options with layer constructors."
+                 is mounted. Use named `agent`, `assistant`, and `user` options with layer constructors."
             ),
             Self::Reserved(what) => bail!(
                 "{file_label} declares a memory layer with {what}, which is not \
@@ -224,7 +246,7 @@ impl MemoryLayersValue {
             ),
             Self::Unknown(what) => bail!(
                 "{file_label} declares an unknown memory layer: {what}. Use \
-                 named `agent` and `user` layers."
+                 named `agent`, `assistant`, and `user` layers."
             ),
             Self::Dynamic(what) => bail!(
                 "{file_label} declares memory that is not a static literal \
@@ -241,6 +263,10 @@ fn layer_type_value(layer_type: &str, has_id: bool) -> MemoryLayersValue {
         // The deployment owns the agent layer, so there is no id to assert.
         "agent" if has_id => MemoryLayersValue::Unknown("an `id` on the agent layer".to_string()),
         "agent" => MemoryLayersValue::Agent,
+        "assistant" if has_id => {
+            MemoryLayersValue::Unknown("an `id` on the assistant layer".to_string())
+        }
+        "assistant" => MemoryLayersValue::Assistant,
         "user" => MemoryLayersValue::User,
         other => MemoryLayersValue::Unknown(format!("type {other:?}")),
     }
@@ -249,17 +275,33 @@ fn layer_type_value(layer_type: &str, has_id: bool) -> MemoryLayersValue {
 /// Reduce a list of layer entries to the canonical mounted set.
 fn reduce_layer_entries(entries: Vec<MemoryLayersValue>) -> MemoryLayersValue {
     let mut agent = false;
+    let mut assistant = false;
     let mut user = false;
     for entry in entries {
         match entry {
             MemoryLayersValue::Agent if agent => return MemoryLayersValue::Duplicate("agent"),
             MemoryLayersValue::Agent => agent = true,
+            MemoryLayersValue::Assistant if assistant => {
+                return MemoryLayersValue::Duplicate("assistant")
+            }
+            MemoryLayersValue::Assistant => assistant = true,
             MemoryLayersValue::User if user => return MemoryLayersValue::Duplicate("user"),
             MemoryLayersValue::User => user = true,
             // A duplicate, shorthand, reserved, unknown, or dynamic entry decides
             // the whole list.
             other => return other,
         }
+    }
+    if assistant {
+        return if agent || user {
+            MemoryLayersValue::WithAssistant(MemoryLayers {
+                agent,
+                assistant,
+                user,
+            })
+        } else {
+            MemoryLayersValue::Assistant
+        };
     }
     match (agent, user) {
         (true, true) => MemoryLayersValue::AgentAndUser,
@@ -347,7 +389,7 @@ fn named_memory_layers(
 ) -> Option<MemoryLayersValue> {
     let has_named = options.properties.iter().any(|property| {
         matches!(property, ObjectPropertyKind::ObjectProperty(property)
-            if property.key.is_specific_static_name("agent") || property.key.is_specific_static_name("user"))
+            if property.key.is_specific_static_name("agent") || property.key.is_specific_static_name("assistant") || property.key.is_specific_static_name("user"))
     });
     if options.properties.iter().any(|property| {
         matches!(property, ObjectPropertyKind::ObjectProperty(property) if property.computed)
@@ -358,6 +400,7 @@ fn named_memory_layers(
         return None;
     }
     let mut agent = None;
+    let mut assistant = None;
     let mut user = None;
     for property in &options.properties {
         let ObjectPropertyKind::ObjectProperty(property) = property else {
@@ -367,17 +410,20 @@ fn named_memory_layers(
         };
         let target = if property.key.is_specific_static_name("agent") {
             &mut agent
+        } else if property.key.is_specific_static_name("assistant") {
+            &mut assistant
         } else if property.key.is_specific_static_name("user") {
             &mut user
         } else {
             return Some(MemoryLayersValue::Unknown(
-                "named layers only accept agent and user; do not mix them with scope".to_string(),
+                "named layers only accept agent, assistant, and user; do not mix them with scope"
+                    .to_string(),
             ));
         };
         *target = Some(&property.value);
     }
     let mut entries = Vec::new();
-    for (name, value) in [("agent", agent), ("user", user)] {
+    for (name, value) in [("agent", agent), ("assistant", assistant), ("user", user)] {
         let Some(value) = value else { continue };
         let Expression::CallExpression(call) = value else {
             return Some(MemoryLayersValue::Dynamic(format!(
@@ -561,10 +607,19 @@ fn extract_memory_layers_python(
     Ok(match extracted.kind.as_str() {
         "absent" => None,
         "agent" => Some(MemoryLayersValue::Agent),
+        "assistant" => Some(MemoryLayersValue::Assistant),
         "user" => Some(MemoryLayersValue::User),
         "agent_user" => Some(MemoryLayersValue::AgentAndUser),
+        "agent_assistant" | "assistant_user" | "agent_assistant_user" => {
+            Some(MemoryLayersValue::WithAssistant(MemoryLayers {
+                agent: extracted.kind.starts_with("agent_"),
+                assistant: true,
+                user: extracted.kind.ends_with("_user"),
+            }))
+        }
         "none" => Some(MemoryLayersValue::None),
         "duplicate_agent" => Some(MemoryLayersValue::Duplicate("agent")),
+        "duplicate_assistant" => Some(MemoryLayersValue::Duplicate("assistant")),
         "duplicate_user" => Some(MemoryLayersValue::Duplicate("user")),
         "shorthand" => Some(MemoryLayersValue::Shorthand(detail)),
         "reserved" => Some(MemoryLayersValue::Reserved(detail)),
@@ -585,6 +640,87 @@ mod tests {
 
     fn py_layers(source: &str) -> Option<MemoryLayersValue> {
         extract_memory_layers_python(source, "memory.py").unwrap()
+    }
+
+    #[test]
+    fn reads_every_layer_combination_in_both_languages() {
+        for bits in 0..8 {
+            let expected = MemoryLayers {
+                agent: bits & 1 != 0,
+                assistant: bits & 2 != 0,
+                user: bits & 4 != 0,
+            };
+            let names: Vec<_> = [
+                ("agent", expected.agent),
+                ("assistant", expected.assistant),
+                ("user", expected.user),
+            ]
+            .into_iter()
+            .filter_map(|(name, enabled)| enabled.then_some(name))
+            .collect();
+            let ts_named = names
+                .iter()
+                .map(|name| format!("{name}: memoryLayer({{ allow: policy }})"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let py_named = names
+                .iter()
+                .map(|name| format!("{name}=MemoryLayer(allow=policy)"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let scope = names
+                .iter()
+                .rev()
+                .map(|name| format!("{{'type': '{name}', 'allow': policy}}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            for value in [
+                ts_layers(&format!(
+                    "export const memory = defineMemory({{ {ts_named} }});"
+                )),
+                ts_layers(&format!(
+                    "export const memory = defineMemory({{ scope: [{scope}] }});"
+                )),
+                py_layers(&format!("memory = define_memory({py_named})")),
+                py_layers(&format!("memory = define_memory(scope=[{scope}])")),
+            ] {
+                assert_eq!(value.unwrap().mounted_layers("memory").unwrap(), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn assistant_layer_rejects_duplicates_ids_and_key_callbacks() {
+        for (ts, py) in [
+            (
+                "scope: [{ type: 'assistant' }, { type: 'assistant' }]",
+                "scope=[{'type': 'assistant'}, {'type': 'assistant'}]",
+            ),
+            (
+                "scope: { type: 'assistant', id: 'other' }",
+                "scope={'type': 'assistant', 'id': 'other'}",
+            ),
+            (
+                "scope: { type: 'assistant', key: choose }",
+                "scope={'type': 'assistant', 'key': choose}",
+            ),
+            (
+                "assistant: memoryLayer({ key: choose })",
+                "assistant=MemoryLayer(key=choose)",
+            ),
+            (
+                "assistant: memoryLayer(), scope: []",
+                "assistant=MemoryLayer(), scope=[]",
+            ),
+            ("assistant: choose()", "assistant=choose()"),
+        ] {
+            for value in [
+                ts_layers(&format!("export const memory = defineMemory({{ {ts} }});")),
+                py_layers(&format!("memory = define_memory({py})")),
+            ] {
+                assert!(value.unwrap().mounted_layers("memory").is_err(), "{ts}");
+            }
+        }
     }
 
     #[test]
@@ -994,7 +1130,7 @@ mod tests {
             .to_string();
         assert!(shorthand.contains("names whose memory"), "{shorthand}");
         assert!(
-            shorthand.contains("named `agent` and `user`"),
+            shorthand.contains("named `agent`, `assistant`, and `user`"),
             "{shorthand}"
         );
 

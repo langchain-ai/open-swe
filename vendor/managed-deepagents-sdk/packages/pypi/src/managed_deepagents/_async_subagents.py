@@ -47,15 +47,15 @@ def with_async_general_purpose(definition: DeepAgentDefinition) -> DeepAgentDefi
     spec = (
         dict(declared)
         if declared is not None
-        else {**_default_general_purpose(), "skills": [_AGENT_SKILLS]}
+        else {**default_general_purpose(), "skills": [_AGENT_SKILLS]}
     )
     return DeepAgentDefinition(
         {**definition.config, "subagents": [*subagents, {**spec, "async": True}]}
     )
 
 
-def _default_general_purpose() -> dict[str, object]:
-    # Imported here so a deepagents rename breaks only this feature, not the runtime.
+def default_general_purpose() -> dict[str, object]:
+    """deepagents' default general-purpose subagent, as a spec MDA can declare."""
     from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT  # noqa: PLC0415
 
     return dict(GENERAL_PURPOSE_SUBAGENT)
@@ -70,18 +70,6 @@ def route_async_subagents(
         return definition
     routed = [_route(spec, graphs) if is_async_subagent(spec) else spec for spec in subagents]
     return DeepAgentDefinition({**definition.config, "subagents": routed})
-
-
-def reject_async_subagents(definition: DeepAgentDefinition) -> None:
-    """Refuse async subagents in eval, which has no Agent Server to launch them on."""
-    subagents = definition.config.get("subagents")
-    for spec in subagents if isinstance(subagents, Sequence) else ():
-        if is_async_subagent(spec):
-            msg = (
-                f"async subagent {spec.get('name')!r} is not supported in `mda eval`: "
-                "there is no Agent Server to launch it on"
-            )
-            raise ValueError(msg)
 
 
 def async_subagent_definition(definition: DeepAgentDefinition, name: str) -> DeepAgentDefinition:

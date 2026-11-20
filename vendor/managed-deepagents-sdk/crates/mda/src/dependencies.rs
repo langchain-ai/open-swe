@@ -51,7 +51,7 @@ pub const USER_RUNTIME_PACKAGE: &str = "managed-deepagents";
 const TYPESCRIPT_MANAGED: &[Dependency] = &[
     Dependency {
         name: "@langchain/core",
-        version: "^1.2.17",
+        version: "^1.3.2",
     },
     Dependency {
         name: "@langchain/langgraph",
@@ -63,7 +63,7 @@ const TYPESCRIPT_MANAGED: &[Dependency] = &[
     },
     Dependency {
         name: "@langchain/langgraph-sdk",
-        version: "^1.12.0",
+        version: "^1.13.0",
     },
     Dependency {
         name: "deepagents",
@@ -118,7 +118,7 @@ const PYTHON_MANAGED: &[Dependency] = &[
     },
     Dependency {
         name: "langgraph",
-        version: ">=1.2.15,<2",
+        version: ">=1.2.19,<2",
     },
     // 1.1.1 lets an invalid answer to an interrupt inside a tool (such as a
     // subagent) fail the resume instead of reaching the model as a tool error.
@@ -166,7 +166,7 @@ const PYTHON_MANAGED: &[Dependency] = &[
 /// `STAGEHAND_VERSION`).
 pub const PYTHON_BROWSER: Dependency = Dependency {
     name: "stagehand",
-    version: "==4.3.0",
+    version: "==4.4.0",
 };
 
 /// PyPI package behind that browser's `run`, `snapshot` and `screenshot`
@@ -174,7 +174,7 @@ pub const PYTHON_BROWSER: Dependency = Dependency {
 /// first release, and `browser.py` is written against how it closes and saves.
 pub const PYTHON_BROWSER_TOOLS: Dependency = Dependency {
     name: "stagehand-middleware",
-    version: "==0.1.0",
+    version: "==0.1.2",
 };
 
 /// npm package that drives a LangSmith browser from the deployment, for
@@ -183,7 +183,7 @@ pub const PYTHON_BROWSER_TOOLS: Dependency = Dependency {
 /// runs the Stagehand the package is tested against.
 pub const TYPESCRIPT_BROWSER: Dependency = Dependency {
     name: "@browserbasehq/stagehand",
-    version: "4.3.0",
+    version: "4.4.0",
 };
 
 /// npm package behind that browser's `run`, `snapshot` and `screenshot`
@@ -191,7 +191,7 @@ pub const TYPESCRIPT_BROWSER: Dependency = Dependency {
 /// to the release that `managed-deepagents` lists as a peer dependency.
 pub const TYPESCRIPT_BROWSER_TOOLS: Dependency = Dependency {
     name: "stagehand-middleware",
-    version: "0.1.1",
+    version: "0.1.2",
 };
 
 /// npm package that provides the local LangGraph in-memory dev server.
@@ -836,7 +836,7 @@ mod tests {
             .expect("langgraph-sdk dependency must be present");
         assert_eq!(langgraph.version, "^1.4.18");
         assert_eq!(checkpoint.version, "^1.1.3");
-        assert_eq!(sdk.version, "^1.12.0");
+        assert_eq!(sdk.version, "^1.13.0");
     }
 
     #[test]

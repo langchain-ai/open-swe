@@ -8,9 +8,10 @@ from managed_deepagents import MemoryLayer, define_memory
 # `agent=MemoryLayer()` and `user=MemoryLayer()`.
 # Omitted layers are disabled. Agent memory is shared across callers at
 # `/memories/agent/`. User memory requires identity and defaults to managed
-# Slack one-to-one DMs at `/memories/user/`. Either layer can provide an
-# `allow(context)` policy. Each tree is read/write; its `AGENTS.md` is hot
-# memory and other files are read on demand.
+# Slack one-to-one DMs and direct API runs by a caller who signed in with
+# their own token, at `/memories/user/`. Either layer can provide an
+# `allow(context)` policy. Each tree is read/write; its
+# `AGENTS.md` is hot memory and other files are read on demand.
 #
 # The agent layer is a trust boundary. Because runs can write hot memory and hot
 # memory is injected into every later run, whatever one caller gets the agent to

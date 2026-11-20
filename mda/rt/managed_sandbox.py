@@ -1,33 +1,35 @@
 """The thread's sandbox as MDA's own sandbox: declared, and opened as the run starts.
 
-The graph declares one sandbox (``sandbox``) for every run; each run's catalog says which
-sandbox it uses and the options MDA creates it with (``SandboxSpec``): its thread's own, one
-the backend made that MDA adopts by name, or a task worker's coordinator's. A run whose
-catalog names none does not start. MDA keeps one sandbox per thread whatever the backend's
-options become, which apply only when MDA creates it. Before the run prepares, the sandbox is
-asked for and its name reported, so the backend binds the thread to it; it boots while
-the run prepares and calls the model, and the first call that needs it waits for it.
-Where preparing reaches no sandbox (``SandboxSpec.bind_after_prepare``), the sandbox is
-asked for while the run prepares and calls the model, and reported once it is open
-(``rt.sandbox_binding``); the run's first tool call, whichever it is, waits for that.
-Opening and booting are retried while the sandbox service fails transiently; otherwise
-the backend hears why, from preparing or from the call that needed the sandbox. A
-thread and its sandbox are one: nothing replaces a sandbox the thread is bound to, so one
-that is gone leaves the run unable to open it, and the backend says why.
+The graph declares one sandbox (``sandbox``) for every run, and MDA resolves each run's from
+its catalog, once, at the run's first model call or sandbox use: which sandbox it uses and
+the options MDA creates it with (``SandboxSpec``), its thread's own, one the backend made
+that MDA adopts by name, or a task worker's coordinator's. A run whose catalog names none
+does not start. MDA keeps one sandbox per thread whatever the backend's options become,
+which apply only when MDA creates it. Before the run prepares, the sandbox is asked for and
+its name reported, so the backend binds the thread to it; it boots while the run prepares
+and calls the model, and the first call that needs it waits for it. Where preparing reaches
+no sandbox (``SandboxSpec.bind_after_prepare``), the sandbox is asked for while the run
+prepares and calls the model, and reported once it is open (``rt.sandbox_binding``); the
+run's first tool call, whichever it is, waits for that. Opening and booting are retried
+while the sandbox service fails transiently; otherwise the backend hears why, from preparing
+or from the call that needed the sandbox. A thread and its sandbox are one: nothing replaces
+a sandbox the thread is bound to, so one that is gone leaves the run unable to open it, and
+the backend says why.
 
-MDA writes the sandbox's whole proxy config, before each command it runs there, as the
+MDA writes the sandbox's whole proxy config, through its own proxy config sync, as the
 backend hands it over (``runtime_api.sandbox_proxy``): GitHub's rules, with a token the
 backend minted for the run's scope, and its tool channel's capability, which names the
 sandbox, so it is asked for once the sandbox is open, and again before the token expires.
-Until then MDA leaves the proxy config alone, so a new sandbox keeps the rules it was
-created with, its cloud identity among them; an external sandbox keeps its own throughout
-(``SandboxSpec.external``). The first write waits for the sandbox to boot, so it is made
-behind the run's preparation and first model call, and the run's first tool call waits
-for it, whichever tool it is, since the backend may run it in the sandbox: it is retried
-for as long as the host takes to suspend an idle sandbox, while the sandbox API takes no
-proxy config, and then a failure ends the run at that call, since the backend writes none
-of it. It writes it again every few minutes before a model or tool call, for the commands
-the backend runs in the sandbox.
+The run's sandbox is resolved before that, so it leaves the proxy config alone
+(``_openswe_no_manage_proxy``) and the commands MDA runs there write none: until the first
+write a new sandbox keeps the rules it was created with, its cloud identity among them, and
+an external sandbox keeps its own throughout (``SandboxSpec.external``). The first write
+waits for the sandbox to boot, so it is made behind the run's preparation and first model
+call, and the run's first tool call waits for it, whichever tool it is, since the backend
+may run it in the sandbox: it is retried for as long as the host takes to suspend an idle
+sandbox, while the sandbox API takes no proxy config, and then a failure ends the run at
+that call, since the backend writes none of it. It writes it again every few minutes before
+a model or tool call, for the commands the backend runs in the sandbox.
 """
 
 import asyncio
@@ -42,7 +44,6 @@ from typing import Final, Protocol, runtime_checkable
 
 import httpx2
 from deepagents.backends import CompositeBackend
-from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
 from langchain_core.messages import ToolMessage
@@ -58,7 +59,8 @@ from langsmith.sandbox import (
     SandboxConnectionError,
     SandboxNotReadyError,
 )
-from managed_deepagents import define_sandbox
+from managed_deepagents import ManagedServerRuntime, define_sandbox
+from managed_deepagents._sandbox_proxy import SandboxProxyConfigSync  # noqa: PLC2701
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import JsonValue
 from runtime_api.catalog import SandboxCreate, SandboxSpec
@@ -106,9 +108,6 @@ PROXY_WRITE_BACKOFF_SECONDS: Final = (1.0, 2.0, 4.0, 8.0, 15.0, 30.0, 30.0, 30.0
 PROXY_WRITE_MAX_ELAPSED_SECONDS: Final = 180.0
 # No sandbox to write on: writing again changes nothing.
 _PERMANENT_WRITE_FAILURES: Final = (ResourceNotFoundError,)
-# MDA writes the proxy config before each command it runs in the sandbox, this one included.
-_NO_OP: Final = ":"
-_NO_OP_TIMEOUT_SECONDS: Final = 60
 
 
 @runtime_checkable
@@ -118,17 +117,11 @@ class _Openable(Protocol):
     async def aopen(self, *, wait: bool = True) -> str: ...
 
 
-@runtime_checkable
-class _Rebindable(Protocol):
-    """MDA's handle on the run's sandbox, which binds a fresh one to the run."""
-
-    def bind_runtime(self, runtime: object) -> SandboxBackendProtocol: ...
-
-
 def _run_of(runtime: object) -> Run:
     context = getattr(runtime, "context", None)
-    # A hook's backend is bound to the run's configurable, not its runtime, so it
-    # carries no run context: the run in progress is the one it acts for.
+    # A hook's backend is bound to the run's configurable, not its runtime, and the runtime
+    # MDA resolves the run's sandbox with carries the context as sent, unparsed: the run in
+    # progress is the one they act for.
     return context.run() if isinstance(context, RunContext) else current_run()
 
 
@@ -141,18 +134,6 @@ def _planned(runtime: object) -> tuple[Run, SandboxSpec] | None:
     except BackendCallError, RuntimeError:
         # Not started yet, or not a Robin run, so nothing may open a sandbox for it.
         return None
-
-
-def _rebound(runtime: object) -> SandboxBackendProtocol:
-    """The run's sandbox through a handle of its own.
-
-    A hook's handle keeps the sandbox as it first resolved it, which may be from before
-    the backend's part of the proxy config was known, and writes that config.
-    """
-    backend = getattr(runtime, "backend", None)
-    if not isinstance(backend, _Rebindable):
-        raise TypeError("This run has no managed sandbox")
-    return backend.bind_runtime(runtime)
 
 
 class SandboxProxyWriter:
@@ -170,6 +151,9 @@ class SandboxProxyWriter:
         # The sandbox whose first write is left to its boot, until it lands, and that write.
         self._deferred: str | None = None
         self._writing: asyncio.Future[None] | None = None
+        # What MDA last wrote on each sandbox in this run, so an unchanged config is not
+        # written again.
+        self._sync = SandboxProxyConfigSync()
 
     def config(self) -> dict[str, object] | None:
         """All of it, as the backend handed it over; None until it has."""
@@ -208,7 +192,7 @@ class SandboxProxyWriter:
         deadline = time.monotonic() + PROXY_WRITE_MAX_ELAPSED_SECONDS
         for backoff in (*PROXY_WRITE_BACKOFF_SECONDS, None):
             try:
-                await self.write(runtime, sandbox_id)
+                await self.write(runtime)
             except GraphBubbleUp:
                 raise
             except Exception as exc:
@@ -233,18 +217,29 @@ class SandboxProxyWriter:
                     self._deferred = None
                 return
 
-    async def write(self, runtime: object, sandbox_id: str | None = None) -> None:
-        """Have MDA write it on sandbox ``sandbox_id`` (the run's) now; raises when it could not."""
+    async def write(self, runtime: object) -> None:
+        """Have MDA write it on the run's sandbox now, once the sandbox has booted; raises when
+        it could not.
+
+        MDA resolves the run's sandbox once, before the backend's part is known, so the
+        definition it resolved never carries it: MDA's proxy config sync writes it here,
+        outside any command.
+        """
         self._due_at = time.monotonic() + _PROXY_RETRY_SECONDS
+        planned = _planned(runtime)
+        if planned is None:
+            raise BackendCallError("This run has no sandbox")
+        name = await OpenedSandbox.open(getattr(runtime, "backend", None))
         if self._backend_config is None or self._stale():
-            name = sandbox_id or await OpenedSandbox.open(getattr(runtime, "backend", None))
             request = SandboxProxyRequest(
                 run_id=run_id(), sandbox_id=name, force_refresh=self._force_refresh
             )
-            answer = await call(_run_of(runtime).backend, SANDBOX_PROXY, request)
+            answer = await call(planned[0].backend, SANDBOX_PROXY, request)
             self._backend_config = answer.config
             self._backend_expires_at = answer.expires_at
-        await _rebound(runtime).aexecute(_NO_OP, timeout=_NO_OP_TIMEOUT_SECONDS)
+        spec = planned[1]
+        written = definition(spec.create, spec.sandbox_id, self.config())
+        await self._sync.sync(written, name, None)
         self._written = True
         self._due_at = time.monotonic() + _PROXY_REWRITE_SECONDS
 
@@ -293,15 +288,19 @@ def _written_proxy(runtime: object) -> SandboxProxyWriter | None:
     return _PROXIES.get(planned[0])
 
 
-def _selected(runtime: object) -> SandboxDefinition | None:
+def _resolved(runtime: ManagedServerRuntime) -> SandboxDefinition | None:
     """The sandbox the run in ``runtime`` uses, as its catalog says; None outside a run Robin
-    started, which MDA then refuses any sandbox."""
+    started, which then has no sandbox.
+
+    MDA calls it once per run, before the sandbox is open and so before the backend hands
+    over its part of the proxy config: the run's sandbox leaves its proxy config alone, and
+    ``SandboxProxyWriter`` writes it once it is known.
+    """
     planned = _planned(runtime)
     if planned is None:
         return None
-    run, spec = planned
-    proxy_config = None if spec.external else _PROXIES.get(run).config()
-    return definition(spec.create, spec.sandbox_id, proxy_config)
+    spec = planned[1]
+    return definition(spec.create, spec.sandbox_id)
 
 
 def definition(
@@ -313,16 +312,13 @@ def definition(
 
     A task worker's run is an async subagent of its coordinator's, so MDA gives it the
     coordinator's sandbox. MDA writes ``proxy_config`` on it before each command; without
-    one it leaves the sandbox's proxy config alone: until the backend hands it over, and on
-    an external sandbox.
+    one it leaves the sandbox's proxy config alone, as on the sandbox a run resolves.
     """
     return define_sandbox(
-        _openswe_per_thread=True,
         _openswe_sandbox_id=sandbox_id,
         _openswe_no_manage_proxy=proxy_config is None,
         _openswe_create_fields=dict(create.extra_fields),
         proxy_config=proxy_config,
-        default_timeout=EXECUTE_TIMEOUT_SECONDS,
         snapshot_id=create.snapshot_id,
         idle_ttl_seconds=create.idle_ttl_seconds,
         delete_after_stop_seconds=create.delete_after_stop_seconds,
@@ -334,12 +330,7 @@ def definition(
 
 def declared_sandbox() -> SandboxDefinition:
     """The sandbox every run's catalog picks from."""
-    return define_sandbox(
-        _openswe_per_thread=True,
-        _openswe_no_manage_proxy=True,
-        _openswe_select=_selected,
-        default_timeout=EXECUTE_TIMEOUT_SECONDS,
-    )
+    return define_sandbox(default_timeout=EXECUTE_TIMEOUT_SECONDS, resolve=_resolved)
 
 
 @dataclass(frozen=True)
@@ -438,7 +429,7 @@ async def booted_sandbox(runtime: Runtime) -> OpenedSandbox:
 async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
     """``backend``'s sandbox, retried while the sandbox service fails transiently.
 
-    A bound sandbox that is gone (``BoundSandboxMissingError``) is neither retried nor
+    A bound sandbox that is gone (``SandboxMissingError``) is neither retried nor
     replaced: the backend tells the person it was deleted.
     """
     deadline = time.monotonic() + OPEN_MAX_ELAPSED_SECONDS

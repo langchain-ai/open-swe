@@ -1,19 +1,17 @@
-# Resolve the persisted sandbox binding
+# `_openswe_sandbox_id`: the sandbox name Open SWE's backend recorded
 
-**Verdict: not upstream as-is.** `_openswe_sandbox_id` carries Open SWE's authoritative persisted sandbox name, not an MDA platform binding.
+**Verdict: not upstream as-is.** It carries Open SWE's own record of a thread's sandbox into MDA's binding.
 
-**Changed:** `managed_deepagents/runtime.py` and `managed_deepagents/sandbox.py`.
+**Changed:** `managed_deepagents/runtime.py` (`_claim_langsmith_sandbox`, `_persisted_or_none`), `sandbox.py` (`RESOLUTION_OPTION_KEYS`).
 
 ## What
 
-Resolve the persisted name before considering canonical names, ignoring a cached handle for a different name. A missing or unusable bound sandbox fails closed without creating another workspace. This reconnects legacy suffixed bindings without selecting, copying, or deleting either workspace in an existing split.
-
-A not-found tool failure can reconnect to a newer sandbox ID under the same name, but cannot create a replacement for a per-thread sandbox.
+`define_sandbox(_openswe_sandbox_id=name)` makes `name` the only sandbox the thread may open. MDA treats it as bound, as if the thread's `ls_mda_sandbox_binding` metadata named it: it adopts that sandbox and records the binding, and if LangSmith confirms the sandbox is gone it raises `SandboxMissingError` instead of creating one. MDA's own name for the thread is never tried, and a sandbox this process cached under another name for the thread is ignored.
 
 ## Why
 
-Disabling recovery entirely stranded cached handles whose sandbox ID changed under the same name, while canonical-only lookup stranded threads already bound to a suffixed workspace.
+Open SWE's backend created the sandboxes of threads that predate MDA owning them, under names MDA's formula doesn't produce (including suffixed ones from old splits), and it records each thread's sandbox. Those threads must keep working in the sandbox that holds their work.
 
 ## Upstream
 
-MDA should persist an authoritative binding shared across replicas and reconcile stale handles without implicit recreation. Once that contract exists, Open SWE can remove its private binding option.
+MDA should let a caller seed a thread's binding, for example by writing `ls_mda_sandbox_binding` itself or by letting `define_sandbox(resolve=...)` name the sandbox. Once it can, Open SWE writes its recorded name there and drops this option. `resolve` (langchain-ai/langchainplus#68137) picks a run's create options and proxy config, not which sandbox it adopts, so Open SWE's resolver still passes the recorded name as `_openswe_sandbox_id`, which reaches the run's resolved sandbox with its other options.

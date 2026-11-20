@@ -149,10 +149,9 @@ so one receiver validates every key it is sent with
 
 
 @dataclass(frozen=True)
-class LinearChannelThread(ReadsThreadState):
-    """The conversation's thread an event belongs to.
-
-    A handler runs before any run exists, so this is not a run's runtime.
+class LinearHookThread:
+    """The thread ``on_received`` and ``on_finish`` hear about: a handler's
+    thread without ``get_state``, which only a handler deciding an event can read.
     """
 
     id: str
@@ -160,6 +159,15 @@ class LinearChannelThread(ReadsThreadState):
     run the handler starts runs on. Useful for run context that names the
     thread, such as a token a backend signs for it."""
     channel: ChannelName
+
+
+@dataclass(frozen=True)
+class LinearChannelThread(ReadsThreadState, LinearHookThread):
+    """The conversation's thread an event belongs to.
+
+    A handler runs before any run exists, so this is not a run's runtime.
+    """
+
     _get_state: Callable[[], Awaitable[ThreadState | None]] | None = field(
         default=None, repr=False, compare=False
     )

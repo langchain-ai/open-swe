@@ -48,7 +48,9 @@ from managed_deepagents._identity_runtime import (
 )
 from managed_deepagents._langsmith_env import (
     resolve_langsmith_endpoint,
+    resolve_platform_injected_api_key,
     resolve_server_api_key,
+    resolve_tenant_workspace_id,
     resolve_workspace_id,
 )
 from managed_deepagents._managed_thread import on_channel_thread
@@ -71,6 +73,7 @@ __all__ = [
     "is_connection_reference",
     "resolve_agent_auth_base_url",
     "resolve_agent_auth_context",
+    "resolve_agent_owned_auth_context",
     "resolve_credential_principal_id",
     "resolve_owner_id",
 ]
@@ -456,6 +459,23 @@ def resolve_agent_auth_context(
         principal_id=principal_id,
         api_key=config.api_key,
         workspace_id=config.workspace_id,
+    )
+
+
+def resolve_agent_owned_auth_context(env: Mapping[str, str] | None = None) -> AgentAuthContext:
+    """The deployment acting as its agent: no person, so no principal.
+
+    Uses the platform's deployment key and its workspace, since that key is the
+    one bound to the agent, even when a user overrides either for tracing.
+    """
+    resolved = os.environ if env is None else env
+    config = _resolve_agent_auth_config(resolved)
+    return AgentAuthContext(
+        base_url=config.base_url,
+        agent_id=config.deployment_id,
+        principal_id="",
+        api_key=resolve_platform_injected_api_key(resolved) or config.api_key,
+        workspace_id=resolve_tenant_workspace_id(resolved) or config.workspace_id,
     )
 
 

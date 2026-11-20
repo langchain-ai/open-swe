@@ -8,12 +8,8 @@ password-style input. The tools a grant unlocks are loaded on first use and
 cached per caller when the consumer opts in. MCP uses its native listing cache.
 Required integrations without a caller end with sign-in guidance.
 
-A tool call refused until its credentials are connected (LangSmith tool kits
-with ``jit_auth``) interrupts the caller and retries that call once on resume.
-Without a caller to ask (no caller, or a scheduled run), or still unconnected
-after the resume, the call returns a tool error and the run continues.
-Calls to tools that declare the credential they need ask once per model
-step, before any of them runs.
+Consumers that can act as the agent (LangSmith Tool Gateway servers) also
+load in runs with no person, as the agent.
 """
 
 from __future__ import annotations
@@ -23,24 +19,22 @@ import contextvars
 import threading
 import time
 import warnings
-from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
-    ExtendedModelResponse,
     JumpTo,
     ModelCallResult,
     ModelRequest,
     ModelResponse,
-    PrivateStateAttr,
     ToolCallRequest,
     hook_config,
 )
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.runtime import Runtime
 from langgraph.types import Command, interrupt
@@ -49,16 +43,15 @@ from managed_deepagents._agent_auth import (
     AgentAuth,
     AgentAuthContext,
 )
-from managed_deepagents._agent_auth_http import CredentialStoreUnavailableError
+from managed_deepagents._agent_auth_http import (
+    CredentialStoreUnavailableError,
+)
 from managed_deepagents._connection_authorization import (
-    CONNECT_ON_USE_METADATA,
-    ConnectOnUse,
     CredentialAuthorizationDeferredError,
+    CredentialAuthorizationRequiredError,
     CredentialAuthorizationRequiredInterrupt,
     PendingCredential,
-    ToolCredentialRequiredError,
     collect_pending_user_connection_credentials,
-    credential_authorization_interrupt,
     defer_credential_interrupts,
     raise_credential_authorization_required,
     resolve_user_connection_grants,
@@ -75,10 +68,12 @@ from managed_deepagents._identity_runtime import (
     build_runtime_identity,
     resolve_runtime_configurable,
 )
-from managed_deepagents._log import logger
 from managed_deepagents._managed_tools import with_managed_runtime
 from managed_deepagents._run_input import is_scheduled_execution
+from managed_deepagents._run_local import RunLocal
 from managed_deepagents._telemetry.otel.context import LogAttributes, record_log
+from managed_deepagents._tool_gateway.auth import tool_gateway_context
+from managed_deepagents._tool_gateway.connect_first import log_still_not_connected
 
 if TYPE_CHECKING:
     from managed_deepagents.identity import RuntimeIdentity
@@ -110,29 +105,6 @@ class CredentialConsumer:
     #: Cache loaded callables; MCP opts out in favor of native listing caching.
     cache_tools: bool = True
     requires_identity: bool = True
-    #: Optional collector for extra pending credentials (no interrupt).
-    #: MCP uses this for LangSmith Managed Tools OAuth probes.
-    collect_pending_credentials: Callable[[AgentAuthContext], list[PendingCredential]] | None = None
-    #: Lists connect links for the slugs of each server whose tools ask on use.
-    connect_links: (
-        Callable[[AgentAuthContext, Mapping[str, Collection[str]]], list[PendingCredential]] | None
-    ) = None
-
-
-class _ConnectState(AgentState[Any]):
-    """The connect prompt one model step's calls need, asked once after the step."""
-
-    #: Links for the credentials the last model step's calls need, asked once after it.
-    mda_connect_request: NotRequired[Annotated[list[PendingCredential] | None, PrivateStateAttr]]
-    #: Slugs asked about this step; their refused calls do not ask again.
-    mda_connect_asked: NotRequired[Annotated[list[str], PrivateStateAttr]]
-
-
-class _ConnectUpdate(TypedDict, total=False):
-    """A state update to ``_ConnectState``'s keys."""
-
-    mda_connect_request: list[PendingCredential] | None
-    mda_connect_asked: list[str]
 
 
 @dataclass
@@ -157,42 +129,56 @@ def create_credential_gate_middleware(
     return _CredentialGateMiddleware(consumers)
 
 
-class _CredentialGateMiddleware(AgentMiddleware[_ConnectState, Any, Any]):
+class _CredentialGateMiddleware(AgentMiddleware[AgentState[Any], Any, Any]):
     """Reuse loaded tools within one verified run without checkpointing credentials."""
-
-    state_schema = _ConnectState
 
     def __init__(self, consumers: Sequence[CredentialConsumer]) -> None:
         self._consumers = consumers
         self._lock = threading.Lock()
-        self._loaded: tuple[str, AgentAuthContext, list[BaseTool]] | None = None
+        # Tools loaded for the current run. A cached graph serves concurrent runs
+        # with this one instance, so each run keeps its own slot.
+        self._runs: RunLocal[list[tuple[str, object, list[BaseTool]] | None]] = RunLocal(
+            lambda: [None]
+        )
 
     def _tools(self, runtime: object) -> list[BaseTool]:
         caller = _auth_context(runtime)
-        if caller is None:
+        if caller is not None:
+            consumers = self._consumers
+        elif _agent_owned_schedule(runtime):
+            # Only an agent-owned schedule acts as the agent. Channel events, unmapped
+            # senders, outside callers and anonymous runs get no Tool Gateway tools.
+            consumers = [consumer for consumer in self._consumers if not consumer.requires_identity]
+        else:
+            consumers = []
+        if caller is None and not consumers:
             return []
+        contexts = _consumer_contexts(caller, consumers)
+        owner: object = caller.context if caller is not None else "agent"
         info = getattr(runtime, "execution_info", None)
         run_id = info.run_id if info is not None else None
         if not run_id:
-            return _load_all(self._consumers, caller.context)
+            return _load_all(consumers, contexts)
+        slot = self._runs.get()
         with self._lock:
-            if self._loaded is not None and self._loaded[:2] == (run_id, caller.context):
-                resolve_user_connection_grants(
-                    AgentAuth(caller.context),
-                    [
-                        credential.slug
-                        for credential in _consumer_credentials(self._consumers, caller)
-                    ],
-                    interrupt=_interrupt,
-                )
-                return self._loaded[2]
-            tools = _load_all(self._consumers, caller.context)
-            self._loaded = (run_id, caller.context, tools)
+            loaded = slot[0]
+            if loaded is not None and loaded[:2] == (run_id, owner):
+                if caller is not None:
+                    resolve_user_connection_grants(
+                        AgentAuth(caller.context),
+                        [
+                            credential.slug
+                            for credential in _consumer_credentials(self._consumers, caller)
+                        ],
+                        interrupt=_interrupt,
+                    )
+                return loaded[2]
+            tools = _load_all(consumers, contexts)
+            slot[0] = (run_id, owner, tools)
             return tools
 
     def _prepare(self, runtime: Runtime[Any]) -> dict[str, Any] | None:
-        with self._lock:
-            self._loaded = None
+        self._runs.clear()
         blocked = _before_agent(self._consumers, runtime, self._tools)
         return dict(blocked) if blocked is not None else None
 
@@ -216,8 +202,7 @@ class _CredentialGateMiddleware(AgentMiddleware[_ConnectState, Any, Any]):
         handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
     ) -> ModelCallResult[Any]:
         tools = _model_tools_for(self._tools, request)
-        response = handler(_with_extra_tools(request, tools))
-        return _with_connect_request(self._consumers, request, tools, response)
+        return handler(_with_extra_tools(request, tools))
 
     async def awrap_model_call(
         self,
@@ -225,20 +210,7 @@ class _CredentialGateMiddleware(AgentMiddleware[_ConnectState, Any, Any]):
         handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
     ) -> ModelCallResult[Any]:
         tools = await asyncio.to_thread(_model_tools_for, self._tools, request)
-        response = await handler(_with_extra_tools(request, tools))
-        return await asyncio.to_thread(
-            _with_connect_request, self._consumers, request, tools, response
-        )
-
-    def after_model(self, state: _ConnectState, runtime: Runtime[Any]) -> dict[str, Any] | None:
-        del runtime
-        update = _ask_once(state)
-        return dict(update) if update is not None else None
-
-    async def aafter_model(
-        self, state: _ConnectState, runtime: Runtime[Any]
-    ) -> dict[str, Any] | None:
-        return self.after_model(state, runtime)
+        return await handler(_with_extra_tools(request, tools))
 
     def wrap_tool_call(
         self,
@@ -264,14 +236,14 @@ def _wrap_tool_call(
     request: ToolCallRequest,
     handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
 ) -> ToolMessage | Command[Any]:
-    if request.tool is not None:
-        return handler(request)
     try:
+        if request.tool is not None:
+            return handler(request)
         tools = load_tools(request.runtime)
+        return handler(_with_dynamic_tool(request, tools))
     except CredentialStoreUnavailableError as error:
         _record_credential_unavailable(error, "tool_call")
         return _credential_error_message(request)
-    return _call_connecting(_with_dynamic_tool(request, tools), handler)
 
 
 async def _awrap_tool_call(
@@ -279,14 +251,14 @@ async def _awrap_tool_call(
     request: ToolCallRequest,
     handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
 ) -> ToolMessage | Command[Any]:
-    if request.tool is not None:
-        return await handler(request)
     try:
+        if request.tool is not None:
+            return await handler(request)
         tools = await asyncio.to_thread(load_tools, request.runtime)
+        return await handler(_with_dynamic_tool(request, tools))
     except CredentialStoreUnavailableError as error:
         _record_credential_unavailable(error, "tool_call")
         return _credential_error_message(request)
-    return await _acall_connecting(_with_dynamic_tool(request, tools), handler)
 
 
 def _record_credential_unavailable(
@@ -299,9 +271,50 @@ def _record_credential_unavailable(
     record_log("WARN", "credential store unavailable", attributes=attributes)
 
 
+_TOOL_CREDENTIAL_UNAVAILABLE = (
+    "Credential verification is temporarily unavailable. "
+    "The tool could not complete. Please retry later."
+)
+
+
+class _CredentialOutageMiddleware(AgentMiddleware[Any, Any, Any]):
+    """Turn credential-store outages inside tools into tool errors when no gate is installed."""
+
+    @property
+    def name(self) -> str:
+        return "CredentialOutageMiddleware"
+
+    def wrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
+    ) -> ToolMessage | Command[Any]:
+        try:
+            return handler(request)
+        except CredentialStoreUnavailableError as error:
+            _record_credential_unavailable(error, "tool_call")
+            return _credential_error_message(request)
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
+    ) -> ToolMessage | Command[Any]:
+        try:
+            return await handler(request)
+        except CredentialStoreUnavailableError as error:
+            _record_credential_unavailable(error, "tool_call")
+            return _credential_error_message(request)
+
+
+def create_credential_outage_middleware() -> AgentMiddleware[Any, Any, Any]:
+    """Recover from credential-store outages in tools for configs without a gate."""
+    return _CredentialOutageMiddleware()
+
+
 def _credential_error_message(request: ToolCallRequest) -> ToolMessage:
     return ToolMessage(
-        content=_CREDENTIAL_UNAVAILABLE,
+        content=_TOOL_CREDENTIAL_UNAVAILABLE,
         tool_call_id=request.tool_call["id"],
         name=request.tool_call["name"],
         status="error",
@@ -340,8 +353,16 @@ def _before_agent(
         return None
     caller = _auth_context(runtime)
     if caller is None:
-        if all(not consumer.requires_identity for consumer in consumers):
-            _warn_missing_optional_identity()
+        identity = _runtime_identity(runtime)
+        user = (identity or {}).get("user") or {}
+        if user.get("kind") == "service" or all(
+            not consumer.requires_identity for consumer in consumers
+        ):
+            # Schedules and service callers act for no person: user connections are
+            # unavailable, and Tool Gateway servers run as the agent only in an
+            # agent-owned schedule.
+            if any(consumer.requires_identity for consumer in consumers):
+                _warn_no_person()
             return None
         return _sign_in_required(consumers)
     blocked: _BlockedRun | None = None
@@ -370,9 +391,6 @@ def _ensure_grants(
                 [credential.slug for credential in credentials],
             )
         )
-    for consumer in consumers:
-        if consumer.collect_pending_credentials is not None:
-            pending.extend(consumer.collect_pending_credentials(caller.context))
     pending = _dedupe_pending_credentials(pending)
     if pending:
         raise_credential_authorization_required(pending, interrupt=_interrupt)
@@ -381,12 +399,18 @@ def _ensure_grants(
 def _dedupe_pending_credentials(
     credentials: Sequence[PendingCredential],
 ) -> list[PendingCredential]:
-    by_slug: dict[str, PendingCredential] = {}
+    """Every link once.
+
+    Integrations sharing a connection (Gmail and Google Docs on one Google login)
+    each keep their own link: each asks only for its own scopes, and the provider
+    adds every consent to the connection's grant, so any order connects them all.
+    """
+    by_link: dict[str, PendingCredential] = {}
     for credential in credentials:
         slug = credential.get("slug")
         if isinstance(slug, str) and slug:
-            by_slug.setdefault(slug, credential)
-    return list(by_slug.values())
+            by_link.setdefault(str(credential.get("auth_id") or slug), credential)
+    return list(by_link.values())
 
 
 def _consumer_credentials(
@@ -409,16 +433,39 @@ def _model_tools_for(load_tools: _LoadTools, request: ModelRequest[Any]) -> list
         return []
 
 
+def _consumer_contexts(
+    caller: _Caller | None, consumers: Sequence[CredentialConsumer]
+) -> Callable[[CredentialConsumer], AgentAuthContext]:
+    """The person for consumers that need one; for Tool Gateway, the person or the agent."""
+    gateway = (
+        tool_gateway_context(caller.context if caller else None)
+        if any(not consumer.requires_identity for consumer in consumers)
+        else None
+    )
+
+    def context_for(consumer: CredentialConsumer) -> AgentAuthContext:
+        if gateway is not None and not consumer.requires_identity:
+            return gateway
+        if caller is None:
+            raise RuntimeError("user connections require a person")
+        return caller.context
+
+    return context_for
+
+
 def _load_all(
     consumers: Sequence[CredentialConsumer],
-    context: AgentAuthContext,
+    contexts: Callable[[CredentialConsumer], AgentAuthContext],
 ) -> list[BaseTool]:
     if len(consumers) <= 1:
-        return [tool for consumer in consumers for tool in _cached_tools(consumer, context)]
+        return [
+            tool for consumer in consumers for tool in _cached_tools(consumer, contexts(consumer))
+        ]
+    resolved = [(consumer, contexts(consumer)) for consumer in consumers]
     with ThreadPoolExecutor(max_workers=len(consumers)) as pool:
         futures: list[Future[list[BaseTool]]] = [
             pool.submit(contextvars.copy_context().run, _deferred_tools, consumer, context)
-            for consumer in consumers
+            for consumer, context in resolved
         ]
     errors = [future.exception() for future in futures]
     pending = [
@@ -428,13 +475,29 @@ def _load_all(
         for credential in error.credentials
     ]
     if pending:
-        raise_credential_authorization_required(
-            _dedupe_pending_credentials(pending), interrupt=_interrupt
-        )
-    for error in errors:
-        if error is not None:
+        try:
+            raise_credential_authorization_required(
+                _dedupe_pending_credentials(pending), interrupt=_interrupt
+            )
+        except CredentialAuthorizationRequiredError:
+            # The person answered the card without connecting. Tool Gateway servers
+            # run without those connections; a user connection still ends the run.
+            if any(
+                isinstance(error, CredentialAuthorizationDeferredError)
+                and consumer.requires_identity
+                for (consumer, _), error in zip(resolved, errors, strict=True)
+            ):
+                raise
+            log_still_not_connected(pending)
+    tools: list[BaseTool] = []
+    for future, error in zip(futures, errors, strict=True):
+        if isinstance(error, CredentialAuthorizationDeferredError):
+            tools.extend(cast("list[BaseTool]", error.tools))
+        elif error is not None:
             raise error
-    return [tool for future in futures for tool in future.result()]
+        else:
+            tools.extend(future.result())
+    return tools
 
 
 def _deferred_tools(consumer: CredentialConsumer, context: AgentAuthContext) -> list[BaseTool]:
@@ -485,19 +548,25 @@ def _load_tools(
     consumer: CredentialConsumer,
     context: AgentAuthContext,
 ) -> list[BaseTool]:
-    agent_auth = AgentAuth(context)
-    access_tokens = resolve_user_connection_grants(
-        agent_auth,
-        [credential.slug for credential in consumer.credentials],
-        interrupt=_interrupt,
+    # Acting as the agent (no principal), there are no user grants to read.
+    access_tokens = (
+        resolve_user_connection_grants(
+            AgentAuth(context),
+            [credential.slug for credential in consumer.credentials],
+            interrupt=_interrupt,
+        )
+        if context.principal_id
+        else {}
     )
     # Managed wrapping preserves each tool's type (``BaseTool`` in, ``BaseTool`` out).
     return [with_managed_runtime(tool) for tool in consumer.load(access_tokens, context)]
 
 
-def _warn_missing_optional_identity() -> None:
+def _warn_no_person() -> None:
     warnings.warn(
-        "LangSmith MCP servers skipped: no authenticated caller. Add identity.py to enable them.",
+        "Integrations that need a user connection are unavailable in this run: "
+        "it acts for no person (a schedule or a service caller). "
+        "LangSmith Tool Gateway servers run as the agent only in agent-owned schedules.",
         RuntimeWarning,
         stacklevel=3,
     )
@@ -519,172 +588,12 @@ def _with_dynamic_tool(request: ToolCallRequest, tools: Sequence[BaseTool]) -> T
     return request.override(tool=match)
 
 
-def _call_connecting(
-    request: ToolCallRequest,
-    handler: Callable[[ToolCallRequest], ToolMessage | Command[Any]],
-) -> ToolMessage | Command[Any]:
-    try:
-        return handler(request)
-    except Exception as error:
-        missing = _credential_refusal(error)
-        if missing is None:
-            raise
-    if not _ask_to_connect(request, missing):
-        return _not_connected(request, missing)
-    # A resume value is never evidence of a connection; only the retry decides.
-    try:
-        return handler(request)
-    except Exception as error:
-        refusal = _credential_refusal(error)
-        if refusal is None:
-            raise
-        return _not_connected(request, refusal)
-
-
-async def _acall_connecting(
-    request: ToolCallRequest,
-    handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command[Any]]],
-) -> ToolMessage | Command[Any]:
-    try:
-        return await handler(request)
-    except Exception as error:
-        missing = _credential_refusal(error)
-        if missing is None:
-            raise
-    if not _ask_to_connect(request, missing):
-        return _not_connected(request, missing)
-    try:
-        return await handler(request)
-    except Exception as error:
-        refusal = _credential_refusal(error)
-        if refusal is None:
-            raise
-        return _not_connected(request, refusal)
-
-
-def _credential_refusal(error: BaseException) -> ToolCredentialRequiredError | None:
-    """The refusal behind ``error``, through any middleware that wrapped it."""
-    cause: BaseException | None = error
-    while cause is not None:
-        if isinstance(cause, ToolCredentialRequiredError):
-            return cause
-        cause = cause.__cause__
-    return None
-
-
-def _with_connect_request(
-    consumers: Sequence[CredentialConsumer],
-    request: ModelRequest[Any],
-    tools: Sequence[BaseTool],
-    response: ModelResponse[Any],
-) -> ModelCallResult[Any]:
-    """List fresh links for the credentials this step's calls need, for ``after_model``.
-
-    Tools load once per run, so links are listed here rather than read from the
-    tools. Listing in the model step keeps a resumed run, which replays
-    ``after_model`` but not the model call, from starting new connect sessions.
-    """
-    update: _ConnectUpdate = {}
-    needed = _connect_on_use(tools, response)
-    caller = _connecting_caller(request.runtime) if needed else None
-    links = _connect_links(consumers, caller.context, needed) if caller is not None else []
-    if links:
-        update["mda_connect_request"] = links
-    elif request.state.get("mda_connect_request"):
-        # An unanswered prompt from an earlier turn must not be asked again.
-        update["mda_connect_request"] = None
-    if request.state.get("mda_connect_asked"):
-        update["mda_connect_asked"] = []
-    if not update:
-        return response
-    return ExtendedModelResponse(model_response=response, command=Command(update=update))
-
-
-def _connect_on_use(
-    tools: Sequence[BaseTool], response: ModelResponse[Any]
-) -> dict[str, ConnectOnUse]:
-    """The credentials stored tools need for the calls in ``response``, by slug."""
-    connectable: dict[str, ConnectOnUse] = {
-        tool.name: tool.metadata[CONNECT_ON_USE_METADATA]
-        for tool in tools
-        if tool.metadata and CONNECT_ON_USE_METADATA in tool.metadata
-    }
-    needed: dict[str, ConnectOnUse] = {}
-    if not connectable:
-        return needed
-    for message in response.result:
-        if not isinstance(message, AIMessage):
-            continue
-        for call in message.tool_calls:
-            connect = connectable.get(call["name"])
-            if connect is not None:
-                needed.setdefault(connect["credential"]["slug"], connect)
-    return needed
-
-
-def _connect_links(
-    consumers: Sequence[CredentialConsumer],
-    context: AgentAuthContext,
-    needed: Mapping[str, ConnectOnUse],
-) -> list[PendingCredential]:
-    """Fresh links for the needed slugs; a provider connected since load is not listed."""
-    wanted: dict[str, set[str]] = {}
-    for slug, connect in needed.items():
-        wanted.setdefault(connect["server"], set()).add(slug)
-    linked: list[PendingCredential] = []
-    for consumer in consumers:
-        if consumer.connect_links is None:
-            continue
-        try:
-            linked.extend(consumer.connect_links(context, wanted))
-        except Exception as error:  # noqa: BLE001 - each refused call still asks with its 428's link
-            logger.warning("could not list connect links: %s", logger.safe_error_label(error))
-    by_slug = {credential["slug"]: credential for credential in reversed(linked)}
-    return [by_slug[slug] for slug in needed if slug in by_slug]
-
-
-def _ask_once(state: _ConnectState) -> _ConnectUpdate | None:
-    credentials = state.get("mda_connect_request")
-    if not credentials:
-        return None
-    _interrupt(credential_authorization_interrupt(credentials))
-    return {
-        "mda_connect_request": None,
-        "mda_connect_asked": [credential["slug"] for credential in credentials],
-    }
-
-
-def _ask_to_connect(request: ToolCallRequest, missing: ToolCredentialRequiredError) -> bool:
-    """Interrupt with the connect links when this run's caller can follow them.
-
-    A credential already asked about this step returns its tool error instead.
-    """
-    asked = request.state.get("mda_connect_asked") or ()
-    if (
-        not missing.credentials
-        or all(credential["slug"] in asked for credential in missing.credentials)
-        or _connecting_caller(request.runtime) is None
-    ):
-        return False
-    _interrupt(credential_authorization_interrupt(missing.credentials))
-    return True
-
-
-def _connecting_caller(runtime: object | None) -> _Caller | None:
+def connecting_caller(runtime: object | None) -> _Caller | None:
     """The caller the pre-run gate would ask; a schedule has no one to answer."""
     caller = _auth_context(runtime)
     if caller is None or is_scheduled_execution(resolve_runtime_configurable(runtime)):
         return None
     return caller
-
-
-def _not_connected(request: ToolCallRequest, missing: ToolCredentialRequiredError) -> ToolMessage:
-    return ToolMessage(
-        content=f"{missing.provider} is not connected. Connect it in LangSmith, then try again.",
-        tool_call_id=request.tool_call["id"],
-        name=request.tool_call["name"],
-        status="error",
-    )
 
 
 def _interrupt(payload: CredentialAuthorizationRequiredInterrupt) -> None:
@@ -701,14 +610,25 @@ def _runtime_identity(runtime: object | None) -> RuntimeIdentity | None:
     return build_runtime_identity(resolve_runtime_configurable(runtime))
 
 
+def _agent_owned_schedule(runtime: object | None) -> bool:
+    configurable = resolve_runtime_configurable(runtime)
+    identity = build_runtime_identity(configurable)
+    return (
+        identity is not None
+        and identity["user"].get("kind") == "service"
+        and is_scheduled_execution(configurable)
+    )
+
+
 def _auth_context(runtime: object | None) -> _Caller | None:
     """The person a run acts for.
 
-    None without a caller, for a channel event, for a channel sender who cannot
-    be mapped to a user of the agent's identity, or for a caller resuming a
-    channel's conversation from outside that channel.
+    None without a caller, for an agent-owned schedule, for a channel event, for
+    a channel sender who cannot be mapped to a user of the agent's identity, or
+    for a caller resuming a channel's conversation from outside that channel.
     """
-    identity = _runtime_identity(runtime)
+    configurable = resolve_runtime_configurable(runtime)
+    identity = build_runtime_identity(configurable)
     if (
         identity is None
         or not identity["user"].get("id")
@@ -716,6 +636,9 @@ def _auth_context(runtime: object | None) -> _Caller | None:
         or unmapped_channel_provider(identity)
         or outside_caller_on_channel_thread(identity)
     ):
+        return None
+    if _agent_owned_schedule(runtime):
+        # An agent-owned schedule acts for no person.
         return None
     return _Caller(context=resolve_agent_auth_context(identity), identity=identity)
 

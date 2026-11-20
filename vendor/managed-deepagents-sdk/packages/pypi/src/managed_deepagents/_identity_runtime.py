@@ -58,7 +58,6 @@ __all__ = [
     "build_managed_server_info",
     "build_principal_envelope",
     "build_runtime_identity",
-    "principal_envelope_from_server_info",
     "resolve_auth_user",
     "resolve_runtime_configurable",
     "sanitize_configurable",
@@ -234,47 +233,6 @@ def build_identity_source(configurable: Mapping[str, object] | None) -> SourceVi
     )
 
 
-def principal_envelope_from_server_info(info: object | None) -> PrincipalEnvelope | None:
-    """Reassemble the Agent Auth wire envelope from flattened ``server_info`` fields."""
-    if info is None:
-        return None
-    principal = _attr(info, "principal")
-    subject = _attr(info, "subject")
-    link = _attr(info, "link")
-    if principal is None or subject is None or link is None:
-        return None
-    return cast(
-        "PrincipalEnvelope",
-        _freeze(
-            {
-                "principal": _to_mapping(principal),
-                "subject": _to_mapping(subject),
-                "link": _to_mapping(link),
-            }
-        ),
-    )
-
-
-def _attr(value: object, key: str) -> object | None:
-    if isinstance(value, Mapping):
-        return value.get(key)
-    return getattr(value, key, None)
-
-
-def _to_mapping(value: object) -> dict[str, object]:
-    if isinstance(value, Mapping):
-        return {str(key): item for key, item in value.items()}
-    if hasattr(value, "__dict__"):
-        # ``None`` here means the view filled an absent optional key; the wire
-        # envelope omits those rather than sending an explicit null.
-        return {
-            ("from" if str(key) == "from_" else str(key)): item
-            for key, item in vars(value).items()
-            if not str(key).startswith("_") and item is not None
-        }
-    return {}
-
-
 #: Envelope fields that stay mappings in the runtime view. ``claims`` is an
 #: opaque IdP bag whose keys are often not valid Python identifiers (namespaced
 #: OIDC claims such as ``https://acme.com/tenant``), so authors subscript it —
@@ -288,8 +246,7 @@ def _envelope_view(value: Mapping[str, object], *optional: str) -> object:
     The wire envelope omits optional keys (a service principal has no
     ``subject.user_id``; a ``not_required`` link has no ``from``/``to``), but the
     ``*View`` protocols promise ``str | None``. Filling them keeps type-correct
-    reads from raising ``AttributeError``; :func:`_to_mapping` drops them again
-    so the reassembled wire shape still omits rather than nulls them.
+    reads from raising ``AttributeError``.
     """
     view = _mapping_to_ns(value)
     for name in optional:

@@ -135,9 +135,10 @@ PROJECTS: Final = {
         Project(
             name="managed-deepagents-sdk",
             repo_variable="MDA_SDK_REPO",
-            repo="git@github.com:langchain-ai/managed-deepagents-sdk.git",
-            github_repo="langchain-ai/managed-deepagents-sdk",
-            subdirectory="",
+            # MDA moved into langchainplus (langchain-ai/langchainplus#65592).
+            repo="git@github.com:langchain-ai/langchainplus.git",
+            github_repo="langchain-ai/langchainplus",
+            subdirectory="sdks/managed-deepagents",
             paths=(
                 "Cargo.toml",
                 "Cargo.lock",

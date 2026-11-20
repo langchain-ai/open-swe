@@ -97,7 +97,7 @@ explicitly selects LangSmith API-key authentication. Callers send their
 workspace key as `x-api-key`, while MDA retains its thread and store
 authorization hooks. `--memory agent` writes a `memory.ts` / `memory.py` declaring
 deployment-shared memory at `/memories/agent/`; durable memory is opt-in, so
-without the flag the agent keeps nothing between runs. `--no-sandbox` leaves
+without a memory module no durable memory is mounted. `--no-sandbox` leaves
 out the managed sandbox. `-c slack` (also `--channel slack` or `--channels slack`)
 writes `channels/slack.ts` / `channels/slack.py` so the next deploy can add the
 agent to Slack; the same file can be added later with `mda channels init slack`.
@@ -109,6 +109,17 @@ mda build
 mda dev
 mda deploy
 ```
+
+## Durable memory
+
+To keep memory for one assistant across threads and scheduled runs, declare an
+`assistant` layer in a root `memory.ts` or `memory.py`:
+
+```typescript
+export const memory = defineMemory({ assistant: memoryLayer() });
+```
+
+See [Durable memory](docs/memory.md).
 
 ## Pull remote context
 
@@ -130,6 +141,24 @@ Use `mda pull --yes` for non-interactive use. `--name`, `--agent-environment`,
 `--workspace-id`, and `--env-file` select the remote agent and credentials, as with
 `mda deploy`; `LANGSMITH_AGENT_ENVIRONMENT` in `.env` is honored too.
 The remote context is read-only; pulling does not deploy or modify Context Hub.
+
+## Upload memory files
+
+To give a deployed agent files it should start with in its memory, such as notes
+exported from Fleet, upload a folder after the first deploy:
+
+```bash
+mda memory upload fleet_export_files/memories --dry-run
+mda memory upload fleet_export_files/memories
+```
+
+Each file becomes `memories/agent/<path>`. Files the agent's memory already has
+are skipped, so the agent's own edits are kept and the command is safe to re-run.
+It fails until `mda deploy` has created the Agent Server, and when the project
+doesn't turn on agent memory. If you just added `memory.ts` / `memory.py`, deploy
+again before uploading, or the agent won't read the files until the next deploy.
+`--project`, `--name`,
+`--agent-environment`, `--workspace-id`, and `--env-file` work as with `mda pull`.
 
 ## Evaluate
 
@@ -228,12 +257,12 @@ agent = define_deep_agent(
 ```
 
 In both languages, `name` is required: MDA uses it as the LangGraph assistant
-id and the default LangSmith deployment name. The managed runtime owns
+id and the default LangSmith Agent Server name. The managed runtime owns
 `backend`, `store`, and `checkpointer`, and embeds the system prompt from
 `instructions.md`. Agent definitions should focus on behavior: tools,
 middleware, model configuration, and skills.
 
-### Python deployment version
+### Agent Server Python version
 
 Select the Agent Server Python version in `pyproject.toml`:
 
@@ -258,7 +287,7 @@ MDA warns; the dependency install checks the actual interpreter.
 Set `python-version` explicitly to keep the same minor version when MDA adds
 support for newer Python versions.
 
-This setting controls the deployment image. Local build processing, `mda dev`,
+This setting controls the Agent Server image. Local build processing, `mda dev`,
 Harbor task images, and execution sandboxes select their interpreters separately.
 
 ## Schedules
@@ -375,6 +404,8 @@ browser = define_browser(scope="user")
   window per thread.
 - `idleTtlSeconds` / `idle_ttl_seconds`: stop an idle browser after this long
   (60–86,400; default 600).
+- `allowList` / `allow_list`: the only hosts the browser may reach, such as
+  `["vendor.com", "*.vendor.com"]`; changing it reaches existing browsers.
 - A thread's browser reaches servers in its sandbox at `http://localhost:<port>`.
 - Agent factories can replace it, or pass `browser: null` / `browser=None` to
   turn it off for a run.
@@ -449,6 +480,12 @@ MCP tool names before the managed `{server}__` prefix is applied, so
 `includeTools: ["search"]` on server `langchainDocs` exposes
 `langchainDocs__search` when prefixing is enabled.
 
+MDA adds the instructions a server returns when it connects to the agent's
+system prompt, labeled as external guidance, on each model call that offers one
+of its tools. Set `includeInstructions: false` (Python:
+`"include_instructions": False`) on a server to leave them out. Instructions
+over 4,096 characters are cut off with a marker.
+
 ## Connections in the sandbox proxy
 
 Use Agent Auth connections to authenticate sandbox HTTP requests without putting
@@ -489,7 +526,7 @@ Initialize a Slack channel:
 mda channels init slack
 ```
 
-Set up the project's channels for its deployment, or check where they stand,
+Set up the project's channels for its Agent Server, or check where they stand,
 without deploying (the agent has to be deployed once first):
 
 ```bash
@@ -541,13 +578,14 @@ Deploy it to LangSmith:
 mda deploy
 ```
 
-The deployment type defaults to `serverless`. Use `--deployment-type dedicated`
-for a dedicated deployment. Serverless requires a supported GCP SaaS environment.
+The Agent Server type defaults to `serverless`. Use `--agent-server-type dedicated`
+for a dedicated Agent Server. Serverless requires a supported GCP SaaS environment.
+The old `--deployment-type` spelling remains a hidden compatibility alias.
 
 Common deploy options:
 
 ```bash
-mda deploy --name my-agent-dev --deployment-type serverless
+mda deploy --name my-agent-dev --agent-server-type serverless
 mda deploy --workspace-id "$LANGSMITH_WORKSPACE_ID"
 mda deploy --no-wait
 ```
@@ -562,8 +600,8 @@ mda connections delete my-openai-key
 ```
 
 Connections are workspace-scoped (one slug per workspace). Agent-owned opaque
-secrets are owned by the project's default-name MDA deployment, so
-`mda connections create` requires that deployment to exist (`mda deploy`
+secrets are owned by the project's default-name Agent Server, so
+`mda connections create` requires that Agent Server to exist (`mda deploy`
 first). `mda connections list` shows every row in the workspace, not just the
 ones an agent uses. `mda deploy` fails when a connection this project declares
 is missing from the workspace.
@@ -574,17 +612,19 @@ does not yet support creating user-owned opaque slots. Provision OAuth with
 optional flags include `--client-id` and `--scope` (repeatable). Without
 `--authorize`, the pre-run gate collects a missing OAuth grant from each user at
 runtime. Add `--authorize` to create an agent-owned grant and print its
-authorization URL during project setup. The project must already have a
-deployment with its authored agent name.
+authorization URL during project setup. The project must already have an
+Agent Server with its authored agent name.
+Use `--agent-server-id AGENT_SERVER_ID` to target one without a local project;
+`--deployment-id` remains a hidden compatibility alias.
 
-Several deployments can reference one slug, because `mda deploy` only checks
+Several Agent Servers can reference one slug, because `mda deploy` only checks
 that the slug exists. Credentials on a connection have owners, though. An
 agent-owned credential, an opaque secret or an `--authorize` grant, belongs to
-the deployment that created it, so another deployment that references the slug
+the Agent Server that created it, so another Agent Server that references the slug
 has no agent credential of its own. `mda connections create` fails when the slug
-already exists, so it cannot add one. Give each deployment its own slug for
+already exists, so it cannot add one. Give each Agent Server its own slug for
 agent-owned connections, for example `support-bot-openai-key`.
-`mda connections delete <slug>` removes the connection for every deployment
+`mda connections delete <slug>` removes the connection for every Agent Server
 that references it. Slugs use lowercase letters and digits separated by single
 hyphens or slashes, at most 64 characters.
 
@@ -712,17 +752,17 @@ Tear it down again:
 mda delete
 ```
 
-`mda delete` (alias `mda destroy`) removes the LangSmith deployment, the tracing
-project created alongside it, the deployment's Context Hub repo (plus any legacy
+`mda delete` (alias `mda destroy`) removes the LangSmith Agent Server, the tracing
+project created alongside it, the Agent Server's Context Hub repo (plus any legacy
 per-user or org child memory repos left from older runtimes), the managed
-sandboxes the deployment created, and the Agent Auth connections its channels
+sandboxes the Agent Server created, and the Agent Auth connections its channels
 set up. It asks for confirmation first; pass `--yes`
 to skip the prompt in scripts. Agent memory and thread history are not
 recoverable afterwards.
 
-Sandboxes are matched by name. `mda deploy` passes the deployment name to the
+Sandboxes are matched by name. `mda deploy` passes the Agent Server name to the
 runtime, which names every sandbox it creates `{deployment}--{digest}`, so
-teardown can tell a deployment's sandboxes apart from the rest of the
+teardown can tell an Agent Server's sandboxes apart from the rest of the
 workspace's. The digest covers the sandbox scope plus how the sandbox was
 provisioned, so editing `setup.sh` or switching snapshots gives the next run a
 fresh sandbox rather than an old one built from the previous recipe. Sandboxes
@@ -734,7 +774,7 @@ window (see [Sandboxes](https://docs.langchain.com/langsmith/sandboxes)).
 
 Before running `mda deploy`, make sure you have:
 
-- Private beta access to Managed Deep Agents and LangSmith deployment
+- Private beta access to Managed Deep Agents and LangSmith Agent Server
   permissions.
 - A root-level `agent.ts`, `agent.tsx`, or `agent.py`.
 - A `package.json` for TypeScript projects or `pyproject.toml` for Python

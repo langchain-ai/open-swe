@@ -1,0 +1,32 @@
+{
+  "agent": {
+    "id": "44444444-4444-4444-4444-444444444444",
+    "name": "Research Assistant",
+    "revision": "rev_3f9a2b1c",
+    "system_prompt": "You are a helpful research assistant.\n",
+    "instructions": "You are a helpful research assistant.\n",
+    "model": {
+      "id": "anthropic:claude-sonnet-4-6"
+    },
+    "tools": {
+      "tools": [],
+      "interrupt_config": {}
+    },
+    "files": {
+      "AGENTS.md": {
+        "type": "file",
+        "content": "You are a helpful research assistant.\n"
+      }
+    }
+  },
+  "schedules": [],
+  "triggers": [
+    {
+      "template_id": "d809e66e-0000-4000-8000-000000000002",
+      "status": "active",
+      "config": {
+        "channel_name": "support"
+      }
+    }
+  ]
+}

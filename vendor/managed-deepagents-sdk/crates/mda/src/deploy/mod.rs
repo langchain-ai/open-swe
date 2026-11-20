@@ -43,7 +43,7 @@ mod trigger_channels;
 mod trigger_icon;
 mod upsell;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -88,10 +88,11 @@ use helpers::{
     deployment_managed_deep_agent_marker, deployment_runtime_url, deployment_status_url,
     deployment_tenant_id, dropped_reserved_env_vars, ensure_assistant_id_secret,
     ensure_cors_allow_origins, ensure_deployment_name_secret, ensure_langsmith_url_secret,
-    ensure_public_api_url, ensure_recipe_snapshot_secret, ensure_sandbox_api_endpoint_secret,
-    find_agent_deployment, find_deployment_by_name, find_deployment_id_by_name, is_failed_status,
-    is_interrupted_status, is_request_timeout, is_reserved_env_var, is_terminal_status,
-    secrets_from_env, set_mda_handoff_secret, set_workspace_id_secret, WORKSPACE_ID_ENV,
+    ensure_public_api_url, ensure_recipe_snapshot_secret, ensure_resume_drained_runs_secret,
+    ensure_sandbox_api_endpoint_secret, find_agent_deployment, find_deployment_by_name,
+    find_deployment_id_by_name, is_failed_status, is_interrupted_status, is_request_timeout,
+    is_reserved_env_var, is_terminal_status, secrets_from_env, set_mda_handoff_secret,
+    set_workspace_id_secret, WORKSPACE_ID_ENV,
 };
 use langsmith_context::{resolve_workspace_id, LangSmithEndpoints, WORKSPACE_FLAG_HINT};
 
@@ -257,13 +258,13 @@ fn run_session(
         .is_some_and(|value| !value.is_empty())
     {
         log::warning(format!(
-            "Not uploading {AGENT_ID_ENV}. The deployment name is the agent ID."
+            "Not uploading {AGENT_ID_ENV}. The Agent Server name is the agent ID."
         ))?;
     }
     let dropped = dropped_reserved_env_vars(&env_vars);
     if !dropped.is_empty() {
         log::warning(format!(
-            "Not uploading {} from {}. LangSmith sets these on the deployment itself.",
+            "Not uploading {} from {}. LangSmith sets these on the Agent Server itself.",
             dropped.join(", "),
             env_path.display()
         ))?;
@@ -281,6 +282,12 @@ fn run_session(
     // Channel ingress (Slack/GitHub) invokes runs by assistant / graph id —
     // always the langgraph.json graphs key, never a `--name` override.
     ensure_assistant_id_secret(&mut secrets, &assistant_id);
+    // Redeploys pause and resume in-flight runs instead of cancelling them.
+    // The Agent Server only supports this for Python graphs. Users cannot set
+    // it: the flag is reserved, so `.env` never uploads it.
+    if project.language == project::Language::Python {
+        ensure_resume_drained_runs_secret(&mut secrets);
+    }
     // Browser CORS is owned by LangGraph. Derive `CORS_ALLOW_ORIGINS` from the
     // configured public app URL / extra origins so the browser UI can call the
     // Agent Server without a second ACAO from the managed HTTP app.
@@ -412,7 +419,11 @@ fn run_session(
     interrupt.check()?;
     telemetry::stage::enter(Stage::Compile);
     let out_dir = root.join(".mda").join("build");
-    let summary = compile_for_deploy_step(project, &out_dir, context, installation)?;
+    let deploy_context = compile::DeployContext {
+        repo: context.repo,
+        has_skills: context.has_skills,
+    };
+    let summary = compile_for_deploy_step(project, &out_dir, &deploy_context, installation)?;
 
     // -- 4a. Bake sandbox recipe snapshot -----------------------------------
     interrupt.check()?;
@@ -555,13 +566,13 @@ fn run_session(
         image::ImageSource::InternalSource => None,
         image::ImageSource::CustomerRegistry(target) => {
             let sp = spinner();
-            sp.start("Building and pushing deployment image");
+            sp.start("Building and pushing Agent Server image");
             let image = step(
                 &sp,
-                "Could not build and push the deployment image",
+                "Could not build and push the Agent Server image",
                 image::build_and_push(project.language, &out_dir, &target),
             )?;
-            sp.stop("Built and pushed deployment image");
+            sp.stop("Built and pushed Agent Server image");
             Some(image)
         }
     };
@@ -631,7 +642,7 @@ fn run_session(
             .and_then(|deployment| deployment_status_url(deployment, &deployment_id, dashboard_url))
     });
     if let Some(url) = &status_url {
-        note_links("Deployment dashboard", &[("", url)])?;
+        note_links("Agent Server dashboard", &[("", url)])?;
     }
 
     // -- 6. Supply source or image and trigger the revision ----------------
@@ -640,13 +651,13 @@ fn run_session(
         (Some(_), Some(created)) => created,
         (Some(image_uri), None) => {
             let sp = spinner();
-            sp.start("Updating deployment image");
+            sp.start("Updating Agent Server image");
             let updated = step(
                 &sp,
-                "Could not update the deployment",
+                "Could not update the Agent Server",
                 client.update_deployment_external_image(&deployment_id, image_uri, &secrets),
             )?;
-            sp.stop("Deployment image updated");
+            sp.stop("Agent Server image updated");
             updated
         }
         (None, _) => archive_upload_and_trigger(client, &out_dir, &deployment_id, &secrets)?,
@@ -659,7 +670,7 @@ fn run_session(
             deployment_status_url(&updated, &deployment_id, dashboard_url)
         });
         if let Some(url) = &status_url {
-            note_links("Deployment dashboard", &[("", url)])?;
+            note_links("Agent Server dashboard", &[("", url)])?;
         }
     }
 
@@ -672,6 +683,7 @@ fn run_session(
                 "Schedules were discovered, but --no-wait skips cron reconciliation until deploy completes.",
             )?;
         }
+        report_agent_identity(client, &deployment_id)?;
         outro(format!(
             "Build triggered for '{name}'. Not waiting (--no-wait)."
         ))?;
@@ -701,7 +713,7 @@ fn run_session(
         .map(|(name, url)| (*name, url.as_str()))
         .collect();
     note_links_with_section(
-        "Deployment",
+        "Agent Server",
         &deployment_links(&agent_server_url, status_url.as_deref()),
         "HTTP channels",
         &http_link_refs,
@@ -724,11 +736,21 @@ fn run_session(
             }
         }
         Err(err) => log::warning(format!(
-            "Deployment is live, but stale sandbox recipe snapshots could not be cleaned up: {err}"
+            "The Agent Server is live, but stale sandbox recipe snapshots could not be cleaned up: {err}"
         ))?,
     }
+    report_agent_identity(client, &deployment_id)?;
     outro(format!("Deployed '{name}' to LangSmith."))?;
     Ok(CommandCompletion::Succeeded)
+}
+
+fn report_agent_identity(client: &langsmith::Client, deployment_id: &str) -> Result<()> {
+    match client.deployment_agent_identity(deployment_id) {
+        Ok(Some(identity)) => log::info(format!("Agent identity: {identity}"))?,
+        Ok(None) => {}
+        Err(err) => log::warning(format!("Could not read the agent identity: {err:#}"))?,
+    }
+    Ok(())
 }
 
 /// The ID and Agent Server URL of `deployment`, an existing deployment as
@@ -746,7 +768,7 @@ pub(crate) fn live_deployment(
         None => deployment_runtime_url(
             &client
                 .get_deployment(id)
-                .with_context(|| format!("failed to read deployment {id}"))?,
+                .with_context(|| format!("failed to read Agent Server {id}"))?,
         ),
     };
     Ok(url.map(|url| (id.to_string(), url)))
@@ -777,7 +799,7 @@ fn require_trigger_registration_url(
 ) -> Result<Option<String>> {
     if has_trigger_channel && agent_server_url.is_none() {
         bail!(
-            "Deployment started, but channel setup could not complete because no revision was available to track; retry `mda deploy` once the deployment is live."
+            "Deployment started, but channel setup could not complete because no revision was available to track; retry `mda deploy` once the Agent Server is live."
         );
     }
     Ok(agent_server_url)
@@ -881,7 +903,7 @@ fn collision_decision(
     Err(categorized(
         ErrorCategory::UserInput,
         format!(
-            "Resources for deployment '{name}' already exist and require confirmation \
+            "Resources for Agent Server '{name}' already exist and require confirmation \
              before they can be overwritten. Re-run with --yes to overwrite them, or pass \
              --name to deploy under a different name."
         ),
@@ -1009,7 +1031,7 @@ fn confirm_first_deploy_collisions(
     // every remote resource unchanged.
     if let Some(existing) = existing_deployment.as_ref() {
         if let Err(err) = ensure_requested_deployment_source(name, existing, image_source) {
-            sp.error("Existing deployment uses a different source type");
+            sp.error("Existing Agent Server uses a different source type");
             return Err(err);
         }
     }
@@ -1019,7 +1041,7 @@ fn confirm_first_deploy_collisions(
         .as_ref()
         .is_some_and(deployment_is_managed_deep_agent)
     {
-        sp.stop("Existing Managed Deep Agent deployment found");
+        sp.stop("Existing Agent Server for this Managed Deep Agent found");
         return Ok(DeployGate::Proceed(existing_deployment));
     }
     // A repo `mda deploy` created is not a collision even on a first deploy —
@@ -1051,7 +1073,7 @@ fn confirm_first_deploy_collisions(
             .and_then(|deployment| deployment.get("name")?.as_str())
             .unwrap_or(name);
         log::warning(format!(
-            "First Managed Deep Agent deploy will overwrite the source and configuration of existing LangSmith deployment '{deployment_name}'."
+            "First Managed Deep Agent deploy will overwrite the source and configuration of existing LangSmith Agent Server '{deployment_name}'."
         ))?;
     }
     match collision_decision(name, &collisions, yes, std::io::stdin().is_terminal())? {
@@ -1172,13 +1194,9 @@ fn resolve_context_conflicts(
 fn compile_for_deploy_step(
     project: &project::Project,
     out_dir: &Path,
-    context: context_hub::SyncSummary,
+    deploy_context: &compile::DeployContext,
     installation: &Installation,
 ) -> Result<compile::CompileSummary> {
-    let deploy_context = compile::DeployContext {
-        repo: context.repo,
-        has_skills: context.has_skills,
-    };
     let sp = spinner();
     sp.start("Compiling project");
     let summary = step(
@@ -1187,7 +1205,7 @@ fn compile_for_deploy_step(
         compile::compile_for_deploy(
             project,
             out_dir,
-            &deploy_context,
+            deploy_context,
             installation.runtime_source(),
         )
         .map_err(compile::compilation),
@@ -1208,6 +1226,17 @@ pub(crate) struct EmittedRequirements {
     pub connectors: compile::ConnectorRequirements,
     pub mcp_connections: Vec<compile::McpConnectionEntry>,
     pub channels: compile::ChannelRequirements,
+}
+
+impl EmittedRequirements {
+    /// Read back the manifests [`emit_requirements_step`] wrote to `out_dir`.
+    pub(crate) fn load(out_dir: &Path) -> Result<Self> {
+        Ok(Self {
+            connectors: compile::load_connector_requirements(out_dir)?,
+            mcp_connections: compile::load_mcp_connection_entries(out_dir)?,
+            channels: compile::load_channel_requirements(out_dir)?,
+        })
+    }
 }
 
 /// Emit connector, MCP, and channel requirements and report progress.
@@ -1335,44 +1364,44 @@ fn resolve_or_create_deployment(
 ) -> Result<String> {
     match existing.and_then(|deployment| deployment.get("id")?.as_str()) {
         Some(id) => {
-            log::step(format!("Found existing deployment {id}"))?;
+            log::step(format!("Found existing Agent Server {id}"))?;
             Ok(id.to_string())
         }
         None => {
-            log::step("No existing deployment — creating a new one")?;
+            log::step("No existing Agent Server — creating a new one")?;
             let sp = spinner();
-            sp.start(format!("Creating deployment '{name}'"));
+            sp.start(format!("Creating Agent Server '{name}'"));
             match client.create_deployment(name, deployment_type, secrets) {
                 Ok(created) => {
                     let id = step(
                         &sp,
-                        "Could not create the deployment",
+                        "Could not create the Agent Server",
                         require_str(&created, "id", "create deployment"),
                     )?;
-                    sp.stop(format!("Created deployment {id}"));
+                    sp.stop(format!("Created Agent Server {id}"));
                     Ok(id)
                 }
                 Err(err) if is_request_timeout(&err) => {
                     // The host backend may still finish provisioning even when
                     // the client times out waiting for the response.
-                    sp.stop("Create request timed out — checking whether the deployment exists");
+                    sp.stop("Create request timed out — checking whether the Agent Server exists");
                     let sp = spinner();
-                    sp.start(format!("Looking up deployment '{name}'"));
+                    sp.start(format!("Looking up Agent Server '{name}'"));
                     let listed = step(
                         &sp,
                         "Could not reach LangSmith",
                         client.list_deployments(name),
                     )?;
                     if let Some(id) = find_deployment_id_by_name(&listed, name) {
-                        sp.stop(format!("Found deployment {id} (created despite timeout)"));
+                        sp.stop(format!("Found Agent Server {id} (created despite timeout)"));
                         Ok(id)
                     } else {
-                        sp.error("Could not create the deployment");
+                        sp.error("Could not create the Agent Server");
                         Err(err)
                     }
                 }
                 Err(err) => {
-                    sp.error("Could not create the deployment");
+                    sp.error("Could not create the Agent Server");
                     Err(err)
                 }
             }
@@ -1394,7 +1423,7 @@ fn resolve_or_create_agent_deployment(
         None => client.create_agent_deployment(agent, deployment_type, secrets)?,
     };
     let name = require_str(&deployment, "name", "agent deployment")?;
-    log::info(format!("Deployment: {name}"))?;
+    log::info(format!("Agent Server: {name}"))?;
     require_str(&deployment, "id", "agent deployment")
 }
 
@@ -1411,16 +1440,16 @@ fn resolve_or_create_external_deployment(
     if let Some(existing) = existing {
         let id = require_str(existing, "id", "existing deployment")?;
         ensure_external_deployment_source(name, existing)?;
-        log::step(format!("Found deployment {id}"))?;
+        log::step(format!("Found Agent Server {id}"))?;
         return Ok((id, None));
     }
 
-    log::step("No existing deployment — creating a new one")?;
+    log::step("No existing Agent Server — creating a new one")?;
     let sp = spinner();
-    sp.start(format!("Creating deployment '{name}'"));
+    sp.start(format!("Creating Agent Server '{name}'"));
     let created = step(
         &sp,
-        "Could not create the deployment",
+        "Could not create the Agent Server",
         match agent {
             Some(agent) => client.create_external_agent_deployment(agent, image_uri, secrets),
             None => client.create_external_deployment(name, image_uri, secrets),
@@ -1428,10 +1457,10 @@ fn resolve_or_create_external_deployment(
     )?;
     let id = step(
         &sp,
-        "Could not create the deployment",
+        "Could not create the Agent Server",
         require_str(&created, "id", "create deployment"),
     )?;
-    sp.stop(format!("Created deployment {id}"));
+    sp.stop(format!("Created Agent Server {id}"));
     Ok((id, Some(created)))
 }
 
@@ -1439,7 +1468,7 @@ fn ensure_external_deployment_source(name: &str, deployment: &serde_json::Value)
     let source = deployment.get("source").and_then(serde_json::Value::as_str);
     if source != Some("external_docker") {
         bail!(
-            "deployment '{name}' uses source '{}'; deployment source types cannot be changed, so delete it or use a different --name",
+            "Agent Server '{name}' uses source '{}'; Agent Server source types cannot be changed, so delete it or use a different --name",
             source.unwrap_or("unknown")
         );
     }
@@ -1805,8 +1834,8 @@ pub(crate) fn resolve_deployment_id(client: &langsmith::Client, name: &str) -> R
     let listed = client.list_deployments(name).map_err(|err| {
         if is_refusal(&err) {
             err.context(format!(
-                "LangSmith refused to list deployments with this {API_KEY_ENV}; check that the \
-                 key can read deployments in this workspace"
+                "LangSmith refused to list Agent Servers with this {API_KEY_ENV}; check that the \
+                 key can read Agent Servers in this workspace"
             ))
         } else {
             err.context("failed to reach LangSmith")
@@ -1820,7 +1849,7 @@ pub(crate) fn resolve_deployment_id(client: &langsmith::Client, name: &str) -> R
                 .map(|url| format!(" ({url})"))
                 .unwrap_or_default();
             bail!(
-                "No deployment named '{name}' exists in this workspace.\n\
+                "No Agent Server named '{name}' exists in this workspace.\n\
                  Deploy it with `mda deploy` first, or pass `-n <name>` / `--workspace-id <id>` \
                  if it lives under a different name or workspace{dashboard}."
             )
@@ -1847,6 +1876,26 @@ pub(crate) fn resolve_api_key(
     env_vars: &std::collections::BTreeMap<String, String>,
     env_path: &Path,
     platform_api_url: &str,
+) -> Result<ResolvedApiKey> {
+    resolve_api_key_saving(env_vars, env_path, platform_api_url, true)
+}
+
+/// [`resolve_api_key`], but a pasted key is only set in this process, not
+/// saved to `env_path`: for `mda init`, whose `.env` belongs to the parent
+/// directory and which seeds the new project's `.env` from the process.
+pub(crate) fn resolve_api_key_unsaved(
+    env_vars: &std::collections::BTreeMap<String, String>,
+    env_path: &Path,
+    platform_api_url: &str,
+) -> Result<ResolvedApiKey> {
+    resolve_api_key_saving(env_vars, env_path, platform_api_url, false)
+}
+
+fn resolve_api_key_saving(
+    env_vars: &std::collections::BTreeMap<String, String>,
+    env_path: &Path,
+    platform_api_url: &str,
+    save: bool,
 ) -> Result<ResolvedApiKey> {
     if let Some(key) = env_api_key(env_vars)? {
         return Ok(ResolvedApiKey {
@@ -1880,10 +1929,15 @@ pub(crate) fn resolve_api_key(
         ));
     }
 
-    log::warning(
-        "No LangSmith API key found. Paste one from Settings → API Keys (saved to .env), \
-         or press Enter to sign in with your browser (2-hour session on this machine).",
-    )?;
+    let saved_to = if save {
+        ".env"
+    } else {
+        "the new project's .env"
+    };
+    log::warning(format!(
+        "No LangSmith API key found. Paste one from Settings → API Keys (saved to {saved_to}), \
+         or press Enter to sign in with your browser (2-hour session on this machine)."
+    ))?;
     let key: String = password("LangSmith API key (or Enter to authorize)")
         .mask('•')
         .allow_empty()
@@ -1893,10 +1947,17 @@ pub(crate) fn resolve_api_key(
             api_key: authorize_with_device_login(platform_api_url)?,
             source: ApiKeySource::SignIn,
         },
-        ApiKeyPromptChoice::ApiKey(key) => ResolvedApiKey {
+        ApiKeyPromptChoice::ApiKey(key) if save => ResolvedApiKey {
             api_key: persist_api_key(env_path, &key)?,
             source: ApiKeySource::EnvFile(env_path.to_path_buf()),
         },
+        ApiKeyPromptChoice::ApiKey(key) => {
+            export_langsmith_api_key(&key);
+            ResolvedApiKey {
+                api_key: ApiKey::new(key),
+                source: ApiKeySource::ProcessEnv,
+            }
+        }
     })
 }
 
@@ -2126,11 +2187,14 @@ fn missing_user_owned_mcp_connections<'a>(
         if existing.contains_key(&slug) {
             continue;
         }
+        // One server in several definitions (an agent's and a subagent's) is one connection.
+        let mut urls = BTreeSet::new();
         let matches: Vec<&compile::McpConnectionEntry> = mcp_connections
             .iter()
             .filter(|entry| {
                 entry.slug == slug
                     && entry.owner_policy == langsmith::ConnectionOwnerPolicy::User.as_str()
+                    && urls.insert(entry.url.as_str())
             })
             .collect();
         match matches.as_slice() {
@@ -2601,6 +2665,7 @@ fn poll_and_report(
 
     let Some(revision_id) = revision_id else {
         // The dashboard link was handed over as soon as it was knowable.
+        report_agent_identity(client, deployment_id)?;
         outro(format!(
             "Build triggered for '{name}'. No revision to track yet."
         ))?;
@@ -2670,7 +2735,7 @@ fn poll_and_report(
         status if is_interrupted_status(status) => {
             sp.error("Deployment interrupted from another interface");
             if let Some(url) = &status_url {
-                note_links("Inspect the deployment", &[("", url)])?;
+                note_links("Inspect the Agent Server", &[("", url)])?;
             }
             // The cancelled-session footer is rendered by `run`.
             Err(categorized(
@@ -2693,7 +2758,7 @@ fn poll_and_report(
             // The deadline elapsed before any status was observed.
             sp.error("Timed out waiting for the deployment");
             if let Some(url) = &status_url {
-                note_links("Inspect the deployment", &[("", url)])?;
+                note_links("Inspect the Agent Server", &[("", url)])?;
             }
             Err(categorized(
                 ErrorCategory::Deployment,
@@ -2705,7 +2770,7 @@ fn poll_and_report(
             // status that isn't DEPLOYED (e.g. SKIPPED). Either way, fail.
             sp.error(format!("Deployment did not reach DEPLOYED ({status})"));
             if let Some(url) = &status_url {
-                note_links("Inspect the deployment", &[("", url)])?;
+                note_links("Inspect the Agent Server", &[("", url)])?;
             }
             Err(categorized(
                 ErrorCategory::Deployment,
@@ -2736,10 +2801,10 @@ fn display_revision_status(status: &str) -> &str {
 fn fetch_agent_server_url(client: &langsmith::Client, deployment_id: &str) -> Result<String> {
     let deployment = client
         .get_deployment(deployment_id)
-        .context("failed to look up the deployment's Agent Server URL")?;
+        .context("failed to look up the Agent Server URL")?;
     let Some(url) = deployment_runtime_url(&deployment) else {
         bail!(
-            "deployment is live, but the host backend response did not include an Agent Server URL"
+            "the Agent Server is live, but the host backend response did not include an Agent Server URL"
         );
     };
     Ok(url)
@@ -2826,7 +2891,7 @@ fn schedule_reconcile_warning(err: &anyhow::Error, authored: usize) -> String {
     let consequence = if authored == 0 {
         "Any schedules from a previous deploy may still be running."
     } else {
-        "The deployment is live, but its schedules may be missing or stale."
+        "The Agent Server is live, but its schedules may be missing or stale."
     };
     format!("{err:#}\n{consequence} Re-run `mda deploy` to reconcile them.")
 }
@@ -3285,7 +3350,7 @@ mod tests {
         let env = BTreeMap::from([("OPENAI_API_KEY".to_string(), " ".to_string())]);
 
         assert_eq!(
-            missing_local_model_api_key("openai:gpt-5.6-terra", &env, |_| None),
+            missing_local_model_api_key("openai:gpt-6-luna", &env, |_| None),
             Some("OPENAI_API_KEY")
         );
     }
@@ -3295,7 +3360,7 @@ mod tests {
         let shell = |key: &str| (key == "OPENAI_API_KEY").then(|| "sk-test".to_string());
 
         assert_eq!(
-            missing_local_model_api_key("openai:gpt-5.6-terra", &BTreeMap::new(), shell),
+            missing_local_model_api_key("openai:gpt-6-luna", &BTreeMap::new(), shell),
             None
         );
     }
@@ -3614,7 +3679,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "Resources for deployment 'my-agent' already exist and require confirmation before they can be overwritten. Re-run with --yes to overwrite them, or pass --name to deploy under a different name."
+            "Resources for Agent Server 'my-agent' already exist and require confirmation before they can be overwritten. Re-run with --yes to overwrite them, or pass --name to deploy under a different name."
         );
         assert_eq!(category_of(&error), ErrorCategory::UserInput);
     }
@@ -3817,6 +3882,30 @@ mod tests {
         assert!(error.contains("mcp::notion"), "{error}");
         assert!(error.contains("mcp::linear"), "{error}");
         assert!(error.contains("Keep the slug unique"), "{error}");
+    }
+
+    #[test]
+    fn deploy_creates_one_connection_for_a_server_shared_by_several_definitions() {
+        let requirements =
+            BTreeMap::from([("mcp".to_string(), json!({ "userConnections": ["linear"] }))]);
+        let shared = mcp_connection("linear", "linear");
+        let entries = [
+            shared.clone(),
+            compile::McpConnectionEntry {
+                connector_name: "issue_triager_subagent_mcp".into(),
+                ..shared
+            },
+        ];
+
+        let selected = missing_user_owned_mcp_connections(
+            &requirements,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &entries,
+        )
+        .unwrap();
+
+        assert_eq!(selected, vec![&entries[0]]);
     }
 
     #[test]
@@ -4112,7 +4201,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "Deployment started, but channel setup could not complete because no revision was available to track; retry `mda deploy` once the deployment is live."
+            "Deployment started, but channel setup could not complete because no revision was available to track; retry `mda deploy` once the Agent Server is live."
         );
     }
 

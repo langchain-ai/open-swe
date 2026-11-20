@@ -32,10 +32,10 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.run_input import RunChannel
     from managed_deepagents._channels.slack.events import (
         DecidedSlackEvents,
-        SlackChannelThread,
         SlackEvent,
         SlackEventCallback,
         SlackHandlers,
+        SlackHookThread,
         SlackMessageEvent,
     )
     from managed_deepagents._channels.slack.status import SlackStatusChoice
@@ -118,7 +118,7 @@ class TriggerSlackChannel(Channel):
     """Slack events and deploy requirements routed through Trigger Server."""
 
     kind = "slack"
-    transport: Literal["trigger_server"] = "trigger_server"  # ty: ignore[invalid-mutable-override]
+    transport: Literal["trigger_server"] = "trigger_server"  # ty: ignore[incompatible-mutable-override]
 
     def __init__(
         self,
@@ -127,11 +127,11 @@ class TriggerSlackChannel(Channel):
         allow_bot_triggers: bool,
         trigger_mode: SlackTriggerMode | None = None,
         reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
-        status: SlackStatusChoice | None = None,
+        status: SlackStatusChoice | Literal[False] | None = None,
         on_event: Mapping[str, SlackEventCallback] | None = None,
         multitask_strategy: MultitaskStrategy = "enqueue",
         auto_post: bool = True,
-        on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
+        on_finish: EventFinished[SlackEvent, SlackHookThread] | None = None,
         resolve_user: ChannelResolveUser | None = None,
     ) -> None:
         self.app = app
@@ -219,7 +219,8 @@ class TriggerSlackChannel(Channel):
             source_provider="slack",
             channel_name=name,
             reactions=self.reactions,
-            started_status=started_status(self.status),
+            started_status=None if self.status is False else started_status(self.status),
+            show_progress=self.status is not False,
             message_input=lambda event: with_slack_rich_content(
                 event["input"]["messages"], event.get("raw_event")
             ),
@@ -371,10 +372,10 @@ def _run_channel(
     thread: TriggerChannelThread,
 ) -> RunChannel:
     """The channel a delivery's runs start from: its conversation's thread and target."""
+    from managed_deepagents._channels.address import channel_address  # noqa: PLC0415
     from managed_deepagents._channels.run_input import RunChannel  # noqa: PLC0415
-    from managed_deepagents._channels.target import channel_target  # noqa: PLC0415
 
-    origin = channel_target(
+    origin = channel_address(
         cast(
             "ChannelBinding",
             {
@@ -487,10 +488,10 @@ class _TriggerSlackArgs(BaseModel):
             is_slack_status_value,
         )
 
-        if value is None or callable(value) or is_slack_status_value(value):
+        if value is None or value is False or callable(value) or is_slack_status_value(value):
             return value
         raise ValueError(
-            "must be a status line, a list of steps (titles or {'title', 'status'}), "
+            "must be False, a status line, a list of steps (titles or {'title', 'status'}), "
             "or a callable returning one"
         )
 
@@ -577,12 +578,12 @@ def slack_channel(
     ignore_bots: bool | None = None,
     allow_bot_triggers: bool | None = None,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
-    status: SlackStatusChoice | None = None,
+    status: SlackStatusChoice | Literal[False] | None = None,
     on_event: SlackHandlers | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
     auto_post: bool | None = None,
     reply: ChannelReply | None = None,
-    on_finish: EventFinished[SlackEvent, SlackChannelThread] | None = None,
+    on_finish: EventFinished[SlackEvent, SlackHookThread] | None = None,
     resolve_user: ResolveUser | EventEndpoint | None = None,
 ) -> TriggerSlackChannel:
     """Declare a Trigger Server-backed Slack channel.
@@ -626,7 +627,8 @@ def slack_channel(
             step one of its tasks. Other apps show the line, or the first step
             not yet done, as the thread's status. A callable that raises, takes
             longer than 1 s, or returns something else leaves the status as it
-            is.
+            is. ``False`` shows no status and no Stop button; the reply, errors
+            and approvals still show.
             Experimental: this may change in a minor release.
         on_event: Handlers that decide what each kind of message starts, by
             key: ``"mention"`` (a channel message that @-mentions your agent),
@@ -668,7 +670,7 @@ def slack_channel(
             Experimental: this may change in a minor release.
         on_finish: Called once when a message or interaction is done, with the
             ``SlackEvent`` (a ``SlackMessageEvent`` or ``SlackInteractionEvent``), its
-            ``SlackChannelThread``, and how it finished: ``run`` (its run
+            ``SlackHookThread``, and how it finished: ``run`` (its run
             ended with ``run["status"]``, and ``interrupts`` lists the
             decisions the thread waits on), ``skipped`` (no run started: the
             handler returned nothing or failed, ``ignored``, or the thread was
@@ -743,7 +745,7 @@ def slack_channel(
         trigger_mode=parsed.trigger_mode or ("all" if parsed.trigger_on_all_messages else None),
         allow_bot_triggers=parsed.allow_bot_triggers,
         reactions=cast("ReactionChoice", parsed.reactions),
-        status=cast("SlackStatusChoice | None", parsed.status),
+        status=cast("SlackStatusChoice | Literal[False] | None", parsed.status),
         on_event=_resolve_handlers(on_event),
         multitask_strategy=multitask_strategy,
         auto_post=posts,

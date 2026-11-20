@@ -11,13 +11,15 @@ mod identity;
 mod metadata;
 pub mod otel_logger;
 mod posthog;
+mod segment;
 pub mod stage;
 mod transport;
 
 #[cfg(test)]
 pub(crate) use command::CommandInvocation;
-pub use exit::{deliver_at_exit, hold_for_exit, report_panics};
+pub use exit::{deliver_at_exit, hold_for_exit, report_panics, Sink};
 pub use facts::{init_facts, refresh_identity, update_facts, DeploymentInfo, ReportableFacts};
 pub use gates::is_telemetry_disabled;
 pub use otel_logger::{OtelLogger, MAX_STACKTRACE_BYTES};
 pub use posthog::posthog_transport;
+pub use segment::segment_transport;

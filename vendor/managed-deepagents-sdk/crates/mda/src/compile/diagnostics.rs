@@ -96,7 +96,11 @@ mod tests {
     fn memory(language: Language, agent: bool) -> MemoryDecision {
         MemoryDecision::Declared(MemorySummary {
             path: PathBuf::from(format!("memory.{}", language.extension())),
-            scope: MemoryLayers { agent, user: true },
+            scope: MemoryLayers {
+                agent,
+                assistant: false,
+                user: true,
+            },
         })
     }
 

@@ -1,0 +1,20 @@
+{
+  "not_exported": [
+    {
+      "feature": "skills",
+      "summary": "Fleet's built-in skills",
+      "detail": "Fleet's built-in skills (presentation-builder, svg-builder, mermaid-diagram-builder, generate-skill, fleet-guide and others) ship with Fleet's runtime. The exported agent doesn't have them."
+    }
+  ],
+  "warnings": [
+    "Couldn't read this agent's channels from Trigger Server. If it answered in Slack, run `mda channels init slack`."
+  ],
+  "left_behind": [
+    "Conversations: past threads stay in Fleet. The deployment starts with none.",
+    "Traces: the deployment traces to a new LangSmith project. Past traces stay in the Fleet agent's project."
+  ],
+  "memory": [
+    "Fleet's `AGENTS.md` is now `instructions.md`.",
+    "`memory.py` gives the agent its own memory in `memories/agent/`. It starts empty, and the agent adds to it as it learns."
+  ]
+}

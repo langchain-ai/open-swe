@@ -1,0 +1,13 @@
+{
+  "agent": {
+    "id": "aaaaaaa1-0000-0000-0000-000000000000",
+    "name": "Notebook",
+    "system_prompt": "Keep notes in the sandbox.",
+    "model": { "id": "anthropic:claude-sonnet-4-6" },
+    "backend": {
+      "type": "sandbox",
+      "sandbox_config": { "scope": "agent", "sandbox_id": "sb-1", "sandbox_slug": "notebook-1", "status": "ready", "snapshot_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", "idle_ttl_seconds": 1200, "delete_after_stop_seconds": 3600 }
+    }
+  },
+  "schedules": []
+}

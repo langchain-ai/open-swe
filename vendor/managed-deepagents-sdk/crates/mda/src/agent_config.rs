@@ -251,7 +251,7 @@ fn resolve_assistant_id(
                 "agent `name` is required in {file_label}. Add a static string \
                  (e.g. {example}) to {define}(...); MDA \
                  uses it as the LangGraph assistant id and the default LangSmith \
-                 deployment name."
+                 Agent Server name."
             ),
         )),
         AgentNameValue::Static(name) => {
@@ -648,22 +648,37 @@ fn typescript_factory_return<'a>(body: &'a [Statement<'a>]) -> Option<FactoryRet
             {
                 continue;
             }
-            return match declarator.init.as_ref()? {
-                Expression::ArrowFunctionExpression(factory) => Some(match &factory.body {
-                    ArrowFunctionBody::FunctionBody(body) => function_body_return(Some(body)),
-                    body => FactoryReturn {
-                        returned: body.as_expression(),
-                        statements: &[],
-                    },
-                }),
-                Expression::FunctionExpression(factory) => {
-                    Some(function_body_return(factory.body.as_deref()))
-                }
-                _ => None,
-            };
+            return factory_expression_return(declarator.init.as_ref()?);
         }
     }
     None
+}
+
+/// What an inline factory expression returns: an arrow or function expression, or
+/// `cachedAgent({ keyedBy }, build)`, whose `build` (its last argument) returns the
+/// definition. `None` for any other expression.
+fn factory_expression_return<'a>(expression: &'a Expression<'a>) -> Option<FactoryReturn<'a>> {
+    match expression {
+        Expression::ArrowFunctionExpression(factory) => Some(match &factory.body {
+            ArrowFunctionBody::FunctionBody(body) => function_body_return(Some(body)),
+            body => FactoryReturn {
+                returned: body.as_expression(),
+                statements: &[],
+            },
+        }),
+        Expression::FunctionExpression(factory) => {
+            Some(function_body_return(factory.body.as_deref()))
+        }
+        Expression::CallExpression(call) if is_cached_agent_callee(&call.callee) => {
+            factory_expression_return(call.arguments.last()?.as_expression()?)
+        }
+        _ => None,
+    }
+}
+
+/// True when `callee` is the identifier `cachedAgent`.
+fn is_cached_agent_callee(callee: &Expression<'_>) -> bool {
+    matches!(callee, Expression::Identifier(id) if id.name == "cachedAgent")
 }
 
 fn function_body_return<'a>(body: Option<&'a FunctionBody<'a>>) -> FactoryReturn<'a> {
@@ -853,6 +868,27 @@ mod tests {
             assert_eq!(fields.name, AgentNameValue::Static("plain".to_string()));
             assert!(fields.is_factory);
         }
+    }
+
+    #[test]
+    fn cached_typescript_agents_read_their_build_as_the_factory() {
+        for source in [
+            "export const agent = cachedAgent({ keyedBy: agentParams }, (params) => defineDeepAgent({ name: 'cached', model: params.model }));",
+            "export const agent = cachedAgent({ keyedBy: agentParams }, function (params) { return defineDeepAgent({ name: 'cached' }); });",
+            "export const agent = cachedAgent(\n  { keyedBy: async (runtime) => ({ model: 'm' }) },\n  (params) => {\n    const model = params.model;\n    return defineDeepAgent({ name: 'cached', model });\n  }\n);",
+        ] {
+            let fields = extract_agent_config_typescript(source, "agent.ts").unwrap();
+            assert_eq!(fields.name, AgentNameValue::Static("cached".to_string()));
+            assert!(fields.is_factory);
+        }
+    }
+
+    #[test]
+    fn cached_python_agents_read_their_build_as_the_factory() {
+        let source = "@cached_agent(keyed_by=agent_params)\ndef agent(params):\n    model = params['model']\n    return define_deep_agent(name='cached', model=model)\n";
+        let fields = extract_agent_config_python(source, "agent.py").unwrap();
+        assert_eq!(fields.name, AgentNameValue::Static("cached".to_string()));
+        assert!(fields.is_factory);
     }
 
     #[test]

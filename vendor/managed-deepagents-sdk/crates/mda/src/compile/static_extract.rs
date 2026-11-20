@@ -142,7 +142,7 @@ fn extract_python_config(
         .context("failed to serialize selected static config keys")?
         .unwrap_or_default();
     let output = child::output_with_stdin(
-        toolchain::python3()
+        toolchain::isolated_python3()
             .arg("-c")
             .arg(PYTHON_KEYWORD_EXTRACTOR)
             .arg(export_name)

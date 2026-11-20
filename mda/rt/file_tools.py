@@ -100,6 +100,9 @@ class FileToolsMiddleware(AgentMiddleware):
     """
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
+    # Its tool errors are results the model can act on, and the ones that escape it end the
+    # run, so MDA adds no tool error middleware of its own around this agent's tools.
+    _openswe_handles_tool_errors = True
 
     def __init__(
         self,

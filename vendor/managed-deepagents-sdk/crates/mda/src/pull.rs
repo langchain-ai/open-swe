@@ -8,39 +8,20 @@ use cliclack::{confirm, log};
 use serde_json::Value;
 use walkdir::WalkDir;
 
-use crate::agent_config;
 use crate::command::CommandCompletion;
 use crate::context_layout::project_context_root;
-use crate::deploy::langsmith_context::{LangSmithContext, WORKSPACE_FLAG_HINT};
-use crate::deploy::{agent_environment, agent_target, env_file, resolve_api_key};
+use crate::hub_target::{HubTarget, HubTargetArgs};
 use crate::install::Installation;
-use crate::langsmith::AgentEnvironment;
-use crate::naming::normalize_name;
 use crate::path_util::to_unix_path;
 use crate::project::{is_junk_dir, is_junk_file};
-use crate::telemetry::update_facts;
 
 #[derive(clap::Args)]
 pub(crate) struct PullOptions {
     /// Path to the existing Deep Agent project.
     #[arg(default_value = ".")]
     pub path: PathBuf,
-    /// Deployment name (defaults to the authored agent name).
-    #[arg(short = 'n', long)]
-    pub name: Option<String>,
-    /// Agent environment to read from; the deployment name is used as the
-    /// agent ID. Defaults to LANGSMITH_AGENT_ENVIRONMENT in .env.
-    #[arg(long, value_enum)]
-    pub agent_environment: Option<AgentEnvironment>,
-    /// Workspace to read from (overrides LANGSMITH_WORKSPACE_ID).
-    #[arg(long)]
-    pub workspace_id: Option<String>,
-    /// Host backend URL override (advanced).
-    #[arg(long, hide = true)]
-    pub host_url: Option<String>,
-    /// Read credentials from this file instead of the project .env.
-    #[arg(long, value_name = "PATH")]
-    pub env_file: Option<PathBuf>,
+    #[command(flatten)]
+    pub target: HubTargetArgs,
     /// Preview additions, overwrites, and deletions without changing files.
     #[arg(long)]
     pub dry_run: bool,
@@ -52,21 +33,7 @@ pub(crate) struct PullOptions {
 pub(crate) fn run(opts: PullOptions) -> Result<CommandCompletion> {
     let installation = Installation::from_env()?;
     let project = installation.load_project(&opts.path)?;
-    let base_name = match opts.name.as_deref() {
-        Some(name) => normalize_name(name)?,
-        None => agent_config::agent_assistant_id(&project)?,
-    };
-    let env_path = env_file::project_env_path(&opts.path, opts.env_file.as_deref());
-    let env_vars = env_file::parse_env_file(&env_path);
-    let name = target_name(base_name, opts.agent_environment, &env_vars)?;
-    update_facts(|facts| facts.deployment.deployment_name = Some(name.clone()));
-    let ctx = LangSmithContext::resolve_verified(
-        &env_vars,
-        opts.host_url.as_deref(),
-        opts.workspace_id.as_deref(),
-        WORKSPACE_FLAG_HINT,
-        |url| resolve_api_key(&env_vars, &env_path, url),
-    )?;
+    let HubTarget { name, ctx, .. } = opts.target.resolve(&opts.path, &project)?;
     let snapshot = ctx.context_hub_client()?.get_directory(&name)?;
     let root = project_context_root(&project);
     let changes = plan(&root, &snapshot.files)?;
@@ -94,17 +61,6 @@ pub(crate) fn run(opts: PullOptions) -> Result<CommandCompletion> {
     apply(&root, &changes)?;
     log::success(format!("Pulled instructions and skills from '{name}'."))?;
     Ok(CommandCompletion::Succeeded)
-}
-
-/// The Context Hub repo `mda deploy` writes for this agent: the name, suffixed
-/// for a non-production agent environment.
-fn target_name(
-    base_name: String,
-    environment: Option<AgentEnvironment>,
-    env_vars: &BTreeMap<String, String>,
-) -> Result<String> {
-    let environment = agent_environment(environment, env_vars)?;
-    Ok(agent_target(base_name, environment)?.0)
 }
 
 #[derive(Debug)]
@@ -192,7 +148,7 @@ fn plan(root: &Path, remote: &BTreeMap<String, Value>) -> Result<Vec<Change>> {
         desired.insert(path.clone(), Some(text.to_string()));
     }
     if !desired.contains_key("instructions.md") {
-        bail!("Remote instructions.md is missing; no local files were changed. Check the deployment name and workspace.");
+        bail!("Remote instructions.md is missing; no local files were changed. Check the Agent Server name and workspace.");
     }
     let skills = root.join("skills");
     let skills_meta = match fs::symlink_metadata(&skills) {
@@ -348,24 +304,6 @@ mod tests {
             "local memory"
         );
         assert!(plan(dir.path(), &remote()).unwrap().is_empty());
-    }
-
-    #[test]
-    fn targets_the_agent_environment_repo_deploy_writes() {
-        let env = BTreeMap::from([("LANGSMITH_AGENT_ENVIRONMENT".into(), "staging".into())]);
-        assert_eq!(
-            target_name("support".into(), None, &env).unwrap(),
-            "support-staging"
-        );
-        let production = Some(AgentEnvironment::Production);
-        assert_eq!(
-            target_name("support".into(), production, &env).unwrap(),
-            "support"
-        );
-        assert_eq!(
-            target_name("support".into(), None, &BTreeMap::new()).unwrap(),
-            "support"
-        );
     }
 
     #[test]

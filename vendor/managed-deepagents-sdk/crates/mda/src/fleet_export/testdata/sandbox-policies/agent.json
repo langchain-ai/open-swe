@@ -1,0 +1,38 @@
+{
+  "agent": {
+    "id": "aaaaaaa2-0000-0000-0000-000000000000",
+    "name": "Integrator",
+    "system_prompt": "Call the APIs you are allowed to.",
+    "model": { "id": "anthropic:claude-sonnet-4-6" },
+    "backend": {
+      "type": "sandbox",
+      "sandbox_config": { "scope": "thread", "policy_ids": ["p-apis", "p-missing"] }
+    }
+  },
+  "schedules": [],
+  "access_profiles": [
+    {
+      "id": "p-apis",
+      "name": "APIs",
+      "network": { "type": "allow", "hosts": ["api.acme.dev", "api.linear.app", "www.googleapis.com", "git.example.com", "api.github.com"] },
+      "env_vars": { "LOG_LEVEL": "debug" },
+      "proxy_rules": [
+        { "type": "aws", "name": "aws", "enabled": true, "aws": { "access_key_id": { "type": "workspace_secret", "value": "{AWS_KEY_ID}" }, "secret_access_key": { "type": "workspace_secret", "value": "{AWS_SECRET}" } } }
+      ],
+      "rules": [
+        { "match_hosts": ["api.acme.dev"], "source": { "type": "secret", "key": "ACME_KEY" }, "inject": [{ "header": "Authorization", "value": { "type": "template", "template": "Bearer {value}" } }] },
+        { "match_hosts": ["api.linear.app"], "source": { "type": "agent_auth", "connection_id": "c-linear" }, "inject": [{ "header": "Authorization", "value": { "type": "template", "template": "{access_token}" } }] },
+        { "match_hosts": ["www.googleapis.com"], "source": { "type": "connection", "provider_id": "google-oauth-provider", "scopes": ["https://www.googleapis.com/auth/drive.readonly"] }, "inject": [{ "header": "Authorization", "value": { "type": "template", "template": "Bearer {access_token}" } }, { "header": "X-Goog-Token", "value": { "type": "template", "template": "token {access_token}" } }] },
+        { "match_hosts": ["git.example.com"], "source": { "type": "agent_auth", "connection_id": "c-git" }, "inject": [{ "header": "Authorization", "value": { "type": "http_basic", "username": "x-access-token", "password": "{value}" } }] },
+        { "match_hosts": ["api.acme-crm.dev"], "source": { "type": "connection", "provider_id": "acme-crm-oauth-provider" }, "inject": [{ "header": "Authorization", "value": { "type": "http_basic", "username": "{access_token}", "password": "x" } }, { "header": "X-Api-Token", "value": { "type": "template", "template": "token={access_token}" } }] },
+        { "match_hosts": ["dev.azure.com"], "source": { "type": "agent_auth", "connection_id": "c-git" }, "inject": [{ "header": "Authorization", "value": { "type": "http_basic", "username": "", "password": "{value}" } }] },
+        { "match_hosts": ["api.github.com", "github.com"], "source": { "type": "connection", "provider_id": "github-oauth-provider" }, "inject": [{ "header": "Authorization", "value": { "type": "template", "template": "Bearer {access_token}" } }] },
+        { "match_hosts": ["api.acme.dev"], "source": { "type": "secret", "key": "ACME_PAIR" }, "inject": [{ "header": "X-Basic", "value": { "type": "http_basic", "username": "me", "password": "{value}" } }] }
+      ]
+    }
+  ],
+  "connections": [
+    { "id": "c-linear", "slug": "linear", "kind": "oauth2" },
+    { "id": "c-git", "slug": "git-host", "kind": "secret" }
+  ]
+}

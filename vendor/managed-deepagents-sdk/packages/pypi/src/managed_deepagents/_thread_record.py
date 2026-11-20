@@ -52,6 +52,8 @@ class StoredChannel(BaseModel):
     source_thread_key: _Nonblank
     address: JsonValue
     delivery_id: _Nonblank
+    #: The run's own ``reply``; absent, the channel's applies.
+    reply: Literal["auto", "none"] | None = None
 
 
 class StoredOrigin(BaseModel):
@@ -109,6 +111,7 @@ def origin_from_binding(binding: ChannelBinding, sender: str | None) -> StoredOr
                 "source_thread_key": binding["source_thread_key"],
                 "address": address,
                 "delivery_id": binding["delivery_id"],
+                **({"reply": binding["reply"]} if "reply" in binding else {}),
             },
             "sender": sender if is_person_principal(sender) else None,
         }
@@ -192,7 +195,10 @@ def thread_record_metadata(record: ThreadRecord) -> dict[str, JsonValue]:
         "participants": {key: {"role": role} for key, role in record.participants.items()},
     }
     if record.origin is not None:
-        stored["origin"] = record.origin.model_dump(mode="json")
+        stored["origin"] = record.origin.model_dump(
+            mode="json",
+            exclude={"channel": {"reply"}} if record.origin.channel.reply is None else None,
+        )
     return {
         THREAD_RECORD_METADATA: stored,
         THREAD_PARTICIPANTS_METADATA: list(record.participants),

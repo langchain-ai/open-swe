@@ -19,9 +19,9 @@ from managed_deepagents._log import logger
 if TYPE_CHECKING:
     from managed_deepagents._channels.trigger.types import TriggerChannelActionRequest
     from managed_deepagents._channels.types import (
-        ChannelAddress,
         ChannelDestinationProviderConversation,
         ChannelDestinationProviderThread,
+        ConversationAddress,
         JsonValue,
     )
 
@@ -93,7 +93,7 @@ def read_schedule_deliver_to(  # noqa: PLR0911 - validation short-circuits
 
 def address_from_deliver_to(
     to: ChannelDestinationProviderConversation | ChannelDestinationProviderThread,
-) -> ChannelAddress:
+) -> ConversationAddress:
     """Map a deliver_to destination onto a runtime channel address."""
     if to["type"] == "provider_thread":
         return {

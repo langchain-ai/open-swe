@@ -89,9 +89,9 @@ dependencies = [\n\
   \"deepagents>=0.7.30,<1\",\n\
   \"langchain>=1.4.6,<2\",\n\
   \"langchain-core>=1.7.2,<2\",\n\
-  \"langgraph>=1.2.15,<2\",\n\
+  \"langgraph>=1.2.19,<2\",\n\
   \"langgraph-prebuilt>=1.1.1,<2\",\n\
-  \"langgraph-sdk>=0.4.6,<0.5\",\n\
+  \"langgraph-sdk>=0.4.13,<0.5\",\n\
 ]\n\
 \n\
 [build-system]\n\

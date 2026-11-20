@@ -123,7 +123,7 @@ pub(crate) fn build_and_push(
     run(
         build_command(language, target),
         build_dir,
-        "build the deployment image",
+        "build the Agent Server image",
     )?;
     run(
         CommandSpec {
@@ -131,7 +131,7 @@ pub(crate) fn build_and_push(
             args: vec!["push".to_string(), target.tagged_image.clone()],
         },
         build_dir,
-        "push the deployment image",
+        "push the Agent Server image",
     )?;
 
     let output = run(
@@ -146,7 +146,7 @@ pub(crate) fn build_and_push(
             ],
         },
         build_dir,
-        "inspect the pushed deployment image",
+        "inspect the pushed Agent Server image",
     )?;
     resolve_pushed_digest(target, &output.stdout)
 }

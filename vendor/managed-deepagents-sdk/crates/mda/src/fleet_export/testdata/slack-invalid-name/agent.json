@@ -1,0 +1,49 @@
+{
+  "agent": {
+    "id": "33333333-3333-3333-3333-333333333333",
+    "name": "Research Assistant",
+    "revision": "rev_3f9a2b1c",
+    "system_prompt": "You are a helpful research assistant.\n",
+    "instructions": "You are a helpful research assistant.\n",
+    "model": {
+      "id": "anthropic:claude-sonnet-4-6"
+    },
+    "tools": {
+      "tools": [],
+      "interrupt_config": {}
+    },
+    "files": {
+      "AGENTS.md": {
+        "type": "file",
+        "content": "You are a helpful research assistant.\n"
+      }
+    }
+  },
+  "schedules": [],
+  "triggers": [
+    {
+      "template_id": "d809e66e-0000-4000-8000-000000000003",
+      "status": "paused",
+      "config": {
+        "app_name": "Yoda (Slack)",
+        "trigger_mode": "thread",
+        "allow_bot_triggers": false
+      }
+    },
+    {
+      "template_id": "e809e66e-0000-4000-8000-000000000003",
+      "status": "active",
+      "config": {}
+    },
+    {
+      "template_id": "d809e66e-0000-4000-8000-000000000004",
+      "status": "active",
+      "config": {}
+    },
+    {
+      "template_id": "f0000000-0000-4000-8000-000000000009",
+      "status": "active",
+      "config": {}
+    }
+  ]
+}

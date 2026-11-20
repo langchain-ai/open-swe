@@ -98,23 +98,6 @@ def principal_id_from_identity_context(
     return _principal_id_from_claims(claims)
 
 
-def optional_principal_id_from_identity_context(
-    token: object | None,
-    *,
-    key: IdentityContextKey | None = None,
-    issuer: str | None = None,
-    env: Mapping[str, str] | None = None,
-) -> str | None:
-    """Resolve a principal id from an optional event field; ``None`` when absent."""
-    if token is None:
-        return None
-    if not isinstance(token, str):
-        raise InvalidIdentityContextError("identity_context must be a string")
-    if not token.strip():
-        return None
-    return principal_id_from_identity_context(token, key=key, issuer=issuer, env=env)
-
-
 def _require_identity_context_header(token: str) -> None:
     try:
         header = jwt.get_unverified_header(token)
@@ -219,7 +202,6 @@ __all__ = [
     "IdentityContextKey",
     "IdentityContextUnavailableError",
     "InvalidIdentityContextError",
-    "optional_principal_id_from_identity_context",
     "principal_id_from_identity_context",
     "resolve_identity_context_issuer",
     "resolve_identity_context_jwks_url",

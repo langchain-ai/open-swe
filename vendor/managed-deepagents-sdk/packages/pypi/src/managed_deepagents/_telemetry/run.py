@@ -25,11 +25,12 @@ RunOutcome = Literal["success", "failure", "interrupted", "cancelled"]
 #: Whether the run is an agent's own or one of its async subagents'.
 SubagentRole = Literal["lead", "async_subagent"]
 
-MemoryLayerType = Literal["agent", "user"]
+MemoryLayerType = Literal["agent", "assistant", "user"]
 
 #: ``resolve_user_memory_access`` returns the same ``None`` for several distinct
 #: denials, so adoption measured from the presence of ``memory.py`` overcounts.
-#: These name the paths it collapses.
+#: These name the paths it collapses. ``not_slack_dm`` covers every denial by the
+#: default policy, including a direct run that is not private.
 UserMemoryDeniedReason = Literal[
     "not_a_person",
     "not_slack_dm",

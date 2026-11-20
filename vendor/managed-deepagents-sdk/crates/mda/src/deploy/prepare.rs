@@ -17,6 +17,11 @@
 //!
 //! Nothing here prompts. Every decision `mda deploy` asks a human about is
 //! either fixed by policy (repository wins) or a hard failure.
+//!
+//! Compile and requirement emit run project code, so the build runner runs
+//! them as `--phase compile` in its credential-free BuildKit sandbox, then
+//! runs every other step as `--phase provision` with the platform key. The
+//! provision phase reads the compile output as data and runs no project code.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -24,8 +29,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use reqwest::header::HeaderValue;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::context_hub::local_context_has_skills;
 use super::helpers::{
     deployment_is_managed_deep_agent, is_reserved_env_var, secrets_from_env, WORKSPACE_ID_ENV,
 };
@@ -54,8 +61,25 @@ use crate::{compile, project};
 /// repository rather than edited in the Hub.
 pub(crate) const GITHUB_SOURCED_REPO_TAG: &str = "managed-deepagents:github";
 
+/// Written by the compile phase into the output directory and read back by
+/// the provision phase.
+const COMPILED_BUILD_FILE: &str = ".mda-prepare.json";
+
+/// Which part of `mda prepare` to run.
+#[derive(Debug)]
+pub enum PreparePhase {
+    /// Compile and provision in one process.
+    All,
+    /// Compile and emit requirements only. Needs no credentials and makes no
+    /// LangSmith calls; the deployment name is the Context Hub repo to mount.
+    Compile { deployment_name: String },
+    /// Every step except compile, using an existing compile output.
+    Provision,
+}
+
 /// Options for `mda prepare`.
 pub struct PrepareOptions {
+    pub phase: PreparePhase,
     /// Captured at CLI startup and removed from the inherited environment.
     pub build_artifacts_token: Option<OsString>,
     /// Path to the Managed Deep Agent project inside the checkout.
@@ -86,16 +110,78 @@ struct Prepared {
     compiled_files: usize,
 }
 
+/// The compile phase's record of what it compiled. Project code produced the
+/// output directory it sits in, so provision treats it as untrusted data.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompiledBuild {
+    deployment_name: String,
+    has_skills: bool,
+    compiled_files: usize,
+    schedule_crons: compile::schedules::ScheduleCrons,
+}
+
+impl CompiledBuild {
+    fn write(&self, out_dir: &Path) -> Result<()> {
+        let path = out_dir.join(COMPILED_BUILD_FILE);
+        std::fs::write(&path, serde_json::to_vec(self)?)
+            .with_context(|| format!("failed to write {}", path.display()))
+    }
+
+    fn read(out_dir: &Path) -> Result<Self> {
+        let path = out_dir.join(COMPILED_BUILD_FILE);
+        let raw = std::fs::read(&path).with_context(|| {
+            format!(
+                "failed to read {}; run `mda prepare --phase compile` first",
+                path.display()
+            )
+        })?;
+        serde_json::from_slice(&raw)
+            .with_context(|| format!("{} is not a valid compile record", path.display()))
+    }
+
+    /// The compiled entry mounts the Context Hub repo it was compiled for, so
+    /// provisioning a different deployment or skill layout would ship a
+    /// runtime that reads the wrong context.
+    fn ensure_compiled_for(&self, deployment_name: &str, has_skills: bool) -> Result<()> {
+        if self.deployment_name != deployment_name {
+            bail!(
+                "the build was compiled for deployment '{}', not '{deployment_name}'",
+                self.deployment_name
+            );
+        }
+        if self.has_skills != has_skills {
+            bail!("the compiled skills no longer match the synced Context Hub repo; rebuild");
+        }
+        Ok(())
+    }
+}
+
 /// Run `mda prepare` end-to-end.
 pub fn run(opts: PrepareOptions) -> Result<CommandCompletion> {
     update_facts(|facts| facts.deployment.deployment_id = Some(opts.deployment_id.clone()));
+    if let PreparePhase::Compile { deployment_name } = &opts.phase {
+        return run_on_project(&opts, |project, installation| {
+            run_compile(&opts, project, installation, deployment_name)
+        });
+    }
     // Fail before compilation or Context Hub writes if the runner is incompatible.
     let build_token = build_artifacts_token(opts.build_artifacts_token.as_deref())?;
+    run_on_project(&opts, |project, installation| {
+        run_provision(&opts, project, installation, &build_token)
+    })
+}
+
+/// Load the project, run `phase` on it, and show the outcome.
+fn run_on_project(
+    opts: &PrepareOptions,
+    phase: impl FnOnce(&project::Project, &Installation) -> Result<Prepared>,
+) -> Result<CommandCompletion> {
     ensure_project(&opts.path)?;
     let installation = Installation::from_env()?;
     let project = installation.load_project(&opts.path)?;
 
-    match run_inner(&opts, &project, &installation, &build_token) {
+    match phase(&project, &installation) {
         Ok(prepared) => {
             show_sequence(&prepared_items(&project, &prepared))?;
             Ok(CommandCompletion::Succeeded)
@@ -156,7 +242,51 @@ fn failed_items(project: &project::Project, err: &anyhow::Error) -> Vec<Sequence
     )]
 }
 
-fn run_inner(
+fn output_dir(opts: &PrepareOptions, project: &project::Project) -> PathBuf {
+    opts.out
+        .clone()
+        .unwrap_or_else(|| project.root.join(".mda").join("build"))
+}
+
+fn run_compile(
+    opts: &PrepareOptions,
+    project: &project::Project,
+    installation: &Installation,
+    deployment_name: &str,
+) -> Result<Prepared> {
+    let out_dir = output_dir(opts, project);
+    let deploy_context = compile::DeployContext {
+        repo: deployment_name.to_string(),
+        has_skills: local_context_has_skills(project)?,
+    };
+    let compiled = compile_build(project, &out_dir, deploy_context, installation)?;
+    Ok(Prepared {
+        deployment: compiled.deployment_name,
+        out_dir,
+        compiled_files: compiled.compiled_files,
+    })
+}
+
+/// Compile, emit requirement manifests, and record the build in `out_dir`.
+fn compile_build(
+    project: &project::Project,
+    out_dir: &Path,
+    deploy_context: compile::DeployContext,
+    installation: &Installation,
+) -> Result<CompiledBuild> {
+    let summary = compile_for_deploy_step(project, out_dir, &deploy_context, installation)?;
+    emit_requirements_step(project, out_dir, &summary)?;
+    let compiled = CompiledBuild {
+        deployment_name: deploy_context.repo,
+        has_skills: deploy_context.has_skills,
+        compiled_files: summary.copied.len(),
+        schedule_crons: summary.schedule_crons,
+    };
+    compiled.write(out_dir)?;
+    Ok(compiled)
+}
+
+fn run_provision(
     opts: &PrepareOptions,
     project: &project::Project,
     installation: &Installation,
@@ -175,7 +305,7 @@ fn run_inner(
         resolve_api_key_headless(&env_vars)
     })?;
     if ctx.workspace_id.is_none() {
-        bail!("{WORKSPACE_ID_ENV} is required so platform calls are scoped to the deployment's workspace");
+        bail!("{WORKSPACE_ID_ENV} is required so platform calls are scoped to the Agent Server's workspace");
     }
 
     let client = ctx.client()?;
@@ -183,10 +313,10 @@ fn run_inner(
 
     let deployment = client
         .get_deployment(&opts.deployment_id)
-        .context("failed to load the deployment this build belongs to")?;
+        .context("failed to load the Agent Server this build belongs to")?;
     if !deployment_is_managed_deep_agent(&deployment) {
         bail!(
-            "deployment {} is not a Managed Deep Agent deployment",
+            "Agent Server {} does not host a Managed Deep Agent",
             opts.deployment_id
         );
     }
@@ -244,12 +374,22 @@ fn run_inner(
     )?;
     link_context_repo_to_agent(&client, &context_client, &opts.deployment_id, &name)?;
 
-    // -- 4. Compile ---------------------------------------------------------
-    let out_dir = opts
-        .out
-        .clone()
-        .unwrap_or_else(|| project.root.join(".mda").join("build"));
-    let summary = compile_for_deploy_step(project, &out_dir, context, installation)?;
+    // -- 4. Compile, or check the compile phase's output -------------------
+    let out_dir = output_dir(opts, project);
+    let compiled = match opts.phase {
+        PreparePhase::All => {
+            let deploy_context = compile::DeployContext {
+                repo: context.repo,
+                has_skills: context.has_skills,
+            };
+            compile_build(project, &out_dir, deploy_context, installation)?
+        }
+        _ => {
+            let compiled = CompiledBuild::read(&out_dir)?;
+            compiled.ensure_compiled_for(&context.repo, context.has_skills)?;
+            compiled
+        }
+    };
 
     // -- 5. Bake ------------------------------------------------------------
     let snapshot_owner = opts.snapshot_owner.as_deref().unwrap_or(&name);
@@ -269,7 +409,7 @@ fn run_inner(
         connectors: connector_requirements,
         mcp_connections,
         channels: channel_requirements,
-    } = emit_requirements_step(project, &out_dir, &summary)?;
+    } = EmittedRequirements::load(&out_dir)?;
     ensure_workspace_connections(
         &client,
         ctx.workspace_id.as_deref(),
@@ -310,7 +450,7 @@ fn run_inner(
         &assistant_id,
         sandbox_recipe_snapshot.as_deref(),
         &bake_only_secrets,
-        &summary.schedule_crons,
+        &compiled.schedule_crons,
         channel_setup.trigger(),
         !opts.is_preview,
     )?;
@@ -326,7 +466,7 @@ fn run_inner(
     Ok(Prepared {
         deployment: name,
         out_dir,
-        compiled_files: summary.copied.len(),
+        compiled_files: compiled.compiled_files,
     })
 }
 
@@ -380,7 +520,7 @@ fn ensure_hub_repo_is_ours(context_client: &ContextHubClient, name: &str) -> Res
     if context_client.repo_ownership(name)? == RepoOwnership::Foreign {
         bail!(
             "Context Hub repo '{name}' already exists and was not created by Managed Deep Agents. \
-             Rename the deployment or remove that repo, then rebuild."
+             Rename the Agent Server or remove that repo, then rebuild."
         );
     }
     Ok(())
@@ -587,6 +727,55 @@ mod tests {
         let rendered = format!("{items:?}");
         assert!(rendered.contains("Prepare failed"));
         assert!(rendered.contains("boom"));
+    }
+
+    fn compiled_build() -> super::CompiledBuild {
+        super::CompiledBuild {
+            deployment_name: "my-agent".into(),
+            has_skills: true,
+            compiled_files: 3,
+            schedule_crons: BTreeMap::from([(
+                "daily".to_string(),
+                json!({ "graph": "agent", "schedule": "0 9 * * *" }),
+            )]),
+        }
+    }
+
+    #[test]
+    fn compile_record_round_trips_through_the_output_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        compiled_build().write(dir.path()).unwrap();
+        assert_eq!(
+            super::CompiledBuild::read(dir.path()).unwrap(),
+            compiled_build()
+        );
+    }
+
+    #[test]
+    fn provision_requires_a_compile_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = super::CompiledBuild::read(dir.path()).unwrap_err();
+        assert!(format!("{err:#}").contains("--phase compile"));
+
+        std::fs::write(
+            dir.path().join(super::COMPILED_BUILD_FILE),
+            r#"{"deployment_name":"my-agent","has_skills":false,"compiled_files":1,"schedule_crons":{},"api_key":"x"}"#,
+        )
+        .unwrap();
+        assert!(super::CompiledBuild::read(dir.path()).is_err());
+    }
+
+    #[test]
+    fn provision_rejects_a_build_compiled_for_another_deployment_or_skill_layout() {
+        let compiled = compiled_build();
+        compiled.ensure_compiled_for("my-agent", true).unwrap();
+        let err = compiled
+            .ensure_compiled_for("other-agent", true)
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("compiled for deployment 'my-agent'"));
+        assert!(compiled.ensure_compiled_for("my-agent", false).is_err());
     }
 
     #[test]

@@ -1,0 +1,42 @@
+{
+  "agent": {
+    "id": "99999999-9999-9999-9999-999999999999",
+    "name": "Team Triage",
+    "system_prompt": "Triage the team's work.",
+    "model": { "id": "openai:gpt-5.6-terra" },
+    "permissions": { "identity": "shared", "visibility": "tenant" },
+    "tools": {
+      "tools": [
+        { "name": "search", "mcp_server_url": "https://mcp.notion.com/mcp", "mcp_server_name": "Notion" }
+      ]
+    },
+    "subagents": [
+      {
+        "name": "issue triager",
+        "description": "Looks up Linear issues.",
+        "system_prompt": "You triage Linear issues.",
+        "tools": {
+          "tools": [
+            { "name": "list_issues", "mcp_server_url": "https://mcp.linear.app/mcp", "mcp_server_name": "Linear" }
+          ]
+        }
+      },
+      {
+        "name": "notion reader",
+        "description": "Reads Notion pages.",
+        "system_prompt": "You read Notion pages.",
+        "tools": {
+          "tools": [
+            { "name": "search", "mcp_server_url": "https://mcp.notion.com/mcp", "mcp_server_name": "Notion" }
+          ]
+        }
+      }
+    ]
+  },
+  "schedules": [],
+  "mcp_servers": [
+    { "name": "Notion", "url": "https://mcp.notion.com/mcp", "auth_type": "oauth", "headers": [] },
+    { "name": "Linear", "url": "https://mcp.linear.app/mcp", "auth_type": "oauth", "headers": [] }
+  ],
+  "connections": []
+}

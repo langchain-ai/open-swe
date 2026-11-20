@@ -11,7 +11,11 @@ from managed_deepagents._telemetry.client import TelemetryClient
 from managed_deepagents._telemetry.gates import is_telemetry_disabled
 from managed_deepagents._telemetry.otel import LogAttributes, record_log, set_log_attributes
 from managed_deepagents._telemetry.run import finish_run
-from managed_deepagents._telemetry.transport import posthog_transport
+from managed_deepagents._telemetry.transport import (
+    fanout_transport,
+    posthog_transport,
+    segment_transport,
+)
 from managed_deepagents.define_browser import BROWSER_TOOL_PREFIX
 
 if TYPE_CHECKING:
@@ -20,10 +24,10 @@ if TYPE_CHECKING:
     from langgraph.callbacks import GraphInterruptEvent
 
     from managed_deepagents._telemetry.run import PendingRun, RunCompletedEvent, RunOutcome
-    from managed_deepagents._telemetry.transport.posthog import PosthogTransport
+    from managed_deepagents._telemetry.transport.fanout import FanoutTransport
 
 _client: TelemetryClient[RunCompletedEvent] | None = None
-_transport: PosthogTransport | None = None
+_transport: FanoutTransport | None = None
 _client_resolved = False
 _client_lock = Lock()
 
@@ -34,7 +38,11 @@ def _run_client() -> TelemetryClient[RunCompletedEvent] | None:
     global _client, _transport, _client_resolved  # noqa: PLW0603 - process-wide cache, resolved once
     with _client_lock:
         if not _client_resolved:
-            _transport = None if is_telemetry_disabled(os.environ) else posthog_transport()
+            _transport = (
+                None
+                if is_telemetry_disabled(os.environ)
+                else fanout_transport([posthog_transport(), segment_transport()])
+            )
             if _transport is not None:
                 _client = TelemetryClient(_transport)
             _client_resolved = True
@@ -51,7 +59,7 @@ def set_run_telemetry_client_for_tests(override: TelemetryClient[RunCompletedEve
 
 
 def flush_run_telemetry_for_tests() -> bool:
-    """Wait for queued events from the built-in transport."""
+    """Wait for queued events from the built-in transports."""
     return _transport is None or _transport.idle()
 
 

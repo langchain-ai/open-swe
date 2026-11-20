@@ -34,7 +34,8 @@ pub(crate) fn validate_agent_id(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn canonical_name(value: &str) -> String {
+/// Lowercase ASCII letters and digits joined by single dashes.
+pub(crate) fn canonical_name(value: &str) -> String {
     let mut out = String::new();
     let mut previous_was_dash = false;
     for ch in value.chars() {

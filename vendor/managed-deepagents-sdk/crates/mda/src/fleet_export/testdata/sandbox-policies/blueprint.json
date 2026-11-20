@@ -1,0 +1,182 @@
+{
+  "version": 2,
+  "name": "demo",
+  "language": "python",
+  "instructions": "Call the APIs you are allowed to.",
+  "model": "anthropic:claude-sonnet-4-6",
+  "sandbox": true,
+  "memory": "agent",
+  "channels": [],
+  "sandbox_options": {
+    "env_vars": {
+      "LOG_LEVEL": "debug"
+    },
+    "access_control": {
+      "allow_list": [
+        "api.acme.dev",
+        "api.linear.app",
+        "www.googleapis.com",
+        "git.example.com",
+        "api.github.com"
+      ]
+    },
+    "rules": [
+      {
+        "name": "api-acme-dev",
+        "match_hosts": [
+          "api.acme.dev"
+        ],
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": {
+              "workspace_secret": "Bearer {ACME_KEY}"
+            }
+          }
+        ]
+      },
+      {
+        "name": "api-linear-app",
+        "match_hosts": [
+          "api.linear.app"
+        ],
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": {
+              "connection": {
+                "connection": {
+                  "slug": "linear",
+                  "owner": "user"
+                },
+                "format": "raw"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "www-googleapis-com",
+        "match_hosts": [
+          "www.googleapis.com"
+        ],
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": {
+              "connection": {
+                "connection": {
+                  "slug": "google",
+                  "owner": "user"
+                },
+                "format": "bearer"
+              }
+            }
+          },
+          {
+            "name": "X-Goog-Token",
+            "value": {
+              "connection": {
+                "connection": {
+                  "slug": "google",
+                  "owner": "user"
+                },
+                "format": {
+                  "template": "token {token}"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "git-example-com",
+        "match_hosts": [
+          "git.example.com"
+        ],
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": {
+              "connection": {
+                "connection": {
+                  "slug": "git-host",
+                  "owner": "user"
+                },
+                "format": {
+                  "basic": {
+                    "username": "x-access-token"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "api-acme-crm-dev",
+        "match_hosts": [
+          "api.acme-crm.dev"
+        ],
+        "headers": [
+          {
+            "name": "X-Api-Token",
+            "value": {
+              "connection": {
+                "connection": {
+                  "slug": "acme-crm",
+                  "owner": "user"
+                },
+                "format": {
+                  "template": "token={token}"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "api-acme-dev-2",
+        "match_hosts": [
+          "api.acme.dev"
+        ],
+        "headers": [
+          {
+            "name": "X-Basic",
+            "value": {
+              "connection": {
+                "connection": {
+                  "slug": "acme-pair",
+                  "owner": "agent"
+                },
+                "format": {
+                  "basic": {
+                    "username": "me"
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "commented_out": "After your first `mda deploy`, create the `acme-pair` connection (see \"Connections to create\" in FLEET_EXPORT.md).\nThen uncomment this rule and deploy again."
+      }
+    ],
+    "provider_rules": [
+      {
+        "type": "aws",
+        "name": "aws",
+        "enabled": true,
+        "aws": {
+          "access_key_id": {
+            "type": "workspace_secret",
+            "value": "{AWS_KEY_ID}"
+          },
+          "secret_access_key": {
+            "type": "workspace_secret",
+            "value": "{AWS_SECRET}"
+          }
+        }
+      }
+    ]
+  }
+}

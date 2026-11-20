@@ -54,6 +54,8 @@ class IngressThreadOrigin(TypedDict):
     sender: str
 
 
+TAKEABLE_METADATA_KEY = "mda_takeable"
+_TAKEN_CANCEL_REASON_PREFIX = "taken:"
 #: Key under which the values a join returns carry the error a run ended with.
 _JOIN_ERROR_KEY = "__error__"
 #: The errors the Agent Server ends a cancelled run with: stopped, or replaced.
@@ -66,6 +68,8 @@ class IngressRunObservation(TypedDict):
     values: dict[str, Any]
     #: ``None`` when the server omitted a status; each transport validates it.
     status: RunStatus | None
+    #: Steering moved this run's message into the thread's active run.
+    taken: NotRequired[Literal[True]]
 
 
 class _RunOptions(TypedDict, total=False):
@@ -103,6 +107,7 @@ def _run_options(
     metadata: Mapping[str, Any] | None = None,
     *,
     webhook: str | None = None,
+    takeable: bool = False,
 ) -> _RunOptions:
     options: _RunOptions = {}
     if webhook is not None:
@@ -112,6 +117,8 @@ def _run_options(
     if config is not None:
         options["config"] = config
     run_metadata: dict[str, Any] = dict(metadata or {})
+    if takeable:
+        run_metadata[TAKEABLE_METADATA_KEY] = True
     # Hand the current log context's trace id, provider event type and user
     # resolution to the run, beside the run's own metadata, so the run's
     # telemetry can report them. The Agent Server merges run metadata into the
@@ -312,6 +319,12 @@ def lookup_status(error: Exception) -> int | None:
     return status if isinstance(status, int) else None
 
 
+def _has_authored_context(context: Context | None) -> bool:
+    return context is not None and not (
+        isinstance(context, Mapping) and set(context) <= {"mda_channel"}
+    )
+
+
 async def start_ingress_run(
     *,
     client: LangGraphClient,
@@ -348,7 +361,16 @@ async def start_ingress_run(
         assistant_id,
         input=run_input,
         multitask_strategy=multitask_strategy,
-        **_run_options(context, config, metadata, webhook=webhook),
+        **_run_options(
+            context,
+            config,
+            metadata,
+            webhook=webhook,
+            takeable=multitask_strategy == "enqueue"
+            and not state
+            and webhook is None
+            and not _has_authored_context(context),
+        ),
     )
     return _started_run(thread_id, run)
 
@@ -367,6 +389,11 @@ async def resume_ingress_run(
     """Enqueue a keyed interrupt response without creating a thread."""
     if thread_origin is not None:
         thread = await client.threads.get(thread_id)
+        binding = _resumed_binding(thread, thread_origin["binding"])
+        if binding is not thread_origin["binding"]:
+            thread_origin = {**thread_origin, "binding": binding}
+            if isinstance(context, Mapping) and "mda_channel" in context:
+                context = cast("Context", {**context, "mda_channel": binding})
         await _write_thread_record(client, thread_id, thread, thread_origin)
     run = await client.runs.create(
         thread_id,
@@ -376,6 +403,21 @@ async def resume_ingress_run(
         **_run_options(context, config, metadata),
     )
     return _started_run(thread_id, run)
+
+
+def _resumed_binding(thread: object, binding: ChannelBinding) -> ChannelBinding:
+    """A resume continues the paused run, so it keeps that run's stored ``reply``."""
+    metadata = thread.get("metadata") if isinstance(thread, Mapping) else None
+    record = parse_thread_record(metadata)
+    stored = record.origin.channel if record is not None and record.origin is not None else None
+    if (
+        "reply" in binding
+        or stored is None
+        or stored.reply is None
+        or stored.source_thread_key != binding["source_thread_key"]
+    ):
+        return binding
+    return {**binding, "reply": stored.reply}
 
 
 def _next_record(metadata: object, origin: IngressThreadOrigin) -> ThreadRecord:
@@ -456,4 +498,8 @@ async def observe_ingress_run(
     status = run.get("status") if isinstance(run, Mapping) else None
     if isinstance(status, str):
         set_log_attributes({"run_status": status})
-    return {"values": values, "status": status}
+    observed: IngressRunObservation = {"values": values, "status": status}
+    cancel_reason = run.get("cancel_reason") if isinstance(run, Mapping) else None
+    if isinstance(cancel_reason, str) and cancel_reason.startswith(_TAKEN_CANCEL_REASON_PREFIX):
+        observed["taken"] = True
+    return observed

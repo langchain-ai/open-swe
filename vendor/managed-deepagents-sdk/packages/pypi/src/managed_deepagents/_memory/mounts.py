@@ -42,12 +42,14 @@ def managed_context_backend(
     *,
     mount_agent_memory: bool = False,
     user_memory_backend: BackendProtocol | None = None,
+    assistant_memory_backend: BackendProtocol | None = None,
     selected_skills_backend: BackendProtocol | None = None,
 ) -> CompositeBackend:
     routes = managed_context_routes(
         context_backend,
         mount_agent_memory=mount_agent_memory,
         user_memory_backend=user_memory_backend,
+        assistant_memory_backend=assistant_memory_backend,
         selected_skills_backend=selected_skills_backend,
     )
     default_backend = sandbox_backend if sandbox_backend is not None else state_backend_cls()
@@ -74,6 +76,7 @@ def managed_context_routes(
     *,
     mount_agent_memory: bool = False,
     user_memory_backend: BackendProtocol | None = None,
+    assistant_memory_backend: BackendProtocol | None = None,
     selected_skills_backend: BackendProtocol | None = None,
 ) -> dict[str, BackendProtocol]:
     routes: dict[str, BackendProtocol] = {
@@ -92,6 +95,11 @@ def managed_context_routes(
         if mount_agent_memory
         else UnmountedMemoryBackend("agent")
     )
+    routes["/memories/assistant/"] = (
+        MountedPathBackend.directory(assistant_memory_backend, "", "/memories/assistant")
+        if assistant_memory_backend is not None
+        else UnmountedMemoryBackend("assistant")
+    )
     routes["/memories/user/"] = (
         MountedPathBackend.directory(user_memory_backend, "", "/memories/user")
         if user_memory_backend is not None
@@ -108,7 +116,7 @@ class UnmountedMemoryBackend(BackendProtocol):
     route and would fail the whole search on one route's error.
     """
 
-    def __init__(self, layer: Literal["agent", "user"]) -> None:
+    def __init__(self, layer: Literal["agent", "assistant", "user"]) -> None:
         self._layer = layer
 
     def ls(self, path: str = "/") -> LsResult:

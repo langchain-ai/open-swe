@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "name": "demo",
+  "language": "python",
+  "instructions": "Speak like Yoda.\n",
+  "model": "anthropic:claude-sonnet-4-6",
+  "sandbox": false,
+  "memory": "agent",
+  "channels": [
+    {
+      "slack": {
+        "name": "yoda -slack",
+        "trigger_mode": "all",
+        "allow_bot_triggers": true
+      }
+    }
+  ]
+}

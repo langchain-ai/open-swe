@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         FilesystemPermission,
         SubAgent,
     )
+    from deepagents.backends.protocol import BackendProtocol
     from langchain.agents.middleware import InterruptOnConfig
     from langchain.agents.middleware.types import AgentMiddleware
     from langchain.agents.structured_output import ResponseFormat
@@ -51,8 +52,9 @@ if TYPE_CHECKING:
         """MCP servers whose tools this subagent gets, instead of this agent's.
 
         Unset inherits this agent's MCP servers; `[]` or `None` gives it none.
-        A sync subagent may select only servers this agent loads; its own
-        `tools`, or this agent's non-MCP tools, are kept.
+        A server this agent doesn't load loads for this subagent only; export it
+        from ``tools/mcp.py`` so deploy finds its connections. Its own `tools`,
+        or this agent's non-MCP tools, are kept.
         """
 
     class ManagedAsyncSubAgent(ManagedSubAgent, _AsyncFlag):
@@ -135,6 +137,7 @@ def define_deep_agent(
     skills: SkillSelection | Omitted | None = OMITTED,
     memory: MemoryDefinition | Omitted | None = OMITTED,
     browser: BrowserDefinition | Omitted | None = OMITTED,
+    routes: Mapping[str, BackendProtocol] | None = None,
     disable_memory: bool | None = None,
     metadata: Mapping[str, object] | None = None,
     **kwargs: Never,
@@ -172,8 +175,15 @@ def define_deep_agent(
 
     A declarative subagent's ``mcp`` narrows which MCP servers' tools it gets:
     unset inherits this agent's, a list keeps only those servers, and ``[]`` or
-    ``None`` keeps none. A sync subagent may select only servers this agent
-    loads, and a sync ``"mode": "fork"`` subagent cannot set it.
+    ``None`` keeps none. A server this agent doesn't load loads for that
+    subagent only, and a sync ``"mode": "fork"`` subagent cannot set it.
+
+    ``routes`` mounts Deep Agents backends at path prefixes, like
+    ``CompositeBackend(routes=...)``: ``{"/documents/": StoreBackend(...)}``
+    sends ``/documents/a.md`` to that backend as ``/a.md``, and unmatched paths
+    keep the managed backend. Prefixes must be absolute directories and must not
+    overlap MDA's own mounts (``/instructions.md``, ``/skills/``, ``/memories/``).
+    Routes apply to file tools, not to shell commands in a sandbox.
 
     ``metadata`` is MDA-owned authoring config (not a ``create_deep_agent``
     kwarg): the runtime applies it via ``.with_config({"metadata": ...})`` so
@@ -226,10 +236,20 @@ def define_deep_agent(
         config["debug"] = debug
     if metadata is not None:
         config["metadata"] = dict(metadata)
+    config.update(_routes_config(routes))
 
     config.update(copy_managed_selections(instructions, mcp, sandbox, skills, memory, browser))
 
     return DeepAgentDefinition(config)
+
+
+def _routes_config(routes: object) -> dict[str, object]:
+    if routes is None:
+        return {}
+    # Imported lazily so authoring modules without routes skip loading backends.
+    from managed_deepagents._routes import snapshot_routes  # noqa: PLC0415
+
+    return {"routes": snapshot_routes(routes)}
 
 
 _ASYNC_SUBAGENT_UNSUPPORTED_KEYS = ("runnable", "graph_id", "url", "headers")

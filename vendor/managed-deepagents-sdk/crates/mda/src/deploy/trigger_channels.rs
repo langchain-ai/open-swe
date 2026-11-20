@@ -391,7 +391,7 @@ pub(crate) fn artifact(prepared: &PreparedTriggerChannel) -> serde_json::Value {
     })
 }
 
-const SKIPPED_SETUP: &str = "Continuing without the Slack channel. The deployment is live, but it receives no Slack events until you run `mda deploy` again and finish setting up the Slack app.";
+const SKIPPED_SETUP: &str = "Continuing without the Slack channel. The Agent Server is live, but it receives no Slack events until you run `mda deploy` again and finish setting up the Slack app.";
 
 /// Fail before uploading when registering the channel could not finish. The
 /// env credentials are checked always. Without a terminal, a new channel
@@ -415,14 +415,9 @@ pub(crate) fn preflight(
 
 /// Why LangSmith can't create the Slack app without a terminal, if it can't.
 fn unattended_problem(client: &langsmith::Client) -> Option<String> {
-    let self_hosted = client.is_self_hosted();
     // Not knowing whether LangSmith can create the app leaves it to setup.
-    let manager = if self_hosted {
-        None
-    } else {
-        client.slack_manager().ok().flatten()
-    };
-    slack_app::unattended_problem(self_hosted, manager.as_ref())
+    let manager = client.slack_manager().ok().flatten();
+    slack_app::unattended_problem(client.is_self_hosted(), manager.as_ref())
 }
 
 /// Whether Trigger Server already has the deployment's channel, so deploy
@@ -465,7 +460,7 @@ pub(crate) fn status(
 fn registered_status(registered: Option<Option<&str>>) -> ChannelStatus {
     match registered {
         None => ChannelStatus::NeedsSetup(
-            "No Slack app is connected to this deployment yet.".to_string(),
+            "No Slack app is connected to this Agent Server yet.".to_string(),
         ),
         Some(None | Some("active")) => ChannelStatus::Ready,
         Some(Some(status)) => {
@@ -554,7 +549,7 @@ fn transient_failure_category(error: anyhow::Error) -> anyhow::Error {
 }
 
 const READY: &str =
-    "Slack channel ready · the Slack app sends its events to this deployment through LangSmith";
+    "Slack channel ready: the Slack app sends its events to this Agent Server through LangSmith";
 
 /// What Slack setup shows in a terminal.
 struct LiveUi {
@@ -659,17 +654,17 @@ where
             let deployment_id = deployment_id.clone();
             if !interactive {
                 bail!(
-                    "Slack app is connected to deployment {deployment_id} and stays there. Rerun `mda deploy` in a terminal to move it to this deployment, or use another Slack app."
+                    "Slack app is connected to Agent Server {deployment_id} and stays there. Rerun `mda deploy` in a terminal to move it to this Agent Server, or use another Slack app."
                 );
             }
             if !confirm_move(&deployment_id)? {
                 bail!(
-                    "Slack app stays connected to deployment {deployment_id}. Use another Slack app for this deployment."
+                    "Slack app stays connected to Agent Server {deployment_id}. Use another Slack app for this Agent Server."
                 );
             }
             let response = setup(Some(&deployment_id))?;
             let _ = cliclack::log::info(format!(
-                "Moved the Slack app from deployment {deployment_id}."
+                "Moved the Slack app from Agent Server {deployment_id}."
             ));
             response
         }
@@ -685,7 +680,7 @@ where
 
 fn confirm_slack_app_move(deployment_id: &str) -> Result<bool> {
     cliclack::confirm(format!(
-        "Slack app is connected to deployment {deployment_id}. Move it to this deployment? That deployment's Slack channel stops receiving events."
+        "Slack app is connected to Agent Server {deployment_id}. Move it to this Agent Server? That Agent Server's Slack channel stops receiving events."
     ))
     .initial_value(true)
     .interact()
@@ -1026,7 +1021,7 @@ mod tests {
         assert_eq!(calls, 1);
         assert!(error
             .to_string()
-            .contains(&format!("stays connected to deployment {HOLDER}")));
+            .contains(&format!("stays connected to Agent Server {HOLDER}")));
     }
 
     #[test]

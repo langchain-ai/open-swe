@@ -2,7 +2,7 @@
 
 **Verdict: not upstream as-is.** A stopgap: it turns off MDA's proxy handling for the sandbox altogether.
 
-**Changed:** `managed_deepagents/namespaces.py` (`define_sandbox`), `sandbox.py` (`manages_proxy`), `runtime.py` (`_sync_sandbox_proxy_config`). Open SWE sets it in `mda/rt/managed_sandbox.py`.
+**Changed:** `managed_deepagents/namespaces.py` (`define_sandbox`), `sandbox.py` (`manages_proxy`, `RESOLUTION_OPTION_KEYS`), `runtime.py` (`_sync_sandbox_proxy_config` reads it from the run's resolved sandbox). Open SWE sets it in `mda/rt/managed_sandbox.py`.
 
 ## What
 
@@ -10,11 +10,11 @@
 
 ## Why
 
-Before every command it runs in the sandbox, MDA replaces the sandbox's whole proxy config with the one the project declares, or with no rules. Open SWE's backend keeps two rules on the same sandbox: the thread's repository-scoped GitHub token for `github.com`/`api.github.com`, and the tool channel's capability header. The first command MDA ran itself, such as the browser saving a screenshot, would wipe them.
+Before every command it runs in the sandbox, MDA replaces the sandbox's whole proxy config with the one the project declares, or with no rules. Open SWE keeps two rules on the sandbox: the thread's repository-scoped GitHub token for `github.com`/`api.github.com`, and the tool channel's capability header. The first command MDA ran itself, such as the browser saving a screenshot, would wipe them.
 
-**Cost:** on these sandboxes no MDA connection, channel or connector can inject credentials through the proxy, since MDA no longer writes any rules there.
+**Cost:** on these sandboxes no MDA connection, channel or connector can inject credentials through the proxy: the only config written there is Open SWE's.
 
-Open SWE sets it only on the sandboxes whose proxy config its backend writes. Where the backend's `MDA_WRITES_SANDBOX_PROXY` is on, the run's sandbox definition declares the whole config instead, as the backend hands it over: GitHub's rules with a token it minted for the run's scope and the backend's own rules for the sandbox. The backend then writes none of it, so one writer still owns every rule. To have MDA write it before the backend uses the sandbox, Open SWE runs a no-op command through a fresh handle from the hook backend's `bind_runtime`: the hook's own handle keeps the sandbox definition it resolved first, from before the backend's rules were known.
+Open SWE sets it on every run's sandbox. Its backend writes none of the sandbox's proxy config: MDA writes all of it, as the backend hands it over, GitHub's rules with a token it minted for the run's scope and the backend's own rules for the sandbox, so one writer still owns every rule. That config names the sandbox, so it is known only once the sandbox is open, after MDA resolved the run's sandbox through `define_sandbox(resolve=...)`, which it does once per run. So Open SWE's `SandboxProxyWriter` writes it through MDA's own `SandboxProxyConfigSync` (`managed_deepagents._sandbox_proxy`) once the sandbox has booted, outside any command, and Open SWE's resolver returns every run's sandbox with this option, which MDA merges over the declaring definition: MDA's per-run write before the run's first command leaves the config alone instead of writing one with no rules over it. An external sandbox keeps the config its harness gave it.
 
 ## Upstream
 

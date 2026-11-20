@@ -26,6 +26,7 @@ GraphBuildPhase = Literal[
     "create_deep_agent",
 ]
 GraphBuildKind = Literal["run", "read"]
+GraphCacheState = Literal["hit", "miss", "off"]
 
 _T = TypeVar("_T")
 
@@ -33,7 +34,7 @@ _T = TypeVar("_T")
 class GraphBuildTiming:
     """Wall time of each managed phase, from construction to :meth:`log`."""
 
-    __slots__ = ("_clock", "_phases", "_sizes", "_started", "_steps")
+    __slots__ = ("_cache", "_clock", "_phases", "_sizes", "_started", "_steps")
 
     def __init__(self, clock: Callable[[], float] = time.perf_counter) -> None:
         self._clock = clock
@@ -41,6 +42,7 @@ class GraphBuildTiming:
         self._phases: dict[GraphBuildPhase, float] = {}
         self._steps: dict[GraphBuildPhase, dict[str, float]] = {}
         self._sizes: dict[str, int] = {}
+        self._cache: GraphCacheState | None = None
 
     @contextmanager
     def phase(self, name: GraphBuildPhase) -> Generator[None]:
@@ -72,14 +74,18 @@ class GraphBuildTiming:
         """Record what the agent graph is built from."""
         self._sizes = {"tools": tools, "middleware": middleware, "subagents": subagents}
 
+    def set_cache(self, state: GraphCacheState) -> None:
+        """Record whether the graph came from the cache: hit, miss, or off (not cacheable)."""
+        self._cache = state
+
     def log(self, *, kind: GraphBuildKind, run_id: str | None) -> None:
         """Write the total, each phase in the order it first finished, and the sizes."""
         total_ms = _ms(self._clock() - self._started)
-        scope = (
-            f"kind={kind}"
-            if run_id is None
-            else f"kind={kind}, run_id={logger.log_identifier(run_id)}"
-        )
+        scope = f"kind={kind}"
+        if self._cache is not None:
+            scope += f", cache={self._cache}"
+        if run_id is not None:
+            scope += f", run_id={logger.log_identifier(run_id)}"
         parts = [self._phase_text(name, seconds) for name, seconds in self._phases.items()]
         parts.extend(f"{name}={count}" for name, count in self._sizes.items())
         logger.info(
@@ -89,6 +95,7 @@ class GraphBuildTiming:
             f": {' '.join(parts)}" if parts else "",
             attributes={
                 "mda.graph_build.kind": kind,
+                **({"mda.graph_build.cache": self._cache} if self._cache is not None else {}),
                 "mda.graph_build.total_ms": total_ms,
                 **{
                     f"mda.graph_build.{name}_ms": _ms(seconds)

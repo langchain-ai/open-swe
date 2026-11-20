@@ -1,8 +1,7 @@
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
-#[test]
-fn prepare_without_runner_credential_fails_before_loading_project() {
-    let output = Command::new(env!("CARGO_BIN_EXE_mda"))
+fn prepare_without_credentials(extra_args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_mda"))
         .args([
             "prepare",
             "missing-project",
@@ -11,17 +10,42 @@ fn prepare_without_runner_credential_fails_before_loading_project() {
             "--revision-id",
             "revision",
         ])
+        .args(extra_args)
         .env_clear()
         .env("NO_COLOR", "1")
         .stdin(Stdio::null())
         .output()
-        .unwrap();
+        .unwrap()
+}
+
+#[test]
+fn prepare_without_runner_credential_fails_before_loading_project() {
+    for phase in ["all", "provision"] {
+        let output = prepare_without_credentials(&["--phase", phase]);
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("MDA_BUILD_ARTIFACTS_TOKEN is required"),
+            "{stderr}"
+        );
+    }
+}
+
+#[test]
+fn compile_phase_needs_no_runner_credential() {
+    let output = prepare_without_credentials(&["--phase", "compile", "--deployment-name", "bot"]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("MDA_BUILD_ARTIFACTS_TOKEN is required"),
-        "{stderr}"
-    );
+    assert!(!stderr.contains("MDA_BUILD_ARTIFACTS_TOKEN"), "{stderr}");
+    assert!(stderr.contains("missing-project"), "{stderr}");
+}
+
+#[test]
+fn compile_phase_requires_the_deployment_name() {
+    let output = prepare_without_credentials(&["--phase", "compile"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("--deployment-name is required"), "{stderr}");
 }
 
 #[cfg(unix)]

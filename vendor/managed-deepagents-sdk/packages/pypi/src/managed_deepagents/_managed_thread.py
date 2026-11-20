@@ -116,7 +116,11 @@ def build_run_thread(
     record = parse_thread_record(metadata)
     binding = live
     if binding is None and record is not None and record.origin is not None:
-        binding = origin_binding(record.origin.channel, _schedule_event(metadata, configurable))
+        event = _schedule_event(metadata, configurable)
+        binding = origin_binding(record.origin.channel, event)
+        # A stored reply is the paused run's choice, which a schedule's run is not.
+        if binding is not None and event is not None:
+            binding.pop("reply", None)
     participants = _participants(record)
     origin = None
     if binding is not None:

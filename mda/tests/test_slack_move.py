@@ -11,7 +11,7 @@ from langchain.tools import ToolRuntime
 from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.prebuilt.tool_node import ToolCallRequest
-from managed_deepagents import SlackChannelTarget
+from managed_deepagents import SlackChannelAddress
 from pydantic import BaseModel
 from runtime_api.endpoint import Endpoint
 from runtime_api.slack import (
@@ -130,7 +130,7 @@ def test_a_move_into_another_channel_posts_there_through_mda(
     assert options == {
         "new_thread": True,
         "hand_off": True,
-        "to": SlackChannelTarget(conversation_id="C2"),
+        "to": SlackChannelAddress(conversation_id="C2"),
     }
     [(_prepared, request), (_recorded, moved)] = backend.calls
     assert cast(SlackMoveRequest, request).channel_id == "C2"
@@ -230,7 +230,7 @@ def test_a_bare_breakout_into_another_channel_moves_the_thread_there(
     assert cast(SlackMoveRequest, request).channel_id == "C2"
     assert cast(SlackMoved, moved).channel_id == "C2"
     [(_message, options)] = channel.posts
-    assert options["to"] == SlackChannelTarget(conversation_id="C2")
+    assert options["to"] == SlackChannelAddress(conversation_id="C2")
 
 
 def test_any_other_turn_calls_the_model(monkeypatch: pytest.MonkeyPatch, channel: _Channel) -> None:

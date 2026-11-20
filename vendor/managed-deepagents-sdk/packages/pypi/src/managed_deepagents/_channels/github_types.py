@@ -36,11 +36,12 @@ from managed_deepagents._channels.github_schema import (
     _WorkflowPayload,
 )
 from managed_deepagents._channels.http.endpoint import EndpointRequest, EventEndpoint
-from managed_deepagents._channels.types import (
-    ChannelEventCallback,
-    ChannelEventResult,
-    ReadsThreadState,
+from managed_deepagents._channels.run_input import (
+    ChannelRunInput,
+    ChannelRunOptions,
+    GitHubRun,
 )
+from managed_deepagents._channels.types import ReadsThreadState
 
 if TYPE_CHECKING:
     from langgraph_sdk.schema import ThreadState
@@ -135,10 +136,9 @@ class GitHubInstallationEvent(Generic[_InstallationPayloadT]):
 
 
 @dataclass(frozen=True)
-class GitHubChannelThread(ReadsThreadState):
-    """The conversation's thread an event belongs to.
-
-    A handler runs before any run exists, so this is not a run's runtime.
+class GitHubHookThread:
+    """The thread ``on_received`` and ``on_finish`` hear about: a handler's
+    thread without ``get_state``, which only a handler deciding an event can read.
     """
 
     id: str
@@ -151,6 +151,15 @@ class GitHubChannelThread(ReadsThreadState):
     for this thread doesn't start: it only has the App tell the issue or pull
     request that a decision is pending. Runs on threads of its own choosing
     (``thread``) still start."""
+
+
+@dataclass(frozen=True)
+class GitHubChannelThread(ReadsThreadState, GitHubHookThread):
+    """The conversation's thread an event belongs to.
+
+    A handler runs before any run exists, so this is not a run's runtime.
+    """
+
     _get_state: Callable[[], Awaitable[ThreadState | None]] | None = field(
         default=None, repr=False, compare=False
     )
@@ -185,13 +194,15 @@ class GitHubAppOptions(TypedDict, total=False):
     so install the App only on the ones the agent may change."""
 
 
-GitHubEventResult: TypeAlias = ChannelEventResult
+GitHubEventResult: TypeAlias = (
+    ChannelRunInput | list[GitHubRun] | tuple[ChannelRunInput, ChannelRunOptions] | None
+)
 """What an event handler returns: a run's input, as ``agent.invoke`` takes it (a
 string, a message such as ``HumanMessage(...)``, or state such as
 ``{"messages": [...]}``), one run on the event's conversation; or a list of runs
 with options, such as ``[{"input": ..., "context": ..., "metadata": ...}]``.
-``None`` starts nothing. ``reply(message)`` starts nothing too, and posts
-``message`` where the event came from."""
+``None`` starts nothing. GitHub posts no answer, so a run has no ``auto_post``
+and a handler has no ``reply(message)``."""
 
 _Key = TypeVar("_Key", bound=str, default=str)
 _EventPayload = TypeVar("_EventPayload", default=GitHubPayload)
@@ -420,9 +431,13 @@ GitHubEndpointRequest = (
 so one receiver validates every key it is sent with
 ``TypeAdapter(GitHubEndpointRequest)``."""
 
-GitHubEventCallback = ChannelEventCallback[GitHubEvent[_Payload], GitHubChannelThread]
-GitHubInstallationEventCallback = ChannelEventCallback[
-    GitHubInstallationEvent[_InstallationPayloadT], GitHubChannelThread
+GitHubEventCallback = Callable[
+    [GitHubEvent[_Payload], GitHubChannelThread],
+    GitHubEventResult | Awaitable[GitHubEventResult],
+]
+GitHubInstallationEventCallback = Callable[
+    [GitHubInstallationEvent[_InstallationPayloadT], GitHubChannelThread],
+    GitHubEventResult | Awaitable[GitHubEventResult],
 ]
 
 __all__ = [

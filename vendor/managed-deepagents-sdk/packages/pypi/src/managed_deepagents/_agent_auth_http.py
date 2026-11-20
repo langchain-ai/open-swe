@@ -1,7 +1,7 @@
 """Shared Agent Auth HTTP transport and credential-list paging.
 
-Used by ``credentials.get`` and the credential gate so both talk to the same
-API with the same headers, redirect policy, and page walker.
+Used by ``credentials.get``, the credential gate and agent access tokens so all
+talk to the same API with the same headers, redirect policy, and page walker.
 """
 
 from __future__ import annotations
@@ -26,11 +26,18 @@ _HTTP_SERVER_ERROR_END = 600
 AGENT_AUTH_TIMEOUT_SECONDS = 10.0
 AGENT_AUTH_PROBLEM_HINT_MAX_CHARS = 200
 _PROBLEM_HINT_FIELDS: Final = ("detail", "remedy")
-_CLIENT = httpx.Client(
-    verify=ssl.create_default_context(),
-    cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
-    follow_redirects=False,
-)
+
+
+def agent_auth_client(transport: httpx.BaseTransport | None = None) -> httpx.Client:
+    return httpx.Client(
+        verify=ssl.create_default_context(),
+        cookies=CookieJar(policy=DefaultCookiePolicy(allowed_domains=[])),
+        follow_redirects=False,
+        transport=transport,
+    )
+
+
+_CLIENT = agent_auth_client()
 atexit.register(_CLIENT.close)
 
 
@@ -127,6 +134,7 @@ __all__ = [
     "AGENT_AUTH_TIMEOUT_SECONDS",
     "CredentialStoreError",
     "CredentialStoreUnavailableError",
+    "agent_auth_client",
     "agent_auth_credential_query",
     "agent_auth_headers",
     "agent_auth_problem_hint",

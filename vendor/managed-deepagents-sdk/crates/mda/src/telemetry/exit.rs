@@ -6,7 +6,7 @@
 //! call [`deliver_at_exit`] first instead; only the first call sends, so a
 //! signal racing main's own exit delivers once.
 
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use crate::command::CommandCompletion;
@@ -16,7 +16,6 @@ use super::delivery::run_within;
 use super::event::EventEnvelope;
 use super::facts::facts;
 use super::otel_logger::{self, OtelLogger};
-use super::posthog::PosthogTransport;
 use super::stage;
 use super::transport::TelemetryTransport;
 
@@ -27,21 +26,30 @@ type Delivery = Box<dyn FnOnce(CommandCompletion) + Send>;
 
 static PENDING: Mutex<Option<Delivery>> = Mutex::new(None);
 
+/// An analytics backend the run's event is fanned out to.
+pub type Sink = Box<dyn TelemetryTransport + Send>;
+
 /// Hold the run's sinks until it ends. Call once, after they are installed.
-pub fn hold_for_exit(logger: Option<OtelLogger>, posthog: Option<PosthogTransport>) {
+/// Each analytics sink sends on its own job, so one slow backend never holds
+/// up another.
+pub fn hold_for_exit(logger: Option<OtelLogger>, sinks: Vec<Sink>) {
     hold(
         &PENDING,
         Box::new(move |completion| {
             stage::close(completion);
             otel_logger::record_completion(completion);
-            let event =
-                facts().and_then(|facts| EventEnvelope::command_completed(facts, completion));
+            let event = facts()
+                .and_then(|facts| EventEnvelope::command_completed(facts, completion))
+                .map(Arc::new);
             let mut jobs: Vec<Box<dyn FnOnce() + Send>> = Vec::new();
             if let Some(logger) = logger {
                 jobs.push(Box::new(move || logger.shutdown()));
             }
-            if let (Some(posthog), Some(event)) = (posthog, event) {
-                jobs.push(Box::new(move || posthog.record(&event)));
+            if let Some(event) = event {
+                for sink in sinks {
+                    let event = Arc::clone(&event);
+                    jobs.push(Box::new(move || sink.record(&event)));
+                }
             }
             run_within(EXIT_DELIVERY_DEADLINE, jobs);
         }),

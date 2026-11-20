@@ -28,8 +28,8 @@ if TYPE_CHECKING:
     from managed_deepagents._channels.trigger.client import TriggerClientLike
     from managed_deepagents._channels.trigger.types import TriggerStartedThread
     from managed_deepagents._channels.types import (
+        ChannelAddress,
         ChannelMessage,
-        ChannelTarget,
         JsonValue,
         PostedChannelThread,
     )
@@ -46,7 +46,7 @@ async def start_trigger_conversation(
     run: ChannelRunResult | None,
     *,
     hand_off: bool = False,
-    to: ChannelTarget | None = None,
+    to: ChannelAddress | None = None,
 ) -> PostedChannelThread:
     """Post ``message`` at top level in the origin's conversation, and start ``run`` there.
 
@@ -82,11 +82,11 @@ async def start_trigger_conversation(
             "transport": "trigger_server",
             "target": cast("JsonValue", started),
         }
+        if "reply" in origin:
+            moved["reply"] = origin["reply"]
         await hand_off_thread(thread, execution, moved)
         await _say_moved(client, origin, _thread_url(origin, started))
         # The rest of this run answers, and waits on decisions, in the new thread.
-        if "reply" in origin:
-            moved["reply"] = origin["reply"]
         current_run_thread(None, get_config().get("configurable", {})).handed_off.append(moved)
         thread_id = thread.id
     elif run_input is not None and caller is not None:
@@ -126,7 +126,7 @@ async def start_trigger_conversation(
 _SLACK_CONVERSATION_ID = re.compile(r"[CDG][A-Z0-9]+")
 
 
-def _conversation_of(origin: ChannelBinding, to: ChannelTarget) -> str:
+def _conversation_of(origin: ChannelBinding, to: ChannelAddress) -> str:
     """The conversation ``to`` names: another of the origin channel's, with no thread."""
     if to.provider != origin["provider"] or to.channel not in {None, origin["name"]}:
         raise ValueError("a new thread can go only to this channel's conversations")

@@ -1,0 +1,36 @@
+{
+  "not_exported": [
+    {
+      "feature": "skills",
+      "summary": "Fleet's built-in skills",
+      "detail": "Fleet's built-in skills (presentation-builder, svg-builder, mermaid-diagram-builder, generate-skill, fleet-guide and others) ship with Fleet's runtime. The exported agent doesn't have them."
+    },
+    {
+      "feature": "channels",
+      "summary": "Outlook",
+      "detail": "MDA has no Outlook channel"
+    },
+    {
+      "feature": "channels",
+      "summary": "Teams",
+      "detail": "MDA has no Teams channel"
+    },
+    {
+      "feature": "channels",
+      "summary": "trigger f0000000-0000-4000-8000-000000000009",
+      "detail": "unknown Fleet trigger"
+    }
+  ],
+  "warnings": [
+    "Fleet's Slack app name `Yoda (Slack)` isn't a valid `channels.slack` name (letters, numbers, spaces, `_`, `.` and `-`, at most 35 characters), so `channels/slack` leaves it out and the deployment uses the agent's name. Set `name` to choose another.",
+    "`mda deploy` creates a new Slack app; it doesn't reuse Fleet's Slack app `Yoda (Slack)`. Invite its bot to the channels Fleet's bot was in. Fleet's Slack app keeps answering until you remove the channel from the Fleet agent. The Fleet channel was paused; the exported one is active."
+  ],
+  "left_behind": [
+    "Conversations: past threads stay in Fleet. The deployment starts with none.",
+    "Traces: the deployment traces to a new LangSmith project. Past traces stay in the Fleet agent's project."
+  ],
+  "memory": [
+    "Fleet's `AGENTS.md` is now `instructions.md`.",
+    "`memory.py` gives the agent its own memory in `memories/agent/`. It starts empty, and the agent adds to it as it learns."
+  ]
+}

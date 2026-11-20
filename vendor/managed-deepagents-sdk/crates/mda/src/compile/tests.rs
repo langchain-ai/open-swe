@@ -1395,7 +1395,7 @@ fn compile_builds_a_graph_per_typescript_async_subagent() {
 }
 
 #[test]
-fn eval_rejects_typescript_async_subagents() {
+fn eval_builds_typescript_async_subagent_graphs() {
     let root = tempfile::tempdir().unwrap();
     setup_mock_ts_runtime(root.path());
     write_file(
@@ -1409,12 +1409,24 @@ fn eval_rejects_typescript_async_subagents() {
         agent_file: PathBuf::from("agent.ts"),
         files: vec![PathBuf::from("agent.ts")],
     };
+    let out_dir = root.path().join("build");
 
-    let error = compile_for_eval(&project, &root.path().join("build")).unwrap_err();
+    compile_for_eval(&project, &out_dir).unwrap();
 
+    let entry = fs::read_to_string(out_dir.join("_mda_eval_entry.ts")).unwrap();
     assert!(
-        error.to_string().contains("not supported in eval"),
-        "{error}"
+        entry.contains("modelOverride, appDir, asyncSubagentGraphs });"),
+        "{entry}"
+    );
+    assert!(
+        entry.contains("export function agent__r(config) {"),
+        "{entry}"
+    );
+    let langgraph: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
+    assert_eq!(
+        langgraph["graphs"]["lead--r"],
+        "./_mda_eval_entry.ts:agent__r"
     );
 }
 
@@ -1445,7 +1457,7 @@ fn eval_builds_no_async_general_purpose_subagent() {
 }
 
 #[test]
-fn eval_rejects_async_subagents() {
+fn eval_builds_async_subagent_graphs_as_served_entries() {
     if !python3_available() {
         return;
     }
@@ -1461,12 +1473,27 @@ fn eval_rejects_async_subagents() {
         agent_file: PathBuf::from("agent.py"),
         files: vec![PathBuf::from("agent.py")],
     };
+    let out_dir = root.path().join("build");
 
-    let error = compile_for_eval(&project, &root.path().join("build")).unwrap_err();
+    with_py_runtime(root.path(), || compile_for_eval(&project, &out_dir)).unwrap();
 
+    let entry = fs::read_to_string(out_dir.join("_mda_eval_entry.py")).unwrap();
+    assert!(!entry.contains("ServerRuntime"), "{entry}");
     assert!(
-        error.to_string().contains("not supported in eval"),
-        "{error}"
+        entry.contains(
+            "model_override=_model_override, app_dir=_app_dir, async_subagent_graphs=_async_subagent_graphs)\n"
+        ),
+        "{entry}"
+    );
+    assert!(
+        entry.contains("async def agent__r(config):\n    async with parent_run(config):\n"),
+        "{entry}"
+    );
+    let langgraph: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("langgraph.json")).unwrap()).unwrap();
+    assert_eq!(
+        langgraph["graphs"]["lead--general-purpose"],
+        "./_mda_eval_entry.py:agent__general_purpose"
     );
 }
 
@@ -1894,7 +1921,7 @@ fn compile_materializes_python_schedules_as_crons() {
             "schedule = define_schedule(\n",
             "    cron=\"30 2 * * *\",\n",
             "    input={\"messages\": [{\"role\": \"user\", \"content\": \"Sweep stale tickets.\"}]},\n",
-            "    thread={\"mode\": \"persistent\", \"id\": \"nightly-thread\"},\n",
+            "    thread={\"mode\": \"persistent\", \"id\": \"5f2b8a3e-9c41-4d7a-8e0b-6a1d2c3f4e5a\"},\n",
             ")\n",
         ),
     );
@@ -1929,7 +1956,7 @@ fn compile_materializes_python_schedules_as_crons() {
     let cron = &summary.schedule_crons["nightly"];
     assert_eq!(cron["graph"], "agent");
     assert_eq!(cron["schedule"], "30 2 * * *");
-    assert_eq!(cron["thread_id"], "nightly-thread");
+    assert_eq!(cron["thread_id"], "5f2b8a3e-9c41-4d7a-8e0b-6a1d2c3f4e5a");
     assert!(cron.get("on_run_completed").is_none());
     assert_eq!(
         cron["input"]["messages"][0]["content"],
@@ -2303,7 +2330,7 @@ fn compile_wires_typescript_sandbox_without_setup_script() {
     assert!(entry_out.contains("import { sandbox } from \"./sandbox/index\";"));
     assert!(!entry_out.contains("setupScript"));
     assert!(entry_out.contains(
-        "compileManagedAgent(definition, config, { contextRoot, hasSkills, sandbox, asyncSubagentGraphs }, runtime)"
+        "compileManagedAgent(definition, config, { contextRoot, hasSkills, sandbox, sandboxSetup, asyncSubagentGraphs }, runtime)"
     ));
     assert!(
         entry_out.contains("import { compileManagedAgent } from \"managed-deepagents/runtime\";")
@@ -2356,7 +2383,7 @@ fn compile_wires_python_sandbox_without_setup_script() {
     assert!(!entry_out.contains("setup_script="));
     assert!(entry_out
         .contains(
-            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, sandbox=_sandbox, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)",
+            "await compile_managed_agent_async(_definition, config, context_root=_context_root, has_skills=_has_skills, sandbox=_sandbox, sandbox_setup=True, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)",
         ));
     assert!(
         entry_out.contains("from managed_deepagents.runtime import compile_managed_agent_async")
@@ -2561,11 +2588,15 @@ fn compile_wires_tools_typescript_mcp() {
     // The aggregator imports each connector module name-agnostically and
     // validates the connector brand via `collectConnectors`.
     let connectors_out = fs::read_to_string(out_dir.join("_mda_connectors.ts")).unwrap();
-    assert!(connectors_out
-        .contains("import { collectConnectors } from \"managed-deepagents/runtime\";"));
+    assert!(connectors_out.contains(
+        "import { collectConnectors, collectSubagentConnectors } from \"managed-deepagents/runtime\";"
+    ));
     assert!(connectors_out.contains("import * as _connector0 from \"./tools/mcp\";"));
     assert!(connectors_out
         .contains("{ source: \"tools/mcp.ts\", module: { connector: _connector0.mcp } }"));
+    assert!(connectors_out.contains(
+        "export const subagentConnectors = [...collectSubagentConnectors(_connector0)];"
+    ));
 
     // The connectors module is carried over verbatim.
     assert!(out_dir.join("tools/mcp.ts").exists());
@@ -2623,7 +2654,11 @@ fn compile_wires_tools_python_mcp() {
         ));
 
     let connectors_out = fs::read_to_string(out_dir.join("_mda_connectors.py")).unwrap();
-    assert!(connectors_out.contains("from managed_deepagents.runtime import collect_connectors"));
+    assert!(connectors_out.contains(
+        "from managed_deepagents.runtime import collect_connectors, collect_subagent_connectors"
+    ));
+    assert!(connectors_out
+        .contains("subagent_connectors = [*collect_subagent_connectors(_connector0)]"));
     assert!(connectors_out.contains("import tools.mcp as _connector0"));
     assert!(
         connectors_out.contains("(\"tools/mcp.py\", SimpleNamespace(connector=_connector0.mcp))")
@@ -3740,10 +3775,10 @@ fn compile_injects_managed_stack_and_provider_for_typescript() {
     // Other author-declared packages are preserved.
     assert_eq!(deps["deepagents"], "1.12.1");
     // The managed runtime stack is injected as compatible ranges.
-    assert_eq!(deps["@langchain/core"], "^1.2.17");
+    assert_eq!(deps["@langchain/core"], "^1.3.2");
     assert_eq!(deps["@langchain/langgraph"], "^1.4.18");
     assert_eq!(deps["@langchain/langgraph-checkpoint"], "^1.1.3");
-    assert_eq!(deps["@langchain/langgraph-sdk"], "^1.12.0");
+    assert_eq!(deps["@langchain/langgraph-sdk"], "^1.13.0");
     assert_eq!(deps["langchain"], "^1.5.12");
     assert_eq!(deps["uuid"], "^13.0.2");
     // The `langsmith:` provider uses the OpenAI integration package to speak
@@ -3905,7 +3940,7 @@ fn compile_resolves_authored_langchain_and_mcp_tool_dependencies() {
     let manifest: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("package.json")).unwrap()).unwrap();
     let deps = &manifest["dependencies"];
-    assert_eq!(deps["@langchain/core"], "^1.2.17");
+    assert_eq!(deps["@langchain/core"], "^1.3.2");
     assert_eq!(deps["langchain"], "1.5.10");
     assert_eq!(
         deps["@langchain/mcp-adapters"],
@@ -3995,7 +4030,7 @@ fn compile_injects_managed_stack_and_provider_for_python() {
     assert_eq!(pyproject.matches("deepagents>=0.7.3").count(), 1);
     // The managed runtime stack is injected.
     assert!(
-        pyproject.contains("langgraph>=1.2.15,<2"),
+        pyproject.contains("langgraph>=1.2.19,<2"),
         "got: {pyproject}"
     );
     assert!(
@@ -4387,10 +4422,10 @@ fn compile_preserves_named_memory_policies() {
         let memory_source = language.ident(
             "import { defineMemory as dm, memoryLayer } from 'managed-deepagents';\n\
              const allow = async () => { throw new Error('must not run at build time'); };\n\
-             export const memory = dm({ agent: memoryLayer({ allow }), user: memoryLayer({ allow }) });\n",
+             export const memory = dm({ agent: memoryLayer({ allow }), assistant: memoryLayer({ allow }), user: memoryLayer({ allow }) });\n",
             "from managed_deepagents import define_memory as dm, MemoryLayer\n\
              async def allow(context):\n    raise RuntimeError('must not run at build time')\n\
-             memory = dm(agent=MemoryLayer(allow=allow), user=MemoryLayer(allow=allow))\n",
+             memory = dm(agent=MemoryLayer(allow=allow), assistant=MemoryLayer(allow=allow), user=MemoryLayer(allow=allow))\n",
         );
         write_file(root.path(), &memory_file, memory_source);
         let mut files = vec![
@@ -4422,6 +4457,7 @@ fn compile_preserves_named_memory_policies() {
         .unwrap();
 
         assert!(summary.memory.agent_enabled());
+        assert!(summary.memory.assistant_enabled());
         assert!(summary.memory.user_enabled());
         assert_eq!(
             fs::read_to_string(out_dir.join(memory_file)).unwrap(),
@@ -4439,6 +4475,67 @@ fn compile_preserves_named_memory_policies() {
             "identity=_identity, memory=_memory, async_subagent_graphs=_async_subagent_graphs, runtime=runtime)",
         )));
         assert!(!entry_out.contains("must not run at build time"));
+    }
+}
+
+#[test]
+fn compile_assistant_memory_needs_no_identity_or_shared_seed() {
+    for language in [Language::TypeScript, Language::Python] {
+        let root = tempfile::tempdir().unwrap();
+        let agent_file = format!("agent.{}", language.extension());
+        let memory_file = format!("memory.{}", language.extension());
+        write_file(
+            root.path(),
+            &agent_file,
+            language.ident(
+                "export const agent = defineDeepAgent({ name: 'agent', model: 'openai:gpt-5' });\n",
+                "agent = define_deep_agent(name='agent', model='openai:gpt-5')\n",
+            ),
+        );
+        let memory_source = language.ident(
+            "export const memory = defineMemory({ assistant: memoryLayer() });\n",
+            "memory = define_memory(assistant=MemoryLayer())\n",
+        );
+        write_file(root.path(), &memory_file, memory_source);
+        let mut files = vec![PathBuf::from(&agent_file), PathBuf::from(&memory_file)];
+        if language == Language::TypeScript {
+            setup_mock_ts_runtime(root.path());
+        } else {
+            write_file(
+                root.path(),
+                "pyproject.toml",
+                "[project]\nname = 'example'\nversion = '0.0.0'\ndependencies = []\n",
+            );
+            files.push(PathBuf::from("pyproject.toml"));
+        }
+        let project = Project {
+            root: root.path().to_path_buf(),
+            language,
+            agent_file: PathBuf::from(agent_file),
+            files,
+        };
+        let out = root.path().join("build");
+        let summary = match language {
+            Language::TypeScript => compile(&project, &out),
+            Language::Python => with_py_runtime(root.path(), || compile(&project, &out)),
+        }
+        .unwrap();
+        assert!(summary.memory.assistant_enabled());
+        assert!(!summary.memory.agent_enabled());
+        assert!(!summary.memory.user_enabled());
+        assert!(summary.identity.is_none());
+        assert_eq!(
+            fs::read_to_string(out.join(memory_file)).unwrap(),
+            memory_source
+        );
+        assert!(!root
+            .path()
+            .join(".mda/__contexthub__/memories/agent/AGENTS.md")
+            .exists());
+        assert!(!root
+            .path()
+            .join(".mda/__contexthub__/memories/assistant/AGENTS.md")
+            .exists());
     }
 }
 
@@ -4577,8 +4674,8 @@ fn compile_wires_python_browser_and_adds_stagehand() {
         "./_mda_entry.py:browser_handoff_watcher"
     );
     let pyproject = fs::read_to_string(out_dir.join("pyproject.toml")).unwrap();
-    assert!(pyproject.contains("stagehand==4.3.0"));
-    assert!(pyproject.contains("stagehand-middleware==0.1.0"));
+    assert!(pyproject.contains("stagehand==4.4.0"));
+    assert!(pyproject.contains("stagehand-middleware==0.1.2"));
 
     // Eval trials never get a browser, so they never install its client or tools.
     let eval_dir = root.path().join("eval");
@@ -4644,8 +4741,8 @@ fn compile_wires_typescript_browser_and_adds_stagehand() {
     );
     let package: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(out_dir.join("package.json")).unwrap()).unwrap();
-    assert_eq!(package["dependencies"]["@browserbasehq/stagehand"], "4.3.0");
-    assert_eq!(package["dependencies"]["stagehand-middleware"], "0.1.1");
+    assert_eq!(package["dependencies"]["@browserbasehq/stagehand"], "4.4.0");
+    assert_eq!(package["dependencies"]["stagehand-middleware"], "0.1.2");
 
     // Eval trials never get a browser, so they never install Stagehand.
     let eval_dir = root.path().join("eval");

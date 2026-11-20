@@ -285,7 +285,7 @@ fn find_deployment(
 ) -> Result<(String, String)> {
     let found = with_spinner(
         json,
-        &format!("Looking up deployment '{name}'"),
+        &format!("Looking up Agent Server '{name}'"),
         "Could not reach LangSmith",
         || {
             let Some(deployment) = find_target_deployment(client, name, agent)? else {
@@ -296,10 +296,10 @@ fn find_deployment(
         },
         |found| match found {
             Some((deployment, _)) => format!(
-                "Found deployment {}",
+                "Found Agent Server {}",
                 deployment.get("id").and_then(Value::as_str).unwrap_or(name)
             ),
-            None => format!("No deployment named '{name}'"),
+            None => format!("No Agent Server named '{name}'"),
         },
     )?;
     match found {
@@ -307,13 +307,13 @@ fn find_deployment(
         Some((_, None)) => Err(categorized(
             ErrorCategory::Deployment,
             format!(
-                "Channel setup needs an initial deployment of the agent, and deployment '{name}' has not finished its first build. Run `mda channels setup` again once it is live."
+                "Channel setup needs an initial deployment of the agent, and Agent Server '{name}' has not finished its first build. Run `mda channels setup` again once it is live."
             ),
         )),
         None => Err(categorized(
             ErrorCategory::Deployment,
             format!(
-                "Channel setup needs an initial deployment of the agent, and there is no deployment named '{name}' yet. Run `mda deploy` first; it sets the channels up once the deployment is live."
+                "Channel setup needs an initial deployment of the agent, and there is no Agent Server named '{name}' yet. Run `mda deploy` first; it sets the channels up once the Agent Server is live."
             ),
         )),
     }

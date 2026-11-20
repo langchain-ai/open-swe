@@ -118,7 +118,7 @@ impl Client {
                             || api.detail.to_lowercase().contains("scale to zero"))
                 });
             if unsupported_serverless {
-                err.context("Serverless deployments are not supported in this environment. Use --deployment-type dedicated for always-on capacity, or --deployment-type dev to retain legacy deployment behavior")
+                err.context("Serverless Agent Servers are not supported in this environment. Use --agent-server-type dedicated for always-on capacity, or --agent-server-type dev to retain legacy deployment behavior")
             } else {
                 err
             }
@@ -561,8 +561,8 @@ mod tests {
                 .create_deployment("agent", DeploymentType::Serverless, &[])
                 .unwrap_err();
 
-            assert!(err.to_string().contains("--deployment-type dedicated"));
-            assert!(err.to_string().contains("--deployment-type dev"));
+            assert!(err.to_string().contains("--agent-server-type dedicated"));
+            assert!(err.to_string().contains("--agent-server-type dev"));
             let api = err.downcast_ref::<ApiError>().unwrap();
             assert_eq!(api.status, reqwest::StatusCode::BAD_REQUEST);
             assert_eq!(api.detail, detail);

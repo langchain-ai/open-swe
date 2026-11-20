@@ -41,10 +41,7 @@ if TYPE_CHECKING:
 
     from managed_deepagents._connector import Connector
 
-__all__ = ["ExtensionArgs", "ExtensionKind", "define_extension"]
-
-#: The primitives that carry a shared construction envelope.
-ExtensionKind = Literal["connector"]
+__all__ = ["ExtensionArgs", "define_extension"]
 
 _ConnectorT = TypeVar("_ConnectorT", bound="Connector")
 

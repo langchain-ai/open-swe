@@ -6,6 +6,7 @@ into a ManagedToolRuntime before it calls authored code.
 
 from __future__ import annotations
 
+import abc
 import functools
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, fields
@@ -20,7 +21,7 @@ from typing import (
     overload,
 )
 
-from deepagents.backends.protocol import BackendProtocol
+from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.tools import ToolRuntime
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg
@@ -45,7 +46,24 @@ from managed_deepagents.identity import ManagedServerInfo  # noqa: TC001 - datac
 if TYPE_CHECKING:
     from managed_deepagents.define_deep_agent import DeepAgentTool
 
-RuntimeBackendFactory = Callable[[object], BackendProtocol | None]
+
+class ManagedSandboxBackend(SandboxBackendProtocol):
+    """The run's managed sandbox, as ``runtime.backend``."""
+
+    @abc.abstractmethod
+    async def aopen(self, *, wait: bool = True) -> str:
+        """Adopt or create this thread's sandbox now and return its name.
+
+        Without this call, the sandbox opens on its first use.
+
+        With ``wait=False``, return as soon as the sandbox is created or adopted,
+        while it may still be booting. Its first use waits for it to be ready, then
+        runs the connectors' sandbox hooks. A stopped sandbox still restarts before
+        this returns, because LangSmith's start always waits for it to be ready.
+        """
+
+
+RuntimeBackendFactory = Callable[[object], ManagedSandboxBackend | None]
 
 
 _ContextT = DefaultTypeVar("_ContextT", default=Any)
@@ -61,7 +79,7 @@ class ManagedRuntimeExtras(TypedDict, total=False):
     channel: RuntimeChannel | None
     configurable: Mapping[str, object]
     config: RunnableConfig
-    backend: BackendProtocol | None
+    backend: ManagedSandboxBackend | None
     schedules: RuntimeSchedules
 
 
@@ -70,11 +88,11 @@ class ManagedRuntimeExtras(TypedDict, total=False):
 class ManagedRuntime(Runtime[ContextT], Generic[ContextT]):  # ty: ignore[invalid-frozen-dataclass-subclass]
     """Native middleware runtime with exact authored context and managed fields."""
 
-    server_info: ManagedServerInfo | None = None  # ty: ignore[invalid-attribute-override]
+    server_info: ManagedServerInfo | None = None  # ty: ignore[incompatible-attribute-override]
     thread: ManagedThread = field(default_factory=no_thread)
     #: Deprecated: use ``runtime.thread.origin.channel``. Removed in 0.11.
     channel: RuntimeChannel | None = None
-    backend: BackendProtocol | None = None
+    backend: ManagedSandboxBackend | None = None
     schedules: RuntimeSchedules = field(default_factory=RuntimeSchedules)
 
 
@@ -82,11 +100,11 @@ class ManagedRuntime(Runtime[ContextT], Generic[ContextT]):  # ty: ignore[invali
 class ManagedToolRuntime(ToolRuntime[_ContextT, _StateT], Generic[_ContextT, _StateT]):
     """Native tool runtime; type parameters follow context, then state."""
 
-    server_info: ManagedServerInfo | None = None  # ty: ignore[invalid-mutable-override]
+    server_info: ManagedServerInfo | None = None  # ty: ignore[incompatible-mutable-override]
     thread: ManagedThread = field(default_factory=no_thread)
     #: Deprecated: use ``runtime.thread.origin.channel``. Removed in 0.11.
     channel: RuntimeChannel | None = None
-    backend: BackendProtocol | None = None
+    backend: ManagedSandboxBackend | None = None
     schedules: RuntimeSchedules = field(default_factory=RuntimeSchedules)
 
     @classmethod
@@ -112,7 +130,7 @@ class _ManagedExecutionRuntime(_ExecutionRuntime[_AppContextT | None], Generic[_
     thread: ManagedThread = field(default_factory=no_thread)
     #: Deprecated: use ``runtime.thread.origin.channel``. Removed in 0.11.
     channel: RuntimeChannel | None = None
-    backend: BackendProtocol | None = None
+    backend: ManagedSandboxBackend | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -121,7 +139,7 @@ class _ManagedReadRuntime(_ReadRuntime[_AppContextT | None], Generic[_AppContext
     thread: None = None
     #: Deprecated: use ``runtime.thread.origin.channel``. Removed in 0.11.
     channel: RuntimeChannel | None = None
-    backend: BackendProtocol | None = None
+    backend: ManagedSandboxBackend | None = None
 
 
 ManagedServerRuntime = _ManagedExecutionRuntime[_AppContextT] | _ManagedReadRuntime[_AppContextT]

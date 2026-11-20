@@ -270,10 +270,9 @@ edit, deletion or reaction (``SlackActivityEvent``), or a channel's own change
 
 
 @dataclass(frozen=True)
-class SlackChannelThread(ReadsThreadState):
-    """The conversation's thread a message belongs to.
-
-    A handler runs before any run exists, so this is not a run's runtime.
+class SlackHookThread:
+    """The thread ``on_received`` and ``on_finish`` hear about: a handler's
+    thread without ``get_state``, which only a handler deciding an event can read.
     """
 
     id: str
@@ -283,6 +282,15 @@ class SlackChannelThread(ReadsThreadState):
     source_thread_key: str
     """The key the thread is derived from, which names the Slack thread."""
     channel: ChannelName
+
+
+@dataclass(frozen=True)
+class SlackChannelThread(ReadsThreadState, SlackHookThread):
+    """The conversation's thread a message belongs to.
+
+    A handler runs before any run exists, so this is not a run's runtime.
+    """
+
     _get_state: Callable[[], Awaitable[ThreadState | None]] | None = field(
         default=None, repr=False, compare=False
     )
@@ -640,15 +648,15 @@ class DecidedSlackEvents:
         )
 
 
-def finished_slack_thread(delivery: HttpFinishedDelivery, name: str) -> SlackChannelThread:
+def finished_slack_thread(delivery: HttpFinishedDelivery, name: str) -> SlackHookThread:
     """The Slack thread of a finished delivery, for a channel named ``name``."""
+    from managed_deepagents._channels.http.types import ChannelName  # noqa: PLC0415
+
     message = _finished_delivery(delivery.get("raw_event"))
-    return slack_thread(
-        {
-            "id": delivery["thread_id"],
-            "source_thread_key": message["source_thread_key"] if message is not None else "",
-        },
-        name,
+    return SlackHookThread(
+        id=delivery["thread_id"],
+        source_thread_key=message["source_thread_key"] if message is not None else "",
+        channel=ChannelName(name=name),
     )
 
 

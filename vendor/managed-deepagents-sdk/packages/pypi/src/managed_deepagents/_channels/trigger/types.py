@@ -316,6 +316,8 @@ class TriggerChannelRuntimeEventRequest(TriggerChannelRuntimeEventRequestRequire
     # channel can deep-link a run's trace. An opaque id, never a URL: a URL
     # from here would let the deployment choose where a rendered link points.
     tracer_session_id: str
+    # False when the channel shows no status and no Stop button.
+    show_progress: bool
 
 
 class TriggerChannelRuntimeEventResponse(TypedDict):

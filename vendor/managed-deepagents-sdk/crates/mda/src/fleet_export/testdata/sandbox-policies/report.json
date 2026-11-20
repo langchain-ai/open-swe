@@ -1,0 +1,60 @@
+{
+  "not_exported": [
+    {
+      "feature": "skills",
+      "summary": "Fleet's built-in skills",
+      "detail": "Fleet's built-in skills (presentation-builder, svg-builder, mermaid-diagram-builder, generate-skill, fleet-guide and others) ship with Fleet's runtime. The exported agent doesn't have them."
+    }
+  ],
+  "warnings": [],
+  "left_behind": [
+    "Conversations: past threads stay in Fleet. The deployment starts with none.",
+    "Traces: the deployment traces to a new LangSmith project. Past traces stay in the Fleet agent's project."
+  ],
+  "notes": [
+    "Connections: the sandbox uses your existing `linear` connection to sign in to api.linear.app.",
+    "Connections: the sandbox uses your existing `git-host` connection to sign in to git.example.com."
+  ],
+  "connections": [
+    {
+      "slug": "google",
+      "after_first_deploy": false,
+      "summary": "The sandbox signs in to www.googleapis.com with each user's own account. Fleet signed in through its own OAuth app; in MDA you register your own. Each user signs in the first time the agent needs it.",
+      "steps": [
+        "Register an OAuth app at https://console.cloud.google.com/apis/credentials.",
+        "Create the connection. It prints the redirect URI to add to your app: `mda connections create google --oauth google --client-id <client id> --secret-from-env GOOGLE_CLIENT_SECRET --scope https://www.googleapis.com/auth/drive.readonly`."
+      ]
+    },
+    {
+      "slug": "acme-crm",
+      "after_first_deploy": false,
+      "summary": "The sandbox signs in to api.acme-crm.dev with each user's own account. Fleet signed in through its own OAuth app; in MDA you register your own. Each user signs in the first time the agent needs it.",
+      "steps": [
+        "Register an OAuth app with the service behind Fleet's `acme-crm-oauth-provider` provider.",
+        "Create the connection. It prints the redirect URI to add to your app: `mda connections create acme-crm --authorize-url <authorization URL> --token-url <token URL> --client-id <client id> --secret-from-env ACME_CRM_CLIENT_SECRET`. If `mda connections catalog` lists the service, pass `--oauth <service>` instead of `--authorize-url` and `--token-url`."
+      ]
+    },
+    {
+      "slug": "acme-pair",
+      "after_first_deploy": true,
+      "summary": "The sandbox sends the Fleet workspace secret `ACME_PAIR` to api.acme.dev as Basic auth, through a connection the agent owns. An agent-owned connection can only be created after the deployment exists, so the rules that use it are commented out in `sandbox/__init__.py`.",
+      "steps": [
+        "Deploy: `mda deploy`",
+        "Put the value of the Fleet workspace secret `ACME_PAIR` in `.env` as `ACME_PAIR`, then create the connection: `mda connections create acme-pair --secret-from-env ACME_PAIR`",
+        "In `sandbox/__init__.py`, uncomment the rules that use `acme-pair`.",
+        "Deploy again: `mda deploy`"
+      ]
+    }
+  ],
+  "sandbox": [
+    "The `Authorization` header Fleet added to requests for api.acme-crm.dev wasn't carried over: MDA sends Basic auth only with a username that is set, has no colon, and isn't the credential itself, and Fleet's username doesn't fit. If api.acme-crm.dev needs it, add the header to the rule in `sandbox/__init__.py` yourself.",
+    "The `Authorization` header Fleet added to requests for dev.azure.com wasn't carried over: MDA sends Basic auth only with a username that is set, has no colon, and isn't the credential itself, and Fleet's username doesn't fit. If dev.azure.com needs it, add the header to the rule in `sandbox/__init__.py` yourself.",
+    "Requests to api.github.com, github.com won't be signed in to GitHub. Fleet used its own GitHub App for this. To set it up in MDA, run `mda channels init github` and then `mda channels setup`, which creates a GitHub App for this agent. Then add a rule for api.github.com, github.com to `sandbox/__init__.py` that uses `connections.get(\"mda/github-token\", {\"type\": \"agent\"})`.",
+    "Couldn't read Fleet access profile `p-missing` (it may have been deleted), so its settings couldn't be carried over to `sandbox/__init__.py`. If you still need them, check the profile in Fleet and add them to `sandbox/__init__.py`.",
+    "Copied Fleet's sandbox environment variables into `.env` as `SANDBOX_ENV_LOG_LEVEL`. `mda deploy` sends them to the deployment as secrets, and `sandbox/__init__.py` passes each to the sandbox under its Fleet name."
+  ],
+  "memory": [
+    "Fleet's `AGENTS.md` is now `instructions.md`.",
+    "`memory.py` gives the agent its own memory in `memories/agent/`. It starts empty, and the agent adds to it as it learns."
+  ]
+}

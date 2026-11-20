@@ -37,7 +37,6 @@ __all__ = [
     "AGENT_AUTH_TIMEOUT_SECONDS",
     "AgentAuth",
     "AgentAuthContext",
-    "AgentAuthUnknownProviderError",
     "CredentialAuthorizationRequiredError",
     "PendingAuthorization",
     "ResolvePrincipalIdentity",
@@ -104,15 +103,6 @@ class CredentialAuthorizationRequiredError(RuntimeError):
             "The authorization interrupt resumed without a usable credential."
         )
         self.slugs = slugs
-
-
-class AgentAuthUnknownProviderError(RuntimeError):
-    def __init__(self, slug: str) -> None:
-        super().__init__(
-            f'Agent Auth has no OAuth provider registered for slug "{slug}". '
-            "Register the provider or fix the credential slug."
-        )
-        self.slug = slug
 
 
 class AgentAuthRequest(Protocol):
@@ -293,13 +283,6 @@ class AgentAuth:
             )
         return _connection_credential_id(body)
 
-    def read_user_secret(self, slug: str) -> str | None:
-        """Read a caller-owned opaque secret grant for a workspace connection slug."""
-        connection = self.find_workspace_connection(slug)
-        if connection is None:
-            return None
-        return self.read_user_secret_for_connection(connection)
-
     def read_user_secret_for_connection(self, connection: WorkspaceConnection) -> str | None:
         """Read a caller-owned opaque secret when the connection row is already loaded."""
         if connection.kind != "secret":
@@ -319,21 +302,6 @@ class AgentAuth:
                 "connections are not configured: LANGSMITH_HOST_PROJECT_ID is not set"
             )
         return self._read_access_token_for_owner(connection, "agent", agent_id)
-
-    def read_user_access_token(self, slug: str) -> str | None:
-        """Read the caller's OAuth access token without starting a session.
-
-        Reads never mint, so a caller can be probed repeatedly — on every replay
-        of an interrupted node, for instance — without leaving authorization
-        sessions behind.
-
-        Returns:
-            The access token, or ``None`` when the caller must connect.
-        """
-        connection = self.find_workspace_connection(slug)
-        if connection is None:
-            return None
-        return self.read_user_access_token_for_connection(connection)
 
     def read_user_access_token_for_connection(self, connection: WorkspaceConnection) -> str | None:
         """Read a caller OAuth token when the connection row is already loaded."""
@@ -381,28 +349,6 @@ class AgentAuth:
                 "Agent Auth oauth-authorization-session missing id or verification_url"
             )
         return {"slug": slug, "connect_url": connect_url, "auth_id": auth_id}
-
-    def resolve_oauth_provider_id(self, slug: str) -> str:
-        """oauth-providers has no slug filter, so the match is made across pages."""
-        cursor: str | None = None
-        for _ in range(AGENT_AUTH_MAX_PROVIDER_PAGES):
-            query = {"page_size": str(AGENT_AUTH_PROVIDER_PAGE_SIZE)}
-            if cursor:
-                query["cursor"] = cursor
-            status, body = self._request(
-                "GET", f"/v1/agent-auth/oauth-providers?{urllib.parse.urlencode(query)}"
-            )
-            if status >= _HTTP_BAD_REQUEST:
-                raise CredentialStoreError("Agent Auth list oauth-providers failed", status, body)
-            raw_items = body.get("items")
-            for item in raw_items if isinstance(raw_items, list) else []:
-                if isinstance(item, Mapping) and item.get("slug") == slug and item.get("id"):
-                    return str(item["id"])
-            next_cursor = body.get("next_cursor")
-            if not isinstance(next_cursor, str) or not next_cursor or next_cursor == cursor:
-                raise AgentAuthUnknownProviderError(slug)
-            cursor = next_cursor
-        raise CredentialStoreError("Agent Auth oauth-provider list returned too many pages")
 
     def find_credential_id(
         self,

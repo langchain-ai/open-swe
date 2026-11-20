@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Literal, TypedDict
+from typing import TYPE_CHECKING, Literal
 
 __all__ = [
     "CONNECTOR_BRAND",
     "Connector",
     "ConnectorRequirements",
-    "EventsContext",
     "SandboxContext",
     "collect_connectors",
     "has_sandbox_connectors",
@@ -105,15 +104,6 @@ class Connector:
     name: str | None = None
 
 
-class EventsContext(TypedDict, total=False):
-    """Context handed to connector ``events`` for ``/connectors/{name}/events``."""
-
-    name: str
-    request: object
-    raw_body: str | bytes
-    connector: Connector
-
-
 def is_connector(value: object) -> bool:
     """Return ``True`` when ``value`` carries the connector brand."""
     return bool(getattr(value, CONNECTOR_BRAND, False))
@@ -124,6 +114,34 @@ def _connector_has_hook(connector: object) -> bool:
         callable(getattr(connector, hook, None))
         for hook in ("tools", "http", "sandbox", "events", "messaging", "requirements")
     )
+
+
+def collect_subagent_connectors(module: object) -> list[Connector]:
+    """The MCP definitions a ``tools/mcp`` module exports besides ``mcp``.
+
+    Each is named after its export. Only the subagents that select one load it,
+    but deploy still needs its connections.
+    """
+    agent_mcp = getattr(module, "mcp", None)
+    # Python has no export list, so follow import rules: `__all__`, else public names.
+    public = getattr(module, "__all__", None)
+    collected: list[Connector] = []
+    seen: set[int] = set()
+    for export_name, candidate in vars(module).items():
+        if (
+            (export_name not in public if public is not None else export_name.startswith("_"))
+            or candidate is agent_mcp
+            # An imported `McpServersDefinition` class carries the brand too.
+            or isinstance(candidate, type)
+            or not is_connector(candidate)
+            or candidate.kind != "mcp_servers"
+            or id(candidate) in seen
+        ):
+            continue
+        seen.add(id(candidate))
+        object.__setattr__(candidate, "name", export_name)
+        collected.append(candidate)
+    return collected
 
 
 def collect_connectors(modules: list[tuple[str, object]]) -> list[Connector]:

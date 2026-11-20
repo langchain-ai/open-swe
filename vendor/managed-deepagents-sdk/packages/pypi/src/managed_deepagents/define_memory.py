@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import ClassVar, Generic, Literal, Protocol, TypedDict
+from typing import ClassVar, Generic, Literal, Protocol, TypedDict, cast
 
 from typing_extensions import TypeVar
 
@@ -39,6 +39,7 @@ __all__ = [
 
 ContextT = TypeVar("ContextT", default=ManagedRunContext)
 AgentContextT = TypeVar("AgentContextT", default=ManagedRunContext)
+AssistantContextT = TypeVar("AssistantContextT", default=ManagedRunContext)
 UserContextT = TypeVar("UserContextT", default=ManagedRunContext)
 
 
@@ -46,8 +47,10 @@ UserContextT = TypeVar("UserContextT", default=ManagedRunContext)
 class MemoryLayer(Generic[ContextT]):
     """Enable a memory layer, with an optional per-run context policy.
 
-    Without ``allow``, agent memory is available to all callers and user memory
-    is available to trusted people in managed Slack one-to-one DMs.
+    Without ``allow``, agent and assistant memory are available to all callers.
+    User memory is available to trusted people in managed Slack one-to-one DMs
+    and in direct API runs by a caller who signed in with their own token, on a
+    thread no channel recorded.
     Verified Studio users always have user memory access without running its policy.
     """
 
@@ -97,7 +100,7 @@ class MemoryDefinition:
 #: Reserved keywords from adjacent designs. Naming them keeps a hopeful guess
 #: from reading as an unknown typo, and keeps the launch surface one decision wide.
 _RESERVED_KEYWORDS: dict[str, str] = {
-    "layers": ("Declare independent `agent` and `user` layers."),
+    "layers": ("Declare independent `agent`, `assistant`, and `user` layers."),
     "user_memory": "Use `user=MemoryLayer()` to enable caller-scoped memory.",
     "workspace_memory": "Workspace memory is not designed yet.",
     "organization_memory": "Organization-scoped memory is not supported.",
@@ -115,11 +118,12 @@ _RESERVED_KEYWORDS: dict[str, str] = {
 def define_memory(
     *,
     agent: MemoryLayer[AgentContextT] | None = None,
+    assistant: MemoryLayer[AssistantContextT] | None = None,
     user: MemoryLayer[UserContextT] | None = None,
     scope: ResolvedMemoryLayer | Sequence[ResolvedMemoryLayer] | None = None,
     **kwargs: object,
 ) -> MemoryDefinition:
-    """Declare independent agent and user memory layers.
+    """Declare independent agent, assistant, and user memory layers.
 
     Example::
 
@@ -129,25 +133,28 @@ def define_memory(
         )
 
     Omitted layers are disabled. Each enabled layer mounts a read/write tree at
-    ``/memories/agent/`` or ``/memories/user/``, with ``AGENTS.md`` as hot memory.
+    ``/memories/agent/``, ``/memories/assistant/``, or ``/memories/user/``,
+    with ``AGENTS.md`` as hot memory.
     An optional sync or async ``allow(context)`` replaces that layer's default
     policy. The runtime evaluates it once per run, before mounting storage.
     Verified Studio users skip the user memory policy and always have access.
     User memory always requires a trusted person, regardless of its policy.
 
     ``scope`` accepts the legacy layer declarations. Do not combine it with
-    ``agent`` or ``user``.
+    ``agent``, ``assistant``, or ``user``.
     """
     _assert_keywords(kwargs)
-    if scope is not None and (agent is not None or user is not None):
-        raise ValueError("define_memory(...) cannot mix `scope` with `agent` or `user`.")
+    if scope is not None and any(layer is not None for layer in (agent, assistant, user)):
+        raise ValueError(
+            "define_memory(...) cannot mix `scope` with `agent`, `assistant`, or `user`."
+        )
     layers: MemoryLayers = []
-    for name, layer in (("agent", agent), ("user", user)):
+    for name, layer in (("agent", agent), ("assistant", assistant), ("user", user)):
         if layer is None:
             continue
         if not isinstance(layer, MemoryLayer):
             raise TypeError(f"define_memory(...) `{name}` must be a MemoryLayer.")
-        resolved: ResolvedMemoryLayer = {"type": "agent"} if name == "agent" else {"type": "user"}
+        resolved = cast("ResolvedMemoryLayer", {"type": name})
         if layer.allow is not None:
             resolved["allow"] = layer.allow
         layers.append(resolved)
@@ -163,11 +170,12 @@ def _assert_keywords(kwargs: dict[str, object]) -> None:
         if key in kwargs:
             raise ValueError(
                 f"define_memory(...) `{key}` is not supported. {reason} "
-                "Use `agent=MemoryLayer()`, `user=MemoryLayer()`, or both. "
-                "Omit both to keep no memory."
+                "Use `agent=MemoryLayer()`, `assistant=MemoryLayer()`, or `user=MemoryLayer()`. "
+                "Omit all layers to keep no memory."
             )
     if kwargs:
         unknown = ", ".join(sorted(kwargs))
         raise ValueError(
-            f"define_memory(...) unknown option(s): {unknown}. Valid options: agent, user, scope."
+            f"define_memory(...) unknown option(s): {unknown}. "
+            "Valid options: agent, assistant, user, scope."
         )

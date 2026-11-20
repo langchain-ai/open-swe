@@ -7,10 +7,10 @@
 //! 2. the **tracing project** LangSmith auto-creates with the same name — a
 //!    separate resource that survives deployment deletion and then blocks the
 //!    next deploy of that name with a conflict; and
-//! 3. the **Context Hub agent repo** for deploy-owned context, plus any
-//!    legacy per-user (`{name}--u--…`) or org (`{name}--t--…`) memory children
-//!    left from older runtimes, which are keyed off the deploy name and are
-//!    not touched by host teardown; and
+//! 3. the **Context Hub agent repo** for deploy-owned context, plus its
+//!    per-user (`{name}--u--…`), per-assistant (`{name}--a--…`) and legacy org
+//!    (`{name}--t--…`) memory children, which are keyed off the deploy name and
+//!    are not touched by host teardown; and
 //! 4. the **managed sandboxes** the runtime provisioned, which carry no
 //!    deployment reference of their own and are therefore matched by the
 //!    `{name}--` prefix the runtimes give them; and
@@ -284,7 +284,7 @@ fn warn_registry_not_deleted() -> Result<()> {
     note(
         "Sandbox registry was not deleted",
         format!(
-            "Looking up the deployment-owned private image registry failed, so it was \
+            "Looking up the Agent Server-owned private image registry failed, so it was \
              not removed. You can remove it by hand in LangSmith.\n{SANDBOX_DOCS_URL}"
         ),
     )?;
@@ -294,7 +294,7 @@ fn warn_registry_not_deleted() -> Result<()> {
 fn warn_channel_connections_not_deleted() -> Result<()> {
     note(
         "Channel connections were not deleted",
-        "Looking up the deployment's channel connections in Agent Auth failed, so they \
+        "Looking up the Agent Server's channel connections in Agent Auth failed, so they \
          were not removed. You can remove them with `mda connections delete`.",
     )?;
     Ok(())
@@ -335,7 +335,7 @@ fn resolve_plan(
     agent: Option<&DeploymentAgent>,
 ) -> Result<Plan> {
     let sp = spinner();
-    sp.start(format!("Looking up deployment '{name}'"));
+    sp.start(format!("Looking up Agent Server '{name}'"));
     let deployment = step(
         &sp,
         "Could not reach LangSmith",
@@ -356,8 +356,8 @@ fn resolve_plan(
         .and_then(|deployment| live_deployment(client, deployment).ok().flatten())
         .map(|(_, url)| url);
     match &deployment_id {
-        Some(id) => sp.stop(format!("Found deployment {id}")),
-        None => sp.stop(format!("No deployment named '{name}'")),
+        Some(id) => sp.stop(format!("Found Agent Server {id}")),
+        None => sp.stop(format!("No Agent Server named '{name}'")),
     }
 
     let sp = spinner();
@@ -489,19 +489,20 @@ fn deployment_repos(handles: &[String], name: &str) -> Vec<String> {
     repos
 }
 
-/// Whether `handle` is the deploy-owned Context Hub repo for `name`, a
-/// per-user memory child (`--u--`), or a legacy org memory child (`--t--`).
+/// Whether `handle` is the deploy-owned Context Hub repo for `name`, or one of
+/// its per-user (`--u--`), per-assistant (`--a--`) or legacy org (`--t--`) children.
 fn is_deployment_repo(handle: &str, name: &str) -> bool {
     handle == name
-        || handle.starts_with(&format!("{name}--u--"))
-        || handle.starts_with(&format!("{name}--t--"))
+        || ["u", "a", "t"]
+            .iter()
+            .any(|kind| handle.starts_with(&format!("{name}--{kind}--")))
 }
 
 /// List the resources about to be destroyed, so the confirmation is informed.
 fn report_plan(plan: &Plan, delete_tracing_project: bool) -> Result<()> {
     if plan.deployment_id.is_some() {
         log::warning(format!(
-            "Will delete the LangSmith deployment{}",
+            "Will delete the LangSmith Agent Server{}",
             tracing_project_suffix(delete_tracing_project)
         ))?;
     }
@@ -581,7 +582,9 @@ fn delete_crons(client: &langsmith::Client, deployment_url: &str) {
     match delete_managed_crons(client, deployment_url) {
         Ok(0) => sp.clear(),
         Ok(deleted) => sp.stop(format!("Deleted {deleted} schedule(s)")),
-        Err(_) => sp.stop("Could not delete schedules; they stop when the deployment is torn down"),
+        Err(_) => {
+            sp.stop("Could not delete schedules; they stop when the Agent Server is torn down")
+        }
     }
 }
 
@@ -594,19 +597,19 @@ fn delete_deployment(
     delete_tracing_project: bool,
 ) -> Result<()> {
     let sp = spinner();
-    sp.start(format!("Deleting deployment '{name}'"));
+    sp.start(format!("Deleting Agent Server '{name}'"));
     let existed = step(
         &sp,
-        "Could not delete the deployment",
+        "Could not delete the Agent Server",
         client.delete_deployment(deployment_id, delete_tracing_project),
     )?;
     if existed {
         sp.stop(format!(
-            "Deleted deployment '{name}'{}",
+            "Deleted Agent Server '{name}'{}",
             tracing_project_suffix(delete_tracing_project)
         ));
     } else {
-        sp.stop(format!("Deployment '{name}' was already gone"));
+        sp.stop(format!("Agent Server '{name}' was already gone"));
     }
     Ok(())
 }
@@ -744,13 +747,19 @@ mod tests {
         let all = handles(&[
             "my-agent",
             "my-agent--u--user-1",
+            "my-agent--a--assistant-1",
             "my-agent--t--tenant-1",
             "other-agent",
         ]);
 
         assert_eq!(
             deployment_repos(&all, "my-agent"),
-            handles(&["my-agent--t--tenant-1", "my-agent--u--user-1", "my-agent",])
+            handles(&[
+                "my-agent--a--assistant-1",
+                "my-agent--t--tenant-1",
+                "my-agent--u--user-1",
+                "my-agent",
+            ])
         );
     }
 

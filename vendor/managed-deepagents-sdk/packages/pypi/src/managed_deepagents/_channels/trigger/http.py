@@ -7,6 +7,7 @@ import dataclasses
 import functools
 import json
 import os
+import re
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -104,7 +105,7 @@ from managed_deepagents._telemetry.otel import set_log_attributes
 from managed_deepagents.run_context import INTERRUPT_CORRELATION_KEY
 
 if TYPE_CHECKING:
-    from langgraph_sdk.schema import Interrupt, ThreadState
+    from langgraph_sdk.schema import ThreadState
 
     from managed_deepagents._agent_auth import ResolvePrincipalIdentity
     from managed_deepagents._channels.actor import ChannelActor
@@ -116,7 +117,7 @@ if TYPE_CHECKING:
         HttpSkipReason,
     )
     from managed_deepagents._channels.resolve_user import ChannelResolveUser
-    from managed_deepagents._channels.run_input import NormalizedRunInput
+    from managed_deepagents._channels.run_input import NormalizedRunInput, RunConversation
     from managed_deepagents._channels.trigger.ingress import (
         HandlerThreadTarget,
         ObservedIngressRun,
@@ -674,6 +675,7 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
     trigger_client: TriggerClientLike | None = None,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
     started_status: TriggerChannelRuntimeStatus | None = None,
+    show_progress: bool = True,
     message_input: MessageInputFn | None = None,
     only_continues_thread: OnlyContinuesThreadFn | None = None,
     decide_message: DecideMessageFn | None = None,
@@ -956,9 +958,15 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
                 lambda: finish(finished), label="Channel finish notice", schedule=schedule
             )
 
-    async def observe(started: _StartedRun, *, react: bool = True) -> HttpFinish:
+    async def observe(
+        started: _StartedRun,
+        *,
+        react: bool = True,
+        reported: TriggerChannelEvent | None = None,
+    ) -> HttpFinish:
         return await _observe_accepted_run(
             event=event,
+            reported=reported,
             started=started.run,
             client=client,
             observe_agent=observe_agent,
@@ -967,8 +975,14 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
             user_id=user_id,
             reactions=reactions if react else False,
             started_status=started_status,
+            show_progress=show_progress,
             multitask_strategy=started.multitask_strategy,
             newer_run=newer_run,
+            # Only the conversation's own thread can be handed on.
+            handed_off=moved_away
+            if started.run["thread_id"] == thread_id
+            and started.source_thread_key == event["source_thread_key"]
+            else None,
         )
 
     async def run_on_thread(run: NormalizedRunInput, index: int, *, react: bool) -> None:
@@ -990,12 +1004,14 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
         )
         delivers = run.get("deliver_to_conversation", False)
         strategy = run.get("multitask_strategy", multitask_strategy)
+        # The conversation the run belongs to: its status, Stop and answer go there.
+        reported = _in_conversation(event, run.get("conversation"))
         binding = binding_with_messages(
-            trigger_channel_binding(provider=source_provider, name=channel_name, event=event),
+            trigger_channel_binding(provider=source_provider, name=channel_name, event=reported),
             run["messages"],
         )
         binding["reply"] = "auto" if delivers else "none"
-        stamped: dict[str, JsonValue] = {STARTED_FROM_METADATA: event["source_thread_key"]}
+        stamped: dict[str, JsonValue] = {STARTED_FROM_METADATA: reported["source_thread_key"]}
         if delivers:
             stamped[DELIVERS_METADATA] = True
         options: dict[str, object] = {
@@ -1028,7 +1044,9 @@ async def handle_trigger_channel_event_request(  # noqa: C901, PLR0911, PLR0912,
                     "channel run could not be started (%s)", logger.safe_error_label(error)
                 )
             return
-        finished = await observe(_StartedRun(started, owner, strategy), react=react)
+        finished = await observe(
+            _StartedRun(started, owner, strategy), react=react, reported=reported
+        )
         if persistent or finished["type"] != "run" or finished["interrupts"]:
             return
         try:
@@ -1326,9 +1344,39 @@ def _accepted_response(event: TriggerChannelEvent) -> object:
     )
 
 
+#: A Slack conversation's Trigger thread key: ``slack:v1:{app}:{team}:{conversation}:{ts}``.
+_SLACK_THREAD_KEY = re.compile(r"slack:v1:([^:]+):([^:]+):[^:]+:[^:]+")
+_Event = TypeVar("_Event", bound=TriggerChannelEvent)
+
+
+def _in_conversation(event: _Event, conversation: RunConversation | None) -> _Event:
+    """The event as the Slack thread a run belongs to sees it, in the event's own app
+    and workspace; the event itself without ``conversation``."""
+    if conversation is None:
+        return event
+    match = _SLACK_THREAD_KEY.fullmatch(event["source_thread_key"])
+    if match is None:
+        logger.error(
+            "channel run conversation ignored: the event is not a Slack thread's (delivery_id=%s)",
+            logger.log_identifier(event["delivery_id"]),
+        )
+        return event
+    app_id, team_id = match.groups()
+    conversation_id, thread_ts = conversation["conversation_id"], conversation["thread_id"]
+    return cast(
+        "_Event",
+        {
+            **event,
+            "address": {"conversation_id": conversation_id, "thread_id": thread_ts},
+            "source_thread_key": f"slack:v1:{app_id}:{team_id}:{conversation_id}:{thread_ts}",
+        },
+    )
+
+
 async def _observe_accepted_run(
     *,
     event: TriggerChannelEvent,
+    reported: TriggerChannelEvent | None = None,
     started: StartedIngressRun,
     client: TriggerClientLike,
     observe_agent: ObserveAgentFn | None,
@@ -1337,11 +1385,19 @@ async def _observe_accepted_run(
     user_id: str,
     reactions: ReactionChoice = DEFAULT_REACTION_EMOJI,
     started_status: TriggerChannelRuntimeStatus | None = None,
+    show_progress: bool = True,
     multitask_strategy: MultitaskStrategy | None = None,
     newer_run: NewerRunFn | None = None,
+    handed_off: Callable[[Exception], Awaitable[bool]] | None = None,
 ) -> HttpFinish:
     """Observe a started run and say how the delivery finished; the run itself
-    posts its answer (``_channels/delivery.py``)."""
+    posts its answer (``_channels/delivery.py``).
+
+    Its status goes to ``reported``, the conversation it belongs to, which is the
+    event's unless the handler named another; the reaction stays on the event's
+    message.
+    """
+    status_event = reported or event
     was_replaced = functools.partial(
         _replaced_by_newer_message,
         event,
@@ -1352,8 +1408,9 @@ async def _observe_accepted_run(
         user_id=user_id,
         newer_run=newer_run,
     )
-    # A run a newer message replaced ended ``interrupted``, as the HTTP channel
-    # reports one.
+    # A run a newer message replaced, or one whose conversation handed its
+    # thread to a new one, which reports it now, ended ``interrupted``, as the
+    # HTTP channel reports one.
     replaced: HttpFinish = {
         "type": "run",
         "run": {"id": started["run_id"], "status": "interrupted"},
@@ -1374,11 +1431,12 @@ async def _observe_accepted_run(
         )
         request = _runtime_event(
             event_type,
-            event,
+            status_event,
             started,
             message=message,
             tracer_session_id=await tracer_session_id(),
             status=status,
+            show_progress=show_progress,
         )
         await _best_effort(client.post_runtime_event(event["channel_id"], request))
 
@@ -1403,7 +1461,9 @@ async def _observe_accepted_run(
                 user_id=user_id,
             )
         except Exception as error:  # noqa: BLE001 - only known-safe details leave runtime
-            if await was_replaced(error):
+            if await _handed_thread_on(event, started, error, handed_off) or await was_replaced(
+                error
+            ):
                 return replaced
             await lifecycle("run.failed", message=_missing_connection_failure_message(error))
             return {"type": "failed", "reason": "observe", "interrupts": []}
@@ -1412,13 +1472,21 @@ async def _observe_accepted_run(
             return {
                 "type": "run",
                 "run": {"id": started["run_id"], "status": observed["status"]},
-                "interrupts": cast("list[Interrupt]", interrupts or []),
+                "interrupts": interrupts or [],
             }
 
         # Stopped from Slack or Studio: the run ended ``interrupted``, with
         # nothing waiting on a decision.
         if _is_cancelled_run(observed):
-            if not await was_replaced(None):
+            # The active run took the message and still reports its status.
+            if observed.get("taken"):
+                logger.info(
+                    "channel run's message was taken by the thread's active run "
+                    "(delivery_id=%s, run_id=%s)",
+                    logger.log_identifier(event["delivery_id"]),
+                    logger.log_identifier(started["run_id"]),
+                )
+            elif not await was_replaced(None):
                 await lifecycle("run.cancelled")
             return ended()
 
@@ -1531,6 +1599,28 @@ def _observation_kwargs(
     kwargs["source_provider"] = source_provider
     kwargs["source_thread_key"] = source_thread_key
     return kwargs
+
+
+async def _handed_thread_on(
+    event: TriggerChannelEvent,
+    started: StartedIngressRun,
+    error: Exception,
+    handed_off: Callable[[Exception], Awaitable[bool]] | None,
+) -> bool:
+    """Whether a run's status read is a 404 because its conversation handed its
+    thread to a new one, which reports the run now."""
+    if (
+        handed_off is None
+        or lookup_status(error) != HTTPStatus.NOT_FOUND
+        or not await handed_off(error)
+    ):
+        return False
+    logger.info(
+        "channel run handed its thread to a new conversation (delivery_id=%s, run_id=%s)",
+        logger.log_identifier(event["delivery_id"]),
+        logger.log_identifier(started["run_id"]),
+    )
+    return True
 
 
 async def _replaced_by_newer_message(
@@ -1647,6 +1737,7 @@ def _runtime_event(
     *,
     tracer_session_id: str | None = None,
     status: TriggerChannelRuntimeStatus | None = None,
+    show_progress: bool = True,
 ) -> TriggerChannelRuntimeEventRequest:
     request: TriggerChannelRuntimeEventRequest = {
         "id": str(uuid.uuid4()),
@@ -1663,6 +1754,8 @@ def _runtime_event(
         request["message"] = {"text": message}
     if interrupts:
         request["interrupts"] = interrupts
+    if not show_progress:
+        request["show_progress"] = False
     # The status a channel set, on `run.started`.
     if status is not None:
         if "message" in status:

@@ -53,6 +53,10 @@ def layer_type_value(layer_type, has_id):
         if has_id:
             return {"kind": "unknown", "detail": "an `id` on the agent layer"}
         return {"kind": "agent", "detail": None}
+    if layer_type == "assistant":
+        if has_id:
+            return {"kind": "unknown", "detail": "an `id` on the assistant layer"}
+        return {"kind": "assistant", "detail": None}
     if layer_type == "user":
         return {"kind": "user", "detail": None}
     return {"kind": "unknown", "detail": f"type {layer_type!r}"}
@@ -94,28 +98,16 @@ def layer_entry(node):
 
 def reduce_entries(entries):
     """Reduce a list of layer entries to the canonical mounted set."""
-    agent = False
-    user = False
+    layers = set()
     for entry in entries:
-        if entry["kind"] == "agent":
-            if agent:
-                return {"kind": "duplicate_agent", "detail": None}
-            agent = True
-        elif entry["kind"] == "user":
-            if user:
-                return {"kind": "duplicate_user", "detail": None}
-            user = True
-        else:
-            # A duplicate, shorthand, reserved, unknown, or dynamic entry decides
-            # the whole list.
+        kind = entry["kind"]
+        if kind not in {"agent", "assistant", "user"}:
             return entry
-    if agent and user:
-        return {"kind": "agent_user", "detail": None}
-    if agent:
-        return {"kind": "agent", "detail": None}
-    if user:
-        return {"kind": "user", "detail": None}
-    return {"kind": "none", "detail": None}
+        if kind in layers:
+            return {"kind": f"duplicate_{kind}", "detail": None}
+        layers.add(kind)
+    kind = "_".join(name for name in ("agent", "assistant", "user") if name in layers)
+    return {"kind": kind or "none", "detail": None}
 
 
 def layers_value(node):
@@ -157,11 +149,11 @@ def from_call(call):
     # the value is not readable: deploy seeds from this answer and must not guess.
     if any(kw.arg is None for kw in call.keywords):
         return {"kind": "dynamic", "detail": "a ** entry that can set scope"}
-    named = [name for name in ("agent", "user") if name in kwargs]
+    named = [name for name in ("agent", "assistant", "user") if name in kwargs]
     if named:
         if "scope" in kwargs:
-            return {"kind": "unknown", "detail": "cannot mix scope with agent or user"}
-        if any(key not in {"agent", "user"} for key in kwargs):
+            return {"kind": "unknown", "detail": "cannot mix scope with agent, assistant, or user"}
+        if any(key not in {"agent", "assistant", "user"} for key in kwargs):
             return {"kind": "unknown", "detail": "unsupported memory option"}
         return reduce_entries([named_layer(kwargs[name], name) for name in named])
     # Named so the retired shorthand reports the new shape rather than reading as

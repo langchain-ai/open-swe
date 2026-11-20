@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import AsyncExitStack
 from contextvars import Token
 from functools import cached_property
-from typing import Any, cast
+from typing import Any, Self, cast
 from uuid import UUID
 
 from langchain_core.callbacks import AsyncCallbackManager
@@ -35,7 +35,10 @@ from managed_deepagents._channels.delivery import (
 from managed_deepagents._channels.run_output import RunOutput, _current_output
 from managed_deepagents._identity_runtime import _field
 from managed_deepagents._managed_thread import RunThread, _current_thread, build_run_thread
+from managed_deepagents._memory.assistant_memory import APPROVED_ASSISTANT
 from managed_deepagents._memory.async_util import await_if_needed
+from managed_deepagents._memory.user_memory import APPROVED_USER
+from managed_deepagents._sandbox_run import CURRENT_SANDBOX_RUN, SandboxRun
 from managed_deepagents._telemetry.otel import (
     LogContext,
     current_log_context,
@@ -171,7 +174,30 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
     Each step sees the run's channel and thread; when the stream ends, the run's
     result goes to its thread origin, or a scheduled run's ``deliver_to``. A
     scheduled run that raises reports the failure there before it raises.
+
+    ``approved_user`` is the user this call may reach user memory as. MDA sets it on
+    the copy it returns for each run, and each step sees it as ``APPROVED_USER``.
+    ``sandbox_run`` carries the run's runtime to its sandbox's ``resolve`` the same
+    way, as ``CURRENT_SANDBOX_RUN``.
     """
+
+    approved_user: str | None = None
+    approved_assistant: str | None = None
+    sandbox_run: SandboxRun | None = None
+
+    def copy(self, update: dict[str, Any] | None = None) -> Self:
+        """``Pregel.copy``, also keeping the per-call fields, which ``__init__`` doesn't take."""
+        attrs = {
+            key: value
+            for key, value in self.__dict__.items()
+            if key not in ("__orig_class__", "approved_user", "approved_assistant", "sandbox_run")
+        }
+        attrs.update(update or {})
+        copied = self.__class__(**attrs)
+        copied.approved_user = self.approved_user
+        copied.approved_assistant = self.approved_assistant
+        copied.sandbox_run = self.sandbox_run
+        return copied
 
     def stream(
         self,
@@ -190,7 +216,16 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         iterator = super().stream(input, config, context=context, **kwargs)
         try:
             while True:
-                tokens = _enter_step(binding, routing, thread, log, output)
+                tokens = _enter_step(
+                    binding,
+                    routing,
+                    thread,
+                    log,
+                    output,
+                    self.approved_user,
+                    self.approved_assistant,
+                    self.sandbox_run,
+                )
                 try:
                     item = next(iterator)
                 except StopIteration:
@@ -231,7 +266,16 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         resources = AsyncExitStack()
         try:
             while True:
-                tokens = _enter_step(binding, routing, thread, log, output)
+                tokens = _enter_step(
+                    binding,
+                    routing,
+                    thread,
+                    log,
+                    output,
+                    self.approved_user,
+                    self.approved_assistant,
+                    self.sandbox_run,
+                )
                 try:
                     resource_token = _current_resources.set(resources)
                     try:
@@ -398,11 +442,14 @@ def run_log_context(defaults: RunnableConfig | None, config: RunnableConfig | No
 _INPUT = {"source": INPUT_SOURCE}
 
 _StepTokens = tuple[
+    Token[str | None],
+    Token[str | None],
     Token[ChannelBinding | None],
     Token[Mapping[str, object] | None],
     Token[RunThread | None],
     Token[LogContext | None],
     Token[RunOutput | None],
+    Token[SandboxRun | None],
 ]
 
 
@@ -412,23 +459,33 @@ def _enter_step(
     thread: RunThread,
     log: LogContext,
     output: RunOutput | None,
+    approved_user: str | None,
+    approved_assistant: str | None = None,
+    sandbox_run: SandboxRun | None = None,
 ) -> _StepTokens:
     return (
+        # A nested managed graph has none of its own and keeps its parent's.
+        APPROVED_USER.set(approved_user or APPROVED_USER.get()),
+        APPROVED_ASSISTANT.set(approved_assistant or APPROVED_ASSISTANT.get()),
         _current_channel.set(binding),
         _current_routing.set(routing),
         _current_thread.set(thread),
         enter_log_context(log),
         _current_output.set(output),
+        CURRENT_SANDBOX_RUN.set(sandbox_run or CURRENT_SANDBOX_RUN.get()),
     )
 
 
 def _exit_step(tokens: _StepTokens) -> None:
-    channel, routing, thread, log, output = tokens
+    approved, assistant, channel, routing, thread, log, output, sandbox_run = tokens
+    CURRENT_SANDBOX_RUN.reset(sandbox_run)
     _current_output.reset(output)
     exit_log_context(log)
     _current_thread.reset(thread)
     _current_routing.reset(routing)
     _current_channel.reset(channel)
+    APPROVED_ASSISTANT.reset(assistant)
+    APPROVED_USER.reset(approved)
 
 
 def _history_config(config: RunnableConfig) -> RunnableConfig:

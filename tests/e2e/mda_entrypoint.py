@@ -30,9 +30,9 @@ if not sandbox_service.REAL:
 
     def _stand_in_mda_sandbox(
         _sandbox: object, *, scope_key: str, **_kwargs: object
-    ) -> tuple[sandbox_service.StandInSandbox, str, str]:
+    ) -> tuple[sandbox_service.StandInSandbox, str]:
         name = sandbox_service.mda_sandbox_name(scope_key)
-        return sandbox_service.open_mda_sandbox(name), name, name
+        return sandbox_service.open_mda_sandbox(name), name
 
     def _no_proxy(*_args: object, **_kwargs: object) -> None:
         # LangSmith holds a sandbox's proxy config; the stand-in has none to write.

@@ -53,7 +53,7 @@ pub(crate) fn run_python_extractor(
     );
     let python = toolchain::python3_program();
     let output = child::output_with_stdin(
-        toolchain::python3().arg("-c").arg(program),
+        toolchain::isolated_python3().arg("-c").arg(program),
         source.as_bytes(),
     )
     .with_context(|| {

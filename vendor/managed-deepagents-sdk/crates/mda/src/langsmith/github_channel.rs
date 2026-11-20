@@ -86,6 +86,10 @@ pub(crate) struct GitHubChannelStatus {
     pub(crate) installations_truncated: bool,
     #[serde(default)]
     pub(crate) installation_requests: Vec<GitHubInstallationRequest>,
+    /// Whether more installation requests are pending than
+    /// `installation_requests` lists: Agent Auth reports only the first 100.
+    #[serde(default)]
+    pub(crate) installation_requests_truncated: bool,
 }
 
 /// Result of one report. Only `Unavailable` is not the developer's to fix.
@@ -213,7 +217,8 @@ mod tests {
                     "permissions": { "issues": "write", "metadata": "read" },
                     "settings_url": "https://github.com/organizations/acme/settings/installations/7"
                 }],
-                "installation_requests": [{ "account": { "login": "globex", "type": "Organization" } }]
+                "installation_requests": [{ "account": { "login": "globex", "type": "Organization" } }],
+                "installation_requests_truncated": true
             }
         })
         .to_string();
@@ -247,6 +252,7 @@ mod tests {
         assert_eq!(status.installations[0].repositories, vec!["acme/api"]);
         assert!(status.installations[0].repositories_truncated);
         assert_eq!(status.installation_requests[0].account.login, "globex");
+        assert!(status.installation_requests_truncated);
     }
 
     #[test]

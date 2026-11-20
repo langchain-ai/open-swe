@@ -27,6 +27,18 @@ def resolve_loopback_api_url(*, explicit: str | None = None) -> str:
     return f"http://127.0.0.1:{port}{prefix if prefix.startswith('/') else ''}"
 
 
+def unmounted_path(path: str) -> str:
+    """``path`` without this server's ``MOUNT_PREFIX``, as its routes see it.
+
+    The Agent Server gives auth the full request path. Only the server-configured
+    prefix is stripped, at a path-segment boundary, never one from the caller.
+    """
+    prefix = os.environ.get("MOUNT_PREFIX", "").rstrip("/")
+    if prefix.startswith("/") and path.startswith(f"{prefix}/"):
+        return path[len(prefix) :]
+    return path
+
+
 def resolve_loopback_api_key(*, explicit: str | None = None) -> str:
     """API key for trusted loopback LangGraph SDK clients.
 
@@ -79,4 +91,5 @@ __all__ = [
     "resolve_loopback_api_key",
     "resolve_loopback_api_url",
     "sends_key_securely",
+    "unmounted_path",
 ]

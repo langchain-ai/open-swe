@@ -1,7 +1,8 @@
 //! Agent Platform endpoints used by deploy and dev.
 
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use reqwest::Method;
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::Client;
@@ -16,6 +17,39 @@ impl Client {
         &self,
         deployment_id: &str,
     ) -> Result<Option<String>> {
+        let Some(tag) = self
+            .agent_bound_to(deployment_id)?
+            .and_then(|agent| agent.tag_value_id)
+        else {
+            return Ok(None);
+        };
+        ensure!(
+            !tag.is_empty(),
+            "Agent lookup response has an invalid tag_value_id"
+        );
+        Ok(Some(tag))
+    }
+
+    pub(crate) fn deployment_agent_identity(&self, deployment_id: &str) -> Result<Option<String>> {
+        let Some(agent) = self.agent_bound_to(deployment_id)? else {
+            return Ok(None);
+        };
+        let Some(detail) = self.request_optional(
+            self.platform_base(),
+            Method::GET,
+            &format!("/api/v1/agents/{}", agent.id),
+            &[("include", "runtime_bindings")],
+            None,
+        )?
+        else {
+            return Ok(None);
+        };
+        let detail: AgentDetail =
+            serde_json::from_value(detail).context("Agent response is invalid")?;
+        Ok(detail.identity_of(deployment_id))
+    }
+
+    fn agent_bound_to(&self, deployment_id: &str) -> Result<Option<ListedAgent>> {
         let Some(page) = self.request_optional(
             self.platform_base(),
             Method::GET,
@@ -29,21 +63,9 @@ impl Client {
         else {
             return Ok(None);
         };
-        let Some(tag) = page
-            .get("items")
-            .and_then(Value::as_array)
-            .context("Agent lookup response has no items array")?
-            .first()
-            .and_then(|agent| agent.get("tag_value_id"))
-            .filter(|value| !value.is_null())
-        else {
-            return Ok(None);
-        };
-        let tag = tag
-            .as_str()
-            .filter(|tag| !tag.is_empty())
-            .context("Agent lookup response has an invalid tag_value_id")?;
-        Ok(Some(tag.to_string()))
+        let page: AgentPage =
+            serde_json::from_value(page).context("Agent lookup response is invalid")?;
+        Ok(page.items.into_iter().next())
     }
 
     /// Tracing project of `agent_id`'s LOCAL environment, creating the agent
@@ -67,6 +89,52 @@ impl Client {
             .map(str::to_string)
             .context("Agent environment response has no tracer_session_name")
     }
+}
+
+#[derive(Deserialize)]
+struct AgentPage {
+    items: Vec<ListedAgent>,
+}
+
+#[derive(Deserialize)]
+struct ListedAgent {
+    id: String,
+    tag_value_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AgentDetail {
+    environments: Vec<EnvironmentDetail>,
+}
+
+impl AgentDetail {
+    fn identity_of(self, deployment_id: &str) -> Option<String> {
+        self.environments
+            .into_iter()
+            .find(|environment| environment.runs(deployment_id))
+            .and_then(|environment| environment.identifier)
+            .filter(|identifier| !identifier.is_empty())
+    }
+}
+
+#[derive(Deserialize)]
+struct EnvironmentDetail {
+    identifier: Option<String>,
+    #[serde(default)]
+    runtime_bindings: Vec<RuntimeBinding>,
+}
+
+impl EnvironmentDetail {
+    fn runs(&self, deployment_id: &str) -> bool {
+        self.runtime_bindings
+            .iter()
+            .any(|binding| binding.source_id == deployment_id)
+    }
+}
+
+#[derive(Deserialize)]
+struct RuntimeBinding {
+    source_id: String,
 }
 
 #[cfg(test)]
@@ -178,12 +246,163 @@ mod tests {
                 "500 Internal Server Error",
                 json!({"detail": "lookup failed"}),
             ),
+            (
+                "200 OK",
+                json!({"items": [{"id": "actual-agent", "tag_value_id": ""}], "next_cursor": null}),
+            ),
         ] {
             let (client, request) = serve(status, body);
             assert!(client
                 .deployment_agent_tag_value_id("deployment-id")
                 .is_err());
             request.join().unwrap();
+        }
+    }
+
+    fn agent_page() -> Value {
+        json!({"items": [{"id": "actual-agent", "tag_value_id": null}], "next_cursor": null})
+    }
+
+    fn agent_detail(environments: Value) -> Value {
+        json!({"id": "actual-agent", "agent_uuid": "agent-uuid", "environments": environments})
+    }
+
+    fn environment(name: &str, identifier: Option<&str>, source_ids: &[&str]) -> Value {
+        let mut environment = json!({
+            "environment": name,
+            "runtime_bindings": source_ids
+                .iter()
+                .map(|source_id| json!({"source_id": source_id}))
+                .collect::<Vec<_>>(),
+        });
+        if let Some(identifier) = identifier {
+            environment["identifier"] = json!(identifier);
+        }
+        environment
+    }
+
+    #[test]
+    fn deployment_agent_identity_names_the_environment_that_runs_the_deployment() {
+        let (client, requests) = serve_all(vec![
+            ("200 OK", agent_page()),
+            (
+                "200 OK",
+                agent_detail(json!([
+                    environment(
+                        "DEVELOPMENT",
+                        Some("agent:agent-uuid:env:development"),
+                        &["other-deployment"]
+                    ),
+                    environment(
+                        "PRODUCTION",
+                        Some("agent:agent-uuid:env:production"),
+                        &["deployment-id"]
+                    ),
+                ])),
+            ),
+        ]);
+
+        assert_eq!(
+            client
+                .deployment_agent_identity("deployment-id")
+                .unwrap()
+                .as_deref(),
+            Some("agent:agent-uuid:env:production")
+        );
+        let requests = requests.join().unwrap();
+        assert!(requests[0].starts_with("GET /api/v1/agents?"));
+        assert!(requests[0].contains("runtime_binding_source_id=deployment-id"));
+        assert!(requests[0].contains("source_type=MDA"));
+        assert!(
+            requests[1].starts_with("GET /api/v1/agents/actual-agent?include=runtime_bindings ")
+        );
+    }
+
+    #[test]
+    fn deployment_agent_identity_is_none_when_there_is_nothing_to_show() {
+        let not_found = ("404 Not Found", json!({"detail": "not found"}));
+        for (case, responses) in [
+            ("the server has no Agent API", vec![not_found.clone()]),
+            (
+                "no agent is bound",
+                vec![("200 OK", json!({"items": [], "next_cursor": null}))],
+            ),
+            (
+                "the agent cannot be read",
+                vec![("200 OK", agent_page()), not_found.clone()],
+            ),
+            (
+                "the environment has no identifier",
+                vec![
+                    ("200 OK", agent_page()),
+                    (
+                        "200 OK",
+                        agent_detail(json!([environment("PRODUCTION", None, &["deployment-id"])])),
+                    ),
+                ],
+            ),
+            (
+                "no environment runs the deployment",
+                vec![
+                    ("200 OK", agent_page()),
+                    (
+                        "200 OK",
+                        agent_detail(json!([environment(
+                            "PRODUCTION",
+                            Some("agent:agent-uuid:env:production"),
+                            &["other-deployment"]
+                        )])),
+                    ),
+                ],
+            ),
+        ] {
+            let (client, requests) = serve_all(responses);
+            assert_eq!(
+                client.deployment_agent_identity("deployment-id").unwrap(),
+                None,
+                "{case}"
+            );
+            requests.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn deployment_agent_identity_reports_lookup_errors() {
+        for (case, responses) in [
+            (
+                "the agent read fails",
+                vec![
+                    ("200 OK", agent_page()),
+                    (
+                        "500 Internal Server Error",
+                        json!({"detail": "lookup failed"}),
+                    ),
+                ],
+            ),
+            (
+                "the agent detail is malformed",
+                vec![
+                    ("200 OK", agent_page()),
+                    (
+                        "200 OK",
+                        json!({"id": "actual-agent", "environments": "none"}),
+                    ),
+                ],
+            ),
+            (
+                "a listed agent has no id",
+                vec![(
+                    "200 OK",
+                    json!({"items": [{"tag_value_id": null}], "next_cursor": null}),
+                )],
+            ),
+        ] {
+            let (client, requests) = serve_all(responses);
+            assert!(
+                client.deployment_agent_identity("deployment-id").is_err(),
+                "{case}"
+            );
+            requests.join().unwrap();
         }
     }
 }

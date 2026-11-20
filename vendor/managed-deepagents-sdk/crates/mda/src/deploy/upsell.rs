@@ -1,15 +1,13 @@
 //! Plan-entitlement upsell for `mda deploy`.
 //!
-//! Shipping a Managed Deep Agent needs two LangSmith entitlements, each carried
-//! by the organization's plan. When either is missing the host backend answers
-//! `403` with a fixed `detail` (langchainplus `host/api/util.py`):
+//! Shipping a Managed Deep Agent requires LangSmith Deployment entitlement.
+//! Older servers may also return a separate Managed Deep Agents entitlement
+//! error. Both responses use `403` with a fixed `detail`:
 //!
 //! - `LangSmith Deployment is not enabled for this organization` — the plan does
 //!   not include LangSmith Deployment at all (`can_use_langgraph_cloud`).
-//! - `Managed Deep Agents is not enabled for this organization` — the plan
-//!   includes Deployment but not Managed Deep Agents
-//!   (`managed_deep_agents_enabled`, which the private beta can also grant
-//!   outside the plan).
+//! - `Managed Deep Agents is not enabled for this organization` — an older
+//!   server requires separate Managed Deep Agents access.
 //!
 //! Neither is a bug or a misconfiguration the developer can fix in their project,
 //! so a bare `... (HTTP 403)` line sends them looking in the wrong place. Report
@@ -49,7 +47,7 @@ impl PlanGate {
     fn explanation(self) -> &'static str {
         match self {
             Self::Deployment => {
-                "Your LangSmith organization's plan does not include LangSmith Deployment, \
+                "Your LangSmith organization's plan does not include Agent Server hosting, \
                  which `mda deploy` needs to host a Managed Deep Agent. It is available on \
                  the Plus and Enterprise plans."
             }
@@ -67,7 +65,7 @@ impl PlanGate {
     fn footer(self) -> &'static str {
         match self {
             Self::Deployment => {
-                "Deploy cancelled — this plan does not include LangSmith Deployment."
+                "Deploy cancelled — this plan does not include Agent Server hosting."
             }
             // Not phrased as a plan limit: this entitlement is also gated by the
             // private beta, so an upgraded org can still land here.
@@ -148,6 +146,16 @@ mod tests {
     fn recognizes_the_deployment_entitlement_gate() {
         let err = forbidden("LangSmith Deployment is not enabled for this organization");
         assert_eq!(plan_gate(&err), Some(PlanGate::Deployment));
+    }
+
+    #[test]
+    fn deployment_gate_copy_names_agent_server_hosting() {
+        assert!(PlanGate::Deployment
+            .explanation()
+            .contains("Agent Server hosting"));
+        assert!(PlanGate::Deployment
+            .footer()
+            .contains("Agent Server hosting"));
     }
 
     #[test]

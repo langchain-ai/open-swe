@@ -165,7 +165,7 @@ def snapshot_sandbox_selection(value: object) -> SandboxDefinition | None:
         options = _snapshot_sandbox_value(value.options, {})
         if not isinstance(options, dict):
             raise TypeError("sandbox options must be a mapping")
-        return SandboxDefinition(cast("dict[str, object]", options))
+        return SandboxDefinition(cast("dict[str, object]", options), value.resolve)
     raise TypeError("sandbox must be a SandboxDefinition or None")
 
 

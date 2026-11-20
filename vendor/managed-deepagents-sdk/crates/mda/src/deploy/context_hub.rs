@@ -115,9 +115,7 @@ pub struct SyncSummary {
 
 /// Inspect local and Hub context without changing directory contents.
 ///
-/// `memory_enabled` comes from the project's memory declaration
-/// ([`crate::compile::resolve_memory`]) — the single answer build, deploy, and dev
-/// all read, so the seeded tree always matches what the runtime mounts.
+/// `memory_enabled` enables only the deployment-shared agent seed.
 pub(crate) fn prepare_context_sync(
     client: &ContextHubClient,
     project: &Project,
@@ -167,7 +165,13 @@ pub(crate) fn apply_context_sync(
 
     let changed = !files.is_empty();
     if changed {
-        client.create_directory_commit(&plan.repo, plan.parent_commit.as_deref(), files)?;
+        client.create_directory_commit(
+            &plan.repo,
+            plan.parent_commit.as_deref(),
+            files,
+            "deploy",
+            "mda deploy",
+        )?;
     } else {
         let current = client.get_directory(&plan.repo)?;
         if HubContextState::read(&current.files)? != plan.hub_state {
@@ -247,6 +251,12 @@ impl Default for LocalContext {
             memory_enabled: true,
         }
     }
+}
+
+/// Whether the project ships deploy-owned skills, which is what a sync with
+/// the repository winning reports as `has_skills`.
+pub(crate) fn local_context_has_skills(project: &Project) -> Result<bool> {
+    Ok(collect_local_context(project, true)?.has_skills)
 }
 
 fn collect_local_context(project: &Project, memory_enabled: bool) -> Result<LocalContext> {
@@ -895,6 +905,41 @@ mod tests {
         let files = build_all_commit_files(&existing, &local);
 
         assert!(!files.contains_key(AGENT_MEMORY_FILE));
+    }
+
+    #[test]
+    fn assistant_only_declaration_never_seeds_or_updates_shared_memory() {
+        let root = tempfile::tempdir().unwrap();
+        write_file(root.path(), "agent.ts", "export const agent = {};\n");
+        write_file(
+            root.path(),
+            "memory.ts",
+            "export const memory = defineMemory({ assistant: memoryLayer() });\n",
+        );
+        write_file(
+            root.path(),
+            "memories/assistant/AGENTS.md",
+            "local memory\n",
+        );
+        let mut project = project(root.path(), "agent.ts");
+        project.files.push("memory.ts".into());
+        let memory = crate::compile::resolve_memory(&project).unwrap();
+        assert!(memory.assistant_enabled());
+        let local = collect_local_context(&project, memory.agent_enabled()).unwrap();
+        assert!(local.has_local_memories);
+        for existing in [
+            BTreeMap::new(),
+            BTreeMap::from([
+                (
+                    "memories/assistant/AGENTS.md".to_string(),
+                    file_entry("existing\n"),
+                ),
+                (AGENT_MEMORY_FILE.to_string(), file_entry("shared\n")),
+            ]),
+        ] {
+            let files = build_all_commit_files(&existing, &local);
+            assert!(!files.keys().any(|path| path.starts_with("memories/")));
+        }
     }
 
     #[test]

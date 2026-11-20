@@ -125,7 +125,7 @@ async def test_the_file_tools_refuse_before_mda_sees_the_call(
         stream_writer=lambda event: None,
         tool_call_id="call-1",
         store=None,
-        backend=filesystem,
+        backend=filesystem,  # ty: ignore[invalid-argument-type] - a stand-in for the sandbox
     )
     results: dict[str, ToolMessage] = {}
     for path in (OWN, ROBINS):

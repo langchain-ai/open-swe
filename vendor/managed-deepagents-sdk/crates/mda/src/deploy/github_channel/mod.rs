@@ -93,7 +93,7 @@ const WEBHOOK_DIGEST_LENGTH: usize = 16;
 
 const NO_HANDLERS: &str = "The GitHub channel handles no events yet, so no GitHub App is set up. Add handlers with `channels.github({ onEvent: { ... } })` and deploy again.";
 
-const SKIPPED_SETUP: &str = "Continuing without the GitHub channel. The deployment is live, but it receives no GitHub events until you run `mda deploy` again and finish setting up the GitHub App.";
+const SKIPPED_SETUP: &str = "Continuing without the GitHub channel. The Agent Server is live, but it receives no GitHub events until you run `mda deploy` again and finish setting up the GitHub App.";
 
 /// Where a new App is created: an organization login, or [`PERSONAL_OWNER`].
 /// Without a terminal deploy cannot ask, so this must be set.
@@ -108,7 +108,7 @@ const INSTALLATION_ID_HINT: &str =
 
 const EXISTING_APP_NEEDS_TERMINAL: &str = "This agent's GitHub App was brought in by its ID and key and is not installed in exactly one account yet. Install it on GitHub, or set MDA_GITHUB_APP_INSTALLATION_ID in the shell or .env to the installation this agent uses, then run `mda deploy` again. Or run `mda deploy` in a terminal once to choose or install it.";
 
-const MISSING_WEBHOOK_SECRET: &str = "Agent Auth has no webhook secret for this GitHub App, so the channel rejects its events unless the deployment sets GH_WEBHOOK_SECRET. Set MDA_GITHUB_WEBHOOK_SECRET in the shell or .env, or run `mda deploy` in a terminal, to add it.";
+const MISSING_WEBHOOK_SECRET: &str = "Agent Auth has no webhook secret for this GitHub App, so the channel rejects its events unless the Agent Server sets GH_WEBHOOK_SECRET. Set MDA_GITHUB_WEBHOOK_SECRET in the shell or .env, or run `mda deploy` in a terminal, to add it.";
 
 /// An existing App from the CLI-only env vars.
 #[derive(Clone)]
@@ -248,6 +248,9 @@ pub(crate) trait SetupEnv: SetupUi {
     fn installation_from_env(&self) -> Option<String>;
     /// Pick one of several installations of an App the user brought.
     fn choose_installation(&mut self, installations: &[GitHubInstallation]) -> Result<String>;
+    /// The installation Agent Auth recorded for the agent's token, if it can
+    /// tell. Only names it in the output, so a failed lookup is `None`.
+    fn recorded_installation(&mut self, connection: &AppConnection) -> Option<u64>;
     /// Whether the CLI-only env vars choose a new App (its owner) or an
     /// existing one, so nobody is asked.
     fn app_source_from_env(&self) -> Option<AppSource>;
@@ -425,7 +428,7 @@ fn installation_status(report: GitHubSyncOutcome) -> Result<ChannelStatus> {
             bail!("could not ask GitHub about the App: {reason}")
         }
         GitHubSyncOutcome::MissingCredentials | GitHubSyncOutcome::NotCreated => {
-            return needs("Agent Auth has no GitHub App for this deployment.".to_string());
+            return needs("Agent Auth has no GitHub App for this Agent Server.".to_string());
         }
         GitHubSyncOutcome::InvalidCredentials => {
             return needs("GitHub rejected the GitHub App's stored credentials.".to_string());
@@ -452,7 +455,7 @@ fn installation_status(report: GitHubSyncOutcome) -> Result<ChannelStatus> {
 fn app_status(connection: Option<&AppConnection>) -> ChannelStatus {
     let needs = |message: &str| ChannelStatus::NeedsSetup(message.to_string());
     let Some(connection) = connection else {
-        return needs("No GitHub App is set up for this deployment yet.");
+        return needs("No GitHub App is set up for this Agent Server yet.");
     };
     if !connection.installed {
         return match connection.state {
@@ -522,7 +525,7 @@ fn claim_webhook(
             // the next deploy asks again.
             Err(error) if is_cancellation(&error) => {
                 env.warning(&format!(
-                    "GitHub App {} keeps sending its events to {current}, so this deployment receives none. Run `mda deploy` again to point it here.",
+                    "GitHub App {} keeps sending its events to {current}, so this Agent Server receives none. Run `mda deploy` again to point it here.",
                     status.app.slug
                 ))?;
                 return Ok(status);
@@ -536,7 +539,7 @@ fn claim_webhook(
             forget_kept_webhooks(env, connection)?;
         }
         Err(error) => env.warning(&format!(
-            "Could not point GitHub App {}'s webhook at this deployment ({error:#}), so it receives no events. Run `mda deploy` again to retry.",
+            "Could not point GitHub App {}'s webhook at this Agent Server ({error:#}), so it receives no events. Run `mda deploy` again to retry.",
             status.app.slug
         ))?,
     }
@@ -752,9 +755,9 @@ fn app_holder(
 /// holds it: moving it is only offered in a terminal.
 fn app_held_elsewhere(app_id: &str, deployment_id: &str) -> String {
     format!(
-        "GitHub App {app_id} is connected to deployment {deployment_id} and stays there. Run \
+        "GitHub App {app_id} is connected to Agent Server {deployment_id} and stays there. Run \
          `mda channels setup github` or `mda deploy` in a terminal to move it to this \
-         deployment, or use another GitHub App."
+         Agent Server, or use another GitHub App."
     )
 }
 
@@ -799,7 +802,9 @@ pub(crate) fn run_setup(env: &mut dyn SetupEnv, channel: &GitHubChannel) -> Resu
         status = wait_for_installation(env, status)?;
     }
 
-    let report = report::build(channel, &status);
+    let recorded = env.recorded_installation(&connection);
+    let own = agent_installation(env, recorded);
+    let report = report::build(channel, &status, own);
     if let Some(ready) = &report.ready {
         env.success(ready)?;
     }
@@ -810,7 +815,16 @@ pub(crate) fn run_setup(env: &mut dyn SetupEnv, channel: &GitHubChannel) -> Resu
         env.info(note)?;
     }
     store_app_values(env, &connection, &status)?;
-    sync_token_scopes(env, channel, &connection, &status)
+    sync_token_scopes(env, channel, &connection, &status, recorded)
+}
+
+/// The installation the agent's token is minted on: the one Agent Auth
+/// recorded, else the one `MDA_GITHUB_APP_INSTALLATION_ID` names.
+fn agent_installation(env: &dyn SetupEnv, recorded: Option<u64>) -> Option<u64> {
+    recorded.or_else(|| {
+        env.installation_from_env()
+            .and_then(|id| id.trim().parse().ok())
+    })
 }
 
 /// The runtime reads the App's webhook secret and bot ID from Agent Auth, so
@@ -863,12 +877,14 @@ fn store_webhook_secret(env: &mut dyn SetupEnv) -> Result<bool> {
 /// Reconcile the agent's token with the channel's permissions. A change
 /// that drops a permission or lowers its level never leaves the agent with
 /// the broader token: it is narrowed now, or the agent has no token until a
-/// later deploy can mint the narrower one.
+/// later deploy can mint the narrower one. `recorded` is the installation
+/// Agent Auth recorded for the token, when known.
 fn sync_token_scopes(
     env: &mut dyn SetupEnv,
     channel: &GitHubChannel,
     connection: &AppConnection,
     status: &GitHubChannelStatus,
+    recorded: Option<u64>,
 ) -> Result<()> {
     let active: Vec<&GitHubInstallation> = status
         .installations
@@ -904,12 +920,18 @@ fn sync_token_scopes(
         env.info(&report::token_summary(
             channel, status, described, &scopes, false,
         ))?;
-        // Only a pinned or single installation is the one the token is on.
+        // Only a pinned or single installation is the one the token is on,
+        // and a single one only when Agent Auth did not record another.
         return match (&pinned, active.as_slice()) {
             (Some((installation, _)), _) => {
                 check_token(env, channel, status, connection, installation)
             }
-            (None, [installation]) => check_token(env, channel, status, connection, installation),
+            (None, [installation]) => match recorded {
+                Some(id) if id != installation.id => env.info(&format!(
+                    "The agent's GitHub token is on GitHub App installation {id}, which is not active, so deploy leaves it as it is. Set {INSTALLATION_ID_ENV} to choose the installation it uses."
+                )),
+                _ => check_token(env, channel, status, connection, installation),
+            },
             _ => Ok(()),
         };
     }
@@ -1484,7 +1506,7 @@ fn sync_once(env: &mut dyn SetupEnv) -> Result<Option<GitHubChannelStatus>> {
         }
         GitHubSyncOutcome::InvalidCredentials => {
             env.warning(
-                "GitHub rejected the stored App credentials. Delete the deployment with `mda delete` to remove its App from Agent Auth, then deploy again to set up a new one.",
+                "GitHub rejected the stored App credentials. Delete the Agent Server with `mda delete` to remove its App from Agent Auth, then deploy again to set up a new one.",
             )?;
             Ok(None)
         }
@@ -1496,7 +1518,7 @@ fn sync_once(env: &mut dyn SetupEnv) -> Result<Option<GitHubChannelStatus>> {
         }
         GitHubSyncOutcome::Unavailable(reason) => {
             env.warning(&format!(
-                "The deployment is live, but the GitHub App could not be checked ({reason}). Run `mda deploy` again to retry."
+                "The Agent Server is live, but the GitHub App could not be checked ({reason}). Run `mda deploy` again to retry."
             ))?;
             Ok(None)
         }
@@ -1610,7 +1632,7 @@ impl LiveSetup<'_> {
     /// link to the App, with the key, token and webhook secret stored for it.
     fn release_app(&mut self, app_id: &str) -> Result<()> {
         let holder = app_holder(&self.agent_auth, app_id)
-            .context("failed to look up which deployment holds the GitHub App")?;
+            .context("failed to look up which Agent Server holds the GitHub App")?;
         let Some((deployment_id, app)) = holder.filter(|(id, _)| id != self.deployment_id) else {
             bail!(
                 "GitHub App {app_id} is already connected to another Agent Auth app in this \
@@ -1623,8 +1645,8 @@ impl LiveSetup<'_> {
         // Agent Auth uninstalls the App when it lets go of it, so the
         // installation is made again once the App is here.
         let moved = cliclack::confirm(format!(
-            "GitHub App {app_id} is connected to deployment {deployment_id}. Move it to this \
-             deployment? That deployment's GitHub channel stops receiving events, and the App is \
+            "GitHub App {app_id} is connected to Agent Server {deployment_id}. Move it to this \
+             Agent Server? That Agent Server's GitHub channel stops receiving events, and the App is \
              uninstalled on GitHub, so you install it again next."
         ))
         .initial_value(true)
@@ -1632,15 +1654,15 @@ impl LiveSetup<'_> {
         .context("failed to confirm moving the GitHub App")?;
         if !moved {
             bail!(
-                "GitHub App {app_id} stays connected to deployment {deployment_id}. Use another \
-                 App for this deployment."
+                "GitHub App {app_id} stays connected to Agent Server {deployment_id}. Use another \
+                 App for this Agent Server."
             );
         }
         self.agent_auth.delete_agent_app(&app.id).with_context(|| {
-            format!("failed to release GitHub App {app_id} from deployment {deployment_id}")
+            format!("failed to release GitHub App {app_id} from Agent Server {deployment_id}")
         })?;
         log::info(format!(
-            "Released GitHub App {app_id} from deployment {deployment_id}."
+            "Released GitHub App {app_id} from Agent Server {deployment_id}."
         ))?;
         Ok(())
     }
@@ -1871,6 +1893,14 @@ impl SetupEnv for LiveSetup<'_> {
         self.installation_override.clone()
     }
 
+    fn recorded_installation(&mut self, connection: &AppConnection) -> Option<u64> {
+        let connection_id = connection.app.connection_id.as_deref()?;
+        self.agent_auth
+            .agent_github_installation(connection_id, self.deployment_id)
+            .ok()
+            .flatten()
+    }
+
     fn ask_installation_id(&mut self) -> Result<String> {
         if let Some(id) = &self.installation_override {
             return Ok(id.clone());
@@ -1974,7 +2004,7 @@ impl SetupEnv for LiveSetup<'_> {
 
     fn confirm_webhook_replace(&mut self, current: &str) -> Result<bool> {
         cliclack::confirm(format!(
-            "This GitHub App sends its events to {current}. Point its webhook at this deployment instead? Whatever receives them now stops getting them."
+            "This GitHub App sends its events to {current}. Point its webhook at this Agent Server instead? Whatever receives them now stops getting them."
         ))
         .initial_value(false)
         .interact()

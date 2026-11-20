@@ -2,7 +2,7 @@
 //!
 //! A value only travels one way. Nothing here reads a secret back.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, IsTerminal, Write};
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -674,17 +674,17 @@ fn require_managed_deployment_id(
         return explicit_managed_deployment_id(id, |id| session.client.get_deployment(id));
     }
     let project = project::load(&target.path)
-        .context("Pass --deployment-id to target a deployed agent without a local project.")?;
+        .context("Pass --agent-server-id to target a deployed agent without a local project.")?;
     let name = agent_config::agent_assistant_id(&project)?;
     let deployments = session
         .client
         .list_deployments(&name)
-        .context("failed to check for an existing deployment")?;
+        .context("failed to check for an existing Agent Server")?;
     managed_deployment_id(&deployments, &name, |id| {
         session
             .client
             .get_deployment(id)
-            .context("failed to read the existing deployment")
+            .context("failed to read the existing Agent Server")
     })
 }
 
@@ -702,7 +702,7 @@ fn managed_deployment_id(
         return Err(categorized(
             ErrorCategory::UserInput,
             format!(
-                "No deployment named '{name}' exists in this workspace. \
+                "No Agent Server named '{name}' exists in this workspace. \
                  Deploy it with `mda deploy` first."
             ),
         ));
@@ -713,7 +713,7 @@ fn managed_deployment_id(
         .ok_or_else(|| {
             categorized(
                 ErrorCategory::Remote,
-                format!("deployment '{name}' is missing an id"),
+                format!("Agent Server '{name}' is missing an id"),
             )
         })?
         .to_string();
@@ -733,7 +733,7 @@ fn explicit_managed_deployment_id(
     id: &str,
     get_deployment: impl FnOnce(&str) -> Result<Value>,
 ) -> Result<String> {
-    let deployment = get_deployment(id).context("failed to read the target deployment")?;
+    let deployment = get_deployment(id).context("failed to read the target Agent Server")?;
     if deployment_managed_deep_agent_marker(&deployment) == Some(false) {
         return Err(not_managed_deep_agent(id));
     }
@@ -744,7 +744,7 @@ fn not_managed_deep_agent(name: &str) -> anyhow::Error {
     categorized(
         ErrorCategory::UserInput,
         format!(
-            "A deployment named '{name}' exists but is not a Managed Deep Agent. \
+            "An Agent Server named '{name}' exists but is not a Managed Deep Agent. \
              Recreate it with `mda deploy`."
         ),
     )
@@ -943,7 +943,7 @@ fn create_oauth(opts: CreateOptions, owner: ConnectionOwnerPolicy) -> Result<Com
             || session.client.delete_connection(&created.connection_id),
             &opts.slug,
         )?
-        .context("OAuth client credentials requires a managed deployment")?;
+        .context("OAuth client credentials require a managed Agent Server")?;
         rollback_on_authorization_failure(
             require_completed_client_credentials_session(&authorization),
             || session.client.delete_connection(&created.connection_id),
@@ -1052,10 +1052,14 @@ fn select_user_owned_mcp_connection(
     connections: Vec<compile::McpConnectionEntry>,
     slug: &str,
 ) -> Result<Option<compile::McpConnectionEntry>> {
+    // One server in several definitions (an agent's and a subagent's) is one connection.
+    let mut urls = BTreeSet::new();
     let matches: Vec<compile::McpConnectionEntry> = connections
         .into_iter()
         .filter(|entry| {
-            entry.slug == slug && entry.owner_policy == ConnectionOwnerPolicy::User.as_str()
+            entry.slug == slug
+                && entry.owner_policy == ConnectionOwnerPolicy::User.as_str()
+                && urls.insert(entry.url.clone())
         })
         .collect();
     match matches.as_slice() {
@@ -2080,7 +2084,7 @@ mod tests {
         .to_string();
 
         assert!(
-            error.contains("No deployment named 'mail-agent'"),
+            error.contains("No Agent Server named 'mail-agent'"),
             "{error}"
         );
         assert!(error.contains("mda deploy"), "{error}");
@@ -2885,6 +2889,30 @@ mod tests {
         .unwrap();
 
         assert!(selected.is_none());
+    }
+
+    #[test]
+    fn selecting_one_server_shared_by_several_definitions_returns_it() {
+        let entry = compile::McpConnectionEntry {
+            connector_name: "mcp".to_string(),
+            server_name: "linear".to_string(),
+            url: "https://mcp.linear.app/mcp".to_string(),
+            slug: "linear".to_string(),
+            owner_policy: "user".to_string(),
+        };
+        let selected = select_user_owned_mcp_connection(
+            vec![
+                entry.clone(),
+                compile::McpConnectionEntry {
+                    connector_name: "issue_triager_subagent_mcp".to_string(),
+                    ..entry.clone()
+                },
+            ],
+            "linear",
+        )
+        .unwrap();
+
+        assert_eq!(selected, Some(entry));
     }
 
     #[test]

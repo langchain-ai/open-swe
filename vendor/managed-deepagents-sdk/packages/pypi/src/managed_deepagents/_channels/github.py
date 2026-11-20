@@ -4,7 +4,7 @@ import asyncio
 import copy
 import json
 import re
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
@@ -34,8 +34,8 @@ from managed_deepagents._channels.github_types import (
     GitHubChannelThread,
     GitHubEndpointFields,
     GitHubEvent,
-    GitHubEventResult,
     GitHubHandlers,
+    GitHubHookThread,
     GitHubInstallationEvent,
     GitHubRepository,
     GitHubSender,
@@ -48,6 +48,7 @@ from managed_deepagents._channels.http.endpoint import (
 )
 from managed_deepagents._channels.http.input_state import input_state_reader
 from managed_deepagents._channels.http.provider import (
+    EventCallback,
     EventFinished,
     EventReceived,
     channel_name,
@@ -84,11 +85,9 @@ if TYPE_CHECKING:
 
 _MAX_SAFE_INTEGER = 9007199254740991
 
-_Handler = Callable[
-    ["GitHubEvent | GitHubInstallationEvent", GitHubChannelThread],
-    "GitHubEventResult | Awaitable[GitHubEventResult]",
-]
-"""A handler of the channel's: a repository event's or an installation event's."""
+_Handler = EventCallback["GitHubEvent | GitHubInstallationEvent", GitHubChannelThread]
+"""A handler of the channel's: a repository event's or an installation event's, or
+the endpoint it stands for, which may also answer with a reply."""
 
 
 def github_channel(
@@ -96,11 +95,13 @@ def github_channel(
     on_event: GitHubHandlers | None = None,
     app: GitHubAppOptions | None = None,
     multitask_strategy: MultitaskStrategy = "enqueue",
-    on_finish: EventFinished[GitHubEvent, GitHubChannelThread] | None = None,
-    on_received: EventReceived[GitHubEvent, GitHubChannelThread] | None = None,
+    on_finish: EventFinished[GitHubEvent, GitHubHookThread] | None = None,
+    on_received: EventReceived[GitHubEvent, GitHubHookThread] | None = None,
     resolve_user: ResolveUser | EventEndpoint | None = None,
+    ignore_bots: bool = True,
     include_own_events: bool = False,
-    ignore_bots: bool = False,
+    # TODO: deprecate forward_to before the 0.11 release, once the Channels
+    # Service is stood up and fans out provider deliveries to other services.
     forward_to: Sequence[EventEndpoint] | None = None,
 ) -> HttpChannel:
     """Options for ``channels.github(...)``: App scope and event handlers that start runs.
@@ -139,11 +140,11 @@ def github_channel(
         ignore_bots: Ignore issues, comments, pull requests and reviews
             written by other apps and bots, such as Dependabot, so automations
             don't trigger each other, as ``channels.linear`` and
-            ``channels.slack`` do. ``False`` by default, so other bots still
-            start runs. CI events (``check_run``, ``check_suite``,
+            ``channels.slack`` do. ``True`` by default; ``False`` lets other
+            bots start runs. CI events (``check_run``, ``check_suite``,
             ``workflow_run``, ``status``), ``push`` and ``merge_group`` reach
-            their handlers whoever sent them. The App's own activity is always
-            ignored, unless ``include_own_events``.
+            their handlers whoever sent them. The App's own activity follows
+            ``include_own_events``.
         on_received: A delivery of a handled repository event reached its thread, once,
             with the event and its thread, before MDA reads the thread or asks
             the handler: the moment to acknowledge it, such as with a 👀
@@ -201,9 +202,9 @@ def github_channel(
             handlers,
             name(),
             repositories,
-            include_own_events,
             forwarders,
             ignore_bots=ignore_bots,
+            include_own_events=include_own_events,
         )
 
     async def run_input(
@@ -276,13 +277,13 @@ def github_channel(
         on_received=receive_events(
             on_received,
             _event,
-            lambda thread_id: GitHubChannelThread(id=thread_id, channel=ChannelName(name=name())),
+            lambda thread_id: GitHubHookThread(id=thread_id, channel=ChannelName(name=name())),
         ),
         on_finish=finish_events(
             notify_interrupted,
             on_finish,
             _event,
-            lambda delivery: GitHubChannelThread(
+            lambda delivery: GitHubHookThread(
                 id=delivery["thread_id"], channel=ChannelName(name=name())
             ),
         ),
@@ -479,15 +480,44 @@ _AUTHORED_EVENTS = frozenset(
 )
 
 
+async def _sender_filtered(
+    parsed_event: GitHubEvent | GitHubInstallationEvent,
+    event: str,
+    *,
+    ignore_bots: bool,
+    include_own_events: bool,
+) -> GitHubEvent | GitHubInstallationEvent | None:
+    """The event handlers get, or ``None`` when its sender's activity starts nothing."""
+    # The App's own activity starts nothing unless the channel asks for it, so
+    # the agent doesn't trigger itself.
+    configured_bot_id = await _github_app_value("GH_APP_BOT_ID", "bot-id") or ""
+    if not re.fullmatch(r"[1-9][0-9]*", configured_bot_id):
+        raise TypeError(
+            "GitHub App bot ID is unavailable; run `mda deploy` to store it or set GH_APP_BOT_ID"
+        )
+    bot_id = github_identifier_adapter.validate_python(int(configured_bot_id), strict=True)
+    if parsed_event.sender.id == bot_id:
+        if not include_own_events:
+            return None
+        if isinstance(parsed_event, GitHubEvent):
+            return replace(parsed_event, from_app=True)
+        return parsed_event
+    # Another bot's issue, comment, pull request or review, unless the channel
+    # takes them. CI and push events come from bots as a rule.
+    if ignore_bots and parsed_event.sender.type == "Bot" and event in _AUTHORED_EVENTS:
+        return None
+    return parsed_event
+
+
 async def _parse(
     ctx: HttpChannelRequest,
     handlers: Mapping[str, _Handler],
     channel_name: str,
     repositories: frozenset[str] | None,
-    include_own_events: bool,
     forwarders: Sequence[EndpointForwarder] = (),
     *,
-    ignore_bots: bool = False,
+    ignore_bots: bool = True,
+    include_own_events: bool = False,
 ) -> HttpChannelParseResult:
     json_response = import_module("starlette.responses").JSONResponse
 
@@ -537,23 +567,12 @@ async def _parse(
         ):
             return {"type": "ignore", "response": response}
 
-    # The App's own activity starts nothing unless the channel asks for it, so
-    # the agent doesn't trigger itself.
-    configured_bot_id = await _github_app_value("GH_APP_BOT_ID", "bot-id") or ""
-    if not re.fullmatch(r"[1-9][0-9]*", configured_bot_id):
-        raise TypeError(
-            "GitHub App bot ID is unavailable; run `mda deploy` to store it or set GH_APP_BOT_ID"
-        )
-    bot_id = github_identifier_adapter.validate_python(int(configured_bot_id), strict=True)
-    if parsed_event.sender.id == bot_id:
-        # An installation event is a person's, never the App's own.
-        if not include_own_events or not isinstance(parsed_event, GitHubEvent):
-            return {"type": "ignore", "response": response}
-        parsed_event = replace(parsed_event, from_app=True)
-    # Another bot's issue, comment, pull request or review, unless the channel
-    # takes them. CI and push events come from bots as a rule.
-    elif ignore_bots and parsed_event.sender.type == "Bot" and event in _AUTHORED_EVENTS:
+    received = await _sender_filtered(
+        parsed_event, event, ignore_bots=ignore_bots, include_own_events=include_own_events
+    )
+    if received is None:
         return {"type": "ignore", "response": response}
+    parsed_event = received
 
     # Preserve the original event even if a callback modifies its argument.
     snapshot = event_snapshot(parsed_event, "GitHub")

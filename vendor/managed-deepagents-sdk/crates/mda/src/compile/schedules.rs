@@ -11,6 +11,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Map, Value};
+use uuid::Uuid;
 
 use super::discovery::{entry_stem_name, language_dir_entries};
 use super::static_extract::{extract_python_keyword_config, extract_typescript_object_config};
@@ -112,7 +113,7 @@ fn schedule_cron(
     {
         bail!("schedule '{name}' context keys `channel` and `mda_*` are reserved");
     }
-    let mode = thread_mode(object.get("thread"), name)?;
+    let mode = thread_mode(object.get("thread"), name, assistant_id)?;
     let mut schedule = json!({ "name": name });
     let deliver_to = schedule_deliver_to(object, name)?;
     if let Some(deliver_to) = &deliver_to {
@@ -250,7 +251,7 @@ enum ThreadMode {
     Persistent(String),
 }
 
-fn thread_mode(thread: Option<&Value>, name: &str) -> Result<ThreadMode> {
+fn thread_mode(thread: Option<&Value>, name: &str, assistant_id: &str) -> Result<ThreadMode> {
     let Some(thread) = thread else {
         return Ok(ThreadMode::Ephemeral);
     };
@@ -263,23 +264,41 @@ fn thread_mode(thread: Option<&Value>, name: &str) -> Result<ThreadMode> {
         .unwrap_or("ephemeral");
     match mode {
         "ephemeral" => Ok(ThreadMode::Ephemeral),
-        "persistent" => {
-            let id = object
-                .get("id")
-                .and_then(Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| anyhow!("schedule '{name}' persistent thread requires an id"))?;
-            Ok(ThreadMode::Persistent(id.to_string()))
-        }
+        "persistent" => match object.get("id") {
+            None => Ok(ThreadMode::Persistent(persistent_thread_id(
+                assistant_id,
+                name,
+            ))),
+            Some(id) => {
+                let id = id
+                    .as_str()
+                    .and_then(|value| Uuid::parse_str(value.trim()).ok())
+                    .ok_or_else(|| {
+                        anyhow!("schedule '{name}' persistent thread id must be a UUID")
+                    })?;
+                Ok(ThreadMode::Persistent(id.to_string()))
+            }
+        },
         other => bail!("schedule '{name}' has unsupported thread mode '{other}'"),
     }
+}
+
+/// The thread a persistent schedule without an `id` runs on: the same ID on
+/// every deploy, so its runs share one history. Deploy creates the thread when
+/// it does not exist yet.
+fn persistent_thread_id(assistant_id: &str, name: &str) -> String {
+    Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("mda:schedule-thread:{assistant_id}:{name}").as_bytes(),
+    )
+    .to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::{json, Value};
 
-    use super::schedule_cron;
+    use super::{persistent_thread_id, schedule_cron};
 
     fn cron(config: Value) -> Value {
         schedule_cron("daily", &config, "agent", &["slack".to_string()])
@@ -309,13 +328,31 @@ mod tests {
         let entry = cron(json!({
             "cron": "0 9 * * *",
             "input": { "topic": "news" },
-            "thread": { "mode": "persistent", "id": "daily-thread" },
+            "thread": { "mode": "persistent", "id": " 5F2B8A3E-9C41-4D7A-8E0B-6A1D2C3F4E5A " },
         }));
 
         assert_eq!(entry["input"], json!({ "topic": "news" }));
-        assert_eq!(entry["thread_id"], "daily-thread");
+        assert_eq!(entry["thread_id"], "5f2b8a3e-9c41-4d7a-8e0b-6a1d2c3f4e5a");
         assert!(entry.get("on_run_completed").is_none());
         assert!(entry["context"]["mda_schedule"].get("new_thread").is_none());
+    }
+
+    #[test]
+    fn persistent_thread_without_id_gets_a_stable_uuid() {
+        let config = json!({
+            "cron": "0 9 * * *",
+            "prompt": "Summarize",
+            "thread": { "mode": "persistent" },
+        });
+        let entry = cron(config.clone());
+        let id = entry["thread_id"].as_str().expect("thread_id");
+
+        assert!(uuid::Uuid::parse_str(id).is_ok());
+        assert_eq!(id, persistent_thread_id("agent", "daily"));
+        assert_eq!(cron(config)["thread_id"], id);
+        assert_ne!(id, persistent_thread_id("agent", "weekly"));
+        assert_ne!(id, persistent_thread_id("other", "daily"));
+        assert!(entry.get("on_run_completed").is_none());
     }
 
     #[test]
@@ -464,8 +501,12 @@ mod tests {
                 "schedule 'daily' context keys `channel` and `mda_*` are reserved",
             ),
             (
-                json!({ "cron": "0 9 * * *", "prompt": "Summarize", "thread": { "mode": "persistent" } }),
-                "schedule 'daily' persistent thread requires an id",
+                json!({ "cron": "0 9 * * *", "prompt": "Summarize", "thread": { "mode": "persistent", "id": " " } }),
+                "schedule 'daily' persistent thread id must be a UUID",
+            ),
+            (
+                json!({ "cron": "0 9 * * *", "prompt": "Summarize", "thread": { "mode": "persistent", "id": "daily-thread" } }),
+                "schedule 'daily' persistent thread id must be a UUID",
             ),
             (
                 json!({ "cron": "0 9 * * *", "prompt": "Summarize", "thread": { "mode": "forever" } }),

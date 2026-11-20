@@ -16,11 +16,17 @@ from managed_deepagents._identity_runtime import (
     is_studio_auth_user,
     resolve_runtime_configurable,
 )
+from managed_deepagents._thread_record import names_thread_record_key
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from managed_deepagents._memory.layers import AgentMemoryLayer, MemoryLayer, UserMemoryLayer
+    from managed_deepagents._memory.layers import (
+        AgentMemoryLayer,
+        AssistantMemoryLayer,
+        MemoryLayer,
+        UserMemoryLayer,
+    )
     from managed_deepagents._telemetry.run import UserMemoryDeniedReason
 
 
@@ -76,6 +82,29 @@ def resolve_user_memory_principal(
     return None
 
 
+def _is_private_direct_run(configurable: Mapping[str, object] | None, metadata: object) -> bool:
+    """A direct API run whose only audience is the person who authenticated it.
+
+    The caller signed in with their own credential (a validated token stamps
+    an identity provider), the run came over plain HTTP rather than a channel or
+    schedule, and its thread has no record that managed ingress writes for
+    channel conversations. A trusted backend only vouches for a user ID; MDA
+    cannot see who the backend shows the reply to, so it keeps the opt-in. Any
+    thread-record key denies, without parsing it.
+    """
+    identity = build_runtime_identity(configurable)
+    if identity is None:
+        return False
+    provider = identity.get("identity_provider")
+    return (
+        identity["user"]["kind"] == "person"
+        and identity["source"]["provider"] == "http"
+        and isinstance(provider, str)
+        and bool(provider.strip())
+        and not names_thread_record_key(metadata)
+    )
+
+
 @dataclass(frozen=True)
 class UserMemoryAccess:
     """Whether the run may mount user memory.
@@ -112,9 +141,13 @@ async def resolve_user_memory_access(
     if selected_by_dynamic_resolver or principal.bypass_policy:
         return UserMemoryAccess(user_id=user_id)
     if layer.get("allow") is None:
+        is_slack_dm = is_slack_direct_message(context, configurable)
+        is_direct_run = _field(context, "mda_channel") is None and _is_private_direct_run(
+            configurable, _field(run_config, "metadata")
+        )
         return (
             UserMemoryAccess(user_id=user_id)
-            if is_slack_direct_message(context, configurable)
+            if is_slack_dm or is_direct_run
             else _denied("not_slack_dm")
         )
     if await _evaluate_policy(layer, context, context_schema):
@@ -123,7 +156,7 @@ async def resolve_user_memory_access(
 
 
 async def resolve_agent_memory_access(
-    layer: AgentMemoryLayer | None,
+    layer: AgentMemoryLayer | AssistantMemoryLayer | None,
     context: object,
     context_schema: object,
     *,

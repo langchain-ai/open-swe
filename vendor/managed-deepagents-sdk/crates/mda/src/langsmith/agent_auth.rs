@@ -247,7 +247,7 @@ impl Client {
                     "a secret value is required to create an agent-owned opaque connection",
                 )?;
                 let owner_id = agent_owner_id.context(
-                    "a deployment id is required to create an agent-owned opaque connection",
+                    "an Agent Server ID is required to create an agent-owned opaque connection",
                 )?;
                 json!({
                     "slug": slug,
@@ -412,6 +412,38 @@ impl Client {
         connection_id: &str,
         agent_owner_id: &str,
     ) -> Result<AgentGrant> {
+        let Some(credential) = self.agent_credential(connection_id, agent_owner_id)? else {
+            return Ok(AgentGrant::Missing);
+        };
+        Ok(AgentGrant::from_status(
+            credential.pointer("/oauth2/status").and_then(Value::as_str),
+        ))
+    }
+
+    /// The GitHub App installation Agent Auth recorded for the agent's
+    /// credential on a `github_app` connection, which its tokens are minted
+    /// on. `None` when the agent has no credential or none was recorded.
+    /// The ID is read whether Agent Auth returns it as a JSON number or as a
+    /// string; anything else counts as not recorded.
+    pub(crate) fn agent_github_installation(
+        &self,
+        connection_id: &str,
+        agent_owner_id: &str,
+    ) -> Result<Option<u64>> {
+        let credential = self.agent_credential(connection_id, agent_owner_id)?;
+        Ok(credential
+            .as_ref()
+            .and_then(|credential| credential.get("installation_id"))
+            .and_then(|id| match id {
+                Value::Number(id) => id.as_u64(),
+                Value::String(id) => id.trim().parse().ok(),
+                _ => None,
+            }))
+    }
+
+    /// The metadata of the credential `agent_owner_id` holds on a connection:
+    /// its stored status and installation, never its token.
+    fn agent_credential(&self, connection_id: &str, agent_owner_id: &str) -> Result<Option<Value>> {
         let base = self.public_platform_base()?;
         let params = [
             ("credential_owner_type", OWNER_POLICY_AGENT),
@@ -425,19 +457,13 @@ impl Client {
             None,
         )?
         else {
-            return Ok(AgentGrant::Missing);
+            return Ok(None);
         };
         let Some(credential_id) = credential_id(&connection) else {
-            return Ok(AgentGrant::Missing);
+            return Ok(None);
         };
-        // The credential's metadata: its stored status, no token.
         let path = format!("{CREDENTIALS_PATH}/{}", path_id(credential_id));
-        let Some(credential) = self.request_optional(&base, Method::GET, &path, &[], None)? else {
-            return Ok(AgentGrant::Missing);
-        };
-        Ok(AgentGrant::from_status(
-            credential.pointer("/oauth2/status").and_then(Value::as_str),
-        ))
+        self.request_optional(&base, Method::GET, &path, &[], None)
     }
 
     /// The redirect URI Agent Auth sends OAuth providers, when it publishes
@@ -1118,9 +1144,9 @@ mod tests {
             .unwrap_err();
 
         assert!(
-            error
-                .to_string()
-                .contains("a deployment id is required to create an agent-owned opaque connection"),
+            error.to_string().contains(
+                "an Agent Server ID is required to create an agent-owned opaque connection"
+            ),
             "{error}"
         );
     }
@@ -1281,6 +1307,74 @@ mod tests {
                 .agent_oauth_grant(CONN, AGENT)
                 .unwrap(),
             AgentGrant::Missing
+        );
+    }
+
+    #[test]
+    fn agent_github_installation_reads_the_recorded_installation() {
+        const CREDENTIAL: &str = "88888888-8888-4888-8888-888888888888";
+        const AGENT: &str = "11111111-1111-4111-8111-111111111111";
+        let mut connection = workspace_connection_json("mda/github-app/x");
+        connection["credential"]["credential_id"] = json!(CREDENTIAL);
+        let metadata = |installation: Value| {
+            json!({
+                "credential_id": CREDENTIAL,
+                "kind": "oauth2",
+                "installation_id": installation,
+                "oauth2": { "status": "active", "token_type": "Bearer", "scopes": [] },
+            })
+            .to_string()
+        };
+        let (url, rx) = serve_pages(vec![
+            ("200 OK", connection.to_string()),
+            ("200 OK", metadata(json!("70905168"))),
+        ]);
+        assert_eq!(
+            Client::for_test(&url)
+                .agent_github_installation(CONN, AGENT)
+                .unwrap(),
+            Some(70905168)
+        );
+        let owner = rx.recv().unwrap();
+        assert!(owner.contains("credential_owner_id=11111111"), "{owner}");
+        let read = rx.recv().unwrap();
+        assert!(
+            read.starts_with(&format!("GET /v1/agent-auth/credentials/{CREDENTIAL} ")),
+            "{read}"
+        );
+
+        // The installation recorded as a JSON number.
+        let (url, _rx) = serve_pages(vec![
+            ("200 OK", connection.to_string()),
+            ("200 OK", metadata(json!(70905168))),
+        ]);
+        assert_eq!(
+            Client::for_test(&url)
+                .agent_github_installation(CONN, AGENT)
+                .unwrap(),
+            Some(70905168)
+        );
+
+        // A credential without a recorded installation, or none at all.
+        let (url, _rx) = serve_pages(vec![
+            ("200 OK", connection.to_string()),
+            ("200 OK", metadata(Value::Null)),
+        ]);
+        assert_eq!(
+            Client::for_test(&url)
+                .agent_github_installation(CONN, AGENT)
+                .unwrap(),
+            None
+        );
+        let (url, _rx) = serve_once(
+            "200 OK",
+            workspace_connection_json("mda/github-app/x").to_string(),
+        );
+        assert_eq!(
+            Client::for_test(&url)
+                .agent_github_installation(CONN, AGENT)
+                .unwrap(),
+            None
         );
     }
 

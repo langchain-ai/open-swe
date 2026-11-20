@@ -9,12 +9,18 @@
 
 mod env;
 mod manifests;
+mod mcp;
 mod readme;
+mod sandbox;
 pub(crate) mod scaffold;
+pub(crate) mod source;
+mod subagents;
 
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use cliclack::{input, log, set_theme, StringCursor, Theme, ThemeState};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::cli_output::{continue_sequence, show_wordmark_intro, supporting_style, SequenceItem};
@@ -22,6 +28,7 @@ pub use crate::coding_agent::HandoffOutcome;
 use crate::coding_agent::ResetTheme;
 use crate::langsmith::{API_KEY_ENV, REMOVED_API_KEY_ENVS};
 use crate::project::Language;
+pub(crate) use env::sandbox_env_key;
 
 use scaffold::{scaffold, validate_project_name};
 
@@ -42,8 +49,10 @@ pub fn offer_handoff(cwd: &Path, prompt: &str) -> Result<HandoffOutcome> {
 /// are the parts they often already know. Naming them here writes them into
 /// the project instead of leaving them to be edited afterwards, which is also
 /// what makes `mda init` usable from a script.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Blueprint {
+    /// Shape version of a serialized blueprint; bumped on breaking changes.
+    pub version: u32,
     /// Directory to create, relative to the working directory.
     pub name: String,
     /// Authoring language, fixed by the package install channel.
@@ -60,12 +69,181 @@ pub struct Blueprint {
     /// Messaging channels to scaffold next to the agent. Empty leaves
     /// `channels/` uncreated; authors can still run `mda channels init` later.
     pub channels: Vec<InitChannel>,
+    /// MCP definitions to export from `tools/mcp.{ts,py}`. The agent loads
+    /// the one named [`AGENT_MCP`]; subagents select theirs by name. Empty
+    /// writes no file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_definitions: Vec<McpDefinition>,
+    /// Tools that ask a person before they run, keyed by the tool's exposed
+    /// `{server}_{tool}` name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub interrupt_on: BTreeMap<String, InterruptRule>,
+    /// Sync subagents in the agent file's `subagents`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subagents: Vec<Subagent>,
+    /// Skills written under `skills/<name>/`, keyed by skill name, then by
+    /// path inside the skill.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub skills: BTreeMap<String, BTreeMap<String, String>>,
+    /// Settings written into `sandbox/` in place of the starter's. Only read
+    /// when `sandbox` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_options: Option<SandboxOptions>,
 }
+
+/// The name of the MCP definition the agent loads.
+pub const AGENT_MCP: &str = "mcp";
+
+/// One exported `define_mcp` / `defineMcp` in `tools/mcp.{ts,py}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpDefinition {
+    /// snake_case export name, such as `mcp` or `web_researcher_subagent_mcp`.
+    /// TypeScript writes it in camelCase.
+    pub name: String,
+    pub servers: Vec<McpServer>,
+}
+
+/// One remote MCP server in `tools/mcp.{ts,py}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpServer {
+    /// Logical server name; tools are exposed as `{key}_{tool}`.
+    pub key: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<Connection>,
+    /// Signs in through LangSmith (`auth: "langsmith"`), as a Tool Gateway server does.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub langsmith_auth: bool,
+    /// Raw upstream tool names to expose.
+    pub include_tools: Vec<String>,
+    /// When set, the server is written commented out under this note, for
+    /// one that can't load until the developer does something first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commented_out: Option<String>,
+}
+
+/// A `connections.get(slug, { type })` reference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Connection {
+    pub slug: String,
+    pub owner: ConnectionOwner,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ConnectionOwner {
+    User,
+    Agent,
+}
+
+/// A declarative sync subagent in the agent file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Subagent {
+    pub name: String,
+    pub description: String,
+    pub system_prompt: String,
+    /// Unset inherits the agent's model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Names of the [`McpDefinition`]s it selects; empty is `mcp: []`.
+    pub mcp: Vec<String>,
+    /// Keyed by `{server}_{tool}`, like the agent's.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub interrupt_on: BTreeMap<String, InterruptRule>,
+}
+
+/// `define_sandbox` / `defineSandbox` options beyond the starter's.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_ttl_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delete_after_stop_seconds: Option<u64>,
+    /// Set for every command run in the sandbox (`run_config.env_vars`).
+    /// Values go into `.env`; `sandbox/` reads them by name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env_vars: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_control: Option<AccessControl>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<ProxyRule>,
+    /// AWS and GCP signing rules, passed to the sandbox proxy as written.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_rules: Vec<serde_json::Value>,
+}
+
+/// The hosts the sandbox may reach (`proxy_config.access_control`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessControl {
+    AllowList(Vec<String>),
+    DenyList(Vec<String>),
+}
+
+/// A sandbox proxy rule that adds headers to requests for `match_hosts`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxyRule {
+    pub name: String,
+    pub match_hosts: Vec<String>,
+    pub headers: Vec<ProxyHeader>,
+    /// When set, the rule is written commented out under this note, for one
+    /// that can't work until the developer does something first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commented_out: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProxyHeader {
+    pub name: String,
+    pub value: HeaderValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HeaderValue {
+    /// A template the proxy fills from workspace secrets, such as
+    /// `Bearer {ACME_KEY}`.
+    WorkspaceSecret(String),
+    /// A connection's credential, resolved before each command.
+    Connection {
+        connection: Connection,
+        format: ConnectionFormat,
+    },
+}
+
+/// How a connection's credential is written into a header.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionFormat {
+    Raw,
+    Bearer,
+    Basic {
+        username: String,
+    },
+    /// `credential_template` text with `{token}` where the credential goes.
+    Template(String),
+}
+
+/// An `interrupt_on` entry. With neither field set it renders as `true`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterruptRule {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_decisions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Current [`Blueprint::version`].
+// 2: a Slack channel carries its options (`{"slack": {...}}`, not `"slack"`).
+pub const BLUEPRINT_VERSION: u32 = 2;
 
 impl Blueprint {
     /// The project `mda init <name>` creates when told nothing else.
     pub fn new(name: impl Into<String>, language: Language) -> Self {
         Self {
+            version: BLUEPRINT_VERSION,
             name: name.into(),
             language,
             instructions: None,
@@ -73,19 +251,24 @@ impl Blueprint {
             sandbox: true,
             memory: None,
             channels: Vec::new(),
+            mcp_definitions: Vec::new(),
+            interrupt_on: BTreeMap::new(),
+            subagents: Vec::new(),
+            skills: BTreeMap::new(),
+            sandbox_options: None,
         }
     }
 }
 
-/// A messaging channel `mda init --channel` can scaffold into a new project.
-pub use crate::channel::ChannelKind as InitChannel;
+pub use crate::channel::InitChannel;
 
 /// The durable memory a scaffolded `memory.ts` / `memory.py` declares.
 ///
 /// Memory is opt-in, so `mda init` writes the file only when asked. `None` still
 /// writes one — an explicit "this agent keeps no durable memory" is a useful
 /// thing for a scaffold to say out loud.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MemoryChoice {
     /// Deployment-shared memory at `/memories/agent/`, readable and writable by
     /// every caller.
@@ -246,14 +429,15 @@ pub fn init(cwd: &Path, blueprint: &Blueprint) -> Result<InitSummary> {
 }
 
 fn add_requested_channels(summary: &mut InitSummary, blueprint: &Blueprint) -> Result<()> {
+    // One file per channel type; the first entry of a type wins.
     let mut added = Vec::new();
     for channel in &blueprint.channels {
-        if added.contains(channel) {
+        if added.contains(&channel.kind()) {
             continue;
         }
-        let relative = crate::channel::init_channel(&summary.root, *channel)?;
+        let relative = crate::channel::init_channel(&summary.root, channel)?;
         summary.files.push(summary.root.join(&relative));
-        added.push(*channel);
+        added.push(channel.kind());
     }
     Ok(())
 }
@@ -293,14 +477,7 @@ pub fn show_handoff_continuation() -> Result<()> {
 /// Show deterministic next steps after non-interactive project creation.
 pub fn show_non_interactive_next_steps(project_root: &Path, language: Language) -> Result<()> {
     let project_name = project_directory_name(project_root)?;
-    let docs_url = match language {
-        Language::TypeScript => {
-            "https://docs.langchain.com/langsmith/javascript/managed-deep-agents-quickstart"
-        }
-        Language::Python => {
-            "https://docs.langchain.com/langsmith/python/managed-deep-agents-quickstart"
-        }
-    };
+    let docs_url = quickstart_docs_url(language);
 
     console::Term::stderr()
         .write_line(&created_line(project_name))
@@ -363,8 +540,20 @@ fn project_name_from_path(dir: &Path, original: &str) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("project name {original:?} must include a directory name"))
 }
 
+/// Quickstart docs for the project's language.
+fn quickstart_docs_url(language: Language) -> &'static str {
+    match language {
+        Language::TypeScript => {
+            "https://docs.langchain.com/langsmith/javascript/managed-deep-agents-quickstart"
+        }
+        Language::Python => {
+            "https://docs.langchain.com/langsmith/python/managed-deep-agents-quickstart"
+        }
+    }
+}
+
 /// Command to install the project's dependencies.
-fn install_command(language: Language) -> &'static str {
+pub(crate) fn install_command(language: Language) -> &'static str {
     match language {
         Language::TypeScript => "npm install",
         Language::Python => "uv sync",
@@ -438,7 +627,8 @@ mod tests {
         let readme = fs::read_to_string(dir.join("README.md")).unwrap();
         assert!(readme.contains("# myAgent"));
         assert!(readme.contains("npm install"));
-        assert!(readme.contains("mda deploy"));
+        assert!(readme.contains("mda deploy --name myAgent-dev --agent-server-type serverless"));
+        assert!(!readme.contains("--deployment-type serverless"));
         assert!(readme.contains("delete `sandbox/` to opt out"));
         assert!(readme.contains("Add `sandbox/setup.sh`"));
         assert!(readme.contains("sandbox/index.ts"));
@@ -501,7 +691,8 @@ mod tests {
         let readme = fs::read_to_string(dir.join("README.md")).unwrap();
         assert!(readme.contains("# myAgent"));
         assert!(readme.contains("uv sync"));
-        assert!(readme.contains("mda deploy"));
+        assert!(readme.contains("mda deploy --name myAgent-dev --agent-server-type serverless"));
+        assert!(!readme.contains("--deployment-type serverless"));
         assert!(readme.contains("delete `sandbox/` to opt out"));
         assert!(readme.contains("Add `sandbox/setup.sh`"));
         assert!(readme.contains("sandbox/__init__.py"));
@@ -518,6 +709,72 @@ mod tests {
         ));
         assert!(!readme.contains("mda evals compile"));
         assert!(!dir.join("evals").exists());
+    }
+
+    #[test]
+    fn scaffold_writes_agents_md_for_a_python_project() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("myAgent");
+        scaffold(&dir, "myAgent", &blueprint(Language::Python), None).unwrap();
+
+        let agents = fs::read_to_string(dir.join("AGENTS.md")).unwrap();
+
+        assert!(agents.starts_with("# myAgent\n"));
+        assert!(agents.contains("`agent.py` defines the agent"));
+        assert!(agents.contains("- `uv sync` installs dependencies."));
+        assert!(agents.contains(
+            "Docs: https://docs.langchain.com/langsmith/python/managed-deep-agents-quickstart"
+        ));
+        assert!(!agents.contains("__MDA_"));
+    }
+
+    #[test]
+    fn scaffold_writes_agents_md_for_a_typescript_project() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("myAgent");
+        scaffold(&dir, "myAgent", &blueprint(Language::TypeScript), None).unwrap();
+
+        let agents = fs::read_to_string(dir.join("AGENTS.md")).unwrap();
+
+        assert!(agents.contains("`agent.ts` defines the agent"));
+        assert!(agents.contains("- `npm install` installs dependencies."));
+        assert!(agents.contains(
+            "Docs: https://docs.langchain.com/langsmith/javascript/managed-deep-agents-quickstart"
+        ));
+        assert!(!agents.contains("__MDA_"));
+    }
+
+    #[test]
+    fn scaffold_agents_md_points_to_mda_help_for_other_commands() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("myAgent");
+        scaffold(&dir, "myAgent", &blueprint(Language::Python), None).unwrap();
+
+        let agents = fs::read_to_string(dir.join("AGENTS.md")).unwrap();
+
+        assert!(agents.contains("- `mda --help` lists the other commands"));
+    }
+
+    #[test]
+    fn scaffold_agents_md_asks_before_deploying() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("myAgent");
+        scaffold(&dir, "myAgent", &blueprint(Language::Python), None).unwrap();
+
+        let agents = fs::read_to_string(dir.join("AGENTS.md")).unwrap();
+
+        assert!(agents.contains("Don't run `mda deploy` unless the user asks you to."));
+    }
+
+    #[test]
+    fn scaffold_readme_lists_agents_md() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("myAgent");
+        scaffold(&dir, "myAgent", &blueprint(Language::Python), None).unwrap();
+
+        let readme = fs::read_to_string(dir.join("README.md")).unwrap();
+
+        assert!(readme.contains("AGENTS.md"));
     }
 
     #[test]
@@ -553,14 +810,14 @@ mod tests {
 
     #[test]
     fn env_file_leaves_langsmith_blank_without_key() {
-        let contents = env_file(None, "openai:gpt-5.6-terra");
+        let contents = env_file(None, "openai:gpt-6-luna", &[]);
         assert!(contents.contains("LANGSMITH_API_KEY=\n"));
         assert!(!contents.contains("LANGSMITH_API_KEY=ls-"));
     }
 
     #[test]
     fn env_file_uncomments_only_the_models_provider_key() {
-        let contents = env_file(Some("ls-key"), "anthropic:claude-sonnet-5-5");
+        let contents = env_file(Some("ls-key"), "anthropic:claude-sonnet-5-5", &[]);
         let uncommented: Vec<_> = super::env::PROVIDER_API_KEYS
             .iter()
             .filter(|(key, _)| contents.contains(&format!("\n{key}=\n")))
@@ -570,14 +827,35 @@ mod tests {
     }
 
     #[test]
+    fn env_file_uncomments_each_subagent_models_provider_key_once() {
+        let contents = env_file(
+            None,
+            "openai:gpt-5.5",
+            &[
+                "anthropic:claude-sonnet-5-5",
+                "openai:gpt-4.1",
+                "anthropic:claude-haiku-5-5",
+            ],
+        );
+        let uncommented: Vec<_> = super::env::PROVIDER_API_KEYS
+            .iter()
+            .filter(|(key, _)| contents.contains(&format!("\n{key}=\n")))
+            .map(|(key, _)| *key)
+            .collect();
+        assert_eq!(uncommented, ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]);
+        assert_eq!(contents.matches("ANTHROPIC_API_KEY").count(), 1);
+        assert!(contents.contains("subagent's model (anthropic:claude-sonnet-5-5)"));
+    }
+
+    #[test]
     fn env_file_writes_a_key_outside_the_documented_providers() {
-        let contents = env_file(None, "together:meta-llama/Llama-3-70b");
+        let contents = env_file(None, "together:meta-llama/Llama-3-70b", &[]);
         assert!(contents.contains("\nTOGETHER_AI_API_KEY=\n"));
     }
 
     #[test]
     fn env_file_keeps_provider_keys_commented_for_gateway_models() {
-        let contents = env_file(Some("ls-key"), "langsmith:openai/gpt-5.5");
+        let contents = env_file(Some("ls-key"), "langsmith:openai/gpt-5.5", &[]);
         for (key, _) in super::env::PROVIDER_API_KEYS {
             assert!(contents.contains(&format!("# {key}=")));
         }
@@ -712,6 +990,36 @@ mod tests {
     }
 
     #[test]
+    fn scaffold_writes_skills_and_refuses_paths_outside_them() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("myAgent");
+        let skill = |path: &str| {
+            BTreeMap::from([(
+                "triage".to_string(),
+                BTreeMap::from([(path.to_string(), "# Triage".to_string())]),
+            )])
+        };
+
+        let requested = Blueprint {
+            skills: skill("refs/SKILL.md"),
+            ..blueprint(Language::Python)
+        };
+        scaffold(&dir, "myAgent", &requested, None).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join("skills/triage/refs/SKILL.md")).unwrap(),
+            "# Triage"
+        );
+
+        let escaping = Blueprint {
+            skills: skill("../../agent.py"),
+            ..blueprint(Language::Python)
+        };
+        let other = root.path().join("other");
+        assert!(scaffold(&other, "other", &escaping, None).is_err());
+        assert!(!other.join("agent.py").exists());
+    }
+
+    #[test]
     fn scaffold_writes_the_requested_instructions() {
         let root = tempfile::tempdir().unwrap();
         let dir = root.path().join("myAgent");
@@ -723,7 +1031,7 @@ mod tests {
         scaffold(&dir, "myAgent", &requested, None).unwrap();
 
         let instructions = fs::read_to_string(dir.join("instructions.md")).unwrap();
-        assert_eq!(instructions, "You triage inbound support tickets.\n");
+        assert_eq!(instructions, "  You triage inbound support tickets.\n");
     }
 
     #[test]
@@ -765,7 +1073,7 @@ mod tests {
                 Language::Python => "identity.py",
             };
             let project = crate::project::Project {
-                root: dir.clone(),
+                root: dir,
                 language,
                 agent_file: PathBuf::from(entry),
                 files: vec![PathBuf::from(entry)],
@@ -874,7 +1182,7 @@ mod tests {
     fn init_with_slack_channel_writes_the_python_channel_file() {
         let root = tempfile::tempdir().unwrap();
         let requested = Blueprint {
-            channels: vec![InitChannel::Slack],
+            channels: vec![InitChannel::Slack(Default::default())],
             ..blueprint(Language::Python)
         };
 
@@ -895,7 +1203,7 @@ mod tests {
     fn init_with_slack_channel_writes_the_typescript_channel_file() {
         let root = tempfile::tempdir().unwrap();
         let requested = Blueprint {
-            channels: vec![InitChannel::Slack],
+            channels: vec![InitChannel::Slack(Default::default())],
             ..blueprint(Language::TypeScript)
         };
 
@@ -929,7 +1237,10 @@ mod tests {
     fn init_dedupes_a_repeated_slack_channel() {
         let root = tempfile::tempdir().unwrap();
         let requested = Blueprint {
-            channels: vec![InitChannel::Slack, InitChannel::Slack],
+            channels: vec![
+                InitChannel::Slack(Default::default()),
+                InitChannel::Slack(Default::default()),
+            ],
             ..blueprint(Language::Python)
         };
 

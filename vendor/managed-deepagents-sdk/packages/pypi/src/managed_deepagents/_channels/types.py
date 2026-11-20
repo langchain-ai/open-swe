@@ -36,24 +36,17 @@ JsonValue = TypeAliasType(
 such as ``EndpointAnswer``, validates as it is typed."""
 
 ChannelErrorCode = Literal[
-    "channel_invalid_signature",
-    "channel_replay_rejected",
-    "channel_installation_not_found",
-    "channel_event_filtered",
-    "channel_identity_unresolvable",
-    "channel_destination_forbidden",
-    "channel_invocation_rate_limited",
     "channel_run_failed",
     "channel_provider_rate_limited",
     "channel_provider_rejected",
 ]
 
 
-class ChannelAddressRequired(TypedDict):
+class ConversationAddressRequired(TypedDict):
     conversation_id: str
 
 
-class ChannelAddress(ChannelAddressRequired, total=False):
+class ConversationAddress(ConversationAddressRequired, total=False):
     thread_id: str
 
 
@@ -78,7 +71,7 @@ ChannelDestination = (
     | ChannelDestinationProviderConversation
 )
 """Where a schedule's deprecated ``deliver_to`` posts; ``auto_post`` takes a
-``ChannelTarget`` instead."""
+``ChannelAddress`` instead."""
 
 
 MessageContent: TypeAlias = str | list[ContentBlock]
@@ -149,13 +142,13 @@ class ChannelInfo:
     raw_event: JsonValue = None
     #: Where the channel posts: the provider conversation that ``post`` and the
     #: run's answers go to, which is the conversation the thread came from, in
-    #: every run of the thread. ``None`` for a provider without a typed target,
+    #: every run of the thread. ``None`` for a provider without a typed address,
     #: such as ``channels.http()``.
-    target: ChannelTarget | None = None
+    address: ChannelAddress | None = None
 
 
 @dataclass(frozen=True)
-class SlackChannelTarget:
+class SlackChannelAddress:
     """A Slack conversation: a channel, DM or group, and its thread."""
 
     #: The conversation id (``C…``, ``D…`` or ``G…``), Slack's ``channel``.
@@ -164,12 +157,12 @@ class SlackChannelTarget:
     thread_ts: str | None = None
     provider: Literal["slack"] = "slack"
     #: The channel's name, needed only to tell apart two channels of one
-    #: provider. ``None`` is the channel the target is used with.
+    #: provider. ``None`` is the channel the address is used with.
     channel: str | None = None
 
 
 @dataclass(frozen=True)
-class GitHubChannelTarget:
+class GitHubChannelAddress:
     """A GitHub issue or pull request."""
 
     #: ``owner/name``.
@@ -177,12 +170,12 @@ class GitHubChannelTarget:
     #: The issue or pull request number.
     number: int
     provider: Literal["github"] = "github"
-    #: The channel's name; see ``SlackChannelTarget.channel``.
+    #: The channel's name; see ``SlackChannelAddress.channel``.
     channel: str | None = None
 
 
 @dataclass(frozen=True)
-class LinearChannelTarget:
+class LinearChannelAddress:
     """A Linear issue, and the comment thread or agent session on it."""
 
     organization_id: str
@@ -194,11 +187,11 @@ class LinearChannelTarget:
     #: The agent session replies go to.
     session_id: str | None = None
     provider: Literal["linear"] = "linear"
-    #: The channel's name; see ``SlackChannelTarget.channel``.
+    #: The channel's name; see ``SlackChannelAddress.channel``.
     channel: str | None = None
 
 
-ChannelTarget: TypeAlias = SlackChannelTarget | GitHubChannelTarget | LinearChannelTarget
+ChannelAddress: TypeAlias = SlackChannelAddress | GitHubChannelAddress | LinearChannelAddress
 """Where a channel posts, by provider; narrow it on ``provider`` or its class."""
 
 
@@ -256,15 +249,7 @@ def normalize_channel_destination(
 
 # The shapes every provider channel shares: a handler's thread, what it returns,
 # and its handler. ``channels.github``, ``channels.linear`` and ``channels.slack``
-# build on these. String forward references: reply and run_input import this module.
-
-ChannelEventResult: TypeAlias = "ChannelRunResult | ChannelReplyResult | None"
-"""What an event handler returns: a run's input, as ``agent.invoke`` takes it (a
-string, a message such as ``HumanMessage(...)``, or state such as
-``{"messages": [...]}``), one run on the event's conversation; or a list of runs
-with options, such as ``[{"input": ..., "context": ..., "metadata": ...}]``.
-``None`` starts nothing. ``reply(message)`` starts nothing too, and posts
-``message`` where the event came from."""
+# build on these.
 
 
 @runtime_checkable
@@ -294,11 +279,37 @@ class ChannelThread(Protocol):
 _Event = TypeVar("_Event")
 _Thread = TypeVar("_Thread", bound=ChannelThread, default=ChannelThread)
 
-ChannelEventCallback: TypeAlias = Callable[
-    [_Event, _Thread],
-    "ChannelEventResult | Awaitable[ChannelEventResult]",
-]
-"""A handler: decides what an event starts, given the event and its thread."""
+if TYPE_CHECKING:
+    ChannelEventResult: TypeAlias = ChannelRunResult | ChannelReplyResult | None
+    """What an event handler returns: a run's input, as ``agent.invoke`` takes it (a
+    string, a message such as ``HumanMessage(...)``, or state such as
+    ``{"messages": [...]}``), one run on the event's conversation; or a list of runs
+    with options, such as ``[{"input": ..., "context": ..., "metadata": ...}]``.
+    ``None`` starts nothing. ``reply(message)`` starts nothing too, and posts
+    ``message`` where the event came from."""
+
+    ChannelEventCallback: TypeAlias = Callable[
+        [_Event, _Thread], ChannelEventResult | Awaitable[ChannelEventResult]
+    ]
+    """A handler: decides what an event starts, given the event and its thread."""
+else:
+
+    def __getattr__(name: str) -> object:
+        """``ChannelEventResult`` and ``ChannelEventCallback``, built on first use.
+
+        ``reply`` and ``run_input`` import this module, so the types these are made
+        of can't be imported while it loads. Built here, they're real types, as
+        ``typing.get_type_hints`` and pydantic need, not strings.
+        """
+        if name not in ("ChannelEventResult", "ChannelEventCallback"):
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        from managed_deepagents._channels.reply import ChannelReplyResult  # noqa: PLC0415
+        from managed_deepagents._channels.run_input import ChannelRunResult  # noqa: PLC0415
+
+        result = ChannelRunResult | ChannelReplyResult | None
+        globals()["ChannelEventResult"] = result
+        globals()["ChannelEventCallback"] = Callable[[_Event, _Thread], result | Awaitable[result]]
+        return globals()[name]
 
 
 class ReadsThreadState:
@@ -322,7 +333,6 @@ class ReadsThreadState:
 
 
 __all__ = [
-    "ChannelAddress",
     "ChannelContentMessage",
     "ChannelDestination",
     "ChannelError",
@@ -333,6 +343,7 @@ __all__ = [
     "ChannelMessage",
     "ChannelNativeMessage",
     "ChannelThread",
+    "ConversationAddress",
     "JsonValue",
     "PostedChannelMessage",
     "ReadsThreadState",

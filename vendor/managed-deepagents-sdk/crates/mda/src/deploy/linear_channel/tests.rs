@@ -60,7 +60,11 @@ struct Fake {
     env_credentials: Option<AppCredentials>,
     env_webhook_secret: Option<String>,
     workspace: Option<String>,
+    /// What starting an install returns: a new app's completes at once.
     install: OAuthAuthorizationSession,
+    /// How many installs fail to start, as when the app's client credentials
+    /// are off.
+    failed_installs: usize,
     statuses: VecDeque<String>,
     retry: VecDeque<bool>,
     fail_create: bool,
@@ -85,7 +89,8 @@ impl Fake {
             env_credentials: None,
             env_webhook_secret: None,
             workspace: Some("acme".into()),
-            install: session("pending", REDIRECT),
+            install: session("completed", REDIRECT),
+            failed_installs: 0,
             statuses: VecDeque::from(["completed".to_string()]),
             retry: VecDeque::new(),
             fail_create: false,
@@ -187,6 +192,10 @@ impl SetupEnv for Fake {
     }
     fn start_install(&mut self, connection_id: &str) -> Result<OAuthAuthorizationSession> {
         self.calls.push(format!("start_install {connection_id}"));
+        if self.failed_installs > 0 {
+            self.failed_installs -= 1;
+            return Err(anyhow!("Linear refused the client credentials"));
+        }
         Ok(self.install.clone())
     }
     fn confirm_redirect_uri(&mut self, actual: &str) -> Result<bool> {
@@ -243,6 +252,14 @@ fn owned(id: &str, connection: &str, grant: AgentGrant) -> Option<AppConnection>
     })
 }
 
+/// An app an earlier mda set up, which a workspace admin approves again.
+fn awaiting_consent(grant: AgentGrant) -> Fake {
+    let mut env = Fake::new();
+    env.connections = VecDeque::from([owned("app-0", "conn-0", grant)]);
+    env.install = session("pending", REDIRECT);
+    env
+}
+
 /// The workspace connections an earlier mda set up.
 fn legacy(id: &str, secret: Option<&str>, grant: AgentGrant) -> Option<AppConnection> {
     Some(AppConnection {
@@ -278,7 +295,11 @@ fn creates_and_installs_a_new_app_from_a_filled_in_page() {
         .unwrap()
         .starts_with("A Managed Deep Agent"));
     assert!(manifest["display"].get("iconUrl").is_none());
-    assert_eq!(manifest["oauth"]["redirect_uris"], json!([REDIRECT]));
+    assert_eq!(
+        manifest["oauth"]["grant_types"],
+        json!(["authorization_code", "client_credentials"])
+    );
+    assert!(manifest["oauth"].get("redirect_uris").is_none());
     assert_eq!(manifest["webhook"]["url"], WEBHOOK);
     assert_eq!(
         manifest["webhook"]["resourceTypes"],
@@ -288,18 +309,18 @@ fn creates_and_installs_a_new_app_from_a_filled_in_page() {
             "PermissionChange"
         ])
     );
-    // One app holds the credentials and the signing secret.
+    // One app holds the credentials and the signing secret, and its token
+    // comes with no install page.
     assert_eq!(
-        env.calls[1..5],
+        env.calls[1..4],
         [
             "ask_credentials".to_string(),
             "create_app client-1 lin_wh_signing read,write,app:mentionable,app:assignable".into(),
             "start_install conn-1".into(),
-            "open_install_page".into(),
         ]
     );
     assert_eq!(
-        env.calls[5],
+        env.calls[4],
         format!("success Linear channel ready · the Linear app sends its events to {WEBHOOK}")
     );
     assert!(env.called("store_webhook_secret").is_empty());
@@ -332,7 +353,7 @@ fn fills_in_the_configured_name_and_description() {
     )
     .unwrap()
     .unwrap();
-    let url = create_app_url(Some("acme"), &channel, WEBHOOK, REDIRECT).unwrap();
+    let url = create_app_url(Some("acme"), &channel, WEBHOOK).unwrap();
     let manifest = manifest_of(&url);
     assert_eq!(manifest["oauth"]["client_name"], "Triage Bot");
     assert_eq!(
@@ -345,7 +366,7 @@ fn fills_in_the_configured_name_and_description() {
 fn points_the_icon_at_the_one_the_deployment_serves() {
     let mut channel = sessions();
     channel.app_icon = Some("assets/icon.png".into());
-    let url = create_app_url(Some("acme"), &channel, WEBHOOK, REDIRECT).unwrap();
+    let url = create_app_url(Some("acme"), &channel, WEBHOOK).unwrap();
     assert_eq!(
         manifest_of(&url)["display"]["iconUrl"],
         "https://agent.example/channels/linear/icon"
@@ -387,26 +408,31 @@ fn lists_an_env_apps_settings_and_waits_for_them_in_a_terminal() {
     run_setup(&mut env, &sessions()).unwrap();
 
     let warning = env.called("warning Point your Linear app")[0].clone();
-    assert!(warning.contains(&format!("Redirect URIs: add {REDIRECT}")));
+    assert!(warning.contains("Client credentials: turn on"));
+    assert!(!warning.contains("Redirect URIs"));
     assert!(warning.contains(&format!("URL {WEBHOOK}")));
     assert!(warning.contains("Linear can't tell deploy what the app has set"));
     assert!(!warning.contains("prompts below"));
-    // "No" asks again; the install page opens only after "Yes".
+    // "No" asks again; the install starts only after "Yes".
     assert_eq!(env.called("confirm_app_settings").len(), 2);
-    assert_eq!(env.called("info Linear refuses the install").len(), 1);
+    assert_eq!(
+        env.called("info Agent Auth can't get the app's token")
+            .len(),
+        1
+    );
     let confirmed = env
         .calls
         .iter()
         .rposition(|call| call == "confirm_app_settings")
         .unwrap();
-    let open = env
+    let install = env
         .calls
         .iter()
-        .position(|call| call == "open_install_page")
+        .position(|call| call.starts_with("start_install"))
         .unwrap();
-    assert!(confirmed < open);
+    assert!(confirmed < install);
 
-    // Without a terminal the settings come before the install link, unasked.
+    // Without a terminal the settings come before the install, unasked.
     let mut unattended = Fake::new();
     unattended.interactive = false;
     unattended.env_credentials = Some(credentials());
@@ -417,12 +443,12 @@ fn lists_an_env_apps_settings_and_waits_for_them_in_a_terminal() {
         .iter()
         .position(|call| call.starts_with("warning Point your Linear app"))
         .unwrap();
-    let open = unattended
+    let install = unattended
         .calls
         .iter()
-        .position(|call| call == "open_install_page")
+        .position(|call| call.starts_with("start_install"))
         .unwrap();
-    assert!(listed < open);
+    assert!(listed < install);
 
     // A new app from deploy's page is filled in, so nothing is listed.
     let mut created = Fake::new();
@@ -448,7 +474,7 @@ fn tells_a_wrong_client_id_or_secret_from_an_answer_that_says_nothing() {
 
 #[test]
 fn says_when_agent_auth_redirects_elsewhere() {
-    let mut env = Fake::new();
+    let mut env = awaiting_consent(AgentGrant::AuthorizationRequired);
     env.install = session(
         "pending",
         "https://tunnel.trycloudflare.com/v1/agent-auth/oauth/callback",
@@ -469,8 +495,8 @@ fn says_when_agent_auth_redirects_elsewhere() {
         .unwrap();
     assert!(confirm < open);
 
-    // A redirect URI the new app already lists needs nothing.
-    let mut listed = Fake::new();
+    // A redirect URI the app already lists needs nothing.
+    let mut listed = awaiting_consent(AgentGrant::AuthorizationRequired);
     run_setup(&mut listed, &sessions()).unwrap();
     assert!(listed.called("confirm_redirect_uri").is_empty());
 }
@@ -478,12 +504,12 @@ fn says_when_agent_auth_redirects_elsewhere() {
 #[test]
 fn a_no_to_the_redirect_uri_asks_again_before_the_install_page_opens() {
     let tunnel = "https://tunnel.trycloudflare.com/v1/agent-auth/oauth/callback";
-    let mut env = Fake::new();
+    let mut env = awaiting_consent(AgentGrant::AuthorizationRequired);
     env.install = session("pending", tunnel);
     env.redirect_answers = VecDeque::from([false, false]);
     run_setup(&mut env, &sessions()).unwrap();
     assert_eq!(env.called("confirm_redirect_uri").len(), 3);
-    assert_eq!(env.called("info Linear refuses the install").len(), 2);
+    assert_eq!(env.called("info Linear refuses the approval").len(), 2);
     let last_confirm = env
         .calls
         .iter()
@@ -497,9 +523,8 @@ fn a_no_to_the_redirect_uri_asks_again_before_the_install_page_opens() {
     assert!(last_confirm < open);
 
     // Without a terminal nobody is asked: deploy prints the URI and goes on.
-    let mut unattended = Fake::new();
+    let mut unattended = awaiting_consent(AgentGrant::AuthorizationRequired);
     unattended.interactive = false;
-    unattended.env_credentials = Some(credentials());
     unattended.install = session("pending", tunnel);
     run_setup(&mut unattended, &sessions()).unwrap();
     assert!(unattended.called("confirm_redirect_uri").is_empty());
@@ -514,7 +539,7 @@ fn a_no_to_the_redirect_uri_asks_again_before_the_install_page_opens() {
 #[test]
 fn removes_an_unfinished_install_and_offers_to_try_again() {
     let mut env = Fake::new();
-    env.statuses = VecDeque::from(["failed".to_string(), "completed".to_string()]);
+    env.failed_installs = 1;
     env.retry = VecDeque::from([true]);
     run_setup(&mut env, &sessions()).unwrap();
     // The failed attempt's app goes, with its connection and secret.
@@ -523,6 +548,28 @@ fn removes_an_unfinished_install_and_offers_to_try_again() {
     assert_eq!(env.called("retry_or_skip").len(), 1);
     assert_eq!(env.called("start_install").len(), 2);
     assert_eq!(env.called("success").len(), 1);
+
+    // Without a terminal the failure ends setup, naming the likely cause.
+    let mut unattended = Fake::new();
+    unattended.interactive = false;
+    unattended.env_credentials = Some(credentials());
+    unattended.failed_installs = 1;
+    let error = format!("{:#}", run_setup(&mut unattended, &sessions()).unwrap_err());
+    assert!(
+        error.contains("client credentials are turned on"),
+        "{error}"
+    );
+    assert_eq!(unattended.called("delete_"), ["delete_app app-1"]);
+
+    // An install that does not complete at once is no token either.
+    let mut pending = Fake::new();
+    pending.interactive = false;
+    pending.env_credentials = Some(credentials());
+    pending.install = session("pending", REDIRECT);
+    let error = format!("{:#}", run_setup(&mut pending, &sessions()).unwrap_err());
+    assert!(error.contains("the install is `pending`"), "{error}");
+    assert!(pending.called("open_install_page").is_empty());
+    assert_eq!(pending.called("delete_"), ["delete_app app-1"]);
 
     // Skipping continues the deploy without the channel.
     let mut skip = Fake::new();
@@ -613,8 +660,7 @@ fn says_where_the_app_changes_once_when_it_is_installed() {
 #[test]
 fn asks_for_consent_again_when_the_grant_lapsed() {
     // The app and its secret stay: only the admin's approval is needed.
-    let mut env = Fake::new();
-    env.connections = VecDeque::from([owned("app-0", "conn-0", AgentGrant::AuthorizationRequired)]);
+    let mut env = awaiting_consent(AgentGrant::AuthorizationRequired);
     run_setup(&mut env, &sessions()).unwrap();
     assert!(env.calls[0].starts_with("warning Linear stopped renewing"));
     assert_eq!(
@@ -633,6 +679,7 @@ fn asks_for_consent_again_when_the_grant_lapsed() {
     // A missing signing secret of an earlier mda's install is stored along
     // the way.
     let mut unsigned = Fake::new();
+    unsigned.install = session("pending", REDIRECT);
     unsigned.connections =
         VecDeque::from([legacy("conn-0", None, AgentGrant::AuthorizationRequired)]);
     run_setup(&mut unsigned, &sessions()).unwrap();
@@ -643,19 +690,15 @@ fn asks_for_consent_again_when_the_grant_lapsed() {
     assert_eq!(unsigned.called("start_install"), ["start_install conn-0"]);
 
     // Without a terminal, deploy prints the link and waits for it.
-    let mut unattended = Fake::new();
+    let mut unattended = awaiting_consent(AgentGrant::AuthorizationRequired);
     unattended.interactive = false;
-    unattended.connections =
-        VecDeque::from([owned("app-0", "conn-0", AgentGrant::AuthorizationRequired)]);
     run_setup(&mut unattended, &sessions()).unwrap();
     assert_eq!(unattended.called("open_install_page").len(), 1);
     assert_eq!(unattended.called("success").len(), 1);
 
     // A consent that fails keeps the app, to approve again next time.
-    let mut refused = Fake::new();
+    let mut refused = awaiting_consent(AgentGrant::AuthorizationRequired);
     refused.statuses = VecDeque::from(["failed".to_string()]);
-    refused.connections =
-        VecDeque::from([owned("app-0", "conn-0", AgentGrant::AuthorizationRequired)]);
     run_setup(&mut refused, &sessions()).unwrap();
     assert!(refused.called("delete_").is_empty());
     assert_eq!(refused.called("retry_or_skip").len(), 1);
@@ -664,17 +707,26 @@ fn asks_for_consent_again_when_the_grant_lapsed() {
         .last()
         .unwrap()
         .contains("Continuing without the Linear channel"));
+
+    // With client credentials, Agent Auth gets the token back at once.
+    let mut renewed = Fake::new();
+    renewed.connections =
+        VecDeque::from([owned("app-0", "conn-0", AgentGrant::AuthorizationRequired)]);
+    run_setup(&mut renewed, &sessions()).unwrap();
+    assert_eq!(renewed.called("start_install"), ["start_install conn-0"]);
+    assert!(renewed.called("open_install_page").is_empty());
+    assert_eq!(renewed.called("success").len(), 1);
 }
 
 #[test]
 fn asks_for_consent_again_when_the_grant_was_revoked() {
     // A revoke keeps the app and its secret, like a lapsed grant: it does not
     // delete the connection or ask for a new app.
-    let mut env = Fake::new();
-    env.connections = VecDeque::from([owned("app-0", "conn-0", AgentGrant::Revoked)]);
+    let mut env = awaiting_consent(AgentGrant::Revoked);
     run_setup(&mut env, &sessions()).unwrap();
     assert!(
-        env.calls[0].starts_with("warning This deployment's access to the Linear app was revoked"),
+        env.calls[0]
+            .starts_with("warning This Agent Server's access to the Linear app was revoked"),
         "{:?}",
         env.calls
     );
@@ -740,7 +792,7 @@ fn reads_the_workspace_key_from_a_url_or_the_key() {
     for invalid in ["", "acme/../x", "https://linear.app/", "a b"] {
         assert!(workspace_key(invalid).is_err(), "{invalid}");
     }
-    let url = create_app_url(None, &sessions(), WEBHOOK, REDIRECT).unwrap();
+    let url = create_app_url(None, &sessions(), WEBHOOK).unwrap();
     assert!(url.starts_with("https://linear.app/settings/api/applications/new?manifest="));
 }
 
@@ -811,16 +863,15 @@ fn uses_an_existing_app_pointed_at_the_deployment() {
     assert!(env.called("open_create_page").is_empty());
     let settings = env.existing_settings.unwrap();
     assert!(settings.contains("https://linear.app/acme/settings/api"));
-    assert!(settings.contains(&format!("Redirect URIs: add {REDIRECT}")));
+    assert!(settings.contains("Client credentials: turn on"));
     assert!(settings.contains(&format!("URL {WEBHOOK}")));
     assert!(settings.contains("events: AgentSessionEvent, OAuthAuthorization, PermissionChange"));
     assert_eq!(
-        env.calls[..4],
+        env.calls[..3],
         [
             "ask_credentials".to_string(),
             "create_app client-1 lin_wh_signing read,write,app:mentionable,app:assignable".into(),
             "start_install conn-1".into(),
-            "open_install_page".into(),
         ]
     );
 }

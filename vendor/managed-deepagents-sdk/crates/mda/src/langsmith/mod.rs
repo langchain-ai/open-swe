@@ -28,6 +28,7 @@ mod agents;
 mod context_hub;
 mod crons;
 mod deployments;
+mod fleet;
 pub(crate) mod github_app_setup;
 pub(crate) mod github_channel;
 pub(crate) mod linear_app;
@@ -245,7 +246,7 @@ pub struct Secret {
     pub value: String,
 }
 
-/// Deployment type accepted by `mda deploy --deployment-type`.
+/// Agent Server type accepted by `mda deploy --agent-server-type`.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum DeploymentType {
     #[default]

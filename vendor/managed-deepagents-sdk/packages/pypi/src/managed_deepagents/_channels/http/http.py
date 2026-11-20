@@ -16,6 +16,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import Message
 
 from managed_deepagents import _ingress
+from managed_deepagents._channels.address import channel_address
 from managed_deepagents._channels.http import ingress as http_ingress
 from managed_deepagents._channels.http.input_state import (
     ReadState,
@@ -42,7 +43,6 @@ from managed_deepagents._channels.run_input import (
     normalize_run_inputs,
 )
 from managed_deepagents._channels.runtime import is_json_value, json_copy
-from managed_deepagents._channels.target import channel_target
 from managed_deepagents._channels.types import ChannelError
 from managed_deepagents._log import logger
 from managed_deepagents._telemetry.otel import set_log_attributes
@@ -602,18 +602,29 @@ async def _plan_runs(plan: _ConversationRun, delivery: _Delivery, waiter: _Threa
         # The conversation starts no run for the delivery, so its thread records
         # it: a redelivery is then a duplicate, and starts nothing twice.
         await _record_conversation_delivery(delivery, thread_id)
+    # How often each persistent thread came up before, so two runs on one thread
+    # have their own delivery keys and both start.
+    repeats: dict[str, int] = {}
     for index, run in enumerate(runs):
-        if "thread" in run:
-            _ingress.schedule_ingress_work(
-                functools.partial(_start_threaded_run, delivery, run, index),
-                label=f'channel "{delivery.name}" delivery',
-            )
+        thread = run.get("thread")
+        if thread is None:
+            continue
+        thread_id = thread["id"].lower() if thread["mode"] == "persistent" else ""
+        repeat = repeats.get(thread_id, 0) if thread_id else 0
+        if thread_id:
+            repeats[thread_id] = repeat + 1
+        _ingress.schedule_ingress_work(
+            functools.partial(_start_threaded_run, delivery, run, index, repeat),
+            label=f'channel "{delivery.name}" delivery',
+        )
     if conversation is not None:
         plan.multitask_strategy = conversation.get("multitask_strategy", plan.multitask_strategy)
         plan.reply = conversation.get("reply")
     plan.run_input = {"prepare": functools.partial(_planned, conversation)}
-    # A waiting conversation would say it waits for a run its input didn't ask for.
-    plan.skip = paused and conversation is None
+    # Without a run of its own, a conversation that waits on a decision or just
+    # recorded the delivery starts nothing: a waiting one would say it waits for a
+    # run its input didn't ask for, and the other would call the delivery a duplicate.
+    plan.skip = conversation is None and (paused or any("thread" in run for run in runs))
 
 
 async def _record_conversation_delivery(delivery: _Delivery, thread_id: str) -> None:
@@ -718,7 +729,9 @@ async def _prepare_runs(
     return runs
 
 
-async def _start_threaded_run(delivery: _Delivery, run: NormalizedRunInput, index: int) -> None:
+async def _start_threaded_run(
+    delivery: _Delivery, run: NormalizedRunInput, index: int, repeat: int = 0
+) -> None:
     """Start a run on a thread its handler chose, and see it through.
 
     A persistent thread is the channel's own: its source key derives from the
@@ -751,8 +764,9 @@ async def _start_threaded_run(delivery: _Delivery, run: NormalizedRunInput, inde
         binding=binding,
         assistant_id=delivery.assistant_id,
         # Keyed by its thread, not its place among the handler's runs: a resent
-        # delivery whose handler starts a different set still finds its run.
-        delivery_key=f"{key}#{thread_id}",
+        # delivery whose handler starts a different set still finds its run. A
+        # later run on the same thread counts its repeat, so it starts too.
+        delivery_key=f"{key}#{thread_id}#{repeat}" if repeat else f"{key}#{thread_id}",
         multitask_strategy=run.get("multitask_strategy", channel.multitask_strategy),
         prepare=functools.partial(_planned, run),
     )
@@ -1074,7 +1088,7 @@ async def _prepare(
 
 def _run_channel(name: str, channel: HttpChannel, message: HttpChannelInboundMessage) -> RunChannel:
     """The channel a message's runs start from: its conversation's thread and target."""
-    origin = channel_target(
+    origin = channel_address(
         cast(
             "ChannelBinding",
             {"provider": channel.kind, "transport": "direct", "target": message["target"]},

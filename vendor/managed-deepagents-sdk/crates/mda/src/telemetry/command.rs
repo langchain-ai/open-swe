@@ -49,11 +49,16 @@ fn collect_command_path_and_flags(
         if argument.is_positional() {
             continue;
         }
+        let name = argument
+            .get_long()
+            .unwrap_or_else(|| argument.get_id().as_str());
         flag_names.push(
-            argument
-                .get_long()
-                .unwrap_or_else(|| argument.get_id().as_str())
-                .to_string(),
+            match name {
+                "agent-server-id" => "deployment-id",
+                "agent-server-type" => "deployment-type",
+                _ => name,
+            }
+            .to_string(),
         );
     }
 

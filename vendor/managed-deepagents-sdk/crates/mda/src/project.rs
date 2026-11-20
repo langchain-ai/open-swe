@@ -72,7 +72,8 @@ const AGENT_ENTRYPOINTS: &[(&str, Language)] = &[
     ("agent.py", Language::Python),
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Language {
     TypeScript,
     Python,
@@ -173,7 +174,7 @@ pub fn load(root: &Path) -> Result<Project> {
         let entry = entry?;
         if entry.file_type().is_file() {
             let rel = entry.path().strip_prefix(&root)?.to_path_buf();
-            if is_ignored_file(&rel) {
+            if is_ignored_file(&rel) || is_coding_agent_file(&rel) {
                 continue;
             }
             files.push(rel);
@@ -472,6 +473,15 @@ pub(crate) fn is_ignored_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether `rel` is the project-root `AGENTS.md`, which guides the coding agent
+/// editing the project rather than the deployed agent.
+///
+/// Only the root copy is skipped. Agent code may read a nested `AGENTS.md`
+/// (under `tools/`, say) at runtime, so that one stays in the build.
+pub(crate) fn is_coding_agent_file(rel: &Path) -> bool {
+    rel == Path::new("AGENTS.md")
+}
+
 /// Whether `path`'s final component is a tooling/OS cache directory.
 ///
 /// Safe to apply under `skills/**`, unlike [`is_ignored_dir`], which also skips
@@ -659,6 +669,21 @@ mod tests {
         assert!(!project.files.iter().any(|f| f.starts_with("mda_evals")));
         assert!(!project.files.iter().any(|f| f.starts_with("evals")));
         assert!(!project.files.iter().any(|f| f.starts_with("memories")));
+    }
+
+    #[test]
+    fn load_skips_only_the_root_agents_md() {
+        let root = tempfile::tempdir().unwrap();
+        write_stub_file(root.path(), "agent.ts");
+        write_stub_file(root.path(), "AGENTS.md");
+        write_stub_file(root.path(), "tools/AGENTS.md");
+
+        let project = load(root.path()).unwrap();
+
+        assert_eq!(
+            project.files,
+            vec![PathBuf::from("agent.ts"), PathBuf::from("tools/AGENTS.md")]
+        );
     }
 
     #[test]

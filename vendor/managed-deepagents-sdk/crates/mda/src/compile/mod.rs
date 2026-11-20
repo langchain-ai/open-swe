@@ -61,6 +61,7 @@ pub(crate) use requirements::{
     agent_connections_from_connector_requirements, channel_provided_connections,
     connection_owner_policy_for_slug, emit_channel_requirements_for_entries,
     emit_connector_requirements_for_entries, emit_mcp_connection_entries_for_entries,
+    load_channel_requirements, load_connector_requirements, load_mcp_connection_entries,
     referenced_connection_slugs, required_env_from_connector_requirements,
     reserved_user_connection_error, unprovided_reserved_connections,
     user_connections_from_connector_requirements, ChannelRequirements, ConnectorRequirements,
@@ -682,18 +683,12 @@ fn compile_inner(
 ) -> Result<CompileSummary> {
     // Validate first: prepare_out_dir clears existing files during a full build.
     let agent = agent_config::read_agent_static_config(project)?;
-    if matches!(context, RuntimeContext::Eval { .. }) && !agent.async_subagents.is_empty() {
-        bail!(
-            "async subagents are not supported in eval: there is no Agent Server to launch them on"
-        );
-    }
-    // Served agents also get an async general-purpose subagent; eval has no
-    // Agent Server to launch it on.
-    let async_subagents = if matches!(context, RuntimeContext::Eval { .. }) {
-        Vec::new()
-    } else {
-        agent.served_async_subagents()
-    };
+    let async_subagents =
+        if matches!(context, RuntimeContext::Eval { .. }) && agent.async_subagents.is_empty() {
+            Vec::new()
+        } else {
+            agent.served_async_subagents()
+        };
     let local_packages = find_local_packages(project)?;
     prepare_out_dir(&project.root, out_dir, mode)?;
 
@@ -895,9 +890,9 @@ fn compile_inner(
     if recipe.is_some() {
         keep.insert(PathBuf::from(sandbox_recipe::SANDBOX_RECIPE_FILE));
     }
-    // Only a factory can select a sandbox whose base the recipe was not baked on.
-    let sandbox_setup = agent.is_factory
-        && !matches!(context, RuntimeContext::Eval { .. })
+    // A factory's selection, or any sandbox's `resolve`, can pick a base the
+    // recipe was not baked on.
+    let sandbox_setup = !matches!(context, RuntimeContext::Eval { .. })
         && recipe
             .as_ref()
             .is_some_and(|recipe| recipe.has_setup_script);

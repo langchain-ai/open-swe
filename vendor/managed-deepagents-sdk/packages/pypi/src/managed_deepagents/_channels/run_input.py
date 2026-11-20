@@ -6,6 +6,7 @@ Normalized to the JSON the Agent Server accepts.
 from __future__ import annotations
 
 import re
+import warnings
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
 from urllib.parse import urlsplit
@@ -17,44 +18,33 @@ from langchain_core.messages import (
     convert_to_messages,
 )
 
+from managed_deepagents._channels.address import is_channel_address, names_origin
 from managed_deepagents._channels.runtime import is_json_value
-from managed_deepagents._channels.target import is_channel_target, names_origin
+from managed_deepagents._channels.types import SlackChannelAddress
 from managed_deepagents._log import logger
 
 if TYPE_CHECKING:
     from langgraph_sdk.schema import MultitaskStrategy
 
-    from managed_deepagents._channels.types import ChannelReply, ChannelTarget, JsonValue
-    from managed_deepagents.schedules import ThreadConfig
+    from managed_deepagents._channels.types import ChannelAddress, ChannelReply, JsonValue
+    from managed_deepagents.schedules import ThreadEphemeral
 
 
 ChannelRunInput = str | BaseMessage | Mapping[str, object]
 """A user message's text, a message, or state such as ``{"messages": [...]}``."""
 
 
-class ChannelRun(TypedDict):
-    """A run a handler starts with options: its input, and where and how it runs.
-
-    Experimental: this may change in a minor release.
-    """
-
+class _RunFields(TypedDict):
     input: ChannelRunInput
     """The run's input: a user message's text, a message, or state such as
     ``{"messages": [...]}``."""
-    thread: NotRequired[ThreadConfig]
+    thread: NotRequired[ThreadEphemeral | RunThreadPersistent]
     """The thread the run starts on: ``{"mode": "ephemeral"}`` for a fresh
     thread, deleted once the run ends, or ``{"mode": "persistent", "id":
-    "<uuid>"}`` for the thread with that id, kept across events. Omitted, the
+    "<uuid>"}`` for the thread with that id, kept across events: unlike a
+    schedule's, the ``id`` is required. Omitted, the
     thread MDA gives the handler, the event's conversation, as is a persistent
     thread with its id. GitHub, Linear, HTTP and Slack channels only."""
-    auto_post: NotRequired[bool | ChannelTarget]
-    """Where the run posts its final answer. ``True`` is the event's
-    conversation and ``False`` nowhere. A ``ChannelTarget`` names a conversation;
-    for now only the event's own, such as a ``GitHubChannelTarget`` for its
-    issue or a run's ``channel.target`` passed back, which is ``True``.
-    Omitted, the conversation's run posts as the channel's ``auto_post`` says,
-    and a run on any other thread posts nothing. GitHub, Linear, HTTP and
-    Slack channels only."""
     multitask_strategy: NotRequired[MultitaskStrategy]
     """What the run does while its thread already runs, overriding the
     channel's ``multitask_strategy`` for this run. GitHub, Linear, HTTP and
@@ -74,14 +64,61 @@ class ChannelRun(TypedDict):
     without credentials in it."""
 
 
-ChannelRunResult = ChannelRunInput | list[ChannelRun]
+class ChannelRun(_RunFields):
+    """A run a handler starts with options: its input, and where and how it runs.
+
+    Experimental: this may change in a minor release.
+    """
+
+    auto_post: NotRequired[bool | ChannelAddress]
+    """Where the run posts its final answer. ``True`` is the event's
+    conversation and ``False`` nowhere. A ``ChannelAddress`` names a conversation;
+    for now only the event's own, such as a ``LinearChannelAddress`` for its
+    issue or a run's ``channel.address`` passed back, which is ``True``.
+    Omitted, the conversation's run posts as the channel's ``auto_post`` says,
+    and a run on any other thread posts nothing. Linear, HTTP and Slack
+    channels only: GitHub posts no run's answer."""
+    conversation: NotRequired[ChannelAddress]
+    """The conversation the run belongs to when it isn't the event's: a
+    ``SlackChannelAddress`` with ``thread_ts``, such as a Slack thread the handler
+    just opened, in the same app and workspace. The run's status, Stop button
+    and decisions show there, Stop there stops it, and ``auto_post=True``
+    answers there. Only with ``thread``. Slack channels only."""
+
+
+class GitHubRun(_RunFields):
+    """A run a GitHub handler starts: a ``ChannelRun`` without ``auto_post``,
+    since GitHub posts no run's answer (the agent's tools post on GitHub), or
+    ``conversation``, which is Slack's.
+
+    Experimental: this may change in a minor release.
+    """
+
+
+class ChannelRunOptions(TypedDict, total=False):
+    """Run options a handler set with its input, as ``(input, options)``.
+
+    Deprecated: return a run object, ``[{"input": ..., **options}]``. Removed in 0.12.
+    """
+
+    context: Mapping[str, object]
+    """Run context, as ``agent.invoke(input, context=...)`` takes it."""
+    metadata: Mapping[str, JsonValue]
+    """Metadata for the run, as a run object's ``metadata``."""
+    webhook: str
+    """A URL the Agent Server POSTs the finished run to, as a run object's ``webhook``."""
+
+
+ChannelRunResult = ChannelRunInput | list[ChannelRun] | tuple[ChannelRunInput, ChannelRunOptions]
 """What a channel handler may return to start a run: its input, as one run on
 the event's conversation, or a list of ``ChannelRun`` to set run options. On
 GitHub, Linear, HTTP and Slack channels a list may start several runs, at most
 one of them on the event's conversation; elsewhere it holds one run.
 
 Experimental: this may change in a minor release.
-"""
+
+The ``(input, options)`` form is deprecated, and removed in 0.12: return
+``[{"input": ..., **options}]``."""
 
 
 class RunThreadPersistent(TypedDict):
@@ -92,6 +129,13 @@ class RunThreadPersistent(TypedDict):
 
 class RunThreadEphemeral(TypedDict):
     mode: Literal["ephemeral"]
+
+
+class RunConversation(TypedDict):
+    """A run's ``conversation``, as a Trigger address names a Slack thread."""
+
+    conversation_id: str
+    thread_id: str
 
 
 RunThread = RunThreadEphemeral | RunThreadPersistent
@@ -113,6 +157,8 @@ class NormalizedRunInput(TypedDict):
     multitask_strategy: NotRequired[MultitaskStrategy]
     deliver_to_conversation: NotRequired[Literal[True]]
     """The run posts its final answer on the event's conversation."""
+    conversation: NotRequired[RunConversation]
+    """The Slack thread the run belongs to, when it isn't the event's."""
 
 
 class RunStartOptions(TypedDict):
@@ -179,6 +225,8 @@ def normalize_run_input(value: object) -> NormalizedRunInput | None:
     """
     if value is None:
         return None
+    if isinstance(value, tuple):
+        return _run_object(_run_of_tuple(cast("tuple[object, ...]", value)), None)
     if not isinstance(value, list):
         return _plain_run(value)
     runs = [_run_object(item, None) for item in cast("list[object]", value)]
@@ -196,7 +244,7 @@ class RunChannel(TypedDict):
     """The thread of the event's conversation. A run on a persistent thread with
     this id is the conversation's run. Without it, only a run without
     ``thread`` is."""
-    origin: NotRequired[ChannelTarget | None]
+    origin: NotRequired[ChannelAddress | None]
     """The conversation the event came from, which a run's ``auto_post`` may
     name. Without it, a run's target is refused."""
 
@@ -213,6 +261,9 @@ def normalize_run_inputs(value: object, channel: RunChannel) -> list[NormalizedR
     """
     if value is None:
         return []
+    if isinstance(value, tuple):
+        # Options alone, as before run objects: one run on the event's conversation.
+        return [_run_object(_run_of_tuple(cast("tuple[object, ...]", value)), None)]
     if not isinstance(value, list):
         return [_plain_run(value)]
     runs = [_run_object(item, channel) for item in cast("list[object]", value)]
@@ -224,8 +275,8 @@ def normalize_run_inputs(value: object, channel: RunChannel) -> list[NormalizedR
 def starts_on_conversation(result: object, conversation_thread_id: str | None = None) -> bool:
     """Whether a handler's result starts a run on the event's conversation: its
     input alone, or a run in a list without ``thread`` or with the
-    conversation's own. A tuple, which is refused, starts nothing."""
-    if result is None or isinstance(result, tuple):
+    conversation's own. A deprecated ``(input, options)`` tuple starts one there."""
+    if result is None:
         return False
     if not isinstance(result, list):
         return True
@@ -260,17 +311,32 @@ def _is_run(value: object) -> bool:
 
 
 def _plain_run(value: object) -> NormalizedRunInput:
-    """A handler's input alone: text, a message, or state. A tuple, the shape
-    handlers returned run options in before, is refused."""
-    if isinstance(value, tuple):
-        raise InvalidRunInput(_LIST_ITEM)
+    """A handler's input alone: text, a message, or state."""
     return _normalize_input(value)
+
+
+_RUN_TUPLE_DEPRECATION = (
+    "Returning (input, options) from a channel handler is deprecated and will be removed "
+    'in 0.12; return [{"input": ..., **options}] instead.'
+)
+
+
+def _run_of_tuple(value: tuple[object, ...]) -> dict[str, object]:
+    """``(input,)`` or ``(input, options)``, the form run objects replaced, as the
+    run object it stands for; warns that it's deprecated."""
+    if len(value) not in (1, 2):
+        raise InvalidRunInput("run input must be (input, options)")
+    options = value[1] if len(value) > 1 else {}
+    if not isinstance(options, Mapping):
+        raise InvalidRunInput("run options must be a mapping")
+    warnings.warn(_RUN_TUPLE_DEPRECATION, FutureWarning, stacklevel=4)
+    return {**cast("Mapping[str, object]", options), "input": value[0]}
 
 
 _RUN_OPTIONS = frozenset({"context", "metadata", "webhook"})
 # The options that choose where a run starts and answers; GitHub, Linear, HTTP
 # and Slack channels only.
-_ROUTING_OPTIONS = frozenset({"thread", "auto_post", "multitask_strategy"})
+_ROUTING_OPTIONS = frozenset({"thread", "auto_post", "conversation", "multitask_strategy"})
 _MULTITASK_STRATEGIES = frozenset({"enqueue", "interrupt", "rollback", "reject"})
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
 # The metadata keys a handler may set.
@@ -338,6 +404,9 @@ def _with_routing(
             result["reply"] = "auto" if posts else "none"
         elif posts:
             result["deliver_to_conversation"] = True
+    conversation = run.get("conversation")
+    if conversation is not None:
+        result["conversation"] = _run_conversation(conversation, channel, chosen="thread" in result)
     strategy = run.get("multitask_strategy")
     if strategy is not None:
         if strategy not in _MULTITASK_STRATEGIES:
@@ -347,7 +416,26 @@ def _with_routing(
         result["multitask_strategy"] = cast("MultitaskStrategy", strategy)
 
 
-_BAD_AUTO_POST = "run autoPost must be true, false, or a target on this channel for now"
+_BAD_AUTO_POST = "run autoPost must be true, false, or an address on this channel for now"
+_BAD_CONVERSATION = "run conversation must be a Slack thread on a thread the handler chose"
+_SLACK_CONVERSATION_ID = re.compile(r"[CDG][A-Z0-9]+")
+_SLACK_TS = re.compile(r"[0-9]+\.[0-9]+")
+
+
+def _run_conversation(value: object, channel: RunChannel, *, chosen: bool) -> RunConversation:
+    """A run's ``conversation``: a Slack thread of this channel's, for a run on a
+    thread the handler chose."""
+    if (
+        not chosen
+        or channel["provider"] != "slack"
+        or not isinstance(value, SlackChannelAddress)
+        or value.channel not in (None, channel["name"], channel["provider"])
+        or value.thread_ts is None
+        or not _SLACK_CONVERSATION_ID.fullmatch(value.conversation_id)
+        or not _SLACK_TS.fullmatch(value.thread_ts)
+    ):
+        raise InvalidRunInput(_BAD_CONVERSATION)
+    return {"conversation_id": value.conversation_id, "thread_id": value.thread_ts}
 
 
 def _posts_on_conversation(auto_post: object, channel: RunChannel) -> bool:
@@ -360,7 +448,7 @@ def _posts_on_conversation(auto_post: object, channel: RunChannel) -> bool:
         return auto_post
     origin = channel.get("origin")
     if (
-        not is_channel_target(auto_post)
+        not is_channel_address(auto_post)
         or origin is None
         or auto_post.provider != channel["provider"]
         or auto_post.channel not in (None, channel["name"], channel["provider"])

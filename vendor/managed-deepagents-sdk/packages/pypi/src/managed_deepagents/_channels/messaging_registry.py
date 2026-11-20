@@ -29,6 +29,7 @@ PausedNotice = Callable[["JsonValue", "HttpDelivery"], "Awaitable[None]"]
 _provider_by_name: dict[str, str] = {}
 _provider_config_by_name: dict[str, JsonObject] = {}
 _replies_none: set[str] = set()
+_status_hidden: set[str] = set()
 
 
 def channel_provider_for_name(name: str) -> str | None:
@@ -45,12 +46,19 @@ def channel_auto_replies_for_name(name: str) -> bool:
     return name not in _replies_none
 
 
+def channel_shows_status_for_name(name: str) -> bool:
+    """Whether the channel shows a run's status and Stop button: ``False`` only
+    for one declared with ``status=False``."""
+    return name not in _status_hidden
+
+
 _by_name: dict[str, MessagingFactory] = {}
 _paused_notice_by_name: dict[str, PausedNotice] = {}
 
 __all__ = [
     "channel_auto_replies_for_name",
     "channel_provider_config_for_name",
+    "channel_shows_status_for_name",
     "messaging_transport_for_name",
     "paused_notice_for_name",
     "register_channel_messaging",
@@ -87,6 +95,10 @@ def _register_messaging_sources(sources: Sequence[object]) -> None:
             _replies_none.add(name)
         else:
             _replies_none.discard(name)
+        if getattr(source, "status", None) is False:
+            _status_hidden.add(name)
+        else:
+            _status_hidden.discard(name)
         requirements = getattr(source, "requirements", None)
         if callable(requirements):
             manifest = requirements(name)

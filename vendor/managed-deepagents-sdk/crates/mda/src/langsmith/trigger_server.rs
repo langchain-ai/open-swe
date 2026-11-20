@@ -89,7 +89,7 @@ impl std::fmt::Display for SlackAppInUse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Slack app is connected to deployment {}.",
+            "Slack app is connected to Agent Server {}.",
             self.deployment_id
         )
     }
@@ -111,6 +111,14 @@ fn slack_app_in_use(status: StatusCode, text: &str) -> Option<SlackAppInUse> {
     let deployment_id = uuid::Uuid::parse_str(detail.get("deployment_id")?.as_str()?).ok()?;
     Some(SlackAppInUse {
         deployment_id: deployment_id.to_string(),
+    })
+}
+
+/// Whether a 400 is Trigger Server's SSRF refusal of the endpoint URL. Only an
+/// exact match counts, so nothing else from the untrusted body is shown.
+fn endpoint_url_refused(text: &str) -> bool {
+    serde_json::from_str::<Value>(text).is_ok_and(|body| {
+        body.get("detail").and_then(Value::as_str) == Some("endpoint_url is not allowed")
     })
 }
 
@@ -343,6 +351,47 @@ impl Client {
         Ok(Some(SlackManager::Authorized { team_name }))
     }
 
+    /// The caller's registrations for a Fleet agent (its channels and inbox
+    /// triggers), across pages, or `None` when Trigger Server refuses the list,
+    /// as on an install without it.
+    pub(crate) fn agent_triggers(&self, agent_id: &str) -> Result<Option<Vec<Value>>> {
+        let mut items = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let mut query = vec![("agent_id", agent_id), ("page_size", "100")];
+            if let Some(cursor) = cursor.as_deref() {
+                query.push(("cursor", cursor));
+            }
+            let response =
+                self.trigger_get(&["v1", "triggers", "list"], &query, "Trigger listing")?;
+            let status = response.status();
+            if matches!(status, StatusCode::NOT_FOUND | StatusCode::FORBIDDEN) {
+                return Ok(None);
+            }
+            if !status.is_success() {
+                return Err(categorized(
+                    api_category(status),
+                    format!("Trigger listing failed (HTTP {}).", status.as_u16()),
+                ));
+            }
+            let page: Value = response
+                .json()
+                .map_err(|_| anyhow!("Trigger listing returned invalid JSON."))?;
+            let page_items = page
+                .get("items")
+                .and_then(Value::as_array)
+                .context("Trigger listing response has no items array")?;
+            items.extend(page_items.iter().cloned());
+            // An empty or repeated cursor would refetch the same page forever.
+            match page.get("next_cursor").and_then(Value::as_str) {
+                Some(next) if !next.is_empty() && cursor.as_deref() != Some(next) => {
+                    cursor = Some(next.to_string())
+                }
+                _ => return Ok(Some(items)),
+            }
+        }
+    }
+
     /// The channels Trigger Server has registered for the deployment.
     pub(crate) fn trigger_channels(&self, deployment_id: &str) -> Result<Vec<TriggerChannel>> {
         let response = self.trigger_get(
@@ -414,6 +463,12 @@ impl Client {
                     return Err(categorized(
                         ErrorCategory::UserInput,
                         "Slack channel setup conflicts with the existing registration. Check the app setup, or delete and recreate the channel.",
+                    ));
+                }
+                if status == StatusCode::BAD_REQUEST && endpoint_url_refused(&text) {
+                    return Err(categorized(
+                        ErrorCategory::Remote,
+                        "Channel setup failed (HTTP 400): endpoint_url is not allowed. LangSmith refused this Agent Server's URL as the Slack events endpoint before checking the Slack app's credentials.",
                     ));
                 }
                 if matches!(
@@ -858,6 +913,32 @@ mod tests {
     }
 
     #[test]
+    fn customer_setup_reports_refused_endpoint_url_instead_of_credentials() {
+        let (origin, _) = serve_once(
+            "400 Bad Request",
+            &[],
+            r#"{"detail":"endpoint_url is not allowed"}"#,
+        );
+        let mut payload = request();
+        payload.slack.customer_app = Some(SlackCustomerApp {
+            bot_token: "test-bot-token".to_string(),
+            signing_secret: "signing-private".to_string(),
+            move_from_deployment: None,
+        });
+
+        let error = client(None, &origin)
+            .setup_trigger_channel(&payload)
+            .err()
+            .unwrap();
+
+        assert_eq!(
+            error.to_string(),
+            "Channel setup failed (HTTP 400): endpoint_url is not allowed. LangSmith refused this Agent Server's URL as the Slack events endpoint before checking the Slack app's credentials."
+        );
+        assert_eq!(category_of(&error), ErrorCategory::Remote);
+    }
+
+    #[test]
     fn customer_setup_outage_does_not_blame_credentials() {
         let (origin, _) = serve_once(
             "503 Service Unavailable",
@@ -1209,6 +1290,31 @@ mod tests {
 
             assert_eq!(client(None, &origin).slack_manager().unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn agent_triggers_lists_the_agents_registrations() {
+        let (origin, receiver) = serve_once(
+            "200 OK",
+            &[],
+            &json!({"items": [{"template_id": "t"}], "next_cursor": null}).to_string(),
+        );
+
+        let triggers = client(None, &origin).agent_triggers("a1").unwrap().unwrap();
+        let raw = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        assert!(raw.starts_with("GET /v1/triggers/list?agent_id=a1&page_size=100 HTTP/1.1\r\n"));
+        assert_eq!(triggers.len(), 1);
+    }
+
+    #[test]
+    fn agent_triggers_is_none_without_trigger_server() {
+        let (origin, _receiver) = serve_once("404 Not Found", &[], "");
+
+        assert!(client(None, &origin)
+            .agent_triggers("a1")
+            .unwrap()
+            .is_none());
     }
 
     #[test]

@@ -7,11 +7,7 @@ To provision a recipe snapshot, add ``sandbox/setup.sh``. ``mda deploy`` and
 ``mda dev`` bake it once; new threads clone it without re-running the script.
 """
 
-from managed_deepagents import define_sandbox
+__MDA_SANDBOX_STDLIB__from managed_deepagents import __MDA_SANDBOX_IMPORTS__define_sandbox
 
 sandbox = define_sandbox(
-    # Reclaim idle sandboxes after 10 minutes.
-    idle_ttl_seconds=600,
-    # Default per-command timeout, in seconds.
-    default_timeout=600,
-)
+__MDA_SANDBOX_OPTIONS__)

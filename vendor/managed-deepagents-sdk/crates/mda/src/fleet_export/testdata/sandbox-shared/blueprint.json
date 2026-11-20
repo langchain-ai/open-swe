@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "name": "demo",
+  "language": "python",
+  "instructions": "Run team scripts.",
+  "model": "openai:gpt-5.6-terra",
+  "sandbox": true,
+  "memory": "agent",
+  "channels": [],
+  "sandbox_options": {
+    "env_vars": {
+      "OPENAI_API_KEY": "sk-fleet"
+    },
+    "access_control": {
+      "deny_list": [
+        "*.facebook.com",
+        "*"
+      ]
+    },
+    "rules": [
+      {
+        "name": "api-linear-app",
+        "match_hosts": [
+          "api.linear.app"
+        ],
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": {
+              "connection": {
+                "connection": {
+                  "slug": "linear-agent",
+                  "owner": "agent"
+                },
+                "format": "bearer"
+              }
+            }
+          }
+        ],
+        "commented_out": "After your first `mda deploy`, create the `linear-agent` connection (see \"Connections to create\" in FLEET_EXPORT.md).\nThen uncomment this rule and deploy again."
+      },
+      {
+        "name": "www-googleapis-com",
+        "match_hosts": [
+          "www.googleapis.com"
+        ],
+        "headers": [
+          {
+            "name": "Authorization",
+            "value": {
+              "connection": {
+                "connection": {
+                  "slug": "google",
+                  "owner": "agent"
+                },
+                "format": "bearer"
+              }
+            }
+          }
+        ],
+        "commented_out": "After your first `mda deploy`, create the `google` connection (see \"Connections to create\" in FLEET_EXPORT.md).\nThen uncomment this rule and deploy again."
+      }
+    ]
+  }
+}

@@ -37,8 +37,8 @@ from langchain_core.language_models import BaseChatModel
 from managed_deepagents import (
     DeepAgentDefinition,
     ManagedServerRuntime,
+    cached_agent,
     define_deep_agent,
-    shared_factory,
 )
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import BaseModel, ConfigDict
@@ -166,7 +166,7 @@ class GraphInputs(BaseModel):
         return _DEFAULT_MODEL if spec is None else build_model(spec)
 
 
-async def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
+def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
     execution = runtime.execution_runtime
     if execution is None:
         # A read: through the reviewer's graph, which has every graph's persisted state.
@@ -305,7 +305,7 @@ def _parts(graph: Graph) -> _Parts:
 # MDA builds this once per distinct inputs, from them alone, and shares its graph.
 # `mda build` reads the agent's name without running it, so its body stays
 # assignments and one `return define_deep_agent(...)`.
-@shared_factory(_inputs)
+@cached_agent(keyed_by=_inputs)
 def agent(inputs: GraphInputs) -> DeepAgentDefinition:
     parts = _parts(inputs.graph)
     sync_subagents: list[SubAgent] = parts.sync_subagents(inputs.sync_subagent_model())

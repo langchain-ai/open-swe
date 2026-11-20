@@ -49,10 +49,11 @@ pub(crate) fn unattended_problem(
     manager: Option<&SlackManager>,
 ) -> Option<String> {
     match manager {
+        Some(SlackManager::Authorized { .. }) => None,
         _ if self_hosted => Some(unattended_message(true)),
         Some(SlackManager::Unavailable) => Some(unattended_message(true)),
         Some(SlackManager::NotAuthorized) => Some(unattended_message(false)),
-        Some(SlackManager::Authorized { .. }) | None => None,
+        None => None,
     }
 }
 
@@ -101,7 +102,7 @@ pub(crate) fn choose_app(env: &mut impl ChoiceEnv) -> Result<SlackApp> {
         return Ok(SlackApp::Customer(credentials));
     }
     let self_hosted = env.self_hosted();
-    let manager = if self_hosted { None } else { env.manager() };
+    let manager = env.manager();
     if !env.interactive() {
         if let Some(problem) = unattended_problem(self_hosted, manager.as_ref()) {
             bail!(problem);
@@ -131,8 +132,9 @@ pub(crate) fn choose_app(env: &mut impl ChoiceEnv) -> Result<SlackApp> {
     }
 }
 
-/// The answers deploy offers: LangSmith only creates apps on hosted LangSmith,
-/// and names the workspace when the user already authorized it in one.
+/// The answers deploy offers: LangSmith creates apps on hosted LangSmith, and on
+/// a self-hosted one only when it already has a workspace authorized; it names
+/// that workspace.
 pub(crate) fn app_options(self_hosted: bool, manager: Option<&SlackManager>) -> Vec<AppOption> {
     let option = |source, label: &str, hint| AppOption {
         source,
@@ -144,7 +146,8 @@ pub(crate) fn app_options(self_hosted: bool, manager: Option<&SlackManager>) -> 
         "Use an existing Slack app",
         "enter its bot token and signing secret",
     );
-    if self_hosted || manager == Some(&SlackManager::Unavailable) {
+    let authorized = matches!(manager, Some(SlackManager::Authorized { .. }));
+    if (self_hosted && !authorized) || manager == Some(&SlackManager::Unavailable) {
         return vec![
             option(
                 AppSource::Manifest,
@@ -674,17 +677,22 @@ mod tests {
     }
 
     #[test]
-    fn self_hosted_never_asks_about_app_management() {
+    fn self_hosted_offers_a_managed_app_only_in_an_authorized_workspace() {
+        let options = app_options(true, Some(&SlackManager::NotAuthorized));
+        assert_eq!(
+            sources(&options),
+            [AppSource::Manifest, AppSource::Existing]
+        );
+
         let mut env = FakeChoice {
-            interactive: true,
             self_hosted: true,
-            answer: Some(AppSource::Existing),
+            manager: Some(SlackManager::Authorized {
+                team_name: "Acme".to_string(),
+            }),
             ..FakeChoice::default()
         };
-
-        choose_app(&mut env).unwrap();
-
-        assert!(!env.asked_manager);
+        assert!(matches!(choose_app(&mut env).unwrap(), SlackApp::Managed));
+        assert!(env.asked_manager);
     }
 
     #[test]

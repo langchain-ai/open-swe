@@ -1911,7 +1911,7 @@ wheels = [
 
 [[package]]
 name = "managed-deepagents"
-version = "0.10.1"
+version = "0.10.4"
 source = { editable = "vendor/managed-deepagents-sdk/packages/pypi" }
 dependencies = [
     { name = "deepagents" },
@@ -1934,9 +1934,9 @@ requires-dist = [
     { name = "langchain", specifier = ">=1.4.6,<2" },
     { name = "langchain", extras = ["mcp"], marker = "extra == 'test'", specifier = ">=1.4.6,<2" },
     { name = "langchain-core", specifier = ">=1.7.2,<2" },
-    { name = "langgraph", specifier = ">=1.2.15,<2" },
+    { name = "langgraph", specifier = ">=1.2.19,<2" },
     { name = "langgraph-prebuilt", specifier = ">=1.1.1,<2" },
-    { name = "langgraph-sdk", specifier = ">=0.4.6,<0.5" },
+    { name = "langgraph-sdk", specifier = ">=0.4.13,<0.5" },
     { name = "mcp", marker = "extra == 'test'", specifier = ">=2.2.0,<3" },
     { name = "pydantic", specifier = ">=2.7.4,<2.15" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'test'", specifier = ">=2.13.0" },
@@ -1956,9 +1956,9 @@ typing = [
     { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6,<2" },
     { name = "mcp", specifier = ">=2.2.0,<3" },
     { name = "pillow", specifier = ">=11" },
-    { name = "stagehand", specifier = "==4.3.0" },
-    { name = "stagehand-middleware", specifier = "==0.1.0" },
-    { name = "ty", specifier = ">=0.0.80,<0.0.91" },
+    { name = "stagehand", specifier = "==4.4.0" },
+    { name = "stagehand-middleware", specifier = "==0.1.2" },
+    { name = "ty", specifier = ">=0.0.80,<0.0.105" },
 ]
 
 [[package]]

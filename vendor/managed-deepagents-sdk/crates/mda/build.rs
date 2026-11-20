@@ -7,12 +7,17 @@
 //! can send telemetry without requiring user configuration. `MDA_POSTHOG_API_KEY`
 //! must be a GitHub Actions repository *variable*, not a secret: it is a public
 //! write-only ingestion token, and `${{ vars.* }}` resolves empty for a secret,
-//! which would ship releases that silently send nothing.
+//! which would ship releases that silently send nothing. `MDA_SEGMENT_WRITE_KEY`
+//! is baked the same way, for the same reason.
 
 use std::process::Command;
 
 fn main() {
     let posthog_api_key = std::env::var("MDA_POSTHOG_API_KEY")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let segment_write_key = std::env::var("MDA_SEGMENT_WRITE_KEY")
         .unwrap_or_default()
         .trim()
         .to_string();
@@ -31,9 +36,11 @@ fn main() {
         .unwrap_or_else(|| "unknown".to_string());
 
     println!("cargo:rustc-env=MDA_POSTHOG_API_KEY={posthog_api_key}");
+    println!("cargo:rustc-env=MDA_SEGMENT_WRITE_KEY={segment_write_key}");
     println!("cargo:rustc-env=MDA_GIT_SHA={sha}");
     println!("cargo:rustc-env=MDA_GIT_DATE={date}");
     println!("cargo:rerun-if-env-changed=MDA_POSTHOG_API_KEY");
+    println!("cargo:rerun-if-env-changed=MDA_SEGMENT_WRITE_KEY");
     println!("cargo:rerun-if-env-changed=MDA_GIT_SHA");
     println!("cargo:rerun-if-env-changed=MDA_GIT_DATE");
     // Keep the baked SHA/date fresh across local commits.

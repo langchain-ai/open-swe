@@ -2,7 +2,8 @@
 
 use crate::project::Language;
 
-use super::{Blueprint, InitChannel};
+use super::{Blueprint, AGENT_MCP};
+use crate::channel::ChannelKind;
 
 /// Build a `README.md` describing the project that was actually written.
 pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
@@ -53,6 +54,10 @@ pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
             "API keys (LangSmith + model providers); never commit".to_string(),
         ),
         (
+            "AGENTS.md".to_string(),
+            "guidance for coding agents working on this project".to_string(),
+        ),
+        (
             identity_entry.to_string(),
             "managed authentication".to_string(),
         ),
@@ -72,19 +77,20 @@ pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
             "managed LangSmith sandbox (delete `sandbox/` to opt out)".to_string(),
         ));
     }
-    if blueprint.channels.contains(&InitChannel::Slack) {
+    let has_channel = |kind| blueprint.channels.iter().any(|c| c.kind() == kind);
+    if has_channel(ChannelKind::Slack) {
         entries.push((
             format!("channels/slack.{ext}"),
             "Slack messaging channel".to_string(),
         ));
     }
-    if blueprint.channels.contains(&InitChannel::GitHub) {
+    if has_channel(ChannelKind::GitHub) {
         entries.push((
             format!("channels/github.{ext}"),
             "GitHub channel, experimental (GitHub App set up on deploy)".to_string(),
         ));
     }
-    if blueprint.channels.contains(&InitChannel::Linear) {
+    if has_channel(ChannelKind::Linear) {
         entries.push((
             format!("channels/linear.{ext}"),
             "Linear channel, experimental (Linear app set up on deploy)".to_string(),
@@ -95,7 +101,18 @@ pub(super) fn readme(name: &str, blueprint: &Blueprint) -> String {
             ("tools/", "optional custom tools"),
             ("middleware/", "optional middleware"),
             ("skills/", "optional skills synced to Context Hub"),
-            (mcp_entry, "optional MCP server declaration"),
+            (
+                mcp_entry,
+                if !blueprint
+                    .mcp_definitions
+                    .iter()
+                    .any(|definition| definition.name == AGENT_MCP)
+                {
+                    "optional MCP server declaration"
+                } else {
+                    "MCP servers the agent's tools come from"
+                },
+            ),
         ]
         .map(|(entry, comment)| (entry.to_string(), comment.to_string())),
     );
@@ -155,13 +172,14 @@ This copies your files verbatim, generates a managed entry module, and writes a
 deployable build (including `langgraph.json`) to `.mda/build`. The CLI uploads
 that build to LangSmith to run your agent on the managed runtime.
 
-The deployment type defaults to `serverless`. Use `--deployment-type dedicated`
-for a dedicated deployment. Serverless requires a supported GCP SaaS environment.
+The Agent Server type defaults to `serverless`. Use `--agent-server-type dedicated`
+for a dedicated Agent Server. Serverless requires a supported GCP SaaS environment.
+The old `--deployment-type` spelling remains a hidden compatibility alias.
 
 Common options:
 
 ```bash
-mda deploy --name {name}-dev --deployment-type serverless
+mda deploy --name {name}-dev --agent-server-type serverless
 mda deploy --workspace-id "$LANGSMITH_WORKSPACE_ID"
 mda deploy --no-wait
 ```
@@ -183,13 +201,13 @@ piped or redirected it prints the most recent lines (1000 by default) and exits.
 
 ## Delete
 
-Remove the deployment and the LangSmith resources it created:
+Remove the Agent Server and the LangSmith resources it created:
 
 ```bash
 mda delete
 ```
 
-This deletes the deployment, the tracing project created alongside it, the
+This deletes the Agent Server, the tracing project created alongside it, the
 Context Hub repo holding this agent's context and memory, and the managed
 sandboxes this agent created. It asks first; pass `--yes` to skip the prompt.
 Agent memory and thread history are not recoverable afterwards.
@@ -323,6 +341,6 @@ fn identity_section(identity_entry: &str) -> String {
         "## Identity\n\n\
          `{identity_entry}` enables managed authentication: threads are owned\n\
          per caller. Set `auth` to one or more `auth.*` entries if browsers call\n\
-         the deployment directly. Durable memory is declared separately.\n"
+         the Agent Server directly. Durable memory is declared separately.\n"
     )
 }

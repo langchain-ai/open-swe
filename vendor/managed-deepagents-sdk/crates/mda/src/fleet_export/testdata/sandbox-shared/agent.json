@@ -1,0 +1,99 @@
+{
+  "agent": {
+    "id": "aaaaaaa3-0000-0000-0000-000000000000",
+    "name": "Team Runner",
+    "system_prompt": "Run team scripts.",
+    "model": {
+      "id": "openai:gpt-5.6-terra"
+    },
+    "permissions": {
+      "identity": "shared",
+      "visibility": "tenant"
+    },
+    "backend": {
+      "type": "sandbox",
+      "sandbox_config": {
+        "scope": "thread",
+        "policy_ids": [
+          "p-deny",
+          "p-locked"
+        ]
+      }
+    }
+  },
+  "schedules": [],
+  "access_profiles": [
+    {
+      "id": "p-deny",
+      "name": "No socials",
+      "network": {
+        "type": "deny",
+        "hosts": [
+          "*.facebook.com"
+        ]
+      },
+      "rules": [
+        {
+          "match_hosts": [
+            "api.linear.app"
+          ],
+          "source": {
+            "type": "agent_auth",
+            "connection_id": "c-linear"
+          },
+          "inject": [
+            {
+              "header": "Authorization",
+              "value": {
+                "type": "template",
+                "template": "Bearer {access_token}"
+              }
+            }
+          ]
+        },
+        {
+          "match_hosts": [
+            "www.googleapis.com"
+          ],
+          "source": {
+            "type": "connection",
+            "provider_id": "google-oauth-provider",
+            "scopes": [
+              "https://www.googleapis.com/auth/drive.readonly"
+            ]
+          },
+          "inject": [
+            {
+              "header": "Authorization",
+              "value": {
+                "type": "template",
+                "template": "Bearer {access_token}"
+              }
+            }
+          ]
+        }
+      ],
+      "proxy_rules": [],
+      "env_vars": {
+        "OPENAI_API_KEY": "sk-fleet"
+      }
+    },
+    {
+      "id": "p-locked",
+      "name": "Locked down",
+      "network": {
+        "type": "block_all"
+      },
+      "rules": [],
+      "proxy_rules": [],
+      "env_vars": {}
+    }
+  ],
+  "connections": [
+    {
+      "id": "c-linear",
+      "slug": "linear",
+      "kind": "oauth2"
+    }
+  ]
+}

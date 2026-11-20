@@ -151,10 +151,9 @@ fn should_ignore_watch_path(rel: &Path) -> bool {
             return true;
         }
     }
-    if project::is_ignored_file(rel) || project::is_junk_file(rel) {
-        return true;
-    }
-    false
+    project::is_ignored_file(rel)
+        || project::is_junk_file(rel)
+        || project::is_coding_agent_file(rel)
 }
 
 /// Junk-only filter for paths under `skills/**` (not the project denylist).
@@ -552,6 +551,19 @@ mod tests {
                 "{path}"
             );
         }
+    }
+
+    #[test]
+    fn ignores_only_the_root_agents_md() {
+        let ctx = root_ctx();
+        assert_eq!(
+            classify_watch_path(Path::new("AGENTS.md"), &ctx),
+            WatchAction::Ignore
+        );
+        assert_eq!(
+            classify_watch_path(Path::new("tools/AGENTS.md"), &ctx),
+            WatchAction::Recompile
+        );
     }
 
     #[test]

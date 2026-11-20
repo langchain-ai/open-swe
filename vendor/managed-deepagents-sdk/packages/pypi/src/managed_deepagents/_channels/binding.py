@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict, cast
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from pydantic import JsonValue as PydanticJsonValue
 
+from managed_deepagents._channels.address import channel_address
 from managed_deepagents._channels.messaging_registry import (
     channel_provider_for_name,
     messaging_transport_for_name,
@@ -22,18 +23,17 @@ from managed_deepagents._channels.runtime import (
     is_json_value,
     json_copy,
 )
-from managed_deepagents._channels.target import channel_target
 from managed_deepagents._identity_runtime import _field
 from managed_deepagents.run_context import ChannelContext
 
 if TYPE_CHECKING:
     from managed_deepagents._channels.run_input import ChannelRunResult
     from managed_deepagents._channels.types import (
+        ChannelAddress,
         ChannelEvent,
         ChannelInfo,
         ChannelMessage,
         ChannelReply,
-        ChannelTarget,
         JsonValue,
         PostedChannelThread,
     )
@@ -152,6 +152,8 @@ def origin_binding(
         "transport": channel.transport,
         "target": target_from_origin(channel),
     }
+    if channel.reply is not None:
+        binding["reply"] = channel.reply
     if event is not None:
         binding["event"] = event
     return binding if _is_declared_route(binding) else None
@@ -168,7 +170,7 @@ def resolve_channel_info(
         provider=binding["provider"],
         event=binding.get("event"),
         raw_event=binding.get("raw_event"),
-        channel_target=channel_target(binding, binding.get("event")),
+        channel_address=channel_address(binding, binding.get("event")),
     )
 
 
@@ -209,7 +211,7 @@ def runtime_channel(
                 run: ChannelRunResult | None,
                 *,
                 hand_off: bool = False,
-                to: ChannelTarget | None = None,
+                to: ChannelAddress | None = None,
             ) -> PostedChannelThread:
                 return await start_trigger_conversation(
                     client, binding, message, run, hand_off=hand_off, to=to
@@ -226,7 +228,7 @@ def runtime_channel(
         target=binding["target"],
         transport=cast("ChannelMessagingAdapter | None", transport),
         start_thread=start_thread,
-        channel_target=channel_target(binding, binding.get("event")),
+        channel_address=channel_address(binding, binding.get("event")),
     )
 
 

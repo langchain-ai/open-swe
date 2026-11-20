@@ -132,6 +132,10 @@ pub const RESERVED_ENV_VARS: &[&str] = &[
     // Deploy-owned: runtime sandbox calls must use the same platform API surface
     // as deploy preflight, rather than deriving one from the tracing endpoint.
     "MDA_SANDBOX_API_ENDPOINT",
+    // Deploy-owned: Python deploys always resume drained runs.
+    "FF_RESUME_DRAINED_RUNS",
+    // `mda dev` only: it unscopes headerless local callers, so never on a deployment.
+    "MDA_LOCAL_DEV",
 ];
 
 /// Env vars that only `mda` reads, from the shell or `.env`. The deployment
@@ -281,6 +285,13 @@ pub const RECIPE_DIGEST_LENGTH: usize = 16;
 /// ingress (Slack, GitHub) reads this so runs target the compiled graph instead
 /// of the hardcoded `"agent"` fallback.
 pub const MDA_ASSISTANT_ID_ENV: &str = "MDA_ASSISTANT_ID";
+
+/// Agent Server flag that pauses in-flight Python runs at a superstep boundary
+/// on shutdown and re-queues them, so another replica resumes them from their
+/// checkpoint instead of cancelling them after the grace period. Needs
+/// langgraph>=1.2.15; the server ignores it for TypeScript graphs.
+pub const FF_RESUME_DRAINED_RUNS_ENV: &str = "FF_RESUME_DRAINED_RUNS";
+
 /// The LangSmith UI of the environment the deployment runs in, for links that
 /// channels post into LangSmith Studio.
 pub const MDA_LANGSMITH_URL_ENV: &str = "MDA_LANGSMITH_URL";
@@ -520,6 +531,19 @@ pub fn ensure_assistant_id_secret(secrets: &mut Vec<Secret>, assistant_id: &str)
     secrets.push(Secret {
         name: MDA_ASSISTANT_ID_ENV.to_string(),
         value: assistant_id.to_string(),
+    });
+}
+
+/// Turn [`FF_RESUME_DRAINED_RUNS_ENV`] on, so a redeploy resumes long runs
+/// rather than cancelling them.
+///
+/// Same ownership rule as [`ensure_deployment_name_secret`]: deploy owns the
+/// value and overwrites a stale `.env` copy.
+pub fn ensure_resume_drained_runs_secret(secrets: &mut Vec<Secret>) {
+    secrets.retain(|secret| secret.name != FF_RESUME_DRAINED_RUNS_ENV);
+    secrets.push(Secret {
+        name: FF_RESUME_DRAINED_RUNS_ENV.to_string(),
+        value: "true".to_string(),
     });
 }
 
@@ -1117,6 +1141,24 @@ mod tests {
         assert_eq!(secrets.len(), 1);
         assert_eq!(secrets[0].name, MDA_ASSISTANT_ID_ENV);
         assert_eq!(secrets[0].value, "gmail-typescript-example");
+    }
+
+    #[test]
+    fn ensure_resume_drained_runs_secret_injects_and_overwrites() {
+        let mut secrets = vec![Secret {
+            name: FF_RESUME_DRAINED_RUNS_ENV.to_string(),
+            value: "false".to_string(),
+        }];
+        ensure_resume_drained_runs_secret(&mut secrets);
+        assert_eq!(secrets.len(), 1);
+        assert_eq!(secrets[0].name, FF_RESUME_DRAINED_RUNS_ENV);
+        assert_eq!(secrets[0].value, "true");
+    }
+
+    #[test]
+    fn secrets_from_env_drops_resume_drained_runs() {
+        let env = BTreeMap::from([(FF_RESUME_DRAINED_RUNS_ENV.to_string(), "false".to_string())]);
+        assert!(secrets_from_env(&env).is_empty());
     }
 
     #[test]

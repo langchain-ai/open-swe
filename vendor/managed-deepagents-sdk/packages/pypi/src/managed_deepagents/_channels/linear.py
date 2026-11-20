@@ -78,6 +78,7 @@ from managed_deepagents._channels.linear_types import (
     LinearEvent,
     LinearEventCallback,
     LinearHandlers,
+    LinearHookThread,
     LinearIssueCreateEvent,
     LinearIssueUpdateEvent,
     LinearSessionCreatedEvent,
@@ -118,9 +119,9 @@ def linear_channel(
     reply: ChannelReply | None = None,
     sessions: bool = True,
     ignore_bots: bool = True,
-    on_finish: EventFinished[LinearEvent, LinearChannelThread] | None = None,
+    on_finish: EventFinished[LinearEvent, LinearHookThread] | None = None,
     resolve_user: ResolveUser | EventEndpoint | None = None,
-    on_received: EventReceived[LinearEvent, LinearChannelThread] | None = None,
+    on_received: EventReceived[LinearEvent, LinearHookThread] | None = None,
 ) -> HttpChannel:
     """Options for ``channels.linear(...)``: the app's scope, event handlers and sessions.
 
@@ -232,16 +233,14 @@ def linear_channel(
             receive_events(
                 on_received,
                 _event,
-                lambda thread_id: LinearChannelThread(
-                    id=thread_id, channel=ChannelName(name=name())
-                ),
+                lambda thread_id: LinearHookThread(id=thread_id, channel=ChannelName(name=name())),
             )
         ),
         on_finish=finish_events(
             _notify_finished,
             on_finish,
             _event,
-            lambda delivery: LinearChannelThread(
+            lambda delivery: LinearHookThread(
                 id=delivery["thread_id"], channel=ChannelName(name=name())
             ),
         ),

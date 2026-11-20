@@ -31,6 +31,11 @@ from uuid import UUID
 from langgraph_sdk import Auth
 from langgraph_sdk.auth import is_studio_user
 from langgraph_sdk.auth.types import (
+    AssistantsCreate,
+    AssistantsDelete,
+    AssistantsRead,
+    AssistantsSearch,
+    AssistantsUpdate,
     AuthContext,
     BaseUser,
     CronsCreate,
@@ -53,14 +58,20 @@ from managed_deepagents._identity_runtime import (
     build_runtime_identity,
 )
 from managed_deepagents._log import logger
+from managed_deepagents._loopback import unmounted_path
+from managed_deepagents._sandbox_binding import SANDBOX_BINDING_METADATA
 from managed_deepagents._schedule_auth import (
+    SandboxBindingUser,
     ScheduleHandoffUser,
     ThreadHandoffGrant,
     ThreadHandoffUser,
     authorize_schedule,
     is_execution_record,
+    sandbox_binding_grant,
+    sandbox_binding_user,
     schedule_access,
     schedule_handoff_user,
+    schedule_thread_grant,
     thread_handoff_grant,
     thread_handoff_user,
 )
@@ -68,6 +79,7 @@ from managed_deepagents._thread_record import (
     THREAD_CONVERSATION_METADATA,
     THREAD_PARTICIPANTS_METADATA,
     THREAD_RECORD_METADATA,
+    is_person_principal,
     names_thread_record_key,
     parse_thread_record,
     strip_thread_record_keys,
@@ -78,6 +90,12 @@ ThreadsValue = (
     ThreadsCreate | ThreadsRead | ThreadsUpdate | ThreadsDelete | ThreadsSearch | RunsCreate
 )
 CronsValue = CronsCreate | CronsRead | CronsUpdate | CronsDelete | CronsSearch
+AssistantsValue = (
+    AssistantsCreate | AssistantsRead | AssistantsUpdate | AssistantsDelete | AssistantsSearch
+)
+#: Assistants carry their creator under the key threads use, so the server's
+#: assistant-delete cleanup of runs and threads matches the same filter.
+ASSISTANT_OWNER_METADATA = "owner"
 
 HeaderName = str | bytes
 HeaderValue = str | bytes | None
@@ -379,7 +397,7 @@ def build_managed_auth(identity: IdentityDefinitionLike) -> Auth:
         authorization: str | None = None,
         path: str | None = None,
         method: str | None = None,
-    ) -> ManagedUser | ScheduleHandoffUser | ThreadHandoffUser:
+    ) -> ManagedUser | ScheduleHandoffUser | ThreadHandoffUser | SandboxBindingUser:
         return await _authenticate(cfg, http, headers, authorization, path, method)
 
     # ``auth.authenticate`` / ``auth.on`` / ``auth.on.threads`` /
@@ -389,6 +407,7 @@ def build_managed_auth(identity: IdentityDefinitionLike) -> Auth:
     # dead handlers.
     auth.authenticate(authenticate)
     auth.on(_scope_any)
+    auth.on.assistants(_scope_assistants)
     auth.on.threads(_scope_threads)
     auth.on.crons(_scope_crons)
     auth.on.store(_scope_store)
@@ -398,6 +417,21 @@ def build_managed_auth(identity: IdentityDefinitionLike) -> Auth:
 
 async def _scope_threads(ctx: AuthContext, value: ThreadsValue) -> FilterType | None:
     """Scope a threads request to its caller, or to the thread a handoff names."""
+    thread = schedule_thread_grant(ctx.user)
+    # A create must raise on an existing thread: ``do_nothing`` merges the
+    # stamped owner into it, which would take over another caller's thread.
+    if thread is not None and (
+        ctx.action not in {"create", "read"}
+        or str(_field(value, "thread_id")) != thread
+        or (ctx.action == "create" and _field(value, "if_exists") not in (None, "raise"))
+    ):
+        raise _http_exception(ManagedAuthError(403, "Schedule thread access is not permitted"))
+    binding = sandbox_binding_grant(ctx.user)
+    if binding is not None:
+        try:
+            return _authorize_sandbox_binding(binding, ctx.action, value)
+        except ManagedAuthError as err:
+            raise _http_exception(err) from err
     handoff = thread_handoff_grant(ctx.user)
     if handoff is None:
         return _scope_caller_threads(ctx, value)
@@ -473,6 +507,28 @@ def _authorize_thread_handoff(
     return {"owner": _thread_owner_key(handoff["execution"])}
 
 
+def _authorize_sandbox_binding(thread: str, action: str, value: object) -> FilterType | None:
+    """Let the runtime read a thread, or write only its sandbox binding, whoever owns it.
+
+    The run's caller may not own the thread: a scheduled run's thread after the
+    handoff, or a Studio run on a channel thread. The update keeps the owner.
+    """
+    if str(_field(value, "thread_id")) != thread:
+        raise ManagedAuthError(403, "Sandbox binding access is not permitted")
+    if action == "read":
+        return None
+    metadata = _field(value, "metadata")
+    if (
+        action != "update"
+        or not isinstance(value, dict)
+        or value.get("action") is not None
+        or not isinstance(metadata, dict)
+        or set(metadata) != {SANDBOX_BINDING_METADATA}
+    ):
+        raise ManagedAuthError(403, "Sandbox binding access is not permitted")
+    return None
+
+
 def _is_single_thread_interrupt(value: object) -> bool:
     """True for a run-cancel ``update`` that interrupts runs on one thread.
 
@@ -492,18 +548,18 @@ def _guard_unscoped_thread_record(value: object, user: object, action: str) -> N
         _guard_thread_record(value, user, action)
 
 
-async def _scope_store(ctx: AuthContext, value: dict[str, Any]) -> None:
+async def _scope_store(ctx: AuthContext, value: dict[str, Any]) -> None:  # noqa: ARG001
     """Store handler; ``auth.on.store`` hands every action value as ``dict[str, Any]``.
 
     Each value (``StoreGet`` … ``StoreListNamespaces``) carries ``namespace``.
-    The reserved-table check runs before any Studio / local-dev exemption on
-    purpose. A caller holding a workspace LangSmith key can present
+    Every caller is denied the reserved tables, Studio and local dev included.
+    A caller holding a workspace LangSmith key can present
     ``x-auth-scheme: langsmith`` and be authenticated as a Studio user by the
-    Agent Server, so exempting Studio first would hand out the deployment-wide
+    Agent Server, so exempting Studio would hand out the deployment-wide
     account-link and legacy-credential tables to anyone with that key.
     """
     try:
-        _assert_store_access(ctx.user, value)
+        _assert_store_access(value)
     except ManagedAuthError as err:
         raise _http_exception(err) from err
 
@@ -530,6 +586,49 @@ async def _scope_any(ctx: AuthContext, value: dict[str, Any]) -> None:
         raise _http_exception(err) from err
 
 
+async def _scope_assistants(ctx: AuthContext, value: AssistantsValue) -> FilterType | None:
+    """Anyone may read assistants; a person may create, update and delete their own."""
+    # An assistant's metadata merges into its runs' too, so no caller, Studio
+    # included, may give an assistant a thread record.
+    _strip_metadata_record(value)
+    _strip_metadata_record(_field(value, "config"))
+    if _is_unscoped_principal(ctx.user) or ctx.action in {"read", "search"}:
+        return None
+    owner = _field(ctx.user, "mda_user_id")
+    if (
+        not is_person_principal(owner)
+        or _field(ctx.user, "mda_user_kind") == "service"
+        or _field(ctx.user, "mda_source_provider") is not None
+    ):
+        raise _http_exception(
+            ManagedAuthError(403, f"assistants:{ctx.action} is not permitted for this caller")
+        )
+    owner = _thread_owner_key(ctx.user)
+    _check_assistant_payload(value)
+    if ctx.action == "create":
+        # Mutate in place: the server keeps the metadata object it passed in.
+        metadata = _field(value, "metadata")
+        if not isinstance(metadata, dict):
+            metadata = cast("dict[str, Any]", value)["metadata"] = {}
+        metadata[ASSISTANT_OWNER_METADATA] = owner
+    return {ASSISTANT_OWNER_METADATA: owner}
+
+
+def _check_assistant_payload(value: object) -> None:
+    """Assistant context, config and metadata merge into runs: no managed keys or principal."""
+    holders = (
+        _field(value, "metadata"),
+        _field(value, "context"),
+        _field(_field(value, "config"), "configurable"),
+    )
+    keys = [str(key) for holder in holders if isinstance(holder, Mapping) for key in holder]
+    metadata = _field(value, "metadata")
+    if any(key.startswith(("mda_", "langgraph_", "__")) for key in keys) or (
+        isinstance(metadata, Mapping) and ASSISTANT_OWNER_METADATA in metadata
+    ):
+        raise _http_exception(ManagedAuthError(403, "Invalid assistant config"))
+
+
 async def _scope_crons(ctx: AuthContext, value: CronsValue) -> FilterType | None:
     try:
         return await authorize_schedule(ctx.user, ctx.action, value)
@@ -550,8 +649,8 @@ def _deny_unless_assistant_read(resource: str, action: str) -> None:
     Cron access uses the dedicated schedule handler.
 
     Assistant reads stay open so clients can enumerate the deployment's agents;
-    that exposes ``graph_id`` and assistant config, which is deploy-authored
-    rather than caller data.
+    that exposes ``graph_id`` and assistant config to every caller, including
+    config a person authored on an assistant they created.
     """
     if resource == "assistants" and action in {"read", "search"}:
         return
@@ -565,7 +664,7 @@ async def _authenticate(
     authorization: str | None,
     path: str | None,
     method: str | None,
-) -> ManagedUser | ScheduleHandoffUser | ThreadHandoffUser:
+) -> ManagedUser | ScheduleHandoffUser | ThreadHandoffUser | SandboxBindingUser:
     """Resolve the caller identity, bypassing auth for public channel Events routes."""
     # Provider-signed channel Events must reach the public HTTP handler before
     # MDA ingress can succeed (Slack cannot present ``x-mda-ingress-secret``).
@@ -596,8 +695,9 @@ async def _authenticate(
 
 def _handoff_user(
     headers: Mapping[str, object], path: str | None, method: str | None
-) -> ScheduleHandoffUser | ThreadHandoffUser | None:
-    """A schedule or thread handoff caller, which the handoff secret verifies."""
+) -> ScheduleHandoffUser | ThreadHandoffUser | SandboxBindingUser | None:
+    """A schedule, thread handoff or sandbox binding caller, which the handoff secret verifies."""
+    path = unmounted_path(path) if path is not None else None
     try:
         schedule_user = schedule_handoff_user(headers, path, method)
     except ValueError as err:
@@ -605,9 +705,15 @@ def _handoff_user(
     if schedule_user is not None:
         return schedule_user
     try:
-        return thread_handoff_user(headers, path, method)
+        handoff_user = thread_handoff_user(headers, path, method)
     except ValueError as err:
         raise ManagedAuthError(403, "Thread handoff is not permitted") from err
+    if handoff_user is not None:
+        return handoff_user
+    try:
+        return sandbox_binding_user(headers, path, method)
+    except ValueError as err:
+        raise ManagedAuthError(403, "Sandbox binding access is not permitted") from err
 
 
 async def resolve_request_identity(
@@ -670,12 +776,7 @@ def is_channel_events_request(method: str | None, path: str | None) -> bool:
         return False
     if str(method).upper() != "POST":
         return False
-    path_value = str(path).rstrip("/")
-    # Host keeps the deployment mount prefix in auth requests. Strip only the
-    # server-configured prefix at a complete path-segment boundary.
-    mount_prefix = os.environ.get("MOUNT_PREFIX", "").rstrip("/")
-    if mount_prefix.startswith("/") and path_value.startswith(f"{mount_prefix}/"):
-        path_value = path_value[len(mount_prefix) :]
+    path_value = unmounted_path(str(path).rstrip("/"))
     return (
         _is_events_path(path_value, CHANNEL_EVENTS_PATH_PREFIX, CHANNEL_EVENTS_PATH_SUFFIX)
         or _is_events_path(
@@ -806,6 +907,7 @@ class LangSmithAuthResponse(TypedDict, total=False):
 
     tenant_id: str
     user_id: str
+    ls_user_id: str
     user_email: str
 
 
@@ -946,22 +1048,46 @@ def _request_langsmith_verification(request: UrlRequest) -> tuple[int, bytes]:
 
 
 def _langsmith_managed_user(verified: LangSmithAuthResponse, tenant_id: str) -> ManagedUser:
-    verified_user_id = verified.get("user_id")
-    user_id = (
-        f"langsmith:user:{verified_user_id.strip()}"
-        if isinstance(verified_user_id, str) and verified_user_id.strip()
-        else f"langsmith:tenant:{tenant_id}"
-    )
-    user: ManagedUser = {
-        "identity": user_id,
-        "permissions": [],
-        "mda_user_id": user_id,
-        "mda_user_kind": "service",
-    }
-    user_email = verified.get("user_email")
-    if isinstance(user_email, str) and user_email.strip():
-        user["mda_user_email"] = user_email.strip()
+    """Map a verified ``/auth/public`` response to the managed caller.
+
+    A personal access token carries the key owner's ``user_id`` / ``ls_user_id``,
+    so it is a person: it can own user connections and user memory. The Agent
+    Auth subject is ``ls_user_id``, the ID verified Studio users resolve with, so
+    a grant made in Studio is also found over the API. A service key carries
+    neither ID and stays a workspace service principal.
+    """
+    user_id = _trimmed_str(verified.get("user_id"))
+    ls_user_id = _trimmed_str(verified.get("ls_user_id"))
+    subject = ls_user_id or user_id
+    user: ManagedUser
+    if subject is None:
+        tenant_principal = f"langsmith:tenant:{tenant_id}"
+        user = {
+            "identity": tenant_principal,
+            "permissions": [],
+            "mda_user_id": tenant_principal,
+            "mda_user_kind": "service",
+        }
+    else:
+        # Thread ownership keeps the ``langsmith:user:`` key existing threads use.
+        principal = f"langsmith:user:{user_id or subject}"
+        user = {
+            "identity": principal,
+            "permissions": [],
+            "mda_user_id": principal,
+            "mda_identity_provider": "langsmith",
+            "mda_identity_issuer": tenant_id,
+            "mda_identity_subject": subject,
+        }
+    if user_email := _trimmed_str(verified.get("user_email")):
+        user["mda_user_email"] = user_email
     return user
+
+
+def _trimmed_str(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 def _trusted_user_id(headers: Mapping[str, object]) -> object | None:
@@ -1058,46 +1184,42 @@ def _trimmed_stamp(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-#: LangGraph Store namespace prefix for Slack ↔ actor account links.
+#: LangGraph Store namespace prefix for retired Slack ↔ actor account links.
+#:
+#: Nothing writes here any more, but existing deployments may still hold link
+#: records under this prefix. Keep it reserved until contents are explicitly
+#: scrubbed — do not reopen it to ordinary Store API callers.
 IDENTITY_LINKS_STORE_PREFIX = "mda_identity_links"
 
 #: LangGraph Store namespace prefix for legacy Connect-with-X GitHub OAuth tokens.
 #:
 #: The Connect flow no longer writes here, but existing deployments may still
-#: hold tokens under this prefix. Keep it reserved (service principal only)
-#: until contents are explicitly scrubbed — do not reopen it to ordinary Store
-#: API callers.
+#: hold tokens under this prefix. Keep it reserved until contents are explicitly
+#: scrubbed — do not reopen it to ordinary Store API callers.
 GITHUB_CREDENTIALS_STORE_PREFIX = "mda_github_credentials"
 
-#: Trusted service principal for ``IDENTITY_LINKS_STORE_PREFIX`` Store ops.
-#: Stamped by the managed link client together with the ingress secret.
-IDENTITY_LINKS_SERVICE_USER = "mda:identity-links"
 
-
-def _assert_store_access(user: BaseUser, value: Mapping[str, object]) -> None:
+def _assert_store_access(value: Mapping[str, object]) -> None:
     """Fail-closed (403) on the managed reserved namespaces.
 
     ``mda_identity_links`` and ``mda_github_credentials`` are deployment-wide
-    managed tables — account links and (legacy) OAuth tokens for every caller —
-    so only the trusted identity-links service principal may touch them. This
-    check deliberately does not consult memory: it used to sit behind a
-    per-caller memory check, which left the tables open to any authenticated
-    caller on deployments without a user slice.
+    managed tables — legacy account links and OAuth tokens for every caller —
+    and no runtime code reads them any more, so every Store API caller is
+    denied. This check deliberately does not consult memory: it used to sit
+    behind a per-caller memory check, which left the tables open to any
+    authenticated caller on deployments without a user slice.
 
     There is no per-caller store partition to enforce beyond that, because no
     declaration mounts per-caller state in this release.
 
     Studio and local-dev principals are deliberately **not** exempt here. Studio
     identity is reachable by any holder of a workspace LangSmith API key (via the
-    ``x-auth-scheme: langsmith`` ingress the Agent Server honours), and nothing
-    legitimately reads these tables that way: the managed link client stamps
-    :data:`IDENTITY_LINKS_SERVICE_USER` behind the handoff/ingress secret.
+    ``x-auth-scheme: langsmith`` ingress the Agent Server honours).
     """
-    user_id = _field(user, "mda_user_id")
     raw = value.get("namespace") if isinstance(value, Mapping) else None
     namespace = [str(segment) for segment in raw] if isinstance(raw, (list, tuple)) else []
-    if user_id == IDENTITY_LINKS_SERVICE_USER:
-        return
+    # Legacy account-link / GitHub-credential tables are deployment-wide and
+    # reserved: no caller may read or write them through the Store API.
     if (
         not namespace
         or not namespace[0]

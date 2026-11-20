@@ -18,6 +18,7 @@ from urllib.parse import quote
 from langchain_core.runnables.config import var_child_runnable_config
 from langgraph.errors import GraphInterrupt
 
+from managed_deepagents._agent_auth_http import CredentialStoreUnavailableError
 from managed_deepagents._connections import (
     ConnectionNotFoundError,
     ConnectionReference,
@@ -25,6 +26,7 @@ from managed_deepagents._connections import (
     is_connection_reference,
 )
 from managed_deepagents._langsmith_env import resolve_langsmith_endpoint
+from managed_deepagents._run_local import RunLocal
 from managed_deepagents.sandbox import ConnectionHeader, SandboxDefinition
 
 if TYPE_CHECKING:
@@ -82,6 +84,8 @@ def _format_header(value: object, resolved_token: str) -> str:
         return resolved_token
     if value.format == "bearer":
         return f"Bearer {resolved_token}"
+    if value.format == "template":
+        return cast("str", value.template).replace("{token}", resolved_token)
     encoded = base64.b64encode(f"{value.username}:{resolved_token}".encode()).decode()
     return f"Basic {encoded}"
 
@@ -124,7 +128,11 @@ async def resolve_sandbox_proxy_config(
                 headers.append({**header, "value": header_value, "type": "opaque"})
             rules.append({**rule, "headers": headers} if "headers" in rule else dict(rule))
         return {**cast("dict[str, object]", config), "rules": rules}
-    except (ConnectionNotFoundError, CredentialAuthorizationRequiredError):
+    except (
+        ConnectionNotFoundError,
+        CredentialAuthorizationRequiredError,
+        CredentialStoreUnavailableError,
+    ):
         raise
     except Exception as error:
         if isinstance(error, GraphInterrupt):
@@ -225,17 +233,20 @@ class ProxyConfigRefusedError(RuntimeError):
 
 
 class SandboxProxyConfigSync:
-    """Keep wire-config digests for one graph factory invocation.
+    """Remember which proxy config each run already applied to each sandbox.
 
-    MDA rebuilds the graph for every run and resume, so each starts with an empty cache.
+    The memo is per run: a cached graph serves many runs with one instance, and the
+    shared sandbox's config can be changed by other runs, replicas or graphs in the
+    meantime. So each run applies its own config once before its first command,
+    then skips re-applying the same digest for the rest of the run.
     """
 
     def __init__(self) -> None:
-        self._hashes: dict[str, str] = {}
+        self._runs: RunLocal[dict[str, str]] = RunLocal(dict)
 
-    def invalidate(self, name: str | None) -> None:
-        if name is not None:
-            self._hashes.pop(name, None)
+    @property
+    def _hashes(self) -> dict[str, str]:
+        return self._runs.get()
 
     async def sync(
         self,
@@ -269,6 +280,13 @@ class SandboxProxyConfigSync:
                 raise ProxyConfigRefusedError(str(error)) from None
             raise RuntimeError("Could not update sandbox proxy credentials.") from None
         self._hashes[name] = digest
+
+
+def sandbox_has_proxy_connections(sandbox: SandboxDefinition | None) -> bool:
+    """Whether the sandbox proxy config resolves any connection through Agent Auth."""
+    return sandbox is not None and bool(
+        validate_and_collect_sandbox_proxy_config_references(sandbox.options.get("proxy_config"))
+    )
 
 
 def sandbox_credential_consumers(sandbox: SandboxDefinition | None) -> list[CredentialConsumer]:

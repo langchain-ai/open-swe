@@ -9,6 +9,7 @@ are managed by the runtime rather than accepted as declaration fields.
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired
 from urllib.parse import urlsplit
@@ -29,9 +30,13 @@ from managed_deepagents._connections import (
     is_connection_reference,
 )
 from managed_deepagents._connector import Connector
-from managed_deepagents._connectors.mcp.langsmith_url import is_langsmith_managed_tools_path
 from managed_deepagents._connectors.mcp.load import load_managed_mcp_tools
 from managed_deepagents._extension import define_extension
+from managed_deepagents._tool_gateway.auth import (
+    RESERVED_HEADERS,
+    is_tool_gateway_url,
+    uses_langsmith_auth,
+)
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -59,6 +64,16 @@ class _McpToolSelectionConfig(TypedDict, total=False):
     """
 
 
+class LangSmithAuthConfig(TypedDict):
+    """``"langsmith"`` auth that uses a profile's credentials in every run."""
+
+    type: Literal["langsmith"]
+    profile: NotRequired[str]
+
+
+McpServerAuth = Literal["langsmith"] | LangSmithAuthConfig
+
+
 class _RemoteMcpServerBaseConfig(_McpToolSelectionConfig):
     """Common remote-server fields, inheriting raw-name tool selection.
 
@@ -74,8 +89,8 @@ class _RemoteMcpServerBaseConfig(_McpToolSelectionConfig):
     headers: NotRequired[dict[str, str]]
     """Optional authored request headers; omission supplies none.
 
-    LangSmith managed-tools endpoints reject authored headers. A managed
-    ``connection`` rejects a competing Authorization header.
+    A managed ``connection`` rejects a competing Authorization header, and
+    ``auth`` rejects the headers that choose whose credentials it uses.
     """
 
     connection: NotRequired[ConnectionReference]
@@ -84,8 +99,24 @@ class _RemoteMcpServerBaseConfig(_McpToolSelectionConfig):
     Agent ownership uses deployment credentials; user ownership checks the
     verified caller's grants through LangSmith's managed authorization flow.
     An explicit owner ID is an assertion, never a selector. Omission uses public
-    access or runtime-owned authentication for LangSmith managed tools, which
-    reject authored connection overrides.
+    access, or ``auth`` when set. A server cannot set both.
+    """
+
+    auth: NotRequired[McpServerAuth]
+    """Optional ``"langsmith"`` for a LangSmith Tool Gateway server or tool kit.
+
+    Sends the deployment's LangSmith API key and workspace, and the run's person
+    (the agent in an agent-owned schedule) or ``profile``. Only for URLs on the
+    deployment's LangSmith API.
+    """
+
+    include_instructions: NotRequired[bool]
+    """Optional, default True. Add the server's instructions to the agent's system prompt.
+
+    The instructions a server returns when MDA connects to it are added, labeled
+    as external guidance, to each model call that offers one of its tools.
+    Set False for servers whose instructions you do not want the model to
+    read. Instructions over 4,096 characters are cut off with a marker.
     """
 
     timeout: NotRequired[float]
@@ -112,7 +143,7 @@ class SseMcpServerConfig(_RemoteMcpServerBaseConfig):
     """Required ``"sse"`` for a legacy HTTP+SSE-compatible endpoint.
 
     Migrate to Streamable HTTP only when the server supplies a compatible
-    endpoint. LangSmith managed tools require ``"http"`` instead.
+    endpoint.
     """
 
     sse_read_timeout: NotRequired[float]
@@ -130,7 +161,7 @@ class McpServersConfig(TypedDict, closed=True):
     """Closed configuration accepted by ``define_mcp``."""
 
     servers: dict[str, RemoteMcpServerConfig]
-    """Required nonempty logical-name map to HTTP/SSE declarations.
+    """Required logical-name map to HTTP/SSE declarations; may be empty.
 
     Values are ``HttpMcpServerConfig`` or ``SseMcpServerConfig``. Native tool
     names are ``{server}_{tool}``; ambiguous names fail discovery.
@@ -140,8 +171,7 @@ class McpServersConfig(TypedDict, closed=True):
     """Optional discovery policy, default True.
 
     False warns and omits servers whose native discovery fails, retrying next
-    preparation. Pre-run authorization requirements and invalid selections
-    always surface.
+    preparation. Invalid selections always surface.
     """
 
     on_connection_error: NotRequired[Literal["throw"]]
@@ -152,18 +182,13 @@ class McpServersConfig(TypedDict, closed=True):
     """
 
     jit_auth: NotRequired[bool]
-    """Optional, default False. Ask for LangSmith managed-tools connections on use.
-
-    Applies only to LangSmith managed-tools URLs. When True, a kit's tools for
-    providers the caller has not connected are still offered to the model; the
-    first call to one interrupts with the connect link and retries that call
-    after the run resumes. By default the run asks for every missing connection
-    before it starts.
-    """
+    """Deprecated and ignored; it will be removed in 0.11. LangSmith Tool Gateway
+    asks for a connection when one of its tools is called."""
 
 
 __all__ = [
     "HttpMcpServerConfig",
+    "LangSmithAuthConfig",
     "McpServersConfig",
     "McpServersDefinition",
     "RemoteMcpServerConfig",
@@ -185,7 +210,7 @@ class McpServersDefinition(Connector):
     kind = "mcp_servers"
 
     config: McpServersConfig
-    """Validated configuration with a nonempty server map and managed policies.
+    """Validated configuration with a server map and managed policies.
 
     Native clients manage connections during discovery and each asynchronous
     tool invocation; catalogs are cached per authorization scope.
@@ -220,8 +245,7 @@ class McpServersDefinition(Connector):
             "agentConnections": sorted(agent_slugs),
             "userCredentials": sorted(user_slugs),
             "needsDeveloperPrincipal": any(
-                is_langsmith_managed_tools_path(server.get("url"))
-                for server in self.config["servers"].values()
+                uses_langsmith_auth(server) for server in self.config["servers"].values()
             ),
             "providerConfig": {},
         }
@@ -266,8 +290,7 @@ def _reject_removed(data: Mapping[str, object]) -> None:
             raise ValueError(message)
 
 
-_LANGSMITH_MANAGED_CONFLICT = "a LangSmith managed-tools URL cannot declare headers or connection"
-_LANGSMITH_MANAGED_TRANSPORT = 'a LangSmith managed-tools URL must declare transport "http"'
+_AUTH_CONFLICT = "cannot set both auth and connection"
 
 
 def _non_empty_tool_name(name: str) -> str:
@@ -278,6 +301,13 @@ def _non_empty_tool_name(name: str) -> str:
 
 #: A raw MCP tool name, before the managed ``{server}_`` prefix is applied.
 _ToolName = Annotated[str, AfterValidator(_non_empty_tool_name)]
+
+
+class _LangSmithAuth(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    type: Literal["langsmith"]
+    profile: str | None = Field(default=None, min_length=1)
 
 
 class _RemoteMcpServer(BaseModel):
@@ -298,6 +328,8 @@ class _RemoteMcpServer(BaseModel):
     include_tools: list[_ToolName] | None = None
     exclude_tools: list[_ToolName] | None = None
     connection: ConnectionReference | None = None
+    include_instructions: StrictBool | None = None
+    auth: Literal["langsmith"] | _LangSmithAuth | None = None
 
     @field_validator("connection")
     @classmethod
@@ -370,11 +402,22 @@ class _RemoteMcpServer(BaseModel):
 
     @model_validator(mode="after")
     def _no_overlapping_selection(self) -> _RemoteMcpServer:
-        if is_langsmith_managed_tools_path(self.url):
-            if self.transport != "http":
-                raise ValueError(_LANGSMITH_MANAGED_TRANSPORT)
-            if self.headers is not None or self.connection is not None:
-                raise ValueError(_LANGSMITH_MANAGED_CONFLICT)
+        if self.auth is not None and self.connection is not None:
+            raise ValueError(_AUTH_CONFLICT)
+        implied = self.auth is None and self.connection is None and is_tool_gateway_url(self.url)
+        reserved = [key for key in self.headers or {} if key.lower() in RESERVED_HEADERS]
+        if reserved and (self.auth is not None or implied):
+            raise ValueError(
+                f'cannot set {", ".join(reserved)}: auth "langsmith" decides whose '
+                "credentials Tool Gateway uses"
+            )
+        if implied:
+            warnings.warn(
+                'A LangSmith Tool Gateway server without auth uses auth "langsmith"; '
+                'add "auth": "langsmith" to it, since this default will be removed.',
+                FutureWarning,
+                stacklevel=2,
+            )
         if self.connection is not None and any(
             key.lower() == "authorization" for key in self.headers or {}
         ):
@@ -400,7 +443,7 @@ class _McpServersArgs(BaseModel):
     servers: dict[str, _RemoteMcpServer]
     throw_on_load_error: StrictBool = True
     on_connection_error: str = "throw"
-    jit_auth: StrictBool = False
+    jit_auth: StrictBool | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -411,11 +454,7 @@ class _McpServersArgs(BaseModel):
 
     @field_validator("servers")
     @classmethod
-    def _at_least_one_server(
-        cls, servers: dict[str, _RemoteMcpServer]
-    ) -> dict[str, _RemoteMcpServer]:
-        if not servers:
-            raise ValueError("requires at least one entry")
+    def _named_servers(cls, servers: dict[str, _RemoteMcpServer]) -> dict[str, _RemoteMcpServer]:
         if any(not name.strip() for name in servers):
             raise ValueError("server names must be non-empty")
         return servers
@@ -426,6 +465,18 @@ class _McpServersArgs(BaseModel):
         if mode != "throw":
             raise ValueError('only supports on_connection_error="throw"')
         return mode
+
+    @field_validator("jit_auth")
+    @classmethod
+    def _deprecated_jit_auth(cls, jit_auth: bool | None) -> bool | None:
+        if jit_auth is not None:
+            warnings.warn(
+                "jit_auth is deprecated and ignored, and will be removed in 0.11: "
+                "LangSmith Tool Gateway asks for a connection when one of its tools is called.",
+                FutureWarning,
+                stacklevel=2,
+            )
+        return jit_auth
 
 
 #: Declare the MCP servers whose tools should be loaded into the agent.
@@ -441,17 +492,14 @@ def define_mcp(**config: Unpack[McpServersConfig]) -> McpServersDefinition:
     """Declare remote MCP tools without connecting or requiring FastMCP.
 
     Args:
-        servers: Required nonempty map of logical names to ``HttpMcpServerConfig``
+        servers: Required map, possibly empty, of logical names to ``HttpMcpServerConfig``
             or ``SseMcpServerConfig``. See those types for fields and defaults.
             Tools use native ``{server}_{tool}`` names; collisions fail discovery.
         throw_on_load_error: Default True. False warns and omits failed native
-            discovery; preparation retries next run. Pre-run authorization
-            requirements and invalid selections always surface.
+            discovery; preparation retries next run. Invalid selections always surface.
         on_connection_error: Default and only value ``"throw"``. Native invocation
             failures propagate; native MCP tool errors retain failed tool output.
-        jit_auth: Default False. True asks for a LangSmith managed-tools
-            connection when the model first calls one of its tools, instead of
-            before the run starts.
+        jit_auth: Deprecated and ignored; it will be removed in 0.11.
 
     Returns:
         A ``McpServersDefinition`` consumed by the managed runtime.
