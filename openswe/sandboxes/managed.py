@@ -5,13 +5,12 @@ kept whatever the options below become, which apply only when MDA creates it. Ev
 with a thread works in one: its own, or a task worker's coordinator's. A sandbox the
 backend made before MDA owned them becomes MDA's as the next run is planned
 (``BackendSandbox``). The run opens the sandbox and reports its name, and the backend
-binds the thread to it and connects as to any reused sandbox: proxy credentials, git
-identity, tool channel. It reports the sandbox before it prepares, or behind its
-preparation and first model call where preparing reaches no sandbox
-(``bind_after_prepare``). The backend writes the sandbox's proxy config, unless MDA does
-(``writes_proxy``), from what the backend hands it. The backend never creates or replaces a
-sandbox itself, and neither does MDA: a thread whose sandbox LangSmith deleted cannot run
-again, a review's included.
+binds the thread to it and connects as to any reused sandbox, writing its git identity.
+It reports the sandbox before it prepares, or behind its preparation and first model call
+where preparing reaches no sandbox (``bind_after_prepare``). MDA writes the proxy config
+of every sandbox but an external one, from what the backend hands it (``sandbox_proxy``).
+The backend never creates or replaces a sandbox itself, and neither does MDA: a thread
+whose sandbox LangSmith deleted cannot run again, a review's included.
 """
 
 from collections.abc import Sequence
@@ -23,7 +22,6 @@ from openswe.sandboxes.lifecycle import (
     BackendSandbox,
     SandboxCreateConfig,
     TaskWorkerSandbox,
-    mda_writes_proxy,
 )
 from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
 from openswe.sandboxes.state import SandboxUnreachableError, get_sandbox_metadata
@@ -32,16 +30,12 @@ from openswe.tasks.schemas import ThreadMetadata
 
 
 class ManagedSandbox(BaseModel):
-    """What MDA creates a thread's sandbox with, whose sandbox the thread uses, and who writes
-    its proxy config."""
+    """What MDA creates a thread's sandbox with, and whose sandbox the thread uses."""
 
     create: LangSmithCreateOptions
     sandbox_id: str | None = None
     # The thread whose sandbox this one works in, a task worker's coordinator; None for its own.
     thread_id: str | None = None
-    # Whether MDA writes the sandbox's whole proxy config, as the backend hands it over
-    # (``sandbox_proxy``), and the backend none of it.
-    writes_proxy: bool = False
     # Whether the run may prepare before the sandbox is open and report it afterwards
     # (``bind_sandbox``): preparing it reaches no sandbox, and the deployment allows it
     # (``MDA_BIND_SANDBOX_AFTER_PREPARE``).
@@ -106,7 +100,6 @@ class ManagedSandbox(BaseModel):
             else config.langsmith_options(),
             thread_id=owner,
             sandbox_id=sandbox_id if isinstance(sandbox_id, str) else None,
-            writes_proxy=mda_writes_proxy(),
             bind_after_prepare=bind_after_prepare,
         )
 

@@ -1,17 +1,16 @@
 """Connecting to the sandbox bound to a thread.
 
-Managed Deep Agents creates and replaces every thread's sandbox; the backend never
-creates one. This module connects to the sandbox a thread is bound to, refreshes its
-proxy credentials and git identity, and hands MDA a sandbox the backend made before MDA
-owned them (``BackendSandbox``): MDA adopts it, or starts the thread in a fresh one where
-it is gone. The registry lives in ``state``.
+Managed Deep Agents creates and replaces every thread's sandbox, and writes its proxy
+config; the backend never creates one, and hands MDA that config (``mda_proxy_config``).
+This module connects to the sandbox a thread is bound to, writes its git identity, and
+hands MDA a sandbox the backend made before MDA owned them (``BackendSandbox``): MDA adopts
+it, or starts the thread in a fresh one where it is gone. The registry lives in ``state``.
 """
 
 import asyncio
 import logging
 import shlex
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
-from contextlib import asynccontextmanager, suppress
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
@@ -21,14 +20,9 @@ from langgraph_sdk import get_client
 from pydantic import JsonValue
 from runtime_api.sandbox_setup import GitIdentity
 
-from openswe.config import ENV
 from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS, ExecutionDefaults
 from openswe.execution import SANDBOX_EXECUTION, ExecutionProfile
 from openswe.github.app import PermissionMap
-from openswe.github.proxy import (
-    clear_proxy_token_expiry,
-    record_proxy_token_expiry,
-)
 from openswe.github.sandbox_access import (
     READ_ONLY_REVIEW_PERMISSIONS,
     SandboxGitHubAccess,
@@ -40,8 +34,6 @@ from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import (
     LangSmithCreateOptions,
     LiveSandboxProxy,
-    TimeoutLangSmithSandbox,
-    configure_sandbox_proxy,
     get_sandbox_proxy_config,
 )
 from openswe.sandboxes.providers.registry import SandboxGoneError, connect_existing_sandbox
@@ -258,134 +250,6 @@ def _fire_and_forget(coro: Coroutine[Any, Any, Any], what: str) -> None:
 _BACKGROUND: set[asyncio.Task[Any]] = set()
 
 
-async def _configure_proxy(
-    sandbox_id: str,
-    access: SandboxGitHubAccess,
-    base_proxy_config: dict[str, Any] | None,
-    *,
-    thread_id: str | None = None,
-) -> None:
-    kwargs: dict[str, Any] = {}
-    if base_proxy_config is not None:
-        kwargs["base_proxy_config"] = base_proxy_config
-    if thread_id is not None:
-        kwargs["thread_id"] = thread_id
-    await configure_sandbox_proxy(sandbox_id, access.token, **kwargs)
-
-
-async def _refresh_github_proxy(
-    sandbox_backend: SandboxBackendProtocol,
-    *,
-    thread_id: str | None = None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    github_proxy_permissions: PermissionMap | None = None,
-    base_proxy_config: dict[str, Any] | None = None,
-) -> None:
-    """Refresh managed proxy credentials for reused LangSmith sandboxes."""
-    access = await _proxy_token(thread_id, github_proxy_repositories, github_proxy_permissions)
-
-    current_backend = unwrap_sandbox_backend(sandbox_backend)
-    async with aphase(thread_id, "sandbox.proxy_refresh"):
-        await _configure_proxy(
-            current_backend.id,
-            access,
-            base_proxy_config,
-            thread_id=thread_id,
-        )
-    record_proxy_token_expiry(
-        thread_id,
-        access.expires_at,
-        repositories=github_proxy_repositories,
-        permissions=github_proxy_permissions,
-        base_proxy_config=base_proxy_config,
-    )
-
-
-async def _refresh_github_proxy_or_fail(
-    sandbox_backend: SandboxBackendProtocol,
-    thread_id: str,
-    github_proxy_repositories: Sequence[str] | None = None,
-    base_proxy_config: dict[str, Any] | None = None,
-    *,
-    github_proxy_permissions: PermissionMap | None = None,
-) -> SandboxBackendProtocol:
-    """Refresh proxy credentials; a sandbox we can't reconfigure is unreachable."""
-    try:
-        await _refresh_github_proxy(
-            sandbox_backend,
-            thread_id=thread_id,
-            github_proxy_repositories=github_proxy_repositories,
-            github_proxy_permissions=github_proxy_permissions,
-            base_proxy_config=base_proxy_config,
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to refresh GitHub proxy for sandbox %s on thread %s",
-            sandbox_backend.id,
-            thread_id,
-            exc_info=True,
-        )
-        raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
-    return sandbox_backend
-
-
-async def refresh_thread_github_proxy(
-    thread_id: str,
-    *,
-    github_proxy_repositories: Sequence[str] | None = None,
-    github_proxy_permissions: PermissionMap | None = None,
-    force_refresh: bool = False,
-) -> datetime | None:
-    """Give the thread's sandbox a freshly minted GitHub token; when it expires, if the backend
-    writes its proxy.
-
-    Everything it needs is read from the thread: the sandbox, its proxy rules, the scope
-    its token is limited to, which the caller may narrow further. So it works on
-    whichever replica gets the call, whatever that replica has connected to before.
-    """
-    metadata = await get_sandbox_metadata(thread_id)
-    if metadata.get("sandbox_owner") == "external":
-        return None
-    sandbox_id = metadata.get("sandbox_id")
-    if not isinstance(sandbox_id, str):
-        return None
-    if _mda_writes_proxy(metadata):
-        return None
-    bound = await SandboxCreateConfig.bound_profile(thread_id, metadata)
-    if metadata.get("task_id") is not None and isinstance(
-        host_id := metadata.get("sandbox_host_thread_id"), str
-    ):
-        host = await get_sandbox_metadata(host_id)
-        if host.get("sandbox_owner") == "external":
-            return None
-    base_proxy_config = (
-        SandboxCreateConfig.from_options(bound.create).proxy_config or {}
-        if bound is not None
-        else {}
-    )
-    if not await SandboxCredentialPolicy(ThreadMetadata.model_validate(metadata)).allows_github():
-        clear_proxy_token_expiry(thread_id)
-        await configure_sandbox_proxy(
-            sandbox_id,
-            None,
-            base_proxy_config=base_proxy_config if isinstance(base_proxy_config, dict) else None,
-            thread_id=thread_id,
-        )
-        return None
-    repositories, permissions = await _thread_proxy_scope(
-        thread_id, metadata, github_proxy_repositories, github_proxy_permissions
-    )
-    access = await _proxy_token(thread_id, repositories, permissions, force_refresh=force_refresh)
-    async with aphase(thread_id, "sandbox.proxy_refresh"):
-        await _configure_proxy(
-            sandbox_id,
-            access,
-            base_proxy_config if isinstance(base_proxy_config, dict) else None,
-            thread_id=thread_id,
-        )
-    return parse_iso(access.expires_at)
-
-
 _WORK_DIR_READY = "__open_swe_work_dir_ready__"
 
 
@@ -427,58 +291,18 @@ async def _thread_git_identity(thread_id: str | None) -> GitIdentity:
         return GitIdentity()
 
 
-@asynccontextmanager
-async def git_identity(
-    thread_id: str | None, sandbox_backend: SandboxBackendProtocol
-) -> AsyncIterator[None]:
-    """Write the owner's identity with the next LangSmith command, or alongside proxy setup."""
-    identity = await _thread_git_identity(thread_id)
-    if isinstance(sandbox_backend, TimeoutLangSmithSandbox):
-        sandbox_backend.reset_git_identity(identity)
-        yield
-        return
-
-    async def run() -> None:
-        try:
-            async with aphase(thread_id, "sandbox.git_identity"):
-                await configure_git_identity(sandbox_backend, identity)
-        except Exception:
-            logger.warning(
-                "Failed to write the bot Git identity",
-                extra={"thread_id": thread_id, "sandbox_id": sandbox_backend.id},
-                exc_info=True,
-            )
-
-    task = asyncio.create_task(run())
-    try:
-        yield
-    except BaseException:
-        task.cancel()
-        with suppress(asyncio.CancelledError, Exception):
-            await task
-        raise
-    await task
-
-
 async def _connect_existing_sandbox(
     thread_id: str,
     *,
     cached: SandboxBackendProtocol | None,
     sandbox_id: str | None,
-    github_proxy_repositories: Sequence[str] | None = None,
-    github_proxy_permissions: PermissionMap | None = None,
-    base_proxy_config: dict[str, Any] | None = None,
-    mda_writes_proxy: bool = False,
-    allow_github: bool = True,
     external: bool = False,
 ) -> SandboxBackendProtocol:
     """Reuse the sandbox already bound to ``thread_id``, or fail unreachable.
 
     A ``SandboxGoneError`` propagates untouched so the caller recreates. Nothing
-    pings the sandbox first: refreshing the proxy below has to reach it anyway, and
-    raises the same unreachable error when it cannot. Where MDA writes the sandbox's
-    proxy config, the git identity is all this writes there, so writing it is
-    what fails unreachable.
+    pings the sandbox first: writing the git identity below has to reach it anyway,
+    and fails unreachable when it cannot. An external sandbox is used as it is.
     """
     if cached is not None:
         logger.info("Using cached sandbox backend for thread %s", thread_id)
@@ -495,34 +319,16 @@ async def _connect_existing_sandbox(
             raise SandboxUnreachableError(thread_id, sandbox_id, str(exc)) from exc
     if external:
         return sandbox_backend
-    if mda_writes_proxy or not allow_github:
-        try:
-            if not allow_github and not mda_writes_proxy:
-                clear_proxy_token_expiry(thread_id)
-                await configure_sandbox_proxy(
-                    sandbox_backend.id,
-                    None,
-                    base_proxy_config=base_proxy_config,
-                    thread_id=thread_id,
-                )
-            async with aphase(thread_id, "sandbox.git_identity"):
-                await configure_git_identity(sandbox_backend, await _thread_git_identity(thread_id))
-        except Exception as exc:
-            logger.warning(
-                "Failed to write the git identity in the sandbox",
-                extra={"agent_thread_id": thread_id, "sandbox_id": sandbox_backend.id},
-                exc_info=True,
-            )
-            raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
-    else:
-        async with git_identity(thread_id, sandbox_backend):
-            await _refresh_github_proxy_or_fail(
-                sandbox_backend,
-                thread_id,
-                github_proxy_repositories,
-                base_proxy_config,
-                github_proxy_permissions=github_proxy_permissions,
-            )
+    try:
+        async with aphase(thread_id, "sandbox.git_identity"):
+            await configure_git_identity(sandbox_backend, await _thread_git_identity(thread_id))
+    except Exception as exc:
+        logger.warning(
+            "Failed to write the git identity in the sandbox",
+            extra={"agent_thread_id": thread_id, "sandbox_id": sandbox_backend.id},
+            exc_info=True,
+        )
+        raise SandboxUnreachableError(thread_id, sandbox_backend.id, str(exc)) from exc
     return sandbox_backend
 
 
@@ -602,11 +408,9 @@ class TaskWorkerSandbox:
                     )
         return host_id
 
-    async def attach(
-        self, *, github_proxy_repositories: Sequence[str] | None
-    ) -> SandboxBackendProtocol:
+    async def attach(self) -> SandboxBackendProtocol:
         """Connect the worker to its coordinator's existing sandbox and bind it there."""
-        host_id = await self.host(github_proxy_repositories)
+        host_id = await self.host()
         backend = await ensure_sandbox_for_thread(host_id, require_existing=True)
         current_host = ThreadMetadata.model_validate(await get_sandbox_metadata(host_id))
         if current_host.sandbox_id != backend.id:
@@ -627,17 +431,6 @@ class TaskWorkerSandbox:
                 reconcile_background_tasks(self.thread_id), "background task reconcile"
             )
         return published
-
-
-def mda_writes_proxy() -> bool:
-    """Whether MDA writes the proxy config of every sandbox it owns, so the backend never does
-    (``MDA_WRITES_SANDBOX_PROXY``)."""
-    return ENV.MDA_WRITES_SANDBOX_PROXY.get_bool(default=False)
-
-
-def _mda_writes_proxy(metadata: Mapping[str, object]) -> bool:
-    """Whether MDA writes the proxy config of the sandbox ``metadata`` binds."""
-    return metadata.get("sandbox_owner") == "mda" and mda_writes_proxy()
 
 
 async def mda_proxy_config(
@@ -708,15 +501,13 @@ async def _thread_proxy_scope(
 async def ensure_sandbox_for_thread(
     thread_id: str,
     *,
-    github_proxy_repositories: Sequence[str] | None = None,
-    github_proxy_permissions: PermissionMap | None = None,
     abandon_unreachable: bool = False,
     require_existing: bool = False,
 ) -> SandboxBackendProtocol:
     """Connect to the sandbox bound to ``thread_id``; the backend never creates one.
 
     1. Metadata has an id -> reuse this process's connection to that sandbox if
-       it has one, else reconnect; then refresh proxy.
+       it has one, else reconnect; then write the git identity.
     2. A task worker (metadata has ``task_id``) -> attach to its coordinator's
        existing sandbox.
     3. No sandbox yet -> ``SandboxUnreachableError``: MDA creates the thread's sandbox
@@ -732,22 +523,18 @@ async def ensure_sandbox_for_thread(
     whose sandbox holds nothing but a re-derivable checkout — the read-only
     reviewer and review scout.
 
-    ``github_proxy_permissions`` narrows what the proxy's GitHub token may do, at
-    connection and every expiry refresh. Reviewer and review-scout threads always
-    receive read-only GitHub credentials.
-
     ``require_existing`` is for a task worker attaching to its coordinator's sandbox,
     which it must never hand over.
 
-    For LangSmith sandboxes, also refreshes the GitHub App proxy auth and schedules
-    a git identity reset before the next command. Reused sandboxes can lose their global
-    config, and Vercel rejects commits whose email cannot resolve to a GitHub account.
+    The git identity is written on every connection: reused sandboxes can lose their
+    global config, and Vercel rejects commits whose email cannot resolve to a GitHub
+    account. MDA writes the proxy config (``mda_proxy_config``).
     """
     async with aphase(thread_id, "sandbox.thread_metadata"):
         sandbox_metadata = await get_sandbox_metadata(thread_id)
     if sandbox_metadata.get("task_id") is not None:
         worker = TaskWorkerSandbox(thread_id, ThreadMetadata.model_validate(sandbox_metadata))
-        return await worker.attach(github_proxy_repositories=github_proxy_repositories)
+        return await worker.attach()
     raw_sandbox_id = sandbox_metadata.get("sandbox_id")
     sandbox_id = raw_sandbox_id if isinstance(raw_sandbox_id, str) else None
     if sandbox_id is None:
@@ -760,30 +547,12 @@ async def ensure_sandbox_for_thread(
             if sandbox_metadata.get("sandbox_owner") == "mda"
             else "Managed Deep Agents opens this thread's sandbox when its run starts",
         )
-    bound = await SANDBOX_EXECUTION.bound(thread_id, sandbox_id)
-    base_proxy_config = (
-        SandboxCreateConfig.from_options(bound.create).proxy_config or {}
-        if bound is not None
-        else {}
-    )
     external = sandbox_metadata.get("sandbox_owner") == "external"
-    allow_github = await SandboxCredentialPolicy(
-        ThreadMetadata.model_validate(sandbox_metadata)
-    ).allows_github()
-    if allow_github:
-        github_proxy_repositories, github_proxy_permissions = await _thread_proxy_scope(
-            thread_id, sandbox_metadata, github_proxy_repositories, github_proxy_permissions
-        )
     try:
         sandbox_backend = await _connect_existing_sandbox(
             thread_id,
             cached=SANDBOX_CONNECTIONS.get(sandbox_id),
             sandbox_id=sandbox_id,
-            github_proxy_repositories=github_proxy_repositories,
-            github_proxy_permissions=github_proxy_permissions,
-            base_proxy_config=base_proxy_config,
-            mda_writes_proxy=_mda_writes_proxy(sandbox_metadata),
-            allow_github=allow_github,
             external=external,
         )
     except (SandboxGoneError, SandboxUnreachableError) as exc:
@@ -827,9 +596,8 @@ async def bind_mda_sandbox(
 ) -> None:
     """Bind a thread to the sandbox Managed Deep Agents opened for it, and mark the thread MDA's.
 
-    MDA names and creates the sandbox; the next connection configures it as it
-    does any reused sandbox: proxy credentials, unless MDA writes them
-    (``mda_writes_proxy``), git identity, the tool channel. A sandbox under the name the
+    MDA names and creates the sandbox, and writes its proxy config; the next connection
+    writes its git identity, as it does on any reused sandbox. A sandbox under the name the
     thread is bound to, such as one MDA adopted, keeps the creation authority and proxy
     rules recorded for it; a new one is bound with the run's. With no ``sandbox_id`` MDA
     could not open the sandbox (``open_error`` says why), and the thread stays MDA's:

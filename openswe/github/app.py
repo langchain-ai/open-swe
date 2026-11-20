@@ -29,10 +29,8 @@ GITHUB_APP_INSTALLATION_ID = ENV.GITHUB_APP_INSTALLATION_ID.get()
 
 # Installation tokens are valid for 1 hour. Reuse a minted token until it is
 # within this window of expiring so chat/review requests don't pay a fresh
-# JWT-sign + GitHub round-trip every message. The margin stays above the proxy's
-# 5-minute refresh window (``github_proxy.PROXY_TOKEN_REFRESH_WINDOW``) so a
-# near-expiry proxy refresh still mints a genuinely fresh token. A caller that
-# keeps the token for longer asks for more with ``min_lifetime``.
+# JWT-sign + GitHub round-trip every message. A caller that keeps the token for
+# longer asks for more with ``min_lifetime``.
 _TOKEN_CACHE_MARGIN = timedelta(minutes=10)
 PermissionMap = Mapping[str, str]
 PermissionKey = tuple[tuple[str, str], ...]

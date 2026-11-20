@@ -29,7 +29,6 @@ from openswe.execution import ExecutionProfile
 from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.pull_request_status import PullRequestClient
-from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
@@ -95,8 +94,6 @@ async def _ensure_scout_sandbox(thread_id: str, cfg: RunConfig) -> SandboxBacken
     # Like the reviewer's, a scout sandbox holds only a checkout every run re-derives.
     return await ensure_sandbox_for_thread(
         thread_id,
-        github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
-        github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         abandon_unreachable=True,
     )
 

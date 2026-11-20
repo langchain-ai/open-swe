@@ -49,16 +49,6 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
     existing_backend = MagicMock()
     existing_backend.id = "sandbox-existing"
 
-    async def passthrough(
-        sandbox_backend,
-        _thread_id,
-        _github_proxy_repositories=None,
-        _base_proxy_config=None,
-        *,
-        github_proxy_permissions=None,
-    ):
-        return sandbox_backend
-
     with (
         patch(
             "openswe.sandboxes.lifecycle.get_sandbox_metadata",
@@ -70,11 +60,6 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
             new_callable=AsyncMock,
             return_value=existing_backend,
         ) as connect_sandbox,
-        patch(
-            "openswe.sandboxes.lifecycle._refresh_github_proxy_or_fail",
-            new_callable=AsyncMock,
-            side_effect=passthrough,
-        ) as refresh_proxy,
         patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
             "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
@@ -84,7 +69,6 @@ async def test_ensure_sandbox_reconnects_to_metadata_sandbox() -> None:
 
     assert result.id == "sandbox-existing"
     connect_sandbox.assert_awaited_once_with("sandbox-existing")
-    assert refresh_proxy.await_count == 1
     # Metadata already holds this id, so no update is issued.
     update_thread.assert_not_awaited()
     SANDBOX_BACKENDS.clear()
@@ -98,16 +82,6 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
     existing_backend = MagicMock()
     existing_backend.id = "sandbox-existing"
 
-    async def passthrough(
-        sandbox_backend,
-        _thread_id,
-        _github_proxy_repositories=None,
-        _base_proxy_config=None,
-        *,
-        github_proxy_permissions=None,
-    ):
-        return sandbox_backend
-
     with (
         patch(
             "openswe.sandboxes.lifecycle.get_sandbox_metadata",
@@ -119,11 +93,6 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
             new_callable=AsyncMock,
             return_value=existing_backend,
         ) as connect_sandbox,
-        patch(
-            "openswe.sandboxes.lifecycle._refresh_github_proxy_or_fail",
-            new_callable=AsyncMock,
-            side_effect=passthrough,
-        ) as refresh_proxy,
         patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
             "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock
@@ -134,7 +103,6 @@ async def test_ensure_sandbox_resolves_unresolved_backend_proxy() -> None:
     assert result is proxy
     assert proxy.current is existing_backend
     connect_sandbox.assert_awaited_once_with("sandbox-existing")
-    assert refresh_proxy.await_count == 1
     update_thread.assert_not_awaited()
     SANDBOX_BACKENDS.clear()
 
@@ -150,16 +118,6 @@ async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> No
     new_backend = MagicMock()
     new_backend.id = "sandbox-new"
 
-    async def passthrough(
-        sandbox_backend,
-        _thread_id,
-        _github_proxy_repositories=None,
-        _base_proxy_config=None,
-        *,
-        github_proxy_permissions=None,
-    ):
-        return sandbox_backend
-
     with (
         patch(
             "openswe.sandboxes.lifecycle.get_sandbox_metadata",
@@ -171,11 +129,6 @@ async def test_ensure_sandbox_never_reuses_connection_to_another_sandbox() -> No
             new_callable=AsyncMock,
             return_value=new_backend,
         ) as connect_sandbox,
-        patch(
-            "openswe.sandboxes.lifecycle._refresh_github_proxy_or_fail",
-            new_callable=AsyncMock,
-            side_effect=passthrough,
-        ),
         patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch(
             "openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock

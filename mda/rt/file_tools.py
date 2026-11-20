@@ -40,7 +40,6 @@ from langsmith.sandbox import SandboxRetryableConnectionError
 from pydantic import JsonValue
 from runtime_api.catalog import FilesSpec
 from runtime_api.endpoint import call
-from runtime_api.loop import REFRESH_GITHUB_PROXY, RefreshGitHubProxy
 from runtime_api.operations import CHECK_SHELL, ShellCheck
 
 from rt.auto_review import PATH_ARGUMENTS
@@ -378,9 +377,8 @@ class FileToolsMiddleware(AgentMiddleware):
     async def _reauthorized(
         self, request: ToolCallRequest, handler: Handler
     ) -> ToolMessage | Command:
-        """``handler``; when GitHub refused the sandbox's token, a fresh one is put there and
-        the result says so: by MDA, where it writes the sandbox's proxy config, and otherwise
-        by the backend.
+        """``handler``; when GitHub refused the sandbox's token, MDA writes a fresh one there
+        and the result says so.
 
         The command is not run again: it may have done other things before GitHub refused it.
         """
@@ -388,7 +386,7 @@ class FileToolsMiddleware(AgentMiddleware):
         writer = SandboxProxyWriter.of(request.runtime)
         if (
             request.tool_call["name"] != "execute"
-            or (writer is None and not self._backend.run.catalog.loop.refresh_github_proxy)
+            or writer is None
             or not isinstance(result, ToolMessage)
             or not _GITHUB_COMMAND.search(str(request.tool_call["args"].get("command", "")))
             or "github.com" not in (str(request.tool_call["args"].get("command", "")) + result.text)
@@ -396,15 +394,7 @@ class FileToolsMiddleware(AgentMiddleware):
         ):
             return result
         try:
-            if writer is not None:
-                fresh = await writer.rewrite_fresh(request.runtime)
-            else:
-                refreshed = await call(
-                    self._backend,
-                    REFRESH_GITHUB_PROXY,
-                    RefreshGitHubProxy(run_id=run_id(), force_refresh=True),
-                )
-                fresh = refreshed.expires_at is not None
+            fresh = await writer.rewrite_fresh(request.runtime)
         except Exception:
             logger.warning("Could not refresh the sandbox's GitHub token", exc_info=True)
             return result

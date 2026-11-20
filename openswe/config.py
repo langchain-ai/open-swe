@@ -226,18 +226,9 @@ ENV.var(
     secret=True,
 )
 ENV.var(
-    "MDA_WRITES_SANDBOX_PROXY",
-    "Whether MDA writes the whole proxy config of every sandbox it owns, as the backend hands "
-    "it over (sandbox_proxy): GitHub's rules with a token the backend mints for the run's "
-    "scope, which MDA asks for again before it expires, and the backend's own rules for the "
-    "sandbox. The backend then writes none of it. Turn it on only once the MDA deployment runs "
-    "a build that writes it: an older one leaves those sandboxes without one. Defaults to "
-    "false: the backend writes every sandbox's proxy config.",
-)
-ENV.var(
     "MDA_BIND_SANDBOX_AFTER_PREPARE",
     "Whether a run on MDA may prepare, and make its first model call, while its sandbox is "
-    "still being opened, bound to its thread and given its GitHub token; its first tool call "
+    "still being opened, bound to its thread and given its proxy config; its first tool call "
     "waits for those. Defaults to true; false has every run open its sandbox before it prepares.",
     default="true",
 )

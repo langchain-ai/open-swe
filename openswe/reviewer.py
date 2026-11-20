@@ -53,7 +53,6 @@ from openswe.github.app import get_github_app_installation_token_with_expiry
 from openswe.github.http import GitHubClient
 from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS
 from openswe.github.pull_requests import PullRequest
-from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.github.thread_token import cache_github_token_for_thread
 from openswe.middleware import (
     BasePrepareRunMiddleware,
@@ -510,14 +509,9 @@ async def ensure_reviewer_github_token(thread_id: str, cfg: RunConfig) -> str | 
     return github_token
 
 
-async def ensure_reviewer_sandbox_for_thread(
-    thread_id: str,
-    cfg: RunConfig,
-) -> SandboxBackendProtocol:
+async def ensure_reviewer_sandbox_for_thread(thread_id: str) -> SandboxBackendProtocol:
     return await ensure_sandbox_for_thread(
         thread_id,
-        github_proxy_repositories=[cfg.repo.full_name] if cfg.repo else [],
-        github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
         # A reviewer sandbox holds nothing but a checkout `prepare_review_repo`
         # re-derives every run, and reviewer threads outlive their sandbox: one
         # thread per PR, re-triggered on every push. Staying bound to an
@@ -642,7 +636,7 @@ async def prepare_reviewer_run(
     async def _check_out() -> _ReviewCheckout:
         async with aphase(thread_id, "prepare.checkout"):
             try:
-                sandbox_backend = await ensure_reviewer_sandbox_for_thread(thread_id, cfg)
+                sandbox_backend = await ensure_reviewer_sandbox_for_thread(thread_id)
             except SandboxUnreachableError as exc:
                 # This run dies without a sandbox. Say so on the PR instead of leaving
                 # it looking unreviewed, unless it is a shadow nobody on the PR knows of.

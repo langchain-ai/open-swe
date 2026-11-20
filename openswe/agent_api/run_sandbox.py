@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from datetime import datetime
 
 from langchain_core.runnables import RunnableConfig
 from runtime_api.catalog import SandboxSpec
@@ -13,10 +12,7 @@ from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.run_config import RunConfig
 from openswe.sandboxes import lifecycle
-from openswe.sandboxes.lifecycle import (
-    bind_mda_sandbox,
-    refresh_thread_github_proxy,
-)
+from openswe.sandboxes.lifecycle import bind_mda_sandbox
 from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 from openswe.sandboxes.state import (
@@ -63,7 +59,8 @@ class RunSandbox:
         """The sandbox MDA creates for the run, with who commits there.
 
         Who commits is read alongside the sandbox, not after it: the two read the thread
-        and its owner independently, each in transactions of its own.
+        and its owner independently, each in transactions of its own. An MDA deployment from
+        before MDA wrote every sandbox's proxy config reads ``writes_proxy``.
         """
         git_identity = asyncio.ensure_future(self.git_identity())
         try:
@@ -72,7 +69,11 @@ class RunSandbox:
             await self._drop(git_identity)
             raise
         return SandboxSpec.model_validate(
-            {**sandbox.model_dump(mode="json"), "git_identity": await git_identity}
+            {
+                **sandbox.model_dump(mode="json"),
+                "git_identity": await git_identity,
+                "writes_proxy": not sandbox.external,
+            }
         )
 
     @staticmethod
@@ -142,18 +143,6 @@ class RunSandbox:
             if metadata.get("kind") in {"reviewer", "reviewer-shadow", "review-scout"}:
                 repositories = None
         return repositories, permissions
-
-    async def refresh_github_proxy(self, *, force_refresh: bool = False) -> datetime | None:
-        """Refresh the backend-owned proxy within the authenticated run's GitHub scope."""
-        if self._cfg.thread_id is None:
-            raise ValueError("This run has no thread")
-        repositories, permissions = await self.github_scope()
-        return await refresh_thread_github_proxy(
-            self._cfg.thread_id,
-            github_proxy_repositories=repositories,
-            github_proxy_permissions=permissions,
-            force_refresh=force_refresh,
-        )
 
     async def tell_gone(
         self,

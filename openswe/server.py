@@ -2210,7 +2210,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             )
             if part
         ),
-        refresh_github_proxy=True,
         offload_conversation=cfg.offload_conversation,
     )
     surface.inbox = InboxSpec(

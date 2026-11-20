@@ -105,7 +105,6 @@ from runtime_api.loop import (
     PREPARE,
     Done,
     GatewayCredential,
-    GitHubProxyRefreshed,
     Inbox,
     InboxItems,
     InboxRead,
@@ -2101,26 +2100,21 @@ async def test_a_foreground_command_past_the_limit_is_sent_to_the_background(
 async def test_a_command_github_refused_gets_the_sandbox_a_fresh_token(
     monkeypatch: pytest.MonkeyPatch, command: str, output: str, refreshed: bool
 ) -> None:
-    """The sandbox's token is replaced and the model told to retry; the command runs once."""
+    """MDA writes the sandbox's proxy config with a token the backend mints anew and tells the
+    model to retry; the command runs once."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
-    backend = _run_backend(
-        catalog=Catalog(loop=LoopRules(refresh_github_proxy=True), sandbox=_IN_SANDBOX)
-    )
-    calls: list[str] = []
+    backend = _run_backend(catalog=Catalog(loop=LoopRules(), sandbox=_IN_SANDBOX))
 
     async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        calls.append(name)
-        if name == "check_shell":
-            return ShellVerdict(allowed=True)
-        if name == "refresh_github_proxy":
-            assert body["force_refresh"] is True
-        return GitHubProxyRefreshed(expires_at=datetime.now(UTC) + timedelta(hours=1))
+        return ShellVerdict(allowed=True)
 
     _answering(monkeypatch, backend, answer)
     monkeypatch.setattr(backend.outbox, "started", MagicMock())
     monkeypatch.setattr(backend.outbox, "finished", MagicMock())
+    writer = MagicMock(rewrite_fresh=AsyncMock(return_value=True))
+    monkeypatch.setattr("rt.file_tools.SandboxProxyWriter.of", lambda runtime: writer)
     runtime = ToolRuntime(
         state={"messages": []},
         context=None,
@@ -2147,63 +2141,10 @@ async def test_a_command_github_refused_gets_the_sandbox_a_fresh_token(
     await backend.outbox.drain()
 
     in_sandbox.assert_awaited_once()
-    assert calls.count("refresh_github_proxy") == int(refreshed)
+    assert writer.rewrite_fresh.await_count == int(refreshed)
     assert isinstance(result, ToolMessage)
     assert result.text.startswith(output)
     assert ("fresh GitHub token" in result.text) is refreshed
-
-
-async def test_where_mda_writes_the_proxy_a_refused_token_is_minted_anew_by_mda(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """MDA writes the sandbox's proxy config, so it asks the backend for a newly minted token
-    and writes it at once, instead of the backend's refresh, which writes nothing there."""
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
-        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
-    backend = _run_backend(catalog=Catalog(loop=LoopRules(), sandbox=_IN_SANDBOX))
-    calls: list[str] = []
-
-    async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        calls.append(name)
-        return ShellVerdict(allowed=True)
-
-    _answering(monkeypatch, backend, answer)
-    monkeypatch.setattr(backend.outbox, "started", MagicMock())
-    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
-    writer = MagicMock(rewrite_fresh=AsyncMock(return_value=True))
-    monkeypatch.setattr("rt.file_tools.SandboxProxyWriter.of", lambda runtime: writer)
-    runtime = ToolRuntime(
-        state={"messages": []},
-        context=None,
-        config={},
-        stream_writer=lambda event: None,
-        tool_call_id="call-1",
-        store=None,
-    )
-    request = ToolCallRequest(
-        tool_call={
-            "name": "execute",
-            "args": {"command": "gh pr view"},
-            "id": "call-1",
-            "type": "tool_call",
-        },
-        tool=None,
-        state={"messages": []},
-        runtime=runtime,
-    )
-    refused = "HTTP 401: Bad credentials (https://api.github.com/graphql)"
-    in_sandbox = AsyncMock(return_value=ToolMessage(content=refused, tool_call_id="call-1"))
-    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
-
-    result = await files.awrap_tool_call(request, in_sandbox)
-    await backend.outbox.drain()
-
-    in_sandbox.assert_awaited_once()
-    writer.rewrite_fresh.assert_awaited_once_with(runtime)
-    assert "refresh_github_proxy" not in calls
-    assert isinstance(result, ToolMessage)
-    assert "fresh GitHub token" in result.text
 
 
 @pytest.mark.parametrize("excluded", [[], ["grep", "glob"]])

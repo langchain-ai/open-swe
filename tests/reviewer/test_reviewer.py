@@ -9,7 +9,6 @@ from langgraph.runtime import Runtime
 from openswe import reviewer
 from openswe.agent_api.reviewer import ReviewerKind
 from openswe.agent_api.tokens import RunSettings
-from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 
 
 def test_reviewer_system_prompt_org_guidelines_precede_repo_style() -> None:
@@ -103,12 +102,7 @@ async def test_reviewer_limits_sandbox_to_reviewed_repository() -> None:
         prepare = await _planned_prepare(config)
         await prepare.abefore_agent({"messages": []}, None)
 
-    mock_sandbox.assert_awaited_once_with(
-        "reviewer-thread-id",
-        github_proxy_repositories=["acme/repo"],
-        github_proxy_permissions=READ_ONLY_REVIEW_PERMISSIONS,
-        abandon_unreachable=True,
-    )
+    mock_sandbox.assert_awaited_once_with("reviewer-thread-id", abandon_unreachable=True)
 
 
 @pytest.mark.asyncio

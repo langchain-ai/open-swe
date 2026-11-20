@@ -44,19 +44,19 @@ DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS="604800"                 # Optional, d
 This is useful for pre-installing languages, frameworks, or internal tools that your repos depend on — reducing setup time per agent run.
 The default snapshot includes the GitHub CLI; agents invoke it as `gh <command>` and rely on the LangSmith proxy for the real credentials.
 
-For LangSmith sandboxes, Robin configures two GitHub proxy rules whenever a sandbox is created or reattached to a run:
+For LangSmith sandboxes, Robin configures two GitHub proxy rules on every sandbox a run works in:
 
 - `github.com` / `*.github.com` receive Basic auth for git-over-HTTPS operations.
 - `api.github.com` receives Bearer auth for `gh` and REST API operations.
 
 The proxy token is minted at runtime from the GitHub App installation credentials.
-With `MDA_WRITES_SANDBOX_PROXY` on, the Managed Deep Agents deployment writes these rules instead on every sandbox it owns, with the token the backend mints and hands it (see [mda/README.md](../mda/README.md)).
+The backend mints it and hands it to the Managed Deep Agents deployment, which writes these rules on the sandbox (see [mda/README.md](../mda/README.md)).
 Do not store GitHub access tokens as deployment environment variables.
 
 ### Who creates sandboxes
 
 Every thread's sandbox is a LangSmith sandbox that Managed Deep Agents creates when the thread's run starts, and replaces when the agent asks for a fresh one.
-The backend never creates a thread's sandbox: it connects to the one MDA opened, configures its GitHub proxy and git identity, and runs the backend's tools in it.
+The backend never creates a thread's sandbox: it connects to the one MDA opened, writes its git identity, and runs the backend's tools in it; MDA writes its proxy config.
 
 Sandbox provisioning, connection, proxy configuration, and global image captures use the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
 The configured base snapshot must exist in that LangSmith workspace.

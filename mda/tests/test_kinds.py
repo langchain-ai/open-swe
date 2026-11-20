@@ -1,7 +1,7 @@
 import pytest
 from rt.backend import Run, RunContext
 from rt.kinds import Graph
-from runtime_api.catalog import Catalog, LoopRules, SandboxCreate, SandboxSpec
+from runtime_api.catalog import Catalog, LoopRules
 
 
 @pytest.fixture(autouse=True)
@@ -28,21 +28,10 @@ def test_a_review_follows_its_kinds_rules_whatever_its_catalog_says(graph: Graph
 
 
 def test_the_agent_keeps_its_catalogs_loop_and_guards_its_shell() -> None:
-    rules = LoopRules(task_coordination=True, refresh_github_proxy=True)
+    rules = LoopRules(task_coordination=True)
 
     planned = _run("agent", Catalog(loop=rules, model_call_limit=7)).planned
 
     assert planned.loop == rules
     assert planned.model_call_limit == 7
     assert planned.files.guards == ["shell_commands"]
-
-
-def test_mda_keeps_a_proxy_it_writes_fresh_itself() -> None:
-    sandbox = SandboxSpec(
-        create=SandboxCreate(fs_capacity_bytes=1, idle_ttl_seconds=1, delete_after_stop_seconds=1),
-        writes_proxy=True,
-    )
-
-    planned = _run("reviewer", Catalog(sandbox=sandbox)).planned
-
-    assert not planned.loop.refresh_github_proxy

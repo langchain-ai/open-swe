@@ -1,9 +1,8 @@
 """Open SWE's middleware around each model call, run here as the catalog's ``LoopRules`` say.
 
 Before each call it ends the run where a rule says to, adds the thread's task
-context, keeps the sandbox's
-GitHub proxy fresh, picks the call's route and model, and assembles its system
-prompt and tool list. A thread's route is classified here, once, alongside the run's
+context, picks the call's route and model, and assembles its system prompt and tool
+list. A thread's route is classified here, once, alongside the run's
 preparation (``rt.routing``). After an answer that calls no tool, it
 asks again for the reply or CLI result the run owes. When the run ends, it asks
 for the graph's own end-of-run work and reports the end, neither of which the run
@@ -19,7 +18,6 @@ import json
 import logging
 import uuid
 from collections.abc import Awaitable, Collection, Mapping, Sequence
-from datetime import UTC, datetime, timedelta
 from typing import Final
 from xml.etree import ElementTree
 
@@ -46,17 +44,13 @@ from runtime_api.catalog import (
 from runtime_api.endpoint import call
 from runtime_api.loop import (
     FINISH_SCOUT_PLAN,
-    REFRESH_GITHUB_PROXY,
     REPLY_ON_BEHALF,
     RUN_ENDED,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
     BeforeModel,
-    GitHubProxyRefreshed,
     ModelCall,
     PhaseResult,
-    Prepared,
-    RefreshGitHubProxy,
     ReplyOnBehalf,
     RunEnded,
     ScoutPlanEnd,
@@ -74,7 +68,6 @@ from rt.backend import (
     run_call,
 )
 from rt.routing import Route, RouteClassifier
-from rt.sandbox_binding import SandboxBinding
 from rt.tools import STATE_KEY, run_id
 
 logger = logging.getLogger(__name__)
@@ -82,19 +75,8 @@ logger = logging.getLogger(__name__)
 # What ``ModelCallLimitMiddleware`` ends a run with once it reaches its limit.
 _LIMIT_MARKER: Final = "Model call limits exceeded"
 _SUMMARIZATION_EVENT: Final = "_summarization_event"
-# Held state: when the sandbox's GitHub token next needs replacing. It lives in the thread's
-# checkpoint, so it holds for the next run on whichever backend replica serves it.
-_GITHUB_PROXY_DUE: Final = "github_proxy_refresh_at"
 # Held state: the classifier already labeled the thread's first request for its trace.
 _SHADOWED: Final = "jev_shadowed"
-# A token is replaced this long before it expires. The backend never hands out one with
-# less left, so a replacement is not due again at once.
-_GITHUB_PROXY_WINDOW: Final = timedelta(minutes=10)
-# A thread whose sandbox has no GitHub proxy is asked again after this long.
-_GITHUB_PROXY_RECHECK: Final = timedelta(minutes=30)
-# A refresh that failed is tried again after this long, so a failure that keeps happening
-# does not hold up every model call.
-_GITHUB_PROXY_RETRY: Final = timedelta(minutes=1)
 _json_dicts = TypeAdapter(list[dict[str, JsonValue]])
 # Starts the id of each message that tells the model its role in the thread's task.
 _ROLE: Final = "task-role:"
@@ -200,24 +182,6 @@ def _held(state: Mapping[str, object]) -> Mapping[str, object]:
     return held if isinstance(held, Mapping) else {}
 
 
-def _github_proxy_due(refreshed: GitHubProxyRefreshed, now: datetime) -> dict[str, JsonValue]:
-    due = (
-        refreshed.expires_at - _GITHUB_PROXY_WINDOW
-        if refreshed.expires_at is not None
-        else now + _GITHUB_PROXY_RECHECK
-    )
-    return {_GITHUB_PROXY_DUE: due.isoformat()}
-
-
-def _moment(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
-
-
 class _Turn:
     """What happened since the last thing a person said."""
 
@@ -260,25 +224,6 @@ class _Turn:
         return ""
 
 
-class Asked:
-    """The GitHub token refresh a model call waits on, asked for alongside the inbox."""
-
-    def __init__(self, proxy: Awaitable[dict[str, JsonValue]]) -> None:
-        self._proxy = asyncio.ensure_future(proxy)
-        self._answered = False
-
-    async def answers(self) -> dict[str, JsonValue]:
-        self._answered = True
-        return await self._proxy
-
-    async def close(self) -> None:
-        """Stop what is still asked; what failed unread is logged."""
-        self._proxy.cancel()
-        [result] = await asyncio.gather(self._proxy, return_exceptions=True)
-        if not self._answered and isinstance(result, Exception):
-            logger.warning("A call before the model call failed unread", exc_info=result)
-
-
 class RunLoop:
     """What happens around each of the run's model calls, as its ``LoopRules`` say."""
 
@@ -310,29 +255,14 @@ class RunLoop:
     def looks_at_answers(self) -> bool:
         return self.rules.reply is not None
 
-    def ask(self, state: Mapping[str, object]) -> Asked | None:
-        """Start what the backend is asked before a model call whose answer the inbox does
-        not change; None when the run stops here whatever the inbox holds."""
-        held = _held(state)
-        if self._stops(held):
-            return None
-        return Asked(self._github_proxy(held))
-
     def _stops(self, held: Mapping[str, object]) -> bool:
         return any(held.get(key) for key in self.rules.stop_when)
 
-    async def before_model(
-        self, state: Mapping[str, object], asked: Asked | None = None
-    ) -> BeforeModel:
+    async def before_model(self, state: Mapping[str, object]) -> BeforeModel:
         held = _held(state)
         if self._stops(held) or self._awaits_client(state):
             return BeforeModel(jump_to="end")
-        if asked is None:
-            asked = Asked(self._github_proxy(held))
-        try:
-            update = await asked.answers()
-        finally:
-            await asked.close()
+        update: dict[str, JsonValue] = {}
         context = self._task_context(held)
         messages = _messages(state)
         visible = visible_messages(state)
@@ -419,45 +349,6 @@ class RunLoop:
             if isinstance(message.artifact, dict) and message.artifact.get(CLIENT_CALL_PENDING):
                 return True
         return False
-
-    async def _github_proxy(self, held: Mapping[str, object]) -> dict[str, JsonValue]:
-        """Put a new GitHub token on the sandbox once the one there is about to expire.
-
-        The call is awaited, so the model's first command never runs on an expired
-        token. A failure leaves the run going and the call is made again a minute later.
-        A sandbox the run is still opening gets its token as the thread is bound to it
-        (``rt.sandbox_binding``), which the run's first tool call waits for, not a model call.
-        """
-        now = datetime.now(UTC)
-        if not self.github_proxy_due(held, now):
-            return {}
-        binding = SandboxBinding.of(self._backend.run)
-        if binding.pending:
-            return {}
-        if (bound := binding.take_github_proxy()) is not None:
-            return _github_proxy_due(bound, now)
-        try:
-            refreshed = await call(
-                self._backend, REFRESH_GITHUB_PROXY, RefreshGitHubProxy(run_id=run_id())
-            )
-        except Exception:
-            logger.warning("Could not refresh the sandbox's GitHub token", exc_info=True)
-            return {_GITHUB_PROXY_DUE: (now + _GITHUB_PROXY_RETRY).isoformat()}
-        return _github_proxy_due(refreshed, now)
-
-    def github_proxy_due(self, held: Mapping[str, object], now: datetime | None = None) -> bool:
-        """Whether the sandbox's GitHub token is due a new one: none was put there yet, or
-        the one there is about to expire."""
-        if not self.rules.refresh_github_proxy:
-            return False
-        due = _moment(held.get(_GITHUB_PROXY_DUE))
-        return due is None or (now or datetime.now(UTC)) >= due
-
-    def prepared(self, prepared: Prepared) -> dict[str, JsonValue]:
-        """Held state that keeps the token preparation put on the sandbox until it is due."""
-        if prepared.github_proxy is None or not self.rules.refresh_github_proxy:
-            return {}
-        return _github_proxy_due(prepared.github_proxy, datetime.now(UTC))
 
     def _task_context(self, held: Mapping[str, object]) -> TaskContext:
         """The thread's role and task: the catalog's, or the task it joined since."""

@@ -10,11 +10,9 @@ import httpx2
 import pytest
 from pydantic import JsonValue
 
-from openswe.execution import ExecutionProfile
 from openswe.github.sandbox_access import SandboxGitHubAccess
 from openswe.sandboxes.providers.langsmith import (
     PROXY_CONFIG_RETRY_WINDOW_SECONDS,
-    LangSmithCreateOptions,
     configure_sandbox_proxy,
 )
 from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
@@ -233,50 +231,9 @@ class TestConfigureSandboxProxy:
             mock_sleep.assert_not_called()
 
 
-class TestRefreshProxyOnSandboxReuse:
+class TestSandboxReuse:
     @pytest.mark.asyncio
-    async def test_proxy_refresh_failure_raises_instead_of_replacing(self) -> None:
-        """A sandbox we can't reconfigure fails the run, and is never swapped out.
-
-        Replacing it would hand the agent an empty filesystem and discard any
-        work the old sandbox still held.
-        """
-        mock_sandbox = MagicMock(id="sandbox-stale", aexecute=AsyncMock())
-        request = httpx2.Request(
-            "PATCH", "https://api.smith.langchain.com/v2/sandboxes/boxes/sandbox-stale"
-        )
-        response = httpx2.Response(400, request=request)
-
-        with (
-            patch(
-                "openswe.sandboxes.lifecycle.sandbox_token",
-                new_callable=AsyncMock,
-                return_value=SandboxGitHubAccess("ghs_fresh"),
-            ),
-            patch(
-                "openswe.sandboxes.lifecycle.configure_sandbox_proxy",
-                new_callable=AsyncMock,
-                side_effect=httpx2.HTTPStatusError(
-                    "Bad request",
-                    request=request,
-                    response=response,
-                ),
-            ),
-        ):
-            from openswe.sandboxes.lifecycle import (
-                SandboxUnreachableError,
-                _refresh_github_proxy_or_fail,
-            )
-
-            with pytest.raises(SandboxUnreachableError) as excinfo:
-                await _refresh_github_proxy_or_fail(mock_sandbox, "thread-123")
-
-            assert excinfo.value.sandbox_id == "sandbox-stale"
-
-    @pytest.mark.asyncio
-    async def test_a_sandbox_mda_writes_the_proxy_of_fails_unreachable_when_it_cannot_be_reached(
-        self,
-    ) -> None:
+    async def test_a_sandbox_fails_unreachable_when_it_cannot_be_reached(self) -> None:
         """Writing the git identity is all that reaches such a sandbox, so its failure is the
         unreachable error the run's callers notify on, not the sandbox client's own."""
         from openswe.sandboxes.lifecycle import SandboxUnreachableError, _connect_existing_sandbox
@@ -284,62 +241,9 @@ class TestRefreshProxyOnSandboxReuse:
         dead = MagicMock(id="sandbox-stale", aexecute=AsyncMock(side_effect=RuntimeError("gone")))
 
         with pytest.raises(SandboxUnreachableError) as excinfo:
-            await _connect_existing_sandbox(
-                "thread-123", cached=dead, sandbox_id="sandbox-stale", mda_writes_proxy=True
-            )
+            await _connect_existing_sandbox("thread-123", cached=dead, sandbox_id="sandbox-stale")
 
         assert excinfo.value.sandbox_id == "sandbox-stale"
-
-
-class TestRefreshThreadGithubProxy:
-    async def test_a_replica_that_never_connected_still_gives_the_sandbox_a_fresh_token(
-        self,
-    ) -> None:
-        """Replica refresh uses private authority even when public metadata disagrees."""
-        proxy_config = {"rules": [{"name": "public-api"}]}
-        profile = ExecutionProfile(
-            create=LangSmithCreateOptions.resolve(create_params={"proxy_config": proxy_config})
-        )
-        metadata = {
-            "sandbox_id": "sandbox-abc",
-            SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [{"name": "forged"}]},
-        }
-        with (
-            patch(
-                "openswe.sandboxes.lifecycle.SANDBOX_EXECUTION.bound",
-                new_callable=AsyncMock,
-                return_value=profile,
-            ),
-            patch(
-                "openswe.sandboxes.lifecycle.get_sandbox_metadata",
-                new_callable=AsyncMock,
-                return_value=metadata,
-            ),
-            patch(
-                "openswe.sandboxes.lifecycle.sandbox_token",
-                new_callable=AsyncMock,
-                return_value=SandboxGitHubAccess("ghs_fresh", "2026-10-27T20:00:00Z"),
-            ),
-            patch(
-                "openswe.sandboxes.lifecycle.thread_token_repositories",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-            patch(
-                "openswe.sandboxes.lifecycle.configure_sandbox_proxy", new_callable=AsyncMock
-            ) as configure,
-        ):
-            from openswe.sandboxes.lifecycle import refresh_thread_github_proxy
-            from openswe.sandboxes.state import SANDBOX_BACKENDS
-
-            SANDBOX_BACKENDS.pop("thread-123", None)
-            expires_at = await refresh_thread_github_proxy("thread-123")
-
-        configure.assert_awaited_once_with(
-            "sandbox-abc", "ghs_fresh", base_proxy_config=proxy_config, thread_id="thread-123"
-        )
-        assert expires_at is not None
-        assert expires_at.isoformat() == "2026-10-27T20:00:00+00:00"
 
 
 _TAG = "00000000-0000-0000-0000-000000000001"

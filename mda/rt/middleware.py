@@ -453,11 +453,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         loading = asyncio.create_task(self._load_tool_specs())
         classifying = self._loop.classify_ahead(state)
         binding = SandboxBinding.of(self._backend.run)
-        proxy_due = self._loop.github_proxy_due(_held(state))
         if binds_later:
             # Neither preparing nor the first model call needs the sandbox: the backend hears
             # of it once it is open, and the run's first tool call waits for that.
-            binding.start(self._backend, run_id(), opening, refresh_github_proxy=proxy_due)
+            binding.start(self._backend, run_id(), opening)
         try:
             opened = OpenedSandbox() if binds_later else await self._proxied(runtime, await opening)
             # Not behind the outbox: what an earlier run left unsent changes nothing here.
@@ -475,7 +474,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
                     inbox=self._inbox_read().model_dump(mode="json")
                     if self._inbox is not None
                     else None,
-                    refresh_github_proxy=proxy_due and not binds_later,
                     bind_later=binds_later,
                 ),
             )
@@ -483,7 +481,6 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             self._prepared_inbox.get(self._backend.run).keep(prepared.inbox)
             # What the backend's preparation writes wins over where a turn starts from.
             starting = self._loop.starting()
-            prepared.update.update(self._loop.prepared(prepared))
             held = {**state.get(STATE_KEY, {}), **prepared.update}
             prepared.update.update(await self._loop.routed(held, state["messages"], classifying))
             # The route the classifier chose, next to the model a person picked on the trace.
@@ -533,17 +530,17 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             await self._backend.run.load_tool_specs(run_id())
 
     async def _proxied(self, runtime: Runtime, opened: OpenedSandbox) -> OpenedSandbox:
-        """``opened``, once it has booted with the first proxy config MDA writes there, where MDA
-        writes it; or why it could not be.
+        """``opened``, once it has booted with the first proxy config MDA writes there; or why it
+        could not be. An external sandbox keeps its own.
 
         Preparing works in the sandbox here (a review fetches its pull request there, a task
-        worker attaches to its coordinator's), and the backend writes no proxy config where
-        MDA does, so without this first write those commands have no GitHub credentials.
+        worker attaches to its coordinator's), and the backend writes no proxy config, so
+        without this first write those commands have no GitHub credentials.
         """
         if (
             opened.sandbox_id is None
             or self._boot_sandbox is None
-            or not self._backend.run.sandbox.writes_proxy
+            or self._backend.run.sandbox.external
         ):
             return opened
         async with trace("sandbox.proxy_first_write", run_type="chain"):
@@ -580,20 +577,14 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         }
 
     async def _before_model(self, state: RunState) -> dict[str, object] | None:
-        # What the loop asks the backend that the inbox does not change goes alongside it.
-        asked = self._loop.ask(state)
-        try:
-            inbox = await self._read_inbox()
-            # The phase sees what the inbox brought, as the model will.
-            with_inbox = {
-                **state,
-                "messages": [*state["messages"], *messages_from_dict(inbox.messages)],
-                STATE_KEY: {**state.get(STATE_KEY, {}), **inbox.update},
-            }
-            planned = await self._loop.before_model(with_inbox, asked)
-        finally:
-            if asked is not None:
-                await asked.close()
+        inbox = await self._read_inbox()
+        # The phase sees what the inbox brought, as the model will.
+        with_inbox = {
+            **state,
+            "messages": [*state["messages"], *messages_from_dict(inbox.messages)],
+            STATE_KEY: {**state.get(STATE_KEY, {}), **inbox.update},
+        }
+        planned = await self._loop.before_model(with_inbox)
         if planned.jump_to is not None:
             # No model call answers the inbox now: it stays for the run that comes next.
             return _apply(planned)

@@ -1,12 +1,10 @@
 """The thread's sandbox's proxy config, which gives commands in the sandbox their credentials.
 
-The proxy config is written whole, so one side writes all of it. The backend does,
-with a GitHub token it mints for the thread, unless the run's catalog says MDA does
-(``SandboxSpec.writes_proxy``). Then MDA writes it before each command as the backend
-hands it over (``SANDBOX_PROXY``): GitHub's rules, with a token the backend minted for
-the run's scope, and the rest the backend keeps on the sandbox, such as its tool
-channel's capability, which names the sandbox. MDA asks for it again before the token
-expires.
+The proxy config is written whole, so one side writes all of it: MDA, on every sandbox
+but an external one, before each command, as the backend hands it over
+(``SANDBOX_PROXY``): GitHub's rules, with a token the backend minted for the run's scope,
+and the rest the backend keeps on the sandbox, such as its tool channel's capability,
+which names the sandbox. MDA asks for it again before the token expires.
 """
 
 import base64

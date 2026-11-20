@@ -11,8 +11,7 @@ them; the backend answers the typed API both sides import (``runtime_api``):
   What the turn's start records (its transcript turn, the thread's model and usage) is
   the ``run_started`` report, off the run's path
 - the inbox and skills, and the named calls MDA's middleware makes around a model call
-  (``model_choice``, ``refresh_github_proxy``,
-  ``reply_on_behalf``), to move its Slack conversation (``slack_move``, ``slack_moved``),
+  (``model_choice``, ``reply_on_behalf``), to move its Slack conversation (``slack_move``, ``slack_moved``),
   and at the run's end (``run_ended``, or ``model_failed`` when a model call fails it,
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``)
 - the reports of each reply and tool call, which arrive with those notices in ordered
@@ -30,7 +29,6 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
-from datetime import UTC, datetime
 from functools import partial
 from typing import Final, Protocol, cast, runtime_checkable
 from uuid import UUID, uuid4
@@ -67,7 +65,6 @@ from runtime_api.loop import (
     MODEL_FAILED,
     MODEL_RESULT,
     PREPARE,
-    REFRESH_GITHUB_PROXY,
     REPLY_ON_BEHALF,
     ROUTE_MODEL,
     RUN_ENDED,
@@ -83,7 +80,6 @@ from runtime_api.loop import (
     ChosenModel,
     Done,
     GatewayCredential,
-    GitHubProxyRefreshed,
     Inbox,
     InboxItems,
     InboxRead,
@@ -92,7 +88,6 @@ from runtime_api.loop import (
     ModelResult,
     Prepare,
     Prepared,
-    RefreshGitHubProxy,
     ReplyOnBehalf,
     Report,
     Route,
@@ -173,7 +168,6 @@ from openswe.analytics.segment_activity import SegmentActivity
 from openswe.config import ENV
 from openswe.dashboard.langsmith_oauth import LangSmithModelAccess
 from openswe.execution import ExecutionProfile
-from openswe.github.proxy import proxy_token_set_since
 from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
 from openswe.middleware.plugin_chat import PluginChatTools
@@ -185,11 +179,7 @@ from openswe.middleware.transcript import TranscriptMiddleware, queue_run_notice
 from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
-from openswe.sandboxes.lifecycle import (
-    mda_proxy_config,
-    refresh_thread_github_proxy,
-    take_stale_boot,
-)
+from openswe.sandboxes.lifecycle import mda_proxy_config, take_stale_boot
 from openswe.sandboxes.state import SandboxUnreachableError
 from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
@@ -488,10 +478,9 @@ class TokenRun:
         """Ready the run's turn from its token and the conversation.
 
         Nothing here waits on the sandbox MDA keeps: the run readies the sandbox it opened, and
-        its loop keeps the sandbox's GitHub token fresh (``refresh_github_proxy``). A run still
-        opening its sandbox (``Prepare.bind_later``) reports it afterwards (``bind_sandbox``).
+        writes its proxy config. A run still opening its sandbox (``Prepare.bind_later``)
+        reports it afterwards (``bind_sandbox``).
         """
-        started = datetime.now(UTC)
         bind_later = request.in_sandbox and request.bind_later
         preparation = await self.kind.preparation(
             self.config,
@@ -512,13 +501,8 @@ class TokenRun:
             result = await run_hooks(preparation, "before_agent", state, runtime)
             if not bind_later:
                 await self._sandbox.finish_git_identity()
-            # A sandbox the backend connected to got a fresh token.
-            expires_at = proxy_token_set_since(self.run.thread_id, started)
             return Prepared(
                 **result.model_dump(),
-                github_proxy=None
-                if expires_at is None
-                else GitHubProxyRefreshed(expires_at=expires_at),
                 notices=[],
                 sender=self.kind.sender(self.config, self.run.settings),
             )
@@ -531,45 +515,14 @@ class TokenRun:
         return await self._asked_ahead(request, result)
 
     async def _asked_ahead(self, request: Prepare, prepared: Prepared) -> Prepared:
-        """``prepared``, with what ``request`` asks for the run's first model call.
-
-        Asked once the turn is ready, as the run itself would ask next: the inbox read, and
-        alongside it the sandbox's GitHub token when the run says one is due and preparing
-        put none there.
-        """
-        if prepared.jump_to is not None:
+        """``prepared``, with the inbox read ``request`` asks for the run's first model call,
+        asked once the turn is ready, as the run itself would ask next."""
+        if prepared.jump_to is not None or request.inbox is None:
             return prepared
-        refreshing = asyncio.ensure_future(self._refreshed_ahead(request, prepared))
-        try:
-            inbox = None if request.inbox is None else await self.inbox(request.inbox)
-            return prepared.model_copy(update={"inbox": inbox, "github_proxy": await refreshing})
-        finally:
-            refreshing.cancel()
-
-    async def _refreshed_ahead(
-        self, request: Prepare | BindSandbox, prepared: Prepared | None = None
-    ) -> GitHubProxyRefreshed | None:
-        """The token the sandbox's GitHub proxy holds once ``request`` is answered: the one
-        preparing put there, or a fresh one where the run says one is due."""
-        if prepared is not None and prepared.github_proxy is not None:
-            return prepared.github_proxy
-        if not request.refresh_github_proxy:
-            return None
-        try:
-            return await self.refresh_github_proxy(RefreshGitHubProxy(run_id=request.run_id))
-        except Exception:
-            # The run asks again before the call that needs it, and keeps going without it.
-            logger.warning(
-                "Could not refresh the sandbox's GitHub token ahead of the run's first call",
-                extra={"agent_thread_id": self.run.thread_id},
-                exc_info=True,
-            )
-            return None
+        return prepared.model_copy(update={"inbox": await self.inbox(request.inbox)})
 
     async def bind_sandbox(self, request: BindSandbox) -> SandboxBound:
-        """Bind the thread to the sandbox the run opened behind its preparation, and give the
-        sandbox the GitHub token the run says is due, as preparing does for a run that opens
-        its sandbox first.
+        """Bind the thread to the sandbox the run opened behind its preparation.
 
         A thread left with no sandbox to work in is answered, not told: the run goes on
         without one, and tells the person through ``sandbox_unreachable`` once a call needs it.
@@ -584,10 +537,7 @@ class TokenRun:
             )
             return SandboxBound(unreachable=exc.reason or str(exc))
         await self._report_stale_execution()
-        if request.sandbox_id is None:
-            # The thread keeps the sandbox it was bound to before, which the run opens again.
-            return SandboxBound()
-        return SandboxBound(github_proxy=await self._refreshed_ahead(request))
+        return SandboxBound()
 
     async def _report_stale_execution(self) -> None:
         if stale := take_stale_boot(self.run.thread_id):
@@ -767,22 +717,6 @@ class TokenRun:
             {**self.config, "run_name": "task_context"}, lambda _runtime: read()
         )
 
-    async def refresh_github_proxy(self, request: RefreshGitHubProxy) -> GitHubProxyRefreshed:
-        cfg = RunConfig.from_config(self.config)
-        if not cfg.github_linked:
-            return GitHubProxyRefreshed()
-        turn = self.run.settings.agent
-        if turn is not None and turn.coordinator_thread_id is not None:
-            # A task worker works in its coordinator's sandbox, whose token keeps the
-            # coordinator's own scope.
-            expires_at = await refresh_thread_github_proxy(
-                turn.coordinator_thread_id,
-                force_refresh=request.force_refresh,
-            )
-            return GitHubProxyRefreshed(expires_at=expires_at)
-        expires_at = await self._sandbox.refresh_github_proxy(force_refresh=request.force_refresh)
-        return GitHubProxyRefreshed(expires_at=expires_at)
-
     async def gateway_credential(self, _request: RunRequest) -> GatewayCredential:
         """Who the run's model calls go through the LLM gateway as."""
         credential = await LangSmithModelAccess.for_run(self.config).credential()
@@ -796,9 +730,9 @@ class TokenRun:
         """The proxy config MDA writes on the run's sandbox, with a GitHub token of the run's
         scope: a task worker's, its coordinator's own."""
         managed = await self._sandbox.managed()
-        if not managed.writes_proxy:
-            # The sandbox's capability goes only to a run that writes its proxy config.
-            raise RefusedCallError("The backend writes this thread's sandbox proxy config")
+        if managed.external:
+            # An external sandbox keeps the proxy config its harness gave it, and no capability.
+            raise RefusedCallError("This thread's external sandbox keeps its own proxy config")
         github_scope = None
         if RunConfig.from_config(self.config).github_linked:
             github_scope = (None, None) if managed.thread_id else await self._sandbox.github_scope()
@@ -982,7 +916,6 @@ CALLS.serve(TOOL_RESULT, TokenRun.tool_result)
 CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
 CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
 CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
-CALLS.serve(REFRESH_GITHUB_PROXY, TokenRun.refresh_github_proxy)
 CALLS.serve(GATEWAY_CREDENTIAL, TokenRun.gateway_credential)
 CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)

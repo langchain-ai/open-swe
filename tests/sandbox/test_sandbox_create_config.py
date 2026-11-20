@@ -357,21 +357,18 @@ async def test_replicas_cannot_rebind_a_thread_to_a_different_sandbox(monkeypatc
 class TestLangSmithSandboxCredentials:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("linked_github", [False, True])
-    @pytest.mark.parametrize("mda_writes", [False, True])
     async def test_cloud_lifecycle_never_borrows_github_credentials(
         self,
         monkeypatch,
         registry_db,
         execution_defaults: ExecutionDefaults,
         linked_github: bool,
-        mda_writes: bool,
     ) -> None:
         from unittest.mock import AsyncMock, MagicMock
         from uuid import UUID
 
         from openswe.sandboxes import lifecycle
         from openswe.sandboxes.managed import ManagedSandbox
-        from openswe.sandboxes.providers.langsmith import sandbox_proxy_config
         from openswe.users.models import User, UserIdentity
 
         owner = User(
@@ -403,11 +400,6 @@ class TestLangSmithSandboxCredentials:
         backend = MagicMock(id="sandbox-ls")
         mint = AsyncMock(side_effect=AssertionError("GitHub token minting is forbidden"))
         scope = AsyncMock(side_effect=AssertionError("GitHub scope lookup is forbidden"))
-        configure = AsyncMock(side_effect=sandbox_proxy_config)
-        if mda_writes:
-            monkeypatch.setenv("MDA_WRITES_SANDBOX_PROXY", "true")
-        else:
-            monkeypatch.delenv("MDA_WRITES_SANDBOX_PROXY", raising=False)
         monkeypatch.setattr(User, "get", AsyncMock(return_value=owner))
         monkeypatch.setattr(lifecycle, "get_sandbox_metadata", AsyncMock(return_value=metadata))
         monkeypatch.setattr(
@@ -415,7 +407,6 @@ class TestLangSmithSandboxCredentials:
         )
         monkeypatch.setattr(lifecycle, "sandbox_token", mint)
         monkeypatch.setattr(lifecycle, "thread_token_repositories", scope)
-        monkeypatch.setattr(lifecycle, "configure_sandbox_proxy", configure)
         monkeypatch.setattr(lifecycle, "configure_git_identity", AsyncMock())
         monkeypatch.setattr(lifecycle, "connect_existing_sandbox", AsyncMock(return_value=backend))
         monkeypatch.setattr(lifecycle, "set_sandbox_backend", lambda thread_id, backend: backend)
@@ -428,28 +419,18 @@ class TestLangSmithSandboxCredentials:
         )
 
         managed = await ManagedSandbox.for_thread("ls-thread")
-        assert managed.writes_proxy is mda_writes
         assert managed.create.snapshot_id == "snap-1"
         await lifecycle.bind_mda_sandbox("ls-thread", "sandbox-ls")
         metadata.update(
             sandbox_id="sandbox-ls", sandbox_owner="mda", sandbox_base_proxy_config=base_config
         )
         await lifecycle.ensure_sandbox_for_thread("ls-thread")
-        assert await lifecycle.refresh_thread_github_proxy("ls-thread") is None
-        if mda_writes:
-            # MDA writes it as the backend hands it over, with no GitHub rules.
-            assert configure.await_count == 0
-            config, expires_at = await lifecycle.mda_proxy_config(
-                "ls-thread", "sandbox-ls", github_scope=(None, None)
-            )
-            assert config["rules"] == [tools_rule, cloud_rule]
-            assert expires_at is None
-        else:
-            assert configure.await_count == 2
-            for call in configure.await_args_list:
-                assert call.args == ("sandbox-ls", None)
-                clean_config = await sandbox_proxy_config(*call.args, **call.kwargs)
-                assert clean_config["rules"] == [tools_rule, cloud_rule]
+        # MDA writes it as the backend hands it over, with no GitHub rules.
+        config, expires_at = await lifecycle.mda_proxy_config(
+            "ls-thread", "sandbox-ls", github_scope=(None, None)
+        )
+        assert config["rules"] == [tools_rule, cloud_rule]
+        assert expires_at is None
         mint.assert_not_awaited()
         scope.assert_not_awaited()
 
@@ -478,7 +459,8 @@ async def test_legacy_run_digest_is_frozen_and_rejects_modified_records(monkeypa
 
 @pytest.mark.asyncio
 async def test_external_sandbox_skips_credentials_and_proxy(monkeypatch) -> None:
-    from openswe.sandboxes.lifecycle import SandboxCredentialPolicy, refresh_thread_github_proxy
+    from openswe.agent_api.run_sandbox import RunSandbox
+    from openswe.sandboxes.lifecycle import SandboxCredentialPolicy
     from openswe.sandboxes.managed import ManagedSandbox
     from openswe.tasks.schemas import ThreadMetadata
 
@@ -494,19 +476,15 @@ async def test_external_sandbox_skips_credentials_and_proxy(monkeypatch) -> None
     monkeypatch.setattr(
         "openswe.sandboxes.lifecycle.get_sandbox_metadata", AsyncMock(return_value=metadata)
     )
-    configure_proxy = AsyncMock()
-    monkeypatch.setattr("openswe.sandboxes.lifecycle.configure_sandbox_proxy", configure_proxy)
-
-    monkeypatch.setenv("MDA_WRITES_SANDBOX_PROXY", "true")
     managed = await ManagedSandbox.for_thread("thread-ext")
     assert managed.sandbox_id == "tb-task-1"
     assert managed.external is True
-    # Nothing writes an attached sandbox's proxy, MDA included.
-    assert not managed.writes_proxy
+    # Nothing writes an attached sandbox's proxy, an MDA deployment that reads the flag included.
+    spec = await RunSandbox({"configurable": {"thread_id": "thread-ext"}}, reviews=False).spec()
+    assert not spec.writes_proxy
     assert not await SandboxCredentialPolicy(
         ThreadMetadata.model_validate(metadata)
     ).allows_github()
-    assert await refresh_thread_github_proxy("thread-ext") is None
     worker_metadata: dict[str, object] = {
         "owner_type": "system",
         "sandbox_id": "tb-task-1",
@@ -518,12 +496,6 @@ async def test_external_sandbox_skips_credentials_and_proxy(monkeypatch) -> None
         "openswe.sandboxes.lifecycle.get_sandbox_metadata",
         AsyncMock(side_effect=lambda tid: by_thread[tid]),
     )
-    monkeypatch.setattr(
-        "openswe.sandboxes.lifecycle.SandboxCreateConfig.bound_profile",
-        AsyncMock(return_value=None),
-    )
     assert not await SandboxCredentialPolicy(
         ThreadMetadata.model_validate(worker_metadata)
     ).allows_github()
-    assert await refresh_thread_github_proxy("thread-worker") is None
-    configure_proxy.assert_not_awaited()

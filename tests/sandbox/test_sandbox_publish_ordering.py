@@ -30,7 +30,6 @@ async def test_initialization_failure_publishes_nothing() -> None:
             "openswe.sandboxes.lifecycle.connect_existing_sandbox",
             AsyncMock(side_effect=RuntimeError("initialization failed")),
         ),
-        patch("openswe.sandboxes.lifecycle._refresh_github_proxy", new_callable=AsyncMock),
         patch("openswe.sandboxes.lifecycle.configure_git_identity", new_callable=AsyncMock),
         patch("openswe.sandboxes.lifecycle.client.threads.update", new_callable=AsyncMock),
         pytest.raises(Exception, match="initialization failed"),

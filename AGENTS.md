@@ -19,7 +19,7 @@ The backend is a set of stateless APIs MDA calls: typed endpoints at `/agent-api
 Shape new behavior to fit:
 
 - Control flow (when to nudge, route, stop, refresh) is middleware in `mda/rt`; checks around the file and shell tools go in `rt/file_tools.py`.
-- Work that needs the backend's credentials or data is a named `Endpoint` for that work (`model_choice`, `refresh_github_proxy`), never a generic phase call or an untyped body.
+- Work that needs the backend's credentials or data is a named `Endpoint` for that work (`model_choice`, `sandbox_proxy`), never a generic phase call or an untyped body.
 - Data fixed for a run is worked out once when the backend starts it and sent in the run context (`Catalog`, `openswe/agent_api/client.py`); a call that needs a fact derives it from the token.
 - State kept between calls lives in MDA's run state or PostgreSQL, never in backend memory.
 

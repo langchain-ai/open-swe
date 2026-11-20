@@ -38,7 +38,6 @@ from runtime_api.catalog import (
 from runtime_api.endpoint import Delivery
 from runtime_api.loop import (
     Done,
-    GitHubProxyRefreshed,
     PhaseResult,
     Prepared,
 )
@@ -126,26 +125,6 @@ def _state(*messages: BaseMessage, **held: JsonValue) -> dict[str, object]:
     return {"messages": list(messages), STATE_KEY: held}
 
 
-async def test_a_failed_github_token_refresh_waits_before_the_next_try(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, calls = _backend(
-        monkeypatch,
-        {"refresh_github_proxy": BackendCallError("refresh_github_proxy failed: timed out")},
-        LoopRules(refresh_github_proxy=True),
-    )
-    loop = RunLoop(backend)
-
-    first = await loop.before_model(_state(HumanMessage(content="Fix the login", id="human-1")))
-    held = {"github_proxy_refresh_at": first.update["github_proxy_refresh_at"]}
-    second = await loop.before_model(
-        _state(HumanMessage(content="Fix the login", id="human-1"), **held)
-    )
-
-    assert first.call is not None and second.call is not None
-    assert [name for name, _ in calls] == ["refresh_github_proxy"]
-
-
 async def test_the_framing_of_the_clients_tools_follows_the_system_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -158,32 +137,6 @@ async def test_the_framing_of_the_clients_tools_follows_the_system_prompt(
 
     assert planned.call is not None
     assert planned.call.system_prompt.endswith("The Docs plugin is open beside you.")
-
-
-async def test_a_refresh_asked_for_a_call_that_is_not_made_is_stopped(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend, _ = _backend(monkeypatch, {}, LoopRules())
-    loop = RunLoop(backend)
-    started = asyncio.Event()
-    stopped = asyncio.Event()
-
-    async def refresh(_held: Mapping[str, object]) -> dict[str, JsonValue]:
-        started.set()
-        try:
-            await asyncio.Event().wait()
-        finally:
-            stopped.set()
-        return {}
-
-    monkeypatch.setattr(loop, "_github_proxy", refresh)
-
-    asked = loop.ask(_state())
-    assert asked is not None
-    await started.wait()
-    await asked.close()
-
-    assert stopped.is_set()
 
 
 @pytest.mark.parametrize(
@@ -201,12 +154,8 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         hidden_unless={"has_human_input": ["record_human_input"]},
         routing=RoutingRules(mode="fast", route_model_ids={"fast": _FAST.model_id}),
         task_context=TaskContext(instructions=role, message=context),
-        refresh_github_proxy=True,
     )
-    answers: dict[str, BaseModel | BackendCallError] = {
-        "refresh_github_proxy": GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
-    }
-    backend, calls = _backend(monkeypatch, answers, rules)
+    backend, calls = _backend(monkeypatch, {}, rules)
     loop = RunLoop(backend)
     state = _state(
         HumanMessage(content="Fix the login", id="human-1"),
@@ -226,10 +175,7 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     assert planned.call.execution_prompt == "We deploy on Fridays."
     assert planned.call.thread_prompt == "This thread's artifacts are here."
     assert planned.call.hidden_tools == ["grep", "record_human_input"]
-    assert planned.update == {
-        "github_proxy_refresh_at": "2999-01-01T11:50:00+00:00",
-        "model_route": "fast",
-    }
+    assert planned.update == {"model_route": "fast"}
     # The fast route's model reads no images, so a call with one goes to the vision model.
     assert (planned.call.model, planned.call.vision) == (_FAST, _VISION)
     assert planned.call.fallback == _FALLBACK
@@ -237,21 +183,18 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
         role,
         context,
     ]
-    # The task's context came with the catalog: the backend is asked only for the token.
-    assert [name for name, _ in calls] == ["refresh_github_proxy"]
+    # The task's context came with the catalog: the backend is asked nothing.
+    assert calls == []
 
-    # The task's context and role the model still sees are not added again, and a token
-    # with time left is not replaced.
+    # The task's context and role the model still sees are not added again.
     seen = _state(
         HumanMessage(content=role, id="task-role:1"),
         HumanMessage(content=context, id="task-context:1"),
         rendered_system_prompt="You are Open SWE.",
         model_route="fast",
-        github_proxy_refresh_at=planned.update["github_proxy_refresh_at"],
     )
     again = await loop.before_model(seen)
     assert again.messages == []
-    assert [name for name, _ in calls].count("refresh_github_proxy") == 1
 
     # A task the thread joined mid-run, as its first worker's launch said, joins the
     # conversation and leaves the system prompt, and the cache with it, as it was.
@@ -262,7 +205,7 @@ async def test_each_model_call_is_assembled_here_from_the_rules_and_named_calls(
     assert moved.call is not None
     assert moved.call.system_prompt == planned.call.system_prompt
     assert [message.content for message in messages_from_dict(moved.messages)] == [joined]
-    assert [name for name, _ in calls] == ["refresh_github_proxy"]
+    assert calls == []
     # The next run's catalog carries it, so a new turn starts without it.
     assert loop.starting()[JOINED_TASK_CONTEXT] is None
 
@@ -744,17 +687,14 @@ async def test_the_end_of_a_run_is_reported_and_its_graph_work_done_by_name(
     backend, calls = _backend(
         monkeypatch,
         {
-            "prepare": Prepared(
-                update={"rendered_system_prompt": "You review."},
-                github_proxy=GitHubProxyRefreshed(expires_at=_TOKEN_EXPIRES),
-            ),
+            "prepare": Prepared(update={"rendered_system_prompt": "You review."}),
             "run_started": Done(),
             # Neither a report nor a notice that fails takes the review check's settling with it.
             "run_ended": BackendCallError("run_ended failed: timed out"),
             "step_limit_reached": BackendCallError("step_limit_reached failed: Slack is down"),
             "settle_review_check": Done(),
         },
-        LoopRules(at_end=["settle_review_check"], refresh_github_proxy=True),
+        LoopRules(at_end=["settle_review_check"]),
     )
     monkeypatch.setattr(
         "rt.middleware.build_model",

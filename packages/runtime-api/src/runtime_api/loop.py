@@ -3,8 +3,7 @@
 The runtime's middleware runs the loop: it nudges, routes, assembles each call
 and ends the run as the catalog's ``LoopRules`` say. It asks the backend only for
 what needs the backend's data or credentials, one named call each: a model's
-settings, a fresh GitHub proxy token, a reply posted on the model's behalf, and what the end of the run
-records. The runtime classifies each turn's route itself, and the catalog says which
+settings, a reply posted on the model's behalf, and what the end of the run records. The runtime classifies each turn's route itself, and the catalog says which
 task the thread belongs to.
 The transcript and usage hear of the run's start, each reply and tool call, and the
 run's end.
@@ -18,7 +17,6 @@ how its catalog says to read the inbox; the backend keeps what each thread is ow
 until a run receives it.
 """
 
-from datetime import datetime
 from typing import Final, Literal
 from uuid import UUID
 
@@ -83,10 +81,9 @@ class Prepare(RunCall):
     # Why the runtime could not open it, secrets removed.
     sandbox_error: str | None = None
     # What the run's first model call would ask next, asked with the preparation so that
-    # call waits on no round trip of its own: the inbox read, and the sandbox's GitHub
-    # token where it is due. A backend from before these answers neither.
+    # call waits on no round trip of its own: the inbox read. A backend from before it
+    # answers none.
     inbox: InboxRead | None = None
-    refresh_github_proxy: bool = False
     # The runtime is still opening the sandbox, and reports it once it is open
     # (``BIND_SANDBOX``): preparing binds the thread to none and reaches none.
     bind_later: bool = False
@@ -102,25 +99,12 @@ class PhaseResult(BaseModel):
     events: list[JsonValue] = []
 
 
-class RefreshGitHubProxy(RunRequest):
-    force_refresh: bool = False
-
-
-class GitHubProxyRefreshed(BaseModel):
-    """The sandbox's GitHub proxy was given a fresh token."""
-
-    # When that token expires; None when the thread's sandbox has no GitHub proxy to refresh.
-    expires_at: datetime | None = None
-
-
 class BindSandbox(RunRequest):
     """The sandbox the runtime opened behind the run's preparation (``Prepare.bind_later``)."""
 
     # None when the runtime could not open it, and why, secrets removed.
     sandbox_id: str | None = None
     sandbox_error: str | None = None
-    # Whether the sandbox's GitHub token is due, as ``Prepare.refresh_github_proxy`` says.
-    refresh_github_proxy: bool = False
 
 
 class SandboxBound(BaseModel):
@@ -128,8 +112,6 @@ class SandboxBound(BaseModel):
 
     # Why the thread has no sandbox to work in, as the person is told once a call needs it.
     unreachable: str | None = None
-    # The token the sandbox's GitHub proxy was given; None when none was due or it failed.
-    github_proxy: GitHubProxyRefreshed | None = None
 
 
 class GatewayCredential(BaseModel):
@@ -176,9 +158,6 @@ class RunSender(BaseModel):
 
 
 class Prepared(PhaseResult):
-    # The token preparation put on the sandbox, which the first model call then keeps; None
-    # when it put none there.
-    github_proxy: GitHubProxyRefreshed | None = None
     # What ``Prepare.inbox`` read once the turn was ready; None when nothing read it, and
     # the first model call reads it itself (``INBOX``).
     inbox: Inbox | None = None
@@ -381,14 +360,6 @@ TASK_CONTEXT = Endpoint(
 )
 MODEL_CHOICE = Endpoint(
     "model_choice", ChosenModel, ModelSpec, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
-)
-# Mints a token and sets it on the sandbox, so sending it again only mints another.
-REFRESH_GITHUB_PROXY = Endpoint(
-    "refresh_github_proxy",
-    RefreshGitHubProxy,
-    GitHubProxyRefreshed,
-    seconds=LOOP_CALL_SECONDS,
-    delivery="idempotent",
 )
 # Reads the person's current token, refreshing it when it is near expiry: safe to send again.
 GATEWAY_CREDENTIAL = Endpoint(

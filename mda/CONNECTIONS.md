@@ -57,7 +57,7 @@ uv run --project mda --locked mda connections list --project mda --json \
   | jq -e --arg s "mda/github-app/$DEPLOYMENT_ID" 'any(.[]; .slug == $s)'
 ```
 
-Sandboxes' GitHub tokens never come from this connection: the backend mints them, whichever side writes the sandbox's proxy config (`MDA_WRITES_SANDBOX_PROXY`).
+Sandboxes' GitHub tokens never come from this connection: the backend mints them and hands them to MDA with the sandbox's proxy config (`sandbox_proxy`).
 
 ## 3. `open-swe-exa`: the Exa key for `web_search`
 

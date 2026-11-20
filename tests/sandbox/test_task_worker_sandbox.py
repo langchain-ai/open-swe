@@ -98,9 +98,7 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     await SANDBOX_EXECUTION.bind("coordinator", host_sandbox_id, profile, {})
     backend = MagicMock(id=host_sandbox_id)
     connect = AsyncMock(return_value=backend)
-    refresh = AsyncMock()
     monkeypatch.setattr(lifecycle, "connect_existing_sandbox", connect)
-    monkeypatch.setattr(lifecycle, "_refresh_github_proxy", refresh)
 
     attached = await lifecycle.ensure_sandbox_for_thread("worker")
 
@@ -108,23 +106,15 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     assert SANDBOX_BACKENDS["coordinator"].id == SANDBOX_BACKENDS["worker"].id
     assert shared_sandbox["worker"]["sandbox_id"] == host_sandbox_id
     connect.assert_awaited_once_with(host_sandbox_id)
-    assert refresh.await_args.kwargs["thread_id"] == "coordinator"
-    assert refresh.await_args.kwargs["base_proxy_config"] == proxy_config
     shared_sandbox["worker"]["sandbox_base_proxy_config"] = {"rules": ["injected"]}
-    configure = AsyncMock()
     render = AsyncMock(return_value={})
     monkeypatch.setattr(
         lifecycle, "sandbox_token", AsyncMock(return_value=SandboxGitHubAccess("token"))
     )
-    monkeypatch.setattr(lifecycle, "configure_sandbox_proxy", configure)
     monkeypatch.setattr(lifecycle.LiveSandboxProxy, "config_for", render)
-    await lifecycle.refresh_thread_github_proxy("worker")
-    assert configure.await_args.kwargs["base_proxy_config"] == proxy_config
     await lifecycle.mda_proxy_config("worker", host_sandbox_id)
     assert render.await_args.kwargs["base_proxy_config"] == proxy_config
     shared_sandbox["worker"]["sandbox_host_thread_id"] = "another-coordinator"
-    with pytest.raises(PermissionError, match="does not match"):
-        await lifecycle.refresh_thread_github_proxy("worker")
     with pytest.raises(PermissionError, match="does not match"):
         await lifecycle.mda_proxy_config("worker", host_sandbox_id)
     if owner_type == "system":
@@ -144,7 +134,6 @@ async def test_worker_refreshes_binding_during_concurrent_host_reconnect(
         "connect_existing_sandbox",
         AsyncMock(side_effect=lambda sandbox_id: MagicMock(id=sandbox_id)),
     )
-    monkeypatch.setattr(lifecycle, "_refresh_github_proxy", AsyncMock())
     await lifecycle.ensure_sandbox_for_thread("worker")
 
     shared_sandbox["coordinator"]["sandbox_id"] = "sb-replacement"
@@ -185,7 +174,6 @@ async def test_worker_reattach_recovers_a_missed_background_completion(
     backend.aexecute = AsyncMock(return_value=ExecuteResponse(output="", exit_code=0))
     dispatch = AsyncMock()
     monkeypatch.setattr(lifecycle, "connect_existing_sandbox", AsyncMock(return_value=backend))
-    monkeypatch.setattr(lifecycle, "_refresh_github_proxy", AsyncMock())
     monkeypatch.setattr(background_tasks, "_client", lambda: client)
     monkeypatch.setattr(background_tasks, "connect_sandbox", AsyncMock(return_value=backend))
     monkeypatch.setattr(background_tasks, "_list_tasks", AsyncMock(return_value=[task]))

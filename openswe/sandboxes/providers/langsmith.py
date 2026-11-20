@@ -625,7 +625,6 @@ async def connect_async_langsmith_sandbox(sandbox_id: str) -> tuple[AsyncSandbox
 
 async def create_langsmith_sandbox(
     sandbox_id: str | None = None,
-    github_token: str | None = None,
     *,
     snapshot_id: str | None = None,
     mem_bytes: int | None = None,
@@ -643,14 +642,13 @@ async def create_langsmith_sandbox(
     Args:
         sandbox_id: Optional existing sandbox ID to connect to.
                    If None, creates a new sandbox.
-        github_token: Optional GitHub token. Used to configure proxy auth on
-                      new sandboxes. Ignored when connecting to an existing sandbox.
         snapshot_id: Optional repo-scoped snapshot to boot from. When omitted,
             uses the API's root snapshot.
         mem_bytes: Optional memory capacity override for a newly-created sandbox.
         vcpus: Optional virtual CPU count override for a newly-created sandbox.
         fs_capacity_bytes: Optional filesystem capacity override for a newly-created sandbox.
-        create_params: Optional additional fields merged into the sandbox create body.
+        create_params: Optional additional fields merged into the sandbox create body,
+            such as a ``proxy_config`` whose cloud identity rules are fixed at creation.
         prepare_work_dir: Whether a new sandbox creates ``/workspace`` before returning.
 
     Returns:
@@ -677,17 +675,6 @@ async def create_langsmith_sandbox(
 
     if sandbox_id is None and prepare_work_dir:
         await backend.aexecute(f"mkdir -p {WORKSPACE_DIR}")
-    if sandbox_id is None and github_token:
-        proxy_config = get_sandbox_proxy_config(create_params)
-        if proxy_config is not None:
-            await configure_sandbox_proxy(
-                backend.id,
-                github_token,
-                base_proxy_config=proxy_config,
-            )
-        else:
-            await configure_sandbox_proxy(backend.id, github_token)
-
     return backend
 
 

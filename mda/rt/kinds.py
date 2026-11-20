@@ -30,14 +30,7 @@ class KindRules:
     def applied(self, catalog: Catalog) -> Catalog:
         """``catalog``, with this kind's rules in place of the run's."""
         loop = self.loop if self.loop is not None else catalog.loop
-        writes_proxy = catalog.sandbox is not None and catalog.sandbox.writes_proxy
-        loop = loop.model_copy(
-            update={
-                "deployment_prompt": catalog.loop.deployment_prompt,
-                # MDA keeps this sandbox's proxy config fresh itself, before each command.
-                "refresh_github_proxy": loop.refresh_github_proxy and not writes_proxy,
-            }
-        )
+        loop = loop.model_copy(update={"deployment_prompt": catalog.loop.deployment_prompt})
         files = catalog.files
         if self.guards_shell and "shell_commands" not in files.guards:
             files = files.model_copy(update={"guards": [*files.guards, "shell_commands"]})
@@ -53,9 +46,7 @@ class KindRules:
 KINDS: Final[dict[Graph, KindRules]] = {
     "agent": KindRules(guards_shell=True),
     "reviewer": KindRules(
-        loop=LoopRules(
-            hidden_tools=_SHELL_SEARCH, refresh_github_proxy=True, at_end=["settle_review_check"]
-        ),
+        loop=LoopRules(hidden_tools=_SHELL_SEARCH, at_end=["settle_review_check"]),
         model_call_limit=5_000,
     ),
     "review-scout": KindRules(

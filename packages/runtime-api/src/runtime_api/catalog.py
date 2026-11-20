@@ -117,8 +117,9 @@ class SandboxSpec(BaseModel):
 
     create: SandboxCreate
     sandbox_id: str | None = None
-    # Whether MDA writes the sandbox's whole proxy config, which the backend hands it
-    # (``runtime_api.sandbox_proxy``); false leaves the proxy config to the backend.
+    # Deprecated: MDA writes the proxy config of every sandbox but an external one
+    # (``runtime_api.sandbox_proxy``). Sent for MDA deployments from before that, which
+    # leave a sandbox without it to the backend; remove once every deployment writes it.
     writes_proxy: bool = False
     # Whether the run may prepare before its sandbox is open and report the sandbox afterwards
     # (``runtime_api.loop.BIND_SANDBOX``), so its first model call waits for neither: nothing
@@ -292,9 +293,6 @@ class LoopRules(BaseModel):
     # Open SWE's own framing of the tools the client runs, after every call's system prompt;
     # never words the client wrote, which reach the model only in the conversation.
     client_prompt: str = ""
-    # Whether the backend gives the sandbox's GitHub proxy a fresh token before each model
-    # call: a task worker's, the token of its coordinator's sandbox.
-    refresh_github_proxy: bool = False
     # Whether the run was asked only to offload the conversation: it summarizes it and ends.
     offload_conversation: bool = False
     # What the run's end does besides recording it.

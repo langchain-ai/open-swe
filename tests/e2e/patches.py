@@ -305,15 +305,14 @@ def apply() -> None:
 
     langsmith_integration.get_async_sandbox_client = _FakeSandboxClient
     if not sandbox_service.REAL:
-        from openswe.github import proxy as github_proxy
-
         langsmith_integration.create_langsmith_sandbox = _stand_in_sandbox
         langsmith_integration.configure_sandbox_proxy = _configure_no_proxy
-        sandbox_lifecycle.configure_sandbox_proxy = _configure_no_proxy
+        # The config handed to MDA keeps the cloud identity rules read from the live
+        # sandbox; the stand-in was created with none.
+        langsmith_integration.__dict__["_federated_proxy_rules"] = _no_federated_rules
         # The token a sandbox's GitHub proxy carries is minted from the App, like the
         # other App tokens stubbed above; the stand-in has no proxy to carry it.
-        for module in (sandbox_lifecycle, github_proxy):
-            module.__dict__["sandbox_token"] = _sandbox_github_access
+        sandbox_lifecycle.__dict__["sandbox_token"] = _sandbox_github_access
 
     # A refresh boots its own builder to run the scripts in: a stand-in sandbox, of
     # which nothing is reclaimed afterwards; the scripts, the capture and the
@@ -474,6 +473,10 @@ async def _stand_in_sandbox(
 
 async def _configure_no_proxy(*_args: object, **_kwargs: object) -> None:
     return None
+
+
+async def _no_federated_rules(*_args: object, **_kwargs: object) -> list[object]:
+    return []
 
 
 async def _sandbox_github_access(*_args: object, **_kwargs: object) -> object:

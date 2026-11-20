@@ -18,6 +18,7 @@ import e2e_env  # noqa: E402, F401  - the E2E's environment, before anything rea
 import sandbox_service  # noqa: E402
 
 if not sandbox_service.REAL:
+    from managed_deepagents import _sandbox_proxy as mda_sandbox_proxy
     from managed_deepagents import runtime as mda_runtime
 
     def _stand_in_claim(
@@ -33,8 +34,13 @@ if not sandbox_service.REAL:
         name = sandbox_service.mda_sandbox_name(scope_key)
         return sandbox_service.open_mda_sandbox(name), name, name
 
+    def _no_proxy(*_args: object, **_kwargs: object) -> None:
+        # LangSmith holds a sandbox's proxy config; the stand-in has none to write.
+        return None
+
     mda_runtime._claim_langsmith_sandbox = _stand_in_claim
     mda_runtime._create_langsmith_sandbox = _stand_in_mda_sandbox
+    mda_sandbox_proxy.patch_sandbox_proxy_config = _no_proxy
 
 if not os.environ.get("E2E_REAL_LLM"):
     # From the build directory langgraph dev serves. Every model the runtime builds,

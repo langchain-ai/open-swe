@@ -1,4 +1,3 @@
-import logging
 from typing import Self
 from uuid import uuid4
 
@@ -7,7 +6,6 @@ from langgraph.runtime import Runtime
 from runtime_api.catalog import TaskContext as LoopTaskContext
 from runtime_api.provenance import Provenance
 
-from openswe.github.proxy import maybe_refresh_proxy_token
 from openswe.input_messages import (
     RunMessage,
     dynamic_context_hash,
@@ -17,8 +15,6 @@ from openswe.input_messages import (
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.tasks.store import TaskContext, TaskDelegation, TaskMembership
-
-logger = logging.getLogger(__name__)
 
 
 class TaskCoordinationMiddleware(OpenSWEMiddleware):
@@ -79,17 +75,6 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
     ) -> dict[str, list[RunMessage]] | None:
         if self.context is None:
             self.context = await TaskMembership.delegation_for_thread(self.thread_id)
-        if (coordinator := self.coordinator_thread_id) is not None:
-            # A worker keeps its coordinator's sandbox token fresh, as an MDA run's
-            # ``refresh_github_proxy`` does.
-            try:
-                await maybe_refresh_proxy_token(coordinator)
-            except Exception:
-                logger.warning(
-                    "Failed to refresh the task's GitHub proxy",
-                    exc_info=True,
-                    extra={"thread_id": self.thread_id},
-                )
         visible = visible_dynamic_context_hashes(state)
         added: list[RunMessage] = [
             {

@@ -3,7 +3,6 @@ import json
 import logging
 import time
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 
 import jwt
 import pytest
@@ -248,14 +247,9 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     from runtime_api.catalog import TaskContext
     from runtime_api.models import provider_model_kwargs
 
-    from openswe.agent_api import run_calls, run_sandbox
-    from openswe.agent_api.tokens import AgentTurnSettings, RunSettings
     from openswe.middleware.model_selection import RouteSelection
     from openswe.middleware.task_coordination import TaskCoordinationMiddleware
 
-    refresh = AsyncMock(return_value=None)
-    monkeypatch.setattr(run_sandbox, "refresh_thread_github_proxy", refresh)
-    monkeypatch.setattr(run_calls, "refresh_thread_github_proxy", refresh)
     parts = _NeverPlanned()
     monkeypatch.setattr(
         parts, "credentials", AsyncMock(side_effect=AssertionError("No GitHub credentials needed"))
@@ -268,20 +262,11 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
         "model_choice",
         {"run_id": "run-1", "model_id": "anthropic:claude-opus-5-5", "effort": "high"},
     )
-    refreshed = await TokenRun.answer(parts, run, "refresh_github_proxy", {"run_id": "run-1"})
 
     assert isinstance(chosen, dict)
     assert chosen["model_id"] == "anthropic:claude-opus-5-5"
     assert chosen["kwargs"] == provider_model_kwargs(
         "anthropic:claude-opus-5-5", "high", max_tokens=64_000
-    )
-    assert refreshed == {"expires_at": None}
-    # The coding agent narrows its token no further than its thread does.
-    refresh.assert_awaited_once_with(
-        run.thread_id,
-        github_proxy_repositories=None,
-        github_proxy_permissions=None,
-        force_refresh=False,
     )
     # Deprecated: an MDA deployment from before classifying routes and reading the task's
     # context from its catalog still asks, and is answered.
@@ -299,16 +284,6 @@ async def test_the_named_calls_around_a_model_call_never_plan_the_run(
     context = await TokenRun.answer(parts, run, "task_context", {"run_id": "run-1"})
     assert route == {"route": "fast", "persist": True}
     assert context == {"instructions": None, "message": None}
-
-    # A task worker works in its coordinator's sandbox, so it keeps that one's token fresh,
-    # with the coordinator's own scope.
-    refresh.reset_mock()
-    turn = AgentTurnSettings(
-        title_model_id="anthropic:claude-haiku-5-5", coordinator_thread_id="owner"
-    )
-    worker = run.model_copy(update={"settings": RunSettings(agent=turn)})
-    await TokenRun.answer(parts, worker, "refresh_github_proxy", {"run_id": "run-1"})
-    refresh.assert_awaited_once_with("owner", force_refresh=False)
 
 
 async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_off_its_path(
@@ -332,11 +307,7 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
     updated = AsyncMock()
     usage = AsyncMock()
     prompts: list[dict[str, object]] = []
-    expires_at = datetime(2030, 1, 1, tzinfo=UTC)
     monkeypatch.setattr(run_sandbox, "bind_mda_sandbox", bound)
-    monkeypatch.setattr(
-        run_sandbox, "refresh_thread_github_proxy", AsyncMock(return_value=expires_at)
-    )
     # Binding the sandbox found its execution image stale.
     monkeypatch.setattr(run_calls, "take_stale_boot", lambda thread_id: object())
     monkeypatch.setattr(run_calls, "StaleExecutionReporter", MagicMock(report=AsyncMock()))
@@ -379,13 +350,10 @@ async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_o
             "messages": asked,
             "in_sandbox": True,
             "sandbox_id": "sandbox-1",
-            "refresh_github_proxy": True,
         },
     )
 
     assert isinstance(prepared, dict) and isinstance(update := prepared["update"], dict)
-    # The token the run said was due is on the sandbox before its first model call asks.
-    assert prepared["github_proxy"] == {"expires_at": "2030-01-01T00:00:00Z"}
     assert update["work_dir"] == "/workspace"
     assert update["selected_model_id"] == "openai:gpt-6.1-sol"
     assert len(prompts) == 1
@@ -444,8 +412,8 @@ async def test_a_run_still_opening_its_sandbox_prepares_without_it_and_binds_it_
 ) -> None:
     """A run that reports its sandbox behind its preparation is prepared with the thread bound
     to none and no sandbox reached, files a Slack message brought left for its next turn;
-    reporting the sandbox binds the thread and puts the due GitHub token there. A thread left
-    with no sandbox is answered why, and the person told only once a call needs it."""
+    reporting the sandbox binds the thread. A thread left with no sandbox is answered why, and
+    the person told only once a call needs it."""
     from unittest.mock import AsyncMock, MagicMock
 
     from langchain_core.messages import messages_to_dict
@@ -460,12 +428,10 @@ async def test_a_run_still_opening_its_sandbox_prepares_without_it_and_binds_it_
         raise AssertionError("Preparing a turn never reaches a sandbox MDA is still opening")
 
     bound = AsyncMock()
-    refresh = AsyncMock(return_value=datetime(2030, 1, 1, tzinfo=UTC))
     stale = MagicMock(report=AsyncMock())
     told = AsyncMock()
     pending = {"slack_files_pending": [{"url": "https://files.invalid/a", "path": "/tmp/a"}]}
     monkeypatch.setattr(run_sandbox, "bind_mda_sandbox", bound)
-    monkeypatch.setattr(run_sandbox, "refresh_thread_github_proxy", refresh)
     monkeypatch.setattr(run_sandbox, "post_sandbox_unreachable_notification", told)
     monkeypatch.setattr(run_calls, "StaleExecutionReporter", stale)
     monkeypatch.setattr(agent, "load_thread_settings", AsyncMock(return_value={}))
@@ -509,9 +475,7 @@ async def test_a_run_still_opening_its_sandbox_prepares_without_it_and_binds_it_
 
     assert isinstance(prepared, dict) and isinstance(update := prepared["update"], dict)
     assert update["work_dir"] == "/workspace"
-    assert prepared["github_proxy"] is None
     bound.assert_not_awaited()
-    refresh.assert_not_awaited()
 
     # Binding the sandbox found its execution image stale.
     monkeypatch.setattr(run_calls, "take_stale_boot", lambda thread_id: object())
@@ -519,16 +483,14 @@ async def test_a_run_still_opening_its_sandbox_prepares_without_it_and_binds_it_
         parts,
         run,
         "bind_sandbox",
-        {"run_id": "run-1", "sandbox_id": "sandbox-1", "refresh_github_proxy": True},
+        {"run_id": "run-1", "sandbox_id": "sandbox-1"},
     )
 
-    assert answered == {"unreachable": None, "github_proxy": {"expires_at": "2030-01-01T00:00:00Z"}}
+    assert answered == {"unreachable": None}
     bound.assert_awaited_once_with("thread-1", "sandbox-1", open_error=None)
-    refresh.assert_awaited_once()
     stale.report.assert_awaited_once()
 
     # MDA could not open a sandbox for a thread bound to none.
-    refresh.reset_mock()
     bound.side_effect = SandboxUnreachableError(
         "thread-1", None, "could not open", reason="SandboxClientError: HTTP 503"
     )
@@ -536,15 +498,10 @@ async def test_a_run_still_opening_its_sandbox_prepares_without_it_and_binds_it_
         parts,
         run,
         "bind_sandbox",
-        {
-            "run_id": "run-1",
-            "sandbox_error": "SandboxClientError: HTTP 503",
-            "refresh_github_proxy": True,
-        },
+        {"run_id": "run-1", "sandbox_error": "SandboxClientError: HTTP 503"},
     )
 
-    assert answered == {"unreachable": "SandboxClientError: HTTP 503", "github_proxy": None}
-    refresh.assert_not_awaited()
+    assert answered == {"unreachable": "SandboxClientError: HTTP 503"}
     told.assert_not_awaited()
 
 
