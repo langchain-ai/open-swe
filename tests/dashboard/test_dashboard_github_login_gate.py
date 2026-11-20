@@ -59,7 +59,7 @@ async def test_gate_allows_explicit_user_case_insensitively(monkeypatch) -> None
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", " Alice, bob ")
     monkeypatch.delenv("ALLOWED_GITHUB_ORGS", raising=False)
     membership = AsyncMock()
-    monkeypatch.setattr(authorization, "is_user_active_org_member", membership)
+    monkeypatch.setattr(org_membership.Org, "verify_active_member", membership)
 
     await oauth.enforce_github_login_gate("ALICE")
 
@@ -71,11 +71,11 @@ async def test_gate_allows_member_of_any_configured_org(monkeypatch) -> None:
     monkeypatch.delenv("ALLOWED_GITHUB_USERS", raising=False)
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary, secondary")
     membership = AsyncMock(side_effect=[False, True])
-    monkeypatch.setattr(authorization, "is_user_active_org_member", membership)
+    monkeypatch.setattr(org_membership.Org, "verify_active_member", membership)
 
     await oauth.enforce_github_login_gate("Insider")
 
-    assert membership.await_args_list == [call("insider", "primary"), call("insider", "secondary")]
+    assert membership.await_args_list == [call("insider"), call("insider")]
 
 
 @pytest.mark.asyncio
@@ -86,7 +86,7 @@ async def test_gate_uses_union_when_both_allowlists_are_set(
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
     membership = AsyncMock(return_value=authorized_by == "org")
-    monkeypatch.setattr(authorization, "is_user_active_org_member", membership)
+    monkeypatch.setattr(org_membership.Org, "verify_active_member", membership)
 
     login = "alice" if authorized_by == "user" else "insider"
     await oauth.enforce_github_login_gate(login)
@@ -94,7 +94,7 @@ async def test_gate_uses_union_when_both_allowlists_are_set(
     if authorized_by == "user":
         membership.assert_not_awaited()
     else:
-        membership.assert_awaited_once_with("insider", "primary")
+        membership.assert_awaited_once_with("insider")
 
 
 @pytest.mark.parametrize("retry_after", ["0", "60"])
@@ -127,20 +127,108 @@ async def test_gate_retries_membership_lookup_within_deadline(
         else:
             with pytest.raises(HTTPException) as exc:
                 await oauth.enforce_github_login_gate("insider")
-            assert exc.value.status_code == 403
+            assert exc.value.status_code == 503
 
 
 @pytest.mark.asyncio
 async def test_gate_rejects_user_outside_both_allowlists(monkeypatch) -> None:
     monkeypatch.setenv("ALLOWED_GITHUB_USERS", "alice")
     monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
-    monkeypatch.setattr(authorization, "is_user_active_org_member", AsyncMock(return_value=False))
+    monkeypatch.setattr(org_membership.Org, "verify_active_member", AsyncMock(return_value=False))
 
     with pytest.raises(HTTPException) as exc:
         await oauth.enforce_github_login_gate("stranger")
 
     assert exc.value.status_code == 403
     assert exc.value.detail == "your GitHub account is not authorized"
+
+
+@pytest.mark.parametrize(
+    ("answers", "allowed", "status"),
+    [
+        ([org_membership.MembershipVerificationError(), True], True, None),
+        ([False, org_membership.MembershipVerificationError()], False, 503),
+        ([org_membership.MembershipVerificationError(), False], False, 503),
+        ([False, False], False, 403),
+    ],
+)
+async def test_multi_org_gate_distinguishes_denial_and_unverified(
+    monkeypatch, answers: list[bool | Exception], allowed: bool, status: int | None
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary,secondary")
+    membership = AsyncMock(side_effect=answers)
+    monkeypatch.setattr(org_membership.Org, "verify_active_member", membership)
+    assert await authorization.is_authorized_github_login("alice") is allowed
+    membership.side_effect = answers
+    if status is None:
+        await oauth.enforce_github_login_gate("alice")
+    else:
+        with pytest.raises(HTTPException) as exc:
+            await oauth.enforce_github_login_gate("alice")
+        assert exc.value.status_code == status
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx2.Response(404, json={"message": "Not Found"}),
+        httpx2.Response(200, json={"state": "pending"}),
+    ],
+)
+async def test_gate_denies_verified_nonmembers(monkeypatch, response: httpx2.Response) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_id_for_org", AsyncMock(return_value=1)
+    )
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    response.request = httpx2.Request("GET", "https://api.github.com/test")
+    monkeypatch.setattr(httpx2.AsyncClient, "request", AsyncMock(return_value=response))
+
+    with pytest.raises(HTTPException) as exc:
+        await oauth.enforce_github_login_gate("alice")
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("response", "rate_limited"),
+    [
+        (httpx2.Response(403, json={"message": "Resource not accessible"}), False),
+        (
+            httpx2.Response(
+                403,
+                headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "9999999999"},
+                json={"message": "API rate limit exceeded"},
+            ),
+            True,
+        ),
+        (httpx2.Response(200, json={}), False),
+    ],
+)
+async def test_gate_reports_only_evidenced_rate_limits(
+    monkeypatch, response: httpx2.Response, rate_limited: bool
+) -> None:
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "")
+    monkeypatch.setenv("ALLOWED_GITHUB_ORGS", "primary")
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_id_for_org", AsyncMock(return_value=1)
+    )
+    monkeypatch.setattr(
+        github_app, "get_github_app_installation_token", AsyncMock(return_value="token")
+    )
+    response.request = httpx2.Request("GET", "https://api.github.com/test")
+    monkeypatch.setattr(httpx2.AsyncClient, "request", AsyncMock(return_value=response))
+
+    assert not await authorization.is_authorized_github_login("alice")
+    with pytest.raises(HTTPException) as exc:
+        await oauth.enforce_github_login_gate("alice")
+    assert exc.value.status_code == 503
+    assert ("rate-limited" in exc.value.detail) is rate_limited
+    assert ("HTTP 403" in exc.value.detail) is (response.status_code == 403)
+    assert not await org_membership.is_user_active_org_member("alice", "primary")
 
 
 @pytest.mark.asyncio

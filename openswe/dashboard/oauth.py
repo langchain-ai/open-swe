@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 from starlette.requests import HTTPConnection
 
 from openswe.config import ENV
+from openswe.github.org_membership import MembershipVerificationError
 from openswe.github.token_auth import bearer_github_token
 from openswe.users.authorization import (
     allowed_logins,
@@ -237,8 +238,17 @@ def validate_github_login_allowlist() -> None:
 
 
 async def enforce_github_login_gate(login: str) -> None:
-    if await is_authorized_github_login(login):
-        return
+    try:
+        if await is_authorized_github_login(login, strict=True):
+            return
+    except MembershipVerificationError as exc:
+        detail = "GitHub organization membership could not be verified."
+        if exc.status_codes:
+            statuses = ", ".join(str(code) for code in exc.status_codes)
+            detail += f" GitHub returned HTTP {statuses} for membership checks."
+        if exc.rate_limited:
+            detail += " GitHub rate-limited a membership check."
+        raise HTTPException(503, detail) from exc
     logger.warning(
         "Rejected dashboard login",
         extra={"github_login": login, "reason": "not in allowed users or orgs"},

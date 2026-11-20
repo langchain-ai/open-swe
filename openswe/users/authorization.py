@@ -9,7 +9,7 @@ import hmac
 import logging
 
 from openswe.config import ENV
-from openswe.github.org_membership import is_user_active_org_member
+from openswe.github.org_membership import MembershipVerificationError, Org
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +30,22 @@ def allowed_orgs() -> tuple[str, ...]:
     return tuple(dict.fromkeys(org.lower() for org in ENV.ALLOWED_GITHUB_ORGS.get_list()))
 
 
-async def is_authorized_github_login(login: str) -> bool:
+async def is_authorized_github_login(login: str, *, strict: bool = False) -> bool:
     normalized = login.strip().lower()
     if not normalized:
         return False
     if any(hmac.compare_digest(normalized, allowed) for allowed in allowed_logins()):
         return True
+    failures: list[MembershipVerificationError] = []
     for org in allowed_orgs():
-        if await is_user_active_org_member(normalized, org):
-            return True
+        try:
+            if await Org(org).verify_active_member(normalized):
+                return True
+        except MembershipVerificationError as exc:
+            failures.append(exc)
+    if failures and strict:
+        raise MembershipVerificationError(
+            rate_limited=any(exc.rate_limited for exc in failures),
+            status_codes=tuple(sorted({code for exc in failures for code in exc.status_codes})),
+        )
     return False

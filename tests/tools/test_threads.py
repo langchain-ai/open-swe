@@ -469,6 +469,31 @@ async def test_automation_delivery_refuses_creator_failing_login_gate(
     recorded.assert_awaited_once()
 
 
+@pytest.mark.parametrize("rate_limited", [False, True])
+async def test_automation_delivery_reports_unverified_creator_without_sending(
+    monkeypatch: pytest.MonkeyPatch, rate_limited: bool
+) -> None:
+    _automation_run(
+        monkeypatch,
+        {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
+    )
+    detail = "GitHub organization membership could not be verified."
+    if rate_limited:
+        detail += " GitHub rate-limited a membership check."
+    post, recorded = _creator_dm(monkeypatch, gate=HTTPException(503, detail))
+
+    result = await slack_channels.slack_post_message("U_CREATOR", "digest")
+
+    assert result["success"] is False
+    assert "Could not verify" in result["error"]
+    assert "no longer authorized" not in result["error"]
+    assert ("rate-limited" in result["error"]) is rate_limited
+    assert "Nothing was delivered" in result["error"]
+    post.assert_not_awaited()
+    recorded.assert_awaited_once()
+    assert recorded.await_args.args[1] in result["error"]
+
+
 async def test_automation_delivery_refuses_unrelated_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

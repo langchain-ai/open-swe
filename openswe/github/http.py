@@ -650,7 +650,9 @@ class GitHubClient:
                 return None
             raise
         state = payload.get("state") if isinstance(payload, dict) else None
-        return state if isinstance(state, str) else None
+        if state not in ("active", "pending"):
+            raise ValueError("GitHub returned an invalid organization membership state")
+        return state
 
     async def team_members(self, org: str, team_slug: str) -> list[str]:
         """Logins of the people in ``org/team_slug``, child teams included."""

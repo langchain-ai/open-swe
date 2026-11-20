@@ -91,10 +91,15 @@ class CreatorDelivery:
             await enforce_github_login_gate(login)
         except HTTPException as exc:
             logger.warning(
-                "Refused automation delivery to a creator who fails the login gate",
+                "Refused automation delivery at the creator login gate",
                 extra={**log_context, "status_code": exc.status_code},
             )
-            error = f"The automation's creator {login} is no longer authorized to use Robin."
+            if exc.status_code == 403:
+                error = f"The automation's creator {login} is no longer authorized to use Robin."
+            else:
+                error = f"Could not verify whether the automation's creator {login} is authorized."
+                if exc.status_code == 503 and isinstance(exc.detail, str):
+                    error += f" {exc.detail}"
             await record_run_error(record, error)
             raise DeliveryRefused(f"{error} Nothing was delivered.") from exc
         user = await User.for_login("github", login)
