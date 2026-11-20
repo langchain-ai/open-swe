@@ -29,8 +29,22 @@ Always record one with `record_app_review_outcome`:
    - icons, hover, focus-visible, disabled, loading, empty and error states, light and dark, contrast, layout patterns and copy.
 
    Judge only what the diff changes.
+1. **Map every surface.**
+   Before opening a browser, work out from the code everywhere the diff shows up; never settle for the pages you happen to find by clicking around.
+   - For each changed component, hook, style, token or asset, find what imports it (`rg`), then what imports those, up to the routes, layouts and shared chrome (app header, top bar, sidebar, navigation, page shells) that render it.
+     Read the router for each route's real path.
+   - Note what gates each place: feature flags, permissions, plan or settings, data (a non-empty list, several data planes), viewport and route handles.
+   - Add the places the PR's title and description say it targets; they come first.
+   - List each distinct placement once, as `coverage.surfaces`: a component in the app header counts once, shot on the home page, not once per route.
+     A placement in shared chrome is shot on the app's landing or home page.
+1. **Reach each surface.**
+   Find where its gates hold on both sides: switch to an organization, workspace or project that meets them, open the route handle's page, or turn a flag on with the app's own client-side override (its flag panel, `localStorage` or a query parameter) on both sides.
+   Never change server data or settings to reach one.
+   Every surface you can't reach goes in `coverage.missed` with the gate that kept it hidden.
 1. **Shoot.**
-   For up to ten changed pages or states, reach the same state on both sides at one viewport, such as 1440×900, and run `return await shoot('<id>-before')` (`-after` on the preview) to save `/workspace/design-qa/<id>-before.png`, never a full page.
+   Shoot every surface on the map, the PR's targets first, then shared chrome, then the rest, up to fifteen; list any beyond that in `coverage.missed`.
+   The save takes at most 72 files: four per surface shot in both themes, two per recording.
+   For each, reach the same state on both sides at one viewport, such as 1440×900, and run `return await shoot('<id>-before')` (`-after` on the preview) to save `/workspace/design-qa/<id>-before.png`, never a full page.
    Shoot each dark too (`<id>-before-dark`, `-after-dark`) via `page.emulateMedia({ colorScheme: 'dark' })` or else the app's theme toggle, then switch back.
    Skip dark if a side lacks it, noting so in `layout_warnings`.
 1. **Record.**
@@ -45,6 +59,8 @@ Always record one with `record_app_review_outcome`:
   "summary": "- Members menu is a hand-rolled dropdown, not Macaw Select\n- Selected tab uses the accent background",
   "risk": {"score": 4, "reason": "A hand-rolled dropdown replaces Macaw's Select."},
   "video_status": "recorded",
+  "coverage": {"surfaces": ["Settings page", "App header on home"],
+   "missed": [{"title": "App header on home", "path": "/", "reason": "Shown only with the org_nav flag, which has no client-side override."}]},
   "design_system": {"sources": ["DESIGN.md", "macaw-design skill"],
    "findings": [{"severity": "error", "title": "Hand-rolled dropdown", "body": "A div with raw colors.", "rule": "Macaw · Select", "location": "src/Members.tsx:42", "scenario": "settings"}]},
   "scenarios": [{"id": "settings", "title": "Settings page", "path": "/settings", "before_url": "settings-before.png", "after_url": "settings-after.png",
@@ -53,7 +69,8 @@ Always record one with `record_app_review_outcome`:
    "annotations": [{"x": 120, "y": 64, "width": 300, "height": 40, "title": "Label clipped", "body": "Cut off at this width.", "severity": "error"}]}]}}
 ```
 
-- `summary`: at most four `- ` lines of 15 words or fewer, problems first.
+- `summary`: at most four `- ` lines of 15 words or fewer, problems first; name any surface in `coverage.missed`.
+- `coverage.surfaces`: every placement the map found, titled as its scenario is when shot; `coverage.missed`: each one without a scenario, with its `title`, `path` and the `reason` in one sentence.
 - `risk.reason`: one sentence of 20 words or fewer.
 - `findings`, worst first: `error` breaks a written rule or looks broken, such as a hand-rolled component, raw or off-scale value, missing focus, poor contrast, clipping or a broken theme; `warning` is only inconsistent.
   `rule` cites the design system, `location` is the diff's `file:line`, and `scenario` is an `id`.

@@ -20,6 +20,7 @@ import {
   type FrontendReviewRun,
   type FrontendRunStatus,
   type FrontendScenario,
+  type MissedSurface,
   type ScenarioShots,
   type ShotTheme,
 } from "../lib/capture"
@@ -170,6 +171,9 @@ export function ReportView({
             onShow={show}
           />
         )}
+      {report && report.missed.length > 0 && (
+        <MissedSurfaces missed={report.missed} />
+      )}
       {(run.status !== "complete" || run.error) && (
         <Card role="status" className="flex flex-col gap-space-2 p-space-4">
           <h3 className="text-sm font-medium">
@@ -493,6 +497,43 @@ function DesignSystemFindings({
           </div>
         )
       })}
+    </Card>
+  )
+}
+
+/** The surfaces the review mapped from the diff but couldn't capture, with why. */
+function MissedSurfaces({ missed }: { missed: readonly MissedSurface[] }) {
+  return (
+    <Card
+      aria-label="Not captured"
+      className="flex flex-col divide-y divide-default p-0"
+    >
+      <h3 className="px-space-4 py-space-2 text-sm font-semibold">
+        Not captured · {missed.length}
+      </h3>
+      {missed.map((surface, index) => (
+        <div
+          key={index}
+          className="flex min-w-0 flex-col gap-space-1 border-l-2 border-l-warning px-space-4 py-space-2"
+        >
+          <div className="flex min-w-0 flex-wrap items-center gap-x-space-3">
+            <span className="text-sm font-medium text-primary">
+              {surface.title}
+            </span>
+            {surface.path && (
+              <span
+                className="min-w-0 truncate font-mono text-xs text-tertiary"
+                title={surface.path}
+              >
+                {surface.path}
+              </span>
+            )}
+          </div>
+          {surface.reason && (
+            <p className="text-xs text-secondary">{surface.reason}</p>
+          )}
+        </div>
+      ))}
     </Card>
   )
 }

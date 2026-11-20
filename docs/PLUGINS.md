@@ -353,7 +353,7 @@ An app can have pull request reviews do work for it, such as screenshotting a fr
 }
 ```
 
-- `instructions`, at most 8,000 characters, are what the review does for the app, after reviewing the code.
+- `instructions`, at most 16,000 characters, are what the review does for the app, after reviewing the code.
   Reviews read them inside the app's own block; they can't change the review's rules, add tools, or widen where it writes.
 - `writes` names collections the manifest marks `"write": "app"`, so what a review saves can't be forged or deleted by people.
   The review saves with `save_app_document`: a document and files from its sandbox as attachments, in the reviewed repository's scope, only under keys starting `pulls/<number>/` of that pull request.

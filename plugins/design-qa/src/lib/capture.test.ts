@@ -165,8 +165,20 @@ describe("StoredCapture.read assessment", () => {
       },
     }).report
 
-  it("reads the risk, the design system check and each note's severity", () => {
+  it("reads the risk, the design system check, each note's severity and missed surfaces", () => {
     const report = read({
+      coverage: {
+        surfaces: ["Filters", "App header on home"],
+        missed: [
+          {
+            title: "App header on home",
+            path: "/",
+            reason: "Shown only behind a flag.",
+          },
+          { path: "/settings" },
+          { reason: "Neither a title nor a path." },
+        ],
+      },
       risk: { score: 4, reason: "Hand-rolled dropdown replaces Macaw Select." },
       design_system: {
         sources: ["smith-frontend/DESIGN.md", "Macaw docs"],
@@ -229,11 +241,20 @@ describe("StoredCapture.read assessment", () => {
     expect(
       report?.scenarios[0]?.annotations.map(({ severity }) => severity)
     ).toEqual(["error", "info"])
+    expect(report?.missed).toEqual([
+      {
+        title: "App header on home",
+        path: "/",
+        reason: "Shown only behind a flag.",
+      },
+      { title: "/settings", path: "/settings", reason: "" },
+    ])
   })
 
   it("leaves captures saved before reviews scored them unscored", () => {
     const report = read({ risk: { score: 9 } })
     expect(report?.risk).toBeNull()
     expect(report?.design_system).toBeNull()
+    expect(report?.missed).toEqual([])
   })
 })

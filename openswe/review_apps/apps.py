@@ -48,7 +48,7 @@ from openswe.utils.json_types import JsonObject
 
 # Where a review's browser saves the screenshots run code takes, in the run's sandbox.
 WORKSPACE = "/workspace/"
-MAX_FILES = 40
+MAX_FILES = 72
 # Past this, decoding a PNG to re-encode it costs more memory than the space is worth.
 MAX_RECODED_PIXELS = 16_000_000
 # GitHub lists at most 3,000 of a pull request's files, 100 a page; triage judges those.

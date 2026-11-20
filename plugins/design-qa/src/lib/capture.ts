@@ -71,6 +71,15 @@ export interface RiskAssessment {
   reason: string
 }
 
+/** A place the diff shows up that the review mapped but couldn't shoot. */
+export interface MissedSurface {
+  title: string
+  /** The browser path it lives at, when the review knew one. */
+  path: string | null
+  /** The gate that kept it hidden, such as a feature flag or missing data. */
+  reason: string
+}
+
 /** One page or interaction state, captured on the base preview and the pull request's. */
 export interface FrontendScenario {
   id: string
@@ -124,6 +133,8 @@ export interface FrontendReport {
   assessment_error: string | null
   build_verification: "unverified" | "verified"
   video_status: "unavailable" | "recorded"
+  /** The surfaces the review mapped from the diff but couldn't capture. */
+  missed: MissedSurface[]
   scenarios: FrontendScenario[]
 }
 
@@ -272,6 +283,7 @@ export class StoredCapture {
                 ["unavailable", "recorded"],
                 "unavailable"
               ),
+              missed: StoredCapture.missed(reported.fields("coverage")),
               scenarios,
             },
     }
@@ -355,6 +367,23 @@ export class StoredCapture {
         ]
       }),
     }
+  }
+
+  private static missed(found: Fields): MissedSurface[] {
+    return found.list("missed").flatMap((value) => {
+      const surface = Fields.of(value)
+      const path = surface.text("path")
+      const title = surface.text("title") ?? path
+      return title === null
+        ? []
+        : [
+            {
+              title,
+              path,
+              reason: surface.text("reason") ?? "",
+            },
+          ]
+    })
   }
 
   private static scenario(value: JsonValue, index: number): FrontendScenario {

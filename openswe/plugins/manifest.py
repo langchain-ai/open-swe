@@ -101,7 +101,7 @@ class ReviewStep(BaseModel):
     request that changes a file one pattern matches and no ``!`` pattern does.
     """
 
-    instructions: str = Field(min_length=1, max_length=8000)
+    instructions: str = Field(min_length=1, max_length=16_000)
     writes: list[CollectionName] = Field(default_factory=list, max_length=8)
     browser: bool = False
     paths: list[ReviewPath] = Field(default_factory=list, max_length=64)

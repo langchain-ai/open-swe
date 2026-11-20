@@ -10,6 +10,6 @@ Args:
 - key: Where the document goes, starting `pulls/<number>/`.
 - document: The JSON object the app's instructions describe, at most 256 kB.
 - files: Optional attachments, as `{name: path}`: each name of letters, digits, `.`, `_` and `-`, and each path an absolute path under `/workspace/` of a PNG, JPEG, WebP or GIF image, or a WebM or MP4 video, at most 8 MiB.
-  At most 40.
+  At most 72.
 
 Returns: `{success: True, key}`, or `{success: False, error}`.

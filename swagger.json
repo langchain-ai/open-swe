@@ -7438,7 +7438,7 @@
             "type": "boolean"
           },
           "instructions": {
-            "maxLength": 8000,
+            "maxLength": 16000,
             "minLength": 1,
             "title": "Instructions",
             "type": "string"
