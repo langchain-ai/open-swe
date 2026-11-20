@@ -539,6 +539,11 @@ export interface HostApi extends RpcTarget {
   /** Profiles for GitHub logins, in the order asked; at most 100 per call. */
   people(logins: string[]): Promise<Person[]>
   /**
+   * People Robin knows with a GitHub login whose name or login matches
+   * `query`, closest first; an empty `query` lists them by name. At most 50.
+   */
+  searchPeople(query: string, limit?: number): Promise<Person[]>
+  /**
    * The GitHub repositories the person shared with the plugin. It reaches no
    * other: a call naming one fails with status 403.
    */
@@ -555,9 +560,14 @@ export interface HostApi extends RpcTarget {
   /**
    * Open pull requests in every repository the person shared and can still
    * read, by the person's part in them, newest activity first: every page of
-   * GitHub's search, or only `page` (1 to 10) of it.
+   * GitHub's search, or only `page` (1 to 10) of it. With `author`, `role`
+   * must be `author`: that GitHub login's pull requests instead.
    */
-  searchPulls(role: PullRequestRole, page?: number): Promise<PullRequestSearch>
+  searchPulls(
+    role: PullRequestRole,
+    page?: number,
+    author?: string
+  ): Promise<PullRequestSearch>
   /**
    * Agent threads from `options.source` the person may read, most recently
    * updated first. These and the other thread calls need `threads:read`.

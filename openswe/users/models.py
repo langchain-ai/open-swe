@@ -15,10 +15,12 @@ from typing import TYPE_CHECKING, Literal, Self
 from uuid import UUID, uuid7
 
 from sqlalchemy import (
+    ColumnElement,
     ForeignKey,
     Select,
     Text,
     bindparam,
+    case,
     delete,
     func,
     or_,
@@ -496,6 +498,41 @@ class User(Base):
                 .limit(limit)
             )
             return list(rows.all()), total
+
+    @classmethod
+    async def on_github(cls, *, search: str = "", limit: int = 20) -> list[Self]:
+        """People with a GitHub login whose name or login matches ``search``, closest first."""
+        github = (UserIdentity.provider == "github") & (UserIdentity.login != "")
+        query = select(cls).where(cls.identities.any(github))
+        ranking: list[ColumnElement[int]] = []
+        if search := search.strip():
+            fuzzy = FuzzySearch(search)
+            query = query.where(
+                or_(
+                    fuzzy.condition(cls.display_name),
+                    cls.identities.any(github & fuzzy.condition(UserIdentity.login)),
+                )
+            )
+            starts = or_(
+                cls.display_name.istartswith(search, autoescape=True),
+                cls.display_name.icontains(f" {search}", autoescape=True),
+                cls.identities.any(
+                    github & UserIdentity.login.istartswith(search, autoescape=True)
+                ),
+            )
+            contains = or_(
+                cls.display_name.icontains(search, autoescape=True),
+                cls.identities.any(github & UserIdentity.login.icontains(search, autoescape=True)),
+            )
+            ranking.append(case((starts, 0), (contains, 1), else_=2))
+        named = func.lower(func.nullif(cls.display_name, ""))
+        async with postgres.session() as session:
+            rows = await session.scalars(
+                cls._with_identities(query)
+                .order_by(*ranking, named.asc().nulls_last(), cls.id)
+                .limit(limit)
+            )
+            return list(rows.all())
 
     @classmethod
     async def for_identity(

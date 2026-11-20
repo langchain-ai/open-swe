@@ -6,6 +6,8 @@ export type UsageAction =
   | "tab_requested"
   | "tab_mine"
   | "tab_pinned"
+  | "tab_people"
+  | "person_picked"
   | "pull_opened"
   | "pin"
   | "unpin"

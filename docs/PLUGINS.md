@@ -114,7 +114,7 @@ The manifest is a JSON script inside the bundle, read when a version is publishe
 | *(none needed)* | navigate, show toasts, open links, look up people, and list or pick repositories |
 | `storage` | keep JSON documents and files attached to them, private to the person or shared per repository |
 | `realtime` | join live rooms: an ordered update log plus presence, for editing together |
-| `github:read` | read repository info, refs, trees, files, history and pull requests, and search pull requests |
+| `github:read` | read repository info, refs, trees, files, history and pull requests, search pull requests, and search the people Robin knows |
 | `github:write` | create branches, commit files and open pull requests (also allows reads) |
 | `agent` | an agent the person chats with in a dock beside the plugin, with tools the plugin provides |
 | `threads:read` | list and read the agent threads the person may read, including Robin's incident investigations: status, messages and published artifacts |
@@ -237,6 +237,13 @@ const src = ada.avatar ? URL.createObjectURL(ada.avatar) : undefined
 
 The frame can't load remote images, so the web UI fetches each picture and hands it over as a Blob.
 Results come back in the order you asked, logins with no profile are left out, and the client caches profiles for the frame's lifetime.
+
+To let the person pick someone, search the people Robin knows with a GitHub login by name or login, closest first; an empty query lists them by name.
+This needs `github:read` or `github:write`:
+
+```ts
+const found = await host.people.search("ada", { limit: 10 }) // at most 50, 20 by default
+```
 
 ### Storage
 
@@ -423,6 +430,7 @@ const { pulls, incomplete } = await host.pulls.search({ role: "review-requested"
 ```
 
 `review-requested` includes requests to the person's teams.
+With `author`, `role` must be `"author"`: `host.pulls.search({ role: "author", author: "ada" })` lists that login's pull requests in the same repositories.
 `incomplete` says some are missing because GitHub's search timed out or a later page failed; its search lists at most 1000.
 Reading every page can take a few seconds per hundred pull requests, so to show the first ones sooner, ask for one `page` (1 to 10) at a time and follow `nextPage` until it is `null`:
 

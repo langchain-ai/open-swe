@@ -178,6 +178,13 @@ export class PluginHost {
         return person ? [person] : []
       })
     },
+    /** People Robin knows on GitHub whose name or login matches `query`, closest first. */
+    search: async (query: string, options: { limit?: number } = {}) => {
+      const found = await settle(this.api.searchPeople(query, options.limit))
+      for (const person of found)
+        this.profiles.set(person.login.toLowerCase(), person)
+      return found
+    },
   }
 
   readonly ui = {
@@ -240,10 +247,15 @@ export class PluginHost {
      * Open pull requests in every shared repository the person can still
      * read, by their part in them; `review-requested` includes their teams'.
      * With `page`, only that page of GitHub's search, so the first can show
-     * before the rest load; follow `nextPage` for the others.
+     * before the rest load; follow `nextPage` for the others. With `author`
+     * (and `role: "author"`), that GitHub login's pull requests instead.
      */
-    search: (options: { role: PullRequestRole; page?: number }) =>
-      settle(this.api.searchPulls(options.role, options.page)),
+    search: (options: {
+      role: PullRequestRole
+      page?: number
+      author?: string
+    }) =>
+      settle(this.api.searchPulls(options.role, options.page, options.author)),
   }
 
   /**

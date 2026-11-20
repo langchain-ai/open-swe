@@ -69,6 +69,17 @@ async def test_user_search_filters_before_pagination_without_duplicate_identitie
         assert [user.id for user in users] == [expected.id]
 
 
+async def test_the_github_directory_puts_closer_matches_and_named_people_first() -> None:
+    ada = await User.sign_in("github", "1", login="ada", display_name="Ada Janicki")
+    bob = await User.sign_in("github", "2", login="bob", display_name="Bob Nickel")
+    carol = await User.sign_in("github", "3", login="carol")
+
+    assert [user.id for user in await User.on_github()] == [ada.id, bob.id, carol.id]
+    assert [user.id for user in await User.on_github(search="nick")] == [bob.id, ada.id]
+    assert [user.id for user in await User.on_github(search="CAR")] == [carol.id]
+    assert [user.id for user in await User.on_github(search="janicki", limit=1)] == [ada.id]
+
+
 async def test_linking_slack_reaches_the_same_person_from_either_side() -> None:
     github_user = await User.sign_in("github", "1001", login="OctoCat")
     linked = await github_user.link("slack", "U0123", login="octo", team_id="T9")

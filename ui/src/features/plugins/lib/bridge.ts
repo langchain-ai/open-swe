@@ -818,6 +818,18 @@ export class PluginHostApi extends RpcTarget implements HostApi {
     })
   }
 
+  searchPeople(query: string, limit?: number) {
+    return this.#budget.run(() => {
+      if (typeof query !== "string" || query.length > 100)
+        invalid("query must be a string of at most 100 characters")
+      return pluginsApi.searchPeople(
+        this.#host().plugin.id,
+        query,
+        boundedInteger(limit, "limit", 1, 50)
+      )
+    })
+  }
+
   repositories(): Promise<Array<SharedRepository>> {
     return this.#budget.run(() =>
       this.#shared(this.#host().plugin.repositories)
@@ -889,7 +901,8 @@ export class PluginHostApi extends RpcTarget implements HostApi {
 
   searchPulls(
     role: PullRequestRole,
-    page?: number
+    page?: number,
+    author?: string
   ): Promise<PullRequestSearch> {
     return this.#budget.run(() => {
       if (
@@ -897,10 +910,14 @@ export class PluginHostApi extends RpcTarget implements HostApi {
         (!Number.isInteger(page) || page < 1 || page > 10)
       )
         invalid("page must be an integer from 1 to 10")
+      const login = optionalText(author, "author", 39)
+      if (login !== undefined && role !== "author")
+        invalid('author needs role "author"')
       return pluginsApi.searchPulls(
         this.#host().plugin.id,
         pullRole(role),
-        page
+        page,
+        login
       )
     })
   }

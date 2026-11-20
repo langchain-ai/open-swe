@@ -15,6 +15,7 @@ import { CaretLeftIcon } from "@phosphor-icons/react/dist/ssr/CaretLeft"
 import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
 import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
 import { PushPinIcon } from "@phosphor-icons/react/dist/ssr/PushPin"
+import { UsersIcon } from "@phosphor-icons/react/dist/ssr/Users"
 import { useQueryClient } from "@tanstack/react-query"
 import { Fragment, useState } from "react"
 
@@ -50,6 +51,7 @@ import type { InboxRoute, InboxScope } from "../lib/route"
 import { RouteLink, useRouter } from "../lib/router"
 import { Author } from "./Author"
 import { OpenPullRequestInput } from "./OpenPullRequestInput"
+import { PersonPicker } from "./PersonPicker"
 import { ShareRepositories } from "./ShareRepositories"
 import { CaptureAction } from "./CaptureAction"
 import { PinButton } from "./PinButton"
@@ -119,6 +121,12 @@ export function InboxPage() {
                   icon: PushPinIcon,
                   "aria-label": `Pinned${current.scope === "pinned" ? ", selected" : ""}`,
                 },
+                {
+                  value: "people",
+                  display: "People",
+                  icon: UsersIcon,
+                  "aria-label": `People${current.scope === "people" ? ", selected" : ""}`,
+                },
               ]}
             />
             <Button
@@ -131,7 +139,11 @@ export function InboxPage() {
               Share repositories
             </Button>
           </div>
-          <PullRequests key={current.scope} route={current} shared={shared} />
+          <PullRequests
+            key={`${current.scope}:${current.person ?? ""}`}
+            route={current}
+            shared={shared}
+          />
         </>
       )}
     </main>
@@ -142,6 +154,7 @@ const TAB_ACTIONS = {
   "review-requested": "tab_requested",
   mine: "tab_mine",
   pinned: "tab_pinned",
+  people: "tab_people",
 } as const satisfies Record<InboxScope, UsageAction>
 
 const DESCRIPTIONS: Record<InboxScope, string> = {
@@ -150,6 +163,8 @@ const DESCRIPTIONS: Record<InboxScope, string> = {
   mine: "Your open PRs and their capture status, in the repositories you shared.",
   pinned:
     "PRs you pinned stay here until you unpin them. Only you see your pins.",
+  people:
+    "Anyone's open PRs and their capture status, in the repositories you shared. Search by name or GitHub handle.",
 }
 
 const EMPTY: Record<InboxScope, { title: string; body: string }> = {
@@ -165,6 +180,10 @@ const EMPTY: Record<InboxScope, { title: string; body: string }> = {
     title: "You don't have anything pinned yet! Get to pinning!",
     body: "Pin a PR from its card or its QA page to keep it here.",
   },
+  people: {
+    title: "No open PRs from them",
+    body: "Their open PRs in the repositories you shared appear here, including those without captures.",
+  },
 }
 
 function PullRequests({
@@ -174,10 +193,11 @@ function PullRequests({
   route: InboxRoute
   shared: readonly string[]
 }) {
-  const { scope } = route
+  const { scope, person } = route
   const { navigate } = useRouter()
   const queryClient = useQueryClient()
-  const search = useInboxSearch(scope)
+  const search = useInboxSearch(scope, person)
+  const choosing = scope === "people" && !person
   const [text, setText] = useState("")
   const [showSkipped, setShowSkipped] = useState(false)
   const { preferences, change } = useInboxPreferences()
@@ -239,64 +259,84 @@ function PullRequests({
           ? "My PRs for Design QA"
           : scope === "pinned"
             ? "Pinned PRs for Design QA"
-            : "Requested PRs for Design QA"
+            : scope === "people"
+              ? "A person's PRs for Design QA"
+              : "Requested PRs for Design QA"
       }
     >
       <p className="mb-space-3 text-xs text-secondary">{DESCRIPTIONS[scope]}</p>
       <div className="mb-space-4 flex flex-wrap items-center gap-space-3">
-        <Input
-          size="sm"
-          className="min-w-40 flex-1 sm:max-w-sm"
-          aria-label="Filter pull requests"
-          placeholder="Filter by title, repo, or number…"
-          debounceMs={0}
-          value={text}
-          onChange={(next) => {
-            setText(next)
-            if (route.index !== 0) turnTo(0)
-          }}
-        />
-        <Select
-          size="sm"
-          aria-label="Sort pull requests"
-          triggerClassName="w-auto"
-          value={sort}
-          options={[...SORTS]}
-          renderValue={(option) => `Sort: ${option.label ?? option.value}`}
-          onChange={(next) => {
-            if (!next) return
-            record("sort_changed")
-            change({ sort: next })
-            if (route.index !== 0) turnTo(0)
-          }}
-        />
-        <span className="text-xs text-secondary" aria-live="polite">
-          {search.pulls === undefined
-            ? "Loading pull requests…"
-            : `${matching.length}${search.more ? "+" : ""} PR${matching.length === 1 && !search.more ? "" : "s"}${filter ? " match" : ""}${search.more ? " · loading more…" : ""}`}
-        </span>
-        {skipped.length > 0 && (
-          <Switch
-            size="sm"
-            checked={showSkipped}
-            onChange={(next) => {
-              setShowSkipped(next)
-              if (route.index !== 0) turnTo(0)
+        {scope === "people" && (
+          <PersonPicker
+            selected={person}
+            onPick={(login) => {
+              if (login) record("person_picked")
+              navigate({
+                page: "inbox",
+                scope: "people",
+                index: 0,
+                ...(login ? { person: login } : {}),
+              })
             }}
-            label={`Show ${skipped.length} skipped`}
           />
         )}
-        <Button
-          size="sm"
-          color="secondary"
-          variant="outlined"
-          disabled={fetching}
-          onClick={() => {
-            void queryClient.invalidateQueries({ queryKey: ["inbox"] })
-          }}
-        >
-          {fetching ? "Refreshing…" : "Refresh"}
-        </Button>
+        {!choosing && (
+          <>
+            <Input
+              size="sm"
+              className="min-w-40 flex-1 sm:max-w-sm"
+              aria-label="Filter pull requests"
+              placeholder="Filter by title, repo, or number…"
+              debounceMs={0}
+              value={text}
+              onChange={(next) => {
+                setText(next)
+                if (route.index !== 0) turnTo(0)
+              }}
+            />
+            <Select
+              size="sm"
+              aria-label="Sort pull requests"
+              triggerClassName="w-auto"
+              value={sort}
+              options={[...SORTS]}
+              renderValue={(option) => `Sort: ${option.label ?? option.value}`}
+              onChange={(next) => {
+                if (!next) return
+                record("sort_changed")
+                change({ sort: next })
+                if (route.index !== 0) turnTo(0)
+              }}
+            />
+            <span className="text-xs text-secondary" aria-live="polite">
+              {search.pulls === undefined
+                ? "Loading pull requests…"
+                : `${matching.length}${search.more ? "+" : ""} PR${matching.length === 1 && !search.more ? "" : "s"}${filter ? " match" : ""}${search.more ? " · loading more…" : ""}`}
+            </span>
+            {skipped.length > 0 && (
+              <Switch
+                size="sm"
+                checked={showSkipped}
+                onChange={(next) => {
+                  setShowSkipped(next)
+                  if (route.index !== 0) turnTo(0)
+                }}
+                label={`Show ${skipped.length} skipped`}
+              />
+            )}
+            <Button
+              size="sm"
+              color="secondary"
+              variant="outlined"
+              disabled={fetching}
+              onClick={() => {
+                void queryClient.invalidateQueries({ queryKey: ["inbox"] })
+              }}
+            >
+              {fetching ? "Refreshing…" : "Refresh"}
+            </Button>
+          </>
+        )}
       </div>
 
       {failed && (
@@ -325,6 +365,20 @@ function PullRequests({
             <Skeleton key={slot} className="h-64 w-full" />
           ))}
         </div>
+      ) : choosing ? (
+        <Card className="flex flex-col items-center gap-space-2 p-space-8 text-center">
+          <UsersIcon
+            size={28}
+            className="text-icon-secondary"
+            aria-hidden="true"
+          />
+          <h2 className="text-sm font-medium text-primary">
+            Pick someone to see their PRs
+          </h2>
+          <p className="max-w-sm text-sm text-secondary">
+            Search for anyone who uses Robin by name or GitHub handle.
+          </p>
+        </Card>
       ) : shown.length === 0 && !failed ? (
         <Card className="flex flex-col items-center gap-space-2 p-space-8 text-center">
           <EyeIcon

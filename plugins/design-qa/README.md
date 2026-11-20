@@ -8,6 +8,7 @@ The app itself uses only the generic app API.
 ## Inbox
 
 The inbox lists open pull requests, including those without captures, in the repositories you shared with the app: **Requested from you** (GitHub's `review-requested`, which includes your teams) and **My PRs**.
+**People** lists anyone's open pull requests: search the people Robin knows by name or GitHub handle and pick one; the tab's path names them (`/people/<login>`), so going back returns to them.
 **Pinned** lists the pull requests you pinned from a card or a pull request's page, closed ones included, until you unpin them; a pin shows in it at once, and each card is then read from GitHub; pins are kept in your private storage, and a pin in a repository you stop sharing is hidden until you share it again.
 Pull requests the review skipped and never captured, such as ones that change no frontend file, are hidden; **Show N skipped** lists them again.
 Each tab lists 10, 15 (the default), 20, 50 or 100 pull requests a page, sorted by recent updates, highest or lowest risk, most design system issues, or newest or oldest; Design QA keeps both choices for you in its private storage.
@@ -23,7 +24,7 @@ It reads each repository's captures in one query rather than one per pull reques
 Cards show the first paired screenshot, in the dashboard's theme when the review shot it in both, the title, who opened the pull request and the latest capture's date, with badges only for what needs attention: a later capture attempt that was blocked or failed (its reason on hover), a capture of an earlier commit than the pull request's head, a capture or review still running, the risk score and the design system result.
 **Open PR** takes `owner/repo#number`, a GitHub pull request URL, or a bare number when you share one repository, and opens it when you press **Open PR** or Enter; pasting only fills the field.
 
-Design QA counts what people do in it, by action name only (switching tabs, opening a pull request, pinning, requesting a capture, switching theme or comparison, asking the agent, opening GitHub or Robin's PR view), with `analytics.track` in Robin's product analytics.
+Design QA counts what people do in it, by action name only (switching tabs, picking a person, opening a pull request, pinning, requesting a capture, switching theme or comparison, asking the agent, opening GitHub or Robin's PR view), with `analytics.track` in Robin's product analytics.
 
 ## Comparing
 
@@ -88,9 +89,9 @@ It does not renew that watch indefinitely and starts at most five recovery revie
 Drafts follow the author's existing draft-review preference, falling back to the instance default.
 
 Publishing and merging are separate steps.
-Build version 0.6.0 from this directory, publish `bundle/index.html` as a new release of the existing app, update the installed app in Settings → Apps, and have an instance admin approve that same release globally under Defaults → Apps in reviews.
+Build version 0.7.0 from this directory, publish `bundle/index.html` as a new release of the existing app, update the installed app in Settings → Apps, and have an instance admin approve that same release globally under Defaults → Apps in reviews.
 Reviews follow `review.md` and `paths` from the approved release only, so the design system check, recordings and frontend-only triage start once that release is approved, and triage once the backend that reads `paths` is deployed; an earlier backend ignores them.
-Dark captures start once 0.5.0 is approved, and surface mapping and **Not captured** once 0.6.0 is; 0.6.0's review instructions exceed 8,000 characters, so publish it only once the backend that accepts up to 16,000 is deployed; reading the inbox's search a page at a time and **Robin PR view** need a web UI and backend with the paged search and `nav.openReview`, and an earlier web UI reads every page at once.
+Dark captures start once 0.5.0 is approved, and surface mapping and **Not captured** once 0.6.0 is; 0.6.0's review instructions exceed 8,000 characters, so publish it only once the backend that accepts up to 16,000 is deployed; the **People** tab needs a web UI and backend with `people.search` and `pulls.search`'s `author`, and fails to search on an earlier one; reading the inbox's search a page at a time and **Robin PR view** need a web UI and backend with the paged search and `nav.openReview`, and an earlier web UI reads every page at once.
 
 Before capture, verify Preview checks names the actual deployment check, review guidelines identify a comparison base, and Review browser lists only the allowed review/base domains and an existing tool name from Robin's bot kit.
 A legacy `connection/tool` sign-in setting is invalid in the current backend and must be corrected before saving settings.

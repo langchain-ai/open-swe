@@ -35,7 +35,9 @@ export function RouterProvider({ children }: { children: ReactNode }) {
   )
   if (
     route.page === "inbox" &&
-    (route.scope !== inbox.scope || route.index !== inbox.index)
+    (route.scope !== inbox.scope ||
+      route.index !== inbox.index ||
+      route.person !== inbox.person)
   )
     setInbox(route)
   useEffect(

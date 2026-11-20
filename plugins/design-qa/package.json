@@ -1,6 +1,6 @@
 {
   "name": "openswe-plugin-design-qa",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "Design QA: inspect the saved visual captures of your pull requests in Robin",
   "type": "module",

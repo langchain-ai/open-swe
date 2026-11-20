@@ -13,6 +13,7 @@ import {
 import { usePluginHost } from "@openswe/plugin-sdk/react"
 import {
   infiniteQueryOptions,
+  keepPreviousData,
   queryOptions,
   useInfiniteQuery,
   useMutation,
@@ -40,7 +41,7 @@ import { InboxOrder, type InboxPreferences } from "./inboxOrder"
 import type { InboxScope } from "./route"
 
 /** An inbox tab GitHub's search fills, rather than the person's pins. */
-export type SearchScope = Exclude<InboxScope, "pinned">
+export type SearchScope = Exclude<InboxScope, "pinned" | "people">
 
 /** The most pull requests read from GitHub at once, leaving the web UI's request budget room for the rest. */
 const PULL_READS = 6
@@ -105,7 +106,9 @@ export interface RepositoryCaptures {
 
 export const keys = {
   repositories: ["repositories"] as const,
-  inboxSearch: (scope: SearchScope) => ["inbox", "search", scope] as const,
+  /** A tab's search, or, with `author`, the People tab's search of that login's pull requests. */
+  inboxSearch: (scope: SearchScope, author?: string) =>
+    ["inbox", "search", scope, author?.toLowerCase() ?? ""] as const,
   /** A pull request GitHub updated, such as with a new title or head, reads again. */
   inboxPull: ({ repository, number, updatedAt }: PullRequestSummary) =>
     ["inbox", "pull", repository, number, updatedAt ?? ""] as const,
@@ -118,6 +121,7 @@ export const keys = {
   preferences: ["preferences"] as const,
   pins: ["pins"] as const,
   people: (logins: readonly string[]) => ["people", ...logins] as const,
+  peopleSearch: (query: string) => ["people-search", query] as const,
   runs: (pr: PullRequestRef) => ["runs", pr.owner, pr.repo, pr.number] as const,
   run: (pr: PullRequestRef, id: string) =>
     ["run", pr.owner, pr.repo, pr.number, id] as const,
@@ -310,14 +314,20 @@ export class DesignQa {
 
   /**
    * Page `page` of the open pull requests asking the person (or a team of
-   * theirs) for review, or their own, as GitHub's search lists them, newest
-   * activity first: no captures read yet.
+   * theirs) for review, or their own, or with `author` that login's, as
+   * GitHub's search lists them, newest activity first: no captures read yet.
    */
-  searchPage(scope: SearchScope, page: number): Promise<PullRequestSearch> {
-    return this.host.pulls.search({
-      role: scope === "mine" ? "author" : "review-requested",
-      page,
-    })
+  searchPage(
+    scope: SearchScope,
+    page: number,
+    author?: string
+  ): Promise<PullRequestSearch> {
+    return author
+      ? this.host.pulls.search({ role: "author", page, author })
+      : this.host.pulls.search({
+          role: scope === "mine" ? "author" : "review-requested",
+          page,
+        })
   }
 
   /** The last list a tab's search found, kept private to the person. */
@@ -510,10 +520,10 @@ export function useShareRepositories() {
   })
 }
 
-const searchQuery = (qa: DesignQa, scope: SearchScope) =>
+const searchQuery = (qa: DesignQa, scope: SearchScope, author?: string) =>
   infiniteQueryOptions({
-    queryKey: keys.inboxSearch(scope),
-    queryFn: ({ pageParam }) => qa.searchPage(scope, pageParam),
+    queryKey: keys.inboxSearch(scope, author),
+    queryFn: ({ pageParam }) => qa.searchPage(scope, pageParam, author),
     initialPageParam: 1,
     getNextPageParam: (last: PullRequestSearch) => last.nextPage ?? undefined,
     staleTime: 60_000,
@@ -546,30 +556,37 @@ const currentPullQuery = (
 /**
  * An inbox tab's pull requests: the person's pins, or GitHub's search, shown
  * from its first page while the rest load. Until the first page comes, the
- * tab shows what the search found last time, and it remembers this one once
- * every page has loaded.
+ * person's own tabs show what the search found last time, and remember this
+ * one once every page has loaded. The People tab searches `author`'s, and
+ * lists nothing until someone is picked.
  */
-export function useInboxSearch(scope: InboxScope): InboxSearch {
+export function useInboxSearch(
+  scope: InboxScope,
+  author?: string
+): InboxSearch {
   const qa = useDesignQa()
   const queryClient = useQueryClient()
-  const searched: SearchScope | null = scope === "pinned" ? null : scope
-  const pins = useQuery({ ...pinsQuery(qa), enabled: searched === null })
+  const people = scope === "people"
+  const searched: SearchScope | null =
+    scope === "pinned" || (people && !author) ? null : people ? "mine" : scope
+  const remembers = searched !== null && !people
+  const pins = useQuery({ ...pinsQuery(qa), enabled: scope === "pinned" })
   const pinned = (pins.data ?? []).map((pin) => Pins.summary(pin, null))
   const pinReads = useQueries({
     queries: pinned.map((pull) => ({
       ...currentPullQuery(qa, pull, true),
-      enabled: searched === null,
+      enabled: scope === "pinned",
     })),
   })
   const snapshot = useQuery({
     queryKey: keys.inboxSnapshot(searched ?? "mine"),
     queryFn: () => qa.snapshot(searched ?? "mine"),
-    enabled: searched !== null,
+    enabled: remembers,
     staleTime: Infinity,
     retry: false,
   })
   const search = useInfiniteQuery({
-    ...searchQuery(qa, searched ?? "mine"),
+    ...searchQuery(qa, searched ?? "mine", people ? author : undefined),
     enabled: searched !== null,
     // Review requests come and go on GitHub, which tells the app nothing.
     refetchInterval: 5 * 60_000,
@@ -594,7 +611,7 @@ export function useInboxSearch(scope: InboxScope): InboxSearch {
       ? undefined
       : JSON.stringify(InboxSnapshot.document(snapshot.data ?? []))
   useEffect(() => {
-    if (!searched || !finished || remembered === undefined) return
+    if (!searched || !remembers || !finished || remembered === undefined) return
     if (finished === remembered) return
     const document = JSON.parse(finished) as JsonObject
     qa.saveSnapshot(searched, document).then(
@@ -606,8 +623,17 @@ export function useInboxSearch(scope: InboxScope): InboxSearch {
       (error: unknown) =>
         console.warn("Could not remember the inbox's search", error)
     )
-  }, [qa, queryClient, searched, finished, remembered])
+  }, [qa, queryClient, searched, remembers, finished, remembered])
 
+  if (people && !author)
+    return {
+      pulls: [],
+      remembered: false,
+      incomplete: false,
+      fetching: false,
+      more: false,
+      error: null,
+    }
   if (searched === null)
     return {
       pulls: pins.data?.map((pin, index) =>
@@ -619,9 +645,10 @@ export function useInboxSearch(scope: InboxScope): InboxSearch {
       more: false,
       error: pins.error,
     }
+  const kept = remembers ? snapshot.data : undefined
   return {
-    pulls: live ?? snapshot.data ?? undefined,
-    remembered: !live && Boolean(snapshot.data),
+    pulls: live ?? kept ?? undefined,
+    remembered: !live && Boolean(kept),
     incomplete,
     fetching: search.isFetching,
     more: Boolean(live) && hasNextPage && !isError,
@@ -941,6 +968,18 @@ export function usePeople(logins: readonly (string | null)[]) {
   return new Map<string, Person>(
     (people.data ?? []).map((person) => [person.login.toLowerCase(), person])
   )
+}
+
+/** People Robin knows on GitHub whose name or login matches `query`, closest first. */
+export function usePeopleSearch(query: string) {
+  const host = usePluginHost()
+  const text = query.trim()
+  return useQuery({
+    queryKey: keys.peopleSearch(text.toLowerCase()),
+    queryFn: () => host.people.search(text),
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
+  })
 }
 
 /** Names the web UI's tab after what is open; `null` leaves it named Design QA. */

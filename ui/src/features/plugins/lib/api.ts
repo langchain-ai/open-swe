@@ -334,6 +334,23 @@ export function avatarBlob(url: string | null): Promise<Blob | null> {
   return pending
 }
 
+interface PersonWire {
+  login: string
+  name: string
+  avatar_url: string | null
+}
+
+/** People as the frame shows them, each picture fetched as bytes. */
+function withAvatars(people: ReadonlyArray<PersonWire>) {
+  return Promise.all(
+    people.map(async (person) => ({
+      login: person.login,
+      name: person.name,
+      avatar: await avatarBlob(person.avatar_url),
+    }))
+  )
+}
+
 export interface RoomTarget {
   room: string
   repository?: string
@@ -674,7 +691,8 @@ export const pluginsApi = {
   searchPulls: async (
     id: string,
     role: PullRequestRole,
-    page?: number
+    page?: number,
+    author?: string
   ): Promise<PullRequestSearch> => {
     const found = await agentsRequest<{
       pulls: Array<{
@@ -689,7 +707,7 @@ export const pluginsApi = {
       }>
       incomplete: boolean
       next_page: number | null
-    }>(`${plugin(id)}/github/pulls${query({ role, page })}`)
+    }>(`${plugin(id)}/github/pulls${query({ role, page, author })}`)
     return {
       pulls: found.pulls.map((pull) => ({
         repository: pull.repository,
@@ -793,20 +811,18 @@ export const pluginsApi = {
       )
     ).then((found) => found ?? null),
 
-  people: async (id: string, logins: Array<string>) => {
-    const people = await agentsRequest<
-      Array<{ login: string; name: string; avatar_url: string | null }>
-    >(
-      `${plugin(id)}/people?${logins.map((l) => `login=${encodeURIComponent(l)}`).join("&")}`
-    )
-    return Promise.all(
-      people.map(async (person) => ({
-        login: person.login,
-        name: person.name,
-        avatar: await avatarBlob(person.avatar_url),
-      }))
-    )
-  },
+  people: async (id: string, logins: Array<string>) =>
+    withAvatars(
+      await agentsRequest<Array<PersonWire>>(
+        `${plugin(id)}/people?${logins.map((l) => `login=${encodeURIComponent(l)}`).join("&")}`
+      )
+    ),
+  searchPeople: async (id: string, q: string, limit?: number) =>
+    withAvatars(
+      await agentsRequest<Array<PersonWire>>(
+        `${plugin(id)}/people/search${query({ q, limit })}`
+      )
+    ),
 
   publishRoom: async (id: string, target: RoomTarget, update: Uint8Array) =>
     (

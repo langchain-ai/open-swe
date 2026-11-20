@@ -12,7 +12,7 @@ export const PERMISSION_COPY: Record<
   "github:read": {
     label: "Read repositories",
     description:
-      "Read files, branches, history and pull requests in the repositories you share, as you.",
+      "Read files, branches, history and pull requests in the repositories you share, as you, and look up people Robin knows by name or GitHub handle.",
   },
   "github:write": {
     label: "Change repositories",

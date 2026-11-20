@@ -17100,7 +17100,7 @@
     },
     "/dashboard/api/plugins/{installation_id}/github/pulls": {
       "get": {
-        "description": "Open pull requests in the repositories the person shared and can read, by their role.\n\nWithout ``page`` every page of GitHub's search; with it only that page, and the next\none's number while GitHub has more, so a caller can show the first page at once.",
+        "description": "Open pull requests in the repositories the person shared and can read, by their role.\n\nWith ``author``, ``role`` must be ``author``: that person's pull requests, not theirs.\nWithout ``page`` every page of GitHub's search; with it only that page, and the next\none's number while GitHub has more, so a caller can show the first page at once.",
         "operationId": "api_plugin_search_pulls_dashboard_api_plugins__installation_id__github_pulls_get",
         "parameters": [
           {
@@ -17141,6 +17141,23 @@
                 }
               ],
               "title": "Page"
+            }
+          },
+          {
+            "in": "query",
+            "name": "author",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 39,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Author"
             }
           }
         ],
@@ -18224,7 +18241,7 @@
     },
     "/dashboard/api/plugins/{installation_id}/people": {
       "get": {
-        "description": "Names and pictures for GitHub logins: Open SWE's record of each, else the login alone.",
+        "description": "Names and pictures for GitHub logins: Robin's record of each, else the login alone.",
         "operationId": "api_plugin_people_dashboard_api_plugins__installation_id__people_get",
         "parameters": [
           {
@@ -18284,6 +18301,83 @@
           }
         ],
         "summary": "Api Plugin People",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/people/search": {
+      "get": {
+        "description": "People Robin knows with a GitHub login, whose name or login matches ``q``, closest first.\n\nListing the directory needs the installation's GitHub grant, which its consent names.",
+        "operationId": "api_plugin_search_people_dashboard_api_plugins__installation_id__people_search_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Person"
+                  },
+                  "title": "Response Api Plugin Search People Dashboard Api Plugins  Installation Id  People Search Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Search People",
         "tags": [
           "dashboard",
           "plugins"

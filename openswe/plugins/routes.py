@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 from urllib.parse import quote
 from uuid import UUID
 
@@ -1170,12 +1170,16 @@ async def api_plugin_search_pulls(
     plugin: PluginDep,
     role: Literal["review-requested", "author"],
     page: Annotated[int | None, Query(ge=1)] = None,
+    author: Annotated[str | None, Query(max_length=39)] = None,
 ) -> PullRequestSearch:
     """Open pull requests in the repositories the person shared and can read, by their role.
 
+    With ``author``, ``role`` must be ``author``: that person's pull requests, not theirs.
     Without ``page`` every page of GitHub's search; with it only that page, and the next
     one's number while GitHub has more, so a caller can show the first page at once.
     """
+    if author is not None and role != "author":
+        raise HTTPException(422, "author needs role author")
     with _as_http():
         plugin.require(PluginPermission.GITHUB_READ, PluginPermission.GITHUB_WRITE)
         readable = await plugin.readable_repositories()
@@ -1192,7 +1196,7 @@ async def api_plugin_search_pulls(
                 try:
                     found = await list_open_pull_requests(
                         github,
-                        plugin.user.github_login,
+                        author or plugin.user.github_login,
                         ",".join(readable),
                         scope="mine" if role == "author" else "review-requested",
                         lightweight=True,
@@ -1439,26 +1443,42 @@ class Person(BaseModel):
     name: str
     avatar_url: str | None
 
+    @classmethod
+    def of(cls, login: str, user: User | None) -> Self:
+        """``login`` as Robin knows its person: their name and picture, else the login alone."""
+        return cls(
+            login=login,
+            name=(user.display_name if user else "") or login,
+            avatar_url=(user.avatar_url if user else "")
+            or f"https://avatars.githubusercontent.com/{quote(login, safe='')}",
+        )
+
 
 @router.get("/{installation_id}/people")
 async def api_plugin_people(
     _plugin: PluginDep,
     login: Annotated[list[str], Query(min_length=1, max_length=100)],
 ) -> list[Person]:
-    """Names and pictures for GitHub logins: Open SWE's record of each, else the login alone."""
+    """Names and pictures for GitHub logins: Robin's record of each, else the login alone."""
     found = await User.for_github_logins(login)
-    people: list[Person] = []
-    for name in dict.fromkeys(login):
-        user = found.get(name.lower())
-        people.append(
-            Person(
-                login=name,
-                name=(user.display_name if user else "") or name,
-                avatar_url=(user.avatar_url if user else "")
-                or f"https://avatars.githubusercontent.com/{quote(name, safe='')}",
-            )
-        )
-    return people
+    return [Person.of(name, found.get(name.lower())) for name in dict.fromkeys(login)]
+
+
+@router.get("/{installation_id}/people/search")
+async def api_plugin_search_people(
+    plugin: PluginDep,
+    q: Annotated[str, Query(max_length=100)] = "",
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> list[Person]:
+    """People Robin knows with a GitHub login, whose name or login matches ``q``, closest first.
+
+    Listing the directory needs the installation's GitHub grant, which its consent names.
+    """
+    with _as_http():
+        plugin.require(PluginPermission.GITHUB_READ, PluginPermission.GITHUB_WRITE)
+    return [
+        Person.of(user.github_login, user) for user in await User.on_github(search=q, limit=limit)
+    ]
 
 
 # ---- Live rooms --------------------------------------------------------------------
