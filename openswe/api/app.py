@@ -20,6 +20,7 @@ from openswe.api.tracing import configure_datadog_environment
 from openswe.audit_logs.middleware import AuditLogMiddleware
 from openswe.config import ENV
 from openswe.dashboard import router as dashboard_router
+from openswe.dashboard.oauth import DESKTOP_APP_ORIGINS
 from openswe.mcp import server as agent_mcp_server
 from openswe.mda_channels.api import router as mda_channel_api_router
 from openswe.mda_channels.github_deliveries import router as mda_github_deliveries_router
@@ -174,7 +175,7 @@ def create_app() -> FastAPI:
         )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[*allowed_origins, "open-swe://app"],
+        allow_origins=[*allowed_origins, *DESKTOP_APP_ORIGINS],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],

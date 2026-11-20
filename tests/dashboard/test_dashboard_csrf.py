@@ -65,10 +65,11 @@ async def test_require_same_origin_allows_backend_origin(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_require_same_origin_allows_desktop_origin(monkeypatch) -> None:
+@pytest.mark.parametrize("origin", ["robin://app", "open-swe://app"])
+async def test_require_same_origin_allows_desktop_origin(monkeypatch, origin: str) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://dashboard.example")
 
-    oauth.require_same_origin(_request(origin="open-swe://app"))
+    oauth.require_same_origin(_request(origin=origin))
 
 
 @pytest.mark.asyncio

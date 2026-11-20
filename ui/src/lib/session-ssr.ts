@@ -18,7 +18,7 @@ export function isPublicPath(pathname: string): boolean {
  * before the first byte and a logged-in one never refetches `me` on mount.
  *
  * Client-side this is a no-op: the desktop app serves the prerendered shell from
- * `open-swe://app` with no server at all, so the per-route `RequireLogin` gate
+ * `robin://app` with no server at all, so the per-route `RequireLogin` gate
  * stays responsible for that case.
  */
 export const resolveSessionOnServer = createIsomorphicFn()

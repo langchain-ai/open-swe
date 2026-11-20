@@ -27,7 +27,7 @@ export class DesktopLinks {
       source.password ||
       !(
         source.origin === backend.origin ||
-        (source.protocol === "open-swe:" &&
+        (source.protocol === "robin:" &&
           source.hostname === "app" &&
           !source.port)
       )

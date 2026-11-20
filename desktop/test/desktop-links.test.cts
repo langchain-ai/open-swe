@@ -42,7 +42,7 @@ test("routes other deployments to the browser without navigating desktop", async
   assert.deepEqual(links.browserLinks, [
     "https://prod.example/agents/thread-1?tab=plan#latest",
   ]);
-  assert.deepEqual(links.appLinks, ["open-swe://app/agents/thread-2"]);
+  assert.deepEqual(links.appLinks, ["robin://app/agents/thread-2"]);
 });
 
 test("resolves cold-start links once, including unconfigured backends", async () => {
@@ -65,7 +65,7 @@ test("resolves cold-start links once, including unconfigured backends", async ()
     );
     assert.deepEqual(
       links.appLinks,
-      backend === "https://prod.example" ? ["open-swe://app/review"] : [],
+      backend === "https://prod.example" ? ["robin://app/review"] : [],
     );
   }
 });
@@ -82,7 +82,7 @@ test("resolves app and same-backend Slack links without following authenticated 
       return new Response(null, { status: 302, headers: { location } });
     },
   );
-  for (const origin of ["open-swe://app", "https://configured.example"]) {
+  for (const origin of ["robin://app", "https://configured.example"]) {
     await links.openSlack(
       `${origin}/dashboard/api/slack/open?channel=C123&message_ts=1700000000.123456`,
     );
@@ -99,9 +99,9 @@ test("resolves app and same-backend Slack links without following authenticated 
   for (const url of [
     "https://other.example/dashboard/api/slack/open?channel=C123",
     "https://configured.example/dashboard/api/slack/open/other",
-    "open-swe://app/dashboard/api/auth/login",
-    "open-swe://attacker@app/dashboard/api/slack/open",
-    "open-swe://app:123/dashboard/api/slack/open",
+    "robin://app/dashboard/api/auth/login",
+    "robin://attacker@app/dashboard/api/slack/open",
+    "robin://app:123/dashboard/api/slack/open",
     "not a URL",
   ]) {
     assert.equal(links.slackUrl(url), null);
@@ -129,7 +129,7 @@ test("does not open failed or unsafe Slack resolutions", async () => {
       async () => new Response(null, { status, headers: { location } }),
     );
     await assert.rejects(
-      links.openSlack("open-swe://app/dashboard/api/slack/open?channel=C123"),
+      links.openSlack("robin://app/dashboard/api/slack/open?channel=C123"),
     );
     assert.deepEqual(links.browserLinks, []);
   }
@@ -158,8 +158,8 @@ test("opens links on the backend's other dashboard origins in the app", async ()
   links.open("https://elsewhere.example/agents/thread-2");
   await settle();
   assert.deepEqual(links.appLinks, [
-    "open-swe://app/agents/thread-1",
-    "open-swe://app/review",
+    "robin://app/agents/thread-1",
+    "robin://app/review",
   ]);
   assert.deepEqual(links.browserLinks, [
     "https://elsewhere.example/agents/thread-2",
@@ -207,11 +207,11 @@ test("resolves clicked artifact and settings URLs after dashboard discovery", as
   discover(["https://robin.example"]);
   assert.equal(
     await artifact,
-    "open-swe://app/agents/thread-1/plan?view=full#section",
+    "robin://app/agents/thread-1/plan?view=full#section",
   );
   assert.equal(
     await links.appUrl("https://robin.example/my-settings/connections"),
-    "open-swe://app/my-settings/connections",
+    "robin://app/my-settings/connections",
   );
   assert.equal(
     await links.appUrl("https://elsewhere.example/agents/thread-1/plan"),

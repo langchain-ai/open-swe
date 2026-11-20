@@ -20,11 +20,14 @@ describe("resolveDashboardApiBase", () => {
     )
   })
 
-  it("uses the Electron proxy even if the build has a configured API", () => {
-    expect(
-      resolveDashboardApiBase("https://maintainer.example", "open-swe:")
-    ).toBe("")
-  })
+  it.each(["robin:", "open-swe:"])(
+    "uses the Electron proxy for %s even if the build has a configured API",
+    (protocol) => {
+      expect(
+        resolveDashboardApiBase("https://maintainer.example", protocol)
+      ).toBe("")
+    }
+  )
 })
 
 describe("isCrossOriginApiBase", () => {

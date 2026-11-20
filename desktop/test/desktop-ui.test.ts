@@ -18,10 +18,10 @@ type Failure = "interrupted" | "corrupt";
 type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 const page = () =>
-  new Request("open-swe://app/agents/local-thread", {
+  new Request("robin://app/agents/local-thread", {
     headers: { accept: "text/html" },
   });
-const asset = () => new Request("open-swe://app/assets/lazy.js");
+const asset = () => new Request("robin://app/assets/lazy.js");
 const serveFile = async (filename: string) =>
   new Response(await readFile(filename));
 
@@ -200,7 +200,7 @@ test("build info reports the version a reload would load, checking for one each 
   await ui.refresh();
   backend = server("v2");
   const before = checks;
-  const buildInfo = "open-swe://app/open-swe-build-info.json";
+  const buildInfo = "robin://app/open-swe-build-info.json";
   assert.equal(
     (await (await ui.serve(new Request(buildInfo))).json()).commit,
     "v1",

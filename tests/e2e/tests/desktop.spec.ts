@@ -72,7 +72,7 @@ test("Desktop keeps cloud browser authentication redirects inside the viewer", a
   });
   try {
     const page = await electronApp.firstWindow();
-    await page.waitForURL("open-swe://app/**", { waitUntil: "load" });
+    await page.waitForURL("robin://app/**", { waitUntil: "load" });
     await page.evaluate((origin) => {
       const frame = document.createElement("iframe");
       frame.title = "Browser window";
@@ -112,10 +112,10 @@ test("Desktop links supersede startup loading", async () => {
   });
   try {
     const page = await electronApp.firstWindow();
-    await page.waitForURL("open-swe://app/**", { waitUntil: "load" });
+    await page.waitForURL("robin://app/**", { waitUntil: "load" });
     await electronApp.evaluate(({ protocol }) => {
-      protocol.unhandle("open-swe");
-      protocol.handle("open-swe", () => new Response("Ready"));
+      protocol.unhandle("robin");
+      protocol.handle("robin", () => new Response("Ready"));
     });
     const desktopWindow = await electronApp.browserWindow(page);
     await page.goto("data:text/html,Reload fixture");
@@ -142,7 +142,7 @@ test("Desktop links supersede startup loading", async () => {
     });
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
     await expect(page).toHaveURL(
-      "open-swe://app/agents/reviews/a/b/1?tab=changes#file-1",
+      "robin://app/agents/reviews/a/b/1?tab=changes#file-1",
     );
     await page.evaluate(() => window.openSweDesktop!.copyPageLink());
     expect(
@@ -161,7 +161,7 @@ test("Desktop links supersede startup loading", async () => {
         ?.click();
     });
     await expect(page.getByText("Ready", { exact: true })).toBeVisible();
-    await expect(page).toHaveURL("open-swe://app/");
+    await expect(page).toHaveURL("robin://app/");
   } finally {
     await electronApp.close();
     rmSync(stateRoot, { recursive: true, force: true });

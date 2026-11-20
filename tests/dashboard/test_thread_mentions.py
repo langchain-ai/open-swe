@@ -4,9 +4,12 @@ from unittest.mock import AsyncMock
 from uuid import uuid7
 
 import pytest
+from starlette.requests import Request
 
+from openswe.dashboard.deps import DashboardRead
 from openswe.jobs import queue
 from openswe.notifications import service
+from openswe.notifications.routes import api_notifications
 from openswe.notifications.service import AppNotification
 from openswe.slack.user_options import SlackUserOption
 from openswe.threads import index, mentions
@@ -97,6 +100,22 @@ async def test_dispatch_does_not_wait_for_notification_delivery(monkeypatch) -> 
     assert notification._pending
     release.set()
     await asyncio.gather(*notification._pending)
+
+
+@pytest.mark.parametrize("origin", ["robin://app", "open-swe://app", "https://app.example.com"])
+async def test_notification_poll_records_only_desktop_use(
+    monkeypatch: pytest.MonkeyPatch, origin: str
+) -> None:
+    reader = AsyncMock(spec=DashboardRead, user=AsyncMock(spec=User), session=None)
+    request = Request({"type": "http", "headers": [(b"origin", origin.encode())]})
+    monkeypatch.setattr(AppNotification, "pending", AsyncMock(return_value=[]))
+
+    assert await api_notifications(request, reader) == []
+
+    if origin == "https://app.example.com":
+        reader.user.note_desktop_use.assert_not_awaited()
+    else:
+        reader.user.note_desktop_use.assert_awaited_once_with(session=reader.session)
 
 
 async def test_recent_desktop_users_get_a_longer_slack_fallback_delay(

@@ -48,7 +48,7 @@ export class FramePolicy {
    * Raw-file requests carry a token instead of the session, and only ever read.
    * Anything else that changes data gets the session only when the app's own page
    * sent it: `initiatorOrigin`, which Electron sets and no page can, is
-   * `open-swe://app` for the app and `"null"` for a sandboxed frame.
+   * `robin://app` for the app and `"null"` for a sandboxed frame.
    */
   static proxyCredentials(
     method: string,

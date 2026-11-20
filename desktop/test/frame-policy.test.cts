@@ -8,8 +8,8 @@ test("the proxy gives the session only to the app's own page", () => {
   const runs = "/dashboard/api/threads/t/runs";
   const cases = [
     ["GET", raw, "null", "anonymous"],
-    ["POST", raw, "open-swe://app", "method-not-allowed"],
-    ["POST", runs, "open-swe://app", "session"],
+    ["POST", raw, "robin://app", "method-not-allowed"],
+    ["POST", runs, "robin://app", "session"],
     ["POST", runs, "null", "forbidden"],
     ["POST", runs, "https://evil.example", "forbidden"],
     ["DELETE", runs, undefined, "forbidden"],
@@ -24,9 +24,8 @@ test("the proxy gives the session only to the app's own page", () => {
 });
 
 test("a sandboxed or preview frame, or one inside it, may not navigate itself away", () => {
-  const app = { url: "open-swe://app/threads/t", origin: "open-swe://app" };
-  const raw =
-    "open-swe://app/dashboard/api/threads/t/files/raw/token/index.html";
+  const app = { url: "robin://app/threads/t", origin: "robin://app" };
+  const raw = "robin://app/dashboard/api/threads/t/files/raw/token/index.html";
   const evil = "https://evil.example/";
   const sandboxed = (url) => ({ url, origin: "null" });
   const blocks = (frames, target, byApp = false) =>

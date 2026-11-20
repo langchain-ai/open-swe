@@ -10,7 +10,7 @@ export function resolveDashboardApiBase(
   protocol: string,
   basePath = "/"
 ): string {
-  if (protocol === "open-swe:") return ""
+  if (protocol === "robin:" || protocol === "open-swe:") return ""
   return (configured || basePath).replace(/\/$/, "")
 }
 

@@ -45,8 +45,10 @@ def test_desktop_ui_selects_the_backend_commit(monkeypatch: pytest.MonkeyPatch) 
     assert TestClient(app_module.create_app()).get("/desktop-ui.json").status_code == 503
 
 
+@pytest.mark.parametrize("origin", ["robin://app", "open-swe://app"])
 def test_desktop_api_preflight_without_extra_cors_origins(
     monkeypatch: pytest.MonkeyPatch,
+    origin: str,
 ) -> None:
     monkeypatch.delenv("DASHBOARD_ALLOWED_ORIGINS", raising=False)
     client = TestClient(app_module.create_app())
@@ -54,14 +56,14 @@ def test_desktop_api_preflight_without_extra_cors_origins(
     response = client.options(
         "/dashboard/api/me",
         headers={
-            "Origin": "open-swe://app",
+            "Origin": origin,
             "Access-Control-Request-Method": "GET",
             "Access-Control-Request-Headers": "content-type",
         },
     )
 
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "open-swe://app"
+    assert response.headers["access-control-allow-origin"] == origin
     assert response.headers["access-control-allow-credentials"] == "true"
     assert (
         client.options(

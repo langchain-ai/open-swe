@@ -22,7 +22,9 @@ A thread can ask only while this app is open and signed in as the thread's owner
 
 ## How it connects
 
-The UI runs at `open-swe://app`, with native IPC for menus, sign-in, updates and approved local actions.
+The UI runs at `robin://app`, with native IPC for menus, sign-in, updates and approved local actions.
+Changing this scheme requires a native desktop release.
+Older installed clients remain supported by the backend and downloaded UI at `open-swe://app`; origin-scoped browser storage is not migrated to the new origin.
 `/desktop-ui.json` on the backend selects a GitHub Release archive by backend commit, SHA-256 and bridge protocol version.
 Downloads carry no session credentials, follow redirects only to GitHub release hosts, and are verified before activation.
 Each backend has its own cache.

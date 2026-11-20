@@ -28,7 +28,7 @@ const LOGIN_TIMEOUT_MS = 5 * 60 * 1000
 // The origin the backend allows a native client to redeem a handoff from; the
 // desktop app sends the same one. Node sends no Origin of its own, and the
 // exchange is a POST, so without this the CSRF check rejects it.
-const HANDOFF_ORIGIN = "open-swe://app"
+const HANDOFF_ORIGIN = "robin://app"
 // Re-login rather than hand Vite a session that dies mid-afternoon.
 const MIN_REMAINING_MS = 60 * 60 * 1000
 

@@ -31,7 +31,7 @@ _VERIFIER = "desktop-connect-verifier"
 _CHALLENGE = (
     base64.urlsafe_b64encode(hashlib.sha256(_VERIFIER.encode()).digest()).decode().rstrip("=")
 )
-_APP_ORIGIN = {"origin": "open-swe://app"}
+_APP_ORIGIN = {"origin": "robin://app"}
 
 
 @pytest.fixture

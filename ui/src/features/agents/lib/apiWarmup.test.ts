@@ -26,7 +26,7 @@ const TRANSCRIPT_PATH = `${SUMMARY_PATH}/transcript`
 const RUNS_PATH = `${SUMMARY_PATH}/runs`
 const SIDEBAR_PATH = "/dashboard/api/threads/page"
 const SESSION_PATH = "/dashboard/api/me"
-const DESKTOP_ORIGIN = "open-swe://app"
+const DESKTOP_ORIGIN = "robin://app"
 
 function setReadyState(value: DocumentReadyState) {
   Object.defineProperty(document, "readyState", { value, configurable: true })

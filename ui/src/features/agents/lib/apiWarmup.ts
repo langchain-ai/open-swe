@@ -26,7 +26,7 @@ interface WarmupConfig {
   sidebar: string
   /** The session read, warmed only in the desktop app: a server render already has it. */
   session: string
-  desktopProtocol: string
+  desktopProtocols: string[]
   prefsKey: string
   streamPreferenceKey: string
   streamPreferenceDefault: boolean
@@ -65,7 +65,7 @@ function warmApiRequests(
   const review = reviewsRoute.test(route) ? config.review : []
 
   const targets: Array<{ url: string; dashboard: boolean }> = []
-  if (location.protocol === config.desktopProtocol) {
+  if (config.desktopProtocols.includes(location.protocol)) {
     targets.push({ url: api + config.session, dashboard: true })
   }
   for (const path of review) targets.push({ url: api + path, dashboard: true })
@@ -321,7 +321,7 @@ export function apiWarmupScript(selectedPullRequest?: unknown): string {
       : [],
     sidebar: "/threads/page",
     session: "/me",
-    desktopProtocol: "open-swe:",
+    desktopProtocols: ["robin:", "open-swe:"],
     prefsKey: SIDEBAR_PREFS_STORAGE_KEY,
     streamPreferenceKey: STREAM_PREFERENCE_STORAGE_KEY,
     streamPreferenceDefault: STREAM_PREFERENCE_DEFAULT,

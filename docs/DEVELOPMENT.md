@@ -348,7 +348,7 @@ Filter list measurements by `@context.outcome:success` and compare each `@contex
 Threads without transcript metadata always use `stream`, whatever the stored preference.
 Use `@type:vital @vital.name:thread_load @context.thread_source:stream` for useStream loads, and swap in `transcript` to compare.
 Spans completed before RUM finishes initializing are replayed from the bounded local buffer.
-Desktop RUM sessions use local storage because the `open-swe://app` origin cannot use ordinary browser session cookies; web sessions retain the SDK's cookie default.
+Desktop RUM sessions use local storage because the `robin://app` origin cannot use ordinary browser session cookies; web sessions retain the SDK's cookie default.
 Abandoned spans (navigated away, hydration failed) stay local only.
 The backend side of the same picture is the `Server-Timing` header on `GET /dashboard/api/threads/{id}` and `/state` (logged as `thread state timings`) and the `open_swe_dashboard_thread_ttft` histogram, which measures the same thing as `first_text` rather than the first token of any kind.
 

@@ -212,7 +212,7 @@ describe("initializeDatadogRum", () => {
   it("uses local storage for sessions on the desktop custom origin", async () => {
     vi.stubGlobal("window", {
       openSweDesktop: {},
-      location: { protocol: "open-swe:" },
+      location: { protocol: "robin:" },
     })
     const { rum, load } = rumLoader()
     await initializeDatadogRum(

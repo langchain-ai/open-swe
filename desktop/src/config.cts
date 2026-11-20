@@ -1,6 +1,6 @@
 const path = require("node:path");
 
-const APP_ORIGIN = "open-swe://app";
+const APP_ORIGIN = "robin://app";
 const APP_URL = `${APP_ORIGIN}/`;
 const APP_NAME = "Robin";
 const DEVELOPMENT_APP_NAME = "Robin Development";
@@ -65,7 +65,7 @@ function resolveBackendUrl({ argv, env, isPackaged, storedUrl }) {
 function isAppUrl(value) {
   try {
     const url = new URL(value);
-    return url.protocol === "open-swe:" && url.hostname === "app";
+    return url.protocol === "robin:" && url.hostname === "app";
   } catch {
     return false;
   }
@@ -162,7 +162,7 @@ function isTrustedProxyRequest(pageUrl) {
  * The response headers of a page the app frames, with its CSP letting the app
  * frame it as well as whoever it already allowed. LangSmith's browser window
  * names the origins that may frame it, and only https ones, so it can never
- * name the app's own `open-swe://app`.
+ * name the app's own `robin://app`.
  */
 function headersFramedByApp(headers: Record<string, string[]>) {
   return Object.fromEntries(

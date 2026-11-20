@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request
 
 from openswe.dashboard.deps import DashboardReadDep
-from openswe.dashboard.oauth import DESKTOP_APP_ORIGIN, request_origin
+from openswe.dashboard.oauth import DESKTOP_APP_ORIGINS, request_origin
 from openswe.notifications.service import AppNotification
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 @router.get("")
 async def api_notifications(request: Request, reader: DashboardReadDep) -> list[AppNotification]:
     user = reader.user
-    if request_origin(request) == DESKTOP_APP_ORIGIN:
+    if request_origin(request) in DESKTOP_APP_ORIGINS:
         await user.note_desktop_use(session=reader.session)
     return await AppNotification.pending(user.id, session=reader.session)
 

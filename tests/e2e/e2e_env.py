@@ -96,7 +96,7 @@ _DEFAULTS = {
     # the origin a real user is on rather than on the backend.
     "DASHBOARD_BASE_URL": APP_URL,
     "DASHBOARD_API_BASE_URL": BASE_URL,
-    "DASHBOARD_ALLOWED_ORIGINS": f"{APP_URL},{BASE_URL},open-swe://app",
+    "DASHBOARD_ALLOWED_ORIGINS": f"{APP_URL},{BASE_URL},robin://app",
     # At least 32 bytes: a shorter key makes PyJWT warn on every session decode
     # from a worker thread, which holds the warnings lock while logging. The dev
     # log renderer warns from inside its handler, so the two lock orders cross

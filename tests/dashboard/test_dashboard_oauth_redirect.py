@@ -461,7 +461,7 @@ async def test_desktop_github_link_hands_back_only_encrypted_tokens(
         exchange = app_client.post(
             "/dashboard/api/github/desktop/exchange",
             json={"code": handoff, "verifier": _VERIFIER},
-            headers={"origin": "open-swe://app"},
+            headers={"origin": "robin://app"},
         )
 
     assert exchange.status_code == 200

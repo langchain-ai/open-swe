@@ -106,7 +106,7 @@ app.on("child-process-gone", (_event, details) =>
 
 protocol.registerSchemesAsPrivileged([
   {
-    scheme: "open-swe",
+    scheme: "robin",
     privileges: {
       standard: true,
       secure: true,
@@ -1643,7 +1643,7 @@ if (!hasSingleInstanceLock) {
     primaryBackendUrl = backendUrl;
     void shareBackendSession();
 
-    protocol.handle("open-swe", serveDesktopUi);
+    protocol.handle("robin", serveDesktopUi);
     configurePermissions();
     configureFraming();
     configureDesktopIpc();
