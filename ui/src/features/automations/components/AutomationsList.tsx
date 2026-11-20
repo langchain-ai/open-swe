@@ -1,7 +1,7 @@
 import { PlusIcon } from "@langchain/macaw-components/icons"
 import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { Text } from "@langchain/macaw-components/Text"
-import { useState } from "react"
+import { Select } from "@langchain/macaw-components/Select"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
@@ -68,21 +68,43 @@ const EMPTY_TITLES: Record<AutomationsFilter, string> = {
 export function AutomationsList({
   tab,
   onTabChange,
+  chosenFilter,
+  onFilterChange,
+  ownerId,
+  onOwnerChange,
 }: {
   tab: AutomationsTab
   onTabChange: (tab: AutomationsTab) => void
+  chosenFilter: AutomationsFilter
+  onFilterChange: (filter: AutomationsFilter) => void
+  ownerId?: string
+  onOwnerChange: (ownerId: string | undefined) => void
 }) {
   const session = useSession().data
   const isAdmin = session?.is_admin === true
-  const [chosenFilter, setFilter] = useState<AutomationsFilter>("mine")
   // A member sees their own automations alone.
   const filter = isAdmin ? chosenFilter : "mine"
   const schedulesQuery = useAgentSchedules({
     allUsers: isAdmin && filter === "all",
   })
   const canManage = Boolean(session)
-  const schedules = (schedulesQuery.data ?? []).filter((schedule) => {
-    if (filter === "all") return true
+  const allSchedules = schedulesQuery.data ?? []
+  const owners = new Map<string, string>()
+  for (const schedule of allSchedules) {
+    if (!schedule.system && schedule.ownerId) {
+      owners.set(schedule.ownerId, schedule.createdBy || schedule.ownerId)
+    }
+  }
+  const ownerOptions = [
+    { value: "all", label: "All users" },
+    ...Array.from(owners, ([value, label]) => ({ value, label })).sort((a, b) =>
+      a.label.localeCompare(b.label)
+    ),
+  ]
+  const schedules = allSchedules.filter((schedule) => {
+    if (filter === "all") {
+      return !ownerId || (!schedule.system && schedule.ownerId === ownerId)
+    }
     if (filter === "system") return schedule.system === true
     return (
       !schedule.system &&
@@ -138,8 +160,8 @@ export function AutomationsList({
               />
             </div>
 
-            <div className="mt-space-6 flex min-h-8 items-center justify-between">
-              <div className="flex items-center gap-space-3">
+            <div className="mt-space-6 flex min-h-8 flex-wrap items-center justify-between gap-space-3">
+              <div className="flex flex-wrap items-center gap-space-3">
                 {loading ? (
                   <Skeleton className="h-3 w-20" />
                 ) : (
@@ -150,8 +172,25 @@ export function AutomationsList({
                 {isAdmin && (
                   <GroupedTabs
                     value={filter}
-                    onChange={setFilter}
+                    onChange={onFilterChange}
                     options={FILTER_OPTIONS}
+                  />
+                )}
+                {isAdmin && filter === "all" && (
+                  <Select
+                    aria-label="Filter by user"
+                    value={ownerId ?? "all"}
+                    onChange={(value) =>
+                      onOwnerChange(value === "all" ? undefined : value)
+                    }
+                    options={ownerOptions}
+                    hideSearch={false}
+                    searchPlaceholder="Search users…"
+                    emptyText="No users found"
+                    placeholder="Select user"
+                    loading={schedulesQuery.isLoading}
+                    size="sm"
+                    triggerClassName="w-44"
                   />
                 )}
               </div>
@@ -174,8 +213,16 @@ export function AutomationsList({
                 <EmptyState
                   className="rounded-xl border border-dashed border-default bg-surface-level-1"
                   icon={LightningIcon}
-                  title={EMPTY_TITLES[filter]}
-                  description="Run Robin on a schedule or on GitHub, Slack, and Linear events — review code, triage new issues, or investigate an alert."
+                  title={
+                    filter === "all" && ownerId
+                      ? "No automations for this user"
+                      : EMPTY_TITLES[filter]
+                  }
+                  description={
+                    filter === "all" && ownerId
+                      ? "Choose another user or All users to see more automations."
+                      : "Run Robin on a schedule or on GitHub, Slack, and Linear events — review code, triage new issues, or investigate an alert."
+                  }
                   action={canManage && <NewAutomationButton />}
                 />
               ) : (
