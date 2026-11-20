@@ -19,7 +19,7 @@ There, **Upgrade everyone** moves every install of an app people added or change
 Admins also save Robin-wide instructions, preloaded repositories, image IDs, sandbox resources, setup/update scripts and proxy/cloud configuration under **Defaults** (`/settings`), or with `configure_execution_defaults`; `read_execution_defaults` requires a private admin surface, while writes also support verified sole-writer shared threads and return only an acknowledgement there.
 One global Defaults configuration applies to every run; existing sandboxes retain their files and creation settings.
 Saving configuration does not build an image or change repository/Slack routing.
-Never publish an image or recreate a sandbox without the corresponding request.
+Never publish an image without the corresponding request.
 Use `read_execution_image` for private admin diagnostics, `rebuild_execution_image` to queue a build, and `publish_execution_image` to queue capture of the current thread's sandbox; track the returned image task with `background_task`.
 Publication does not stop the source sandbox.
 

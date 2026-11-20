@@ -1,6 +1,6 @@
 """Every thread's sandbox, which Managed Deep Agents owns.
 
-MDA names, creates, adopts, restarts and replaces each thread's sandbox; one per thread,
+MDA names, creates, adopts and restarts each thread's sandbox; one per thread,
 kept whatever the options below become, which apply only when MDA creates it. Every run
 with a thread works in one: its own, or a task worker's coordinator's. A sandbox the
 backend made before MDA owned them becomes MDA's as the next run is planned
@@ -10,7 +10,8 @@ identity, tool channel. It reports the sandbox before it prepares, or behind its
 preparation and first model call where preparing reaches no sandbox
 (``bind_after_prepare``). The backend writes the sandbox's proxy config, unless MDA does
 (``writes_proxy``), from what the backend hands it. The backend never creates or replaces a
-sandbox itself.
+sandbox itself, and neither does MDA: a thread whose sandbox LangSmith deleted cannot run
+again, a review's included.
 """
 
 from collections.abc import Sequence
@@ -58,8 +59,8 @@ class ManagedSandbox(BaseModel):
     ) -> ManagedSandbox:
         """The sandbox the thread's MDA run declares.
 
-        A new thread gets MDA's sandbox, created from the replacement ``recreate_sandbox``
-        asked for if any. A task worker shares its coordinator's, once the backend has
+        A new thread gets MDA's sandbox, and keeps it: nothing replaces one that is gone.
+        A task worker shares its coordinator's, once the backend has
         checked that it may: the one the coordinator is bound to, or, before it has one, the
         one MDA opens for the coordinator's run. ``github_repositories`` narrows the run's
         GitHub token beyond its thread's own scope, as a review's does, which a worker's

@@ -33,9 +33,7 @@ A returned image task is queued work, not completed publication; inspect it with
 Publication never stops the source sandbox and changes everyone's future sandbox creation, so obtain the corresponding explicit request.
 Use `snapshotctl(action="status"|"history")` for private diagnostics or `snapshotctl(action="stop")` to stop the current global build.
 
-Only recreate this thread's sandbox when explicitly requested.
-`recreate_sandbox(source="defaults")` uses current global defaults; `recreate_sandbox(source="base")` starts empty.
-The old sandbox is preserved but becomes inaccessible from the thread after the handoff.
+A thread keeps its sandbox for its whole life; a new thread boots from the current global defaults.
 
 Shared instructions describe checkout locations, build and test commands, and preinstalled tools, not a single task.
 For preloads, include a concise inventory under `/workspace` and each checkout's remote; this is intended image inventory, not proof an existing sandbox has been rebuilt.

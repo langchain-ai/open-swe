@@ -41,9 +41,6 @@ class Opened(Protocol):
     @property
     def error(self) -> str | None: ...
 
-    @property
-    def workspace_lost(self) -> bool: ...
-
 
 @dataclass(frozen=True)
 class BoundSandbox:
@@ -52,8 +49,6 @@ class BoundSandbox:
     error: str | None = None
     # The token the sandbox's GitHub proxy was given, where one was due.
     github_proxy: GitHubProxyRefreshed | None = None
-    # The thread's bound sandbox was gone, and a fresh one made under its name.
-    workspace_lost: bool = False
 
 
 class SandboxBinding:
@@ -115,11 +110,6 @@ class SandboxBinding:
         bound = self._taken("github_proxy")
         return None if bound is None else bound.github_proxy
 
-    def take_workspace_lost(self) -> bool:
-        """Whether the model is yet to hear that the thread's bound workspace was lost, once."""
-        bound = self._taken("workspace_lost")
-        return bound is not None and bound.workspace_lost
-
     def _taken(self, what: str) -> BoundSandbox | None:
         if self._reporting is None or not self._reporting.done() or what in self._told:
             return None
@@ -158,7 +148,7 @@ class SandboxBinding:
         github_proxy = bound.github_proxy
         if github_proxy is None and refresh_github_proxy and opened.sandbox_id is not None:
             github_proxy = await self._refreshed(backend, run_id)
-        return BoundSandbox(github_proxy=github_proxy, workspace_lost=opened.workspace_lost)
+        return BoundSandbox(github_proxy=github_proxy)
 
     @staticmethod
     async def _refreshed(backend: Transport, run_id: str | None) -> GitHubProxyRefreshed | None:

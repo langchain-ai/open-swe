@@ -366,8 +366,6 @@ TOOL_RESULT = Endpoint("tool_result", ToolResultReport, Done, seconds=LOOP_CALL_
 BIND_SANDBOX = Endpoint(
     "bind_sandbox", BindSandbox, SandboxBound, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
-# The runtime replaced the thread's sandbox: the backend connects to the fresh one.
-SANDBOX_REPLACED = Endpoint("sandbox_replaced", RunRequest, Done, seconds=LOOP_CALL_SECONDS)
 # A tool the runtime ran found the sandbox gone: the backend tells the person.
 SANDBOX_UNREACHABLE = Endpoint("sandbox_unreachable", SandboxGone, Done, seconds=LOOP_CALL_SECONDS)
 # For the dashboard to show the thread's browser.

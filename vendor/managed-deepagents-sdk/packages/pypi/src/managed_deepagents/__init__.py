@@ -234,11 +234,9 @@ if TYPE_CHECKING:
     )
     from managed_deepagents.sandbox import (
         SandboxDefinition,
-        SandboxReplacement,
         basic,
         bearer,
         open_sandbox,
-        replace_sandbox,
     )
     from managed_deepagents.schedules import ScheduleThreadConfig, ThreadConfig, define_schedule
 
@@ -376,7 +374,6 @@ _EXPORTS: dict[str, str] = {
     "RuntimeChannel": "managed_deepagents._channels.runtime",
     "RuntimeSchedules": "managed_deepagents._runtime_schedules",
     "SandboxDefinition": "managed_deepagents.sandbox",
-    "SandboxReplacement": "managed_deepagents.sandbox",
     "ScheduleNotFoundError": "managed_deepagents._runtime_schedules",
     "ScheduleOwner": "managed_deepagents._runtime_schedules",
     "SchedulePage": "managed_deepagents._runtime_schedules",
@@ -429,7 +426,6 @@ _EXPORTS: dict[str, str] = {
     "define_sandbox": "managed_deepagents.namespaces",
     "define_schedule": "managed_deepagents.schedules",
     "open_sandbox": "managed_deepagents.sandbox",
-    "replace_sandbox": "managed_deepagents.sandbox",
     "reply": "managed_deepagents._channels.reply",
     "schedules": "managed_deepagents._runtime_schedules",
     "shared_factory": "managed_deepagents.agent_entry",
@@ -610,7 +606,6 @@ __all__ = [
     "RuntimeChannel",
     "RuntimeSchedules",
     "SandboxDefinition",
-    "SandboxReplacement",
     "ScheduleNotFoundError",
     "ScheduleOwner",
     "SchedulePage",
@@ -663,7 +658,6 @@ __all__ = [
     "define_sandbox",
     "define_schedule",
     "open_sandbox",
-    "replace_sandbox",
     "reply",
     "schedules",
     "shared_factory",

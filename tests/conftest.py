@@ -392,7 +392,6 @@ def _execution_defaults(request: pytest.FixtureRequest, monkeypatch: pytest.Monk
     monkeypatch.setattr(EXECUTION_DEFAULTS, "load", AsyncMock(return_value=ExecutionDefaults()))
     monkeypatch.setattr(EXECUTION_IMAGES, "state", AsyncMock(return_value=ImageState()))
     monkeypatch.setattr(SANDBOX_EXECUTION, "bound", AsyncMock(return_value=None))
-    monkeypatch.setattr(SANDBOX_EXECUTION, "pending", AsyncMock(return_value=None))
 
 
 @pytest.fixture

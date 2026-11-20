@@ -264,7 +264,7 @@ async def test_a_reconnecting_reviewer_without_a_known_pr_gets_no_repository_at_
 
 @pytest.mark.parametrize("kind", ["reviewer", "review-scout", "agent"])
 @pytest.mark.parametrize("known_repo", [True, False])
-async def test_a_replaced_sandbox_reconnects_on_the_authenticated_run_scope(
+async def test_refreshing_the_proxy_uses_the_authenticated_run_scope(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     kind: str,
@@ -283,7 +283,6 @@ async def test_a_replaced_sandbox_reconnects_on_the_authenticated_run_scope(
         configurable={"repo": {"owner": "acme", "name": "api"}} if known_repo else {},
     )
 
-    await TokenRun.answer(parts, run, "sandbox_replaced", {})
     await TokenRun.answer(parts, run, "refresh_github_proxy", {"force_refresh": True})
 
     expected = (
@@ -294,7 +293,7 @@ async def test_a_replaced_sandbox_reconnects_on_the_authenticated_run_scope(
     )
     if kind == "agent":
         expected = "x-access-token:repos:11,22"
-    assert injected_auth(github) == [expected, expected]
+    assert injected_auth(github) == [expected]
 
 
 @pytest.mark.parametrize("kind", ["reviewer", "review-scout", "agent"])
@@ -321,7 +320,6 @@ async def test_mda_alone_writes_the_proxy_of_every_sandbox_it_owns(
     )
 
     managed = await RunSandbox(run_config(run), reviews=parts.reviews).managed()
-    await TokenRun.answer(parts, run, "sandbox_replaced", {})
     refreshed = await TokenRun.answer(parts, run, "refresh_github_proxy", {})
     await TokenRun.answer(parts, run, "sandbox_proxy", {"run_id": "run", "sandbox_id": "sandbox"})
 

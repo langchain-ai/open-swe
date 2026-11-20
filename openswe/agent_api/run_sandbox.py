@@ -5,11 +5,9 @@ import logging
 from datetime import datetime
 
 from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
 from runtime_api.catalog import SandboxSpec
 from runtime_api.sandbox_setup import GitIdentity
 
-from openswe.agent_api.runs import in_graph_context
 from openswe.github.app import PermissionMap
 from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
@@ -17,12 +15,15 @@ from openswe.run_config import RunConfig
 from openswe.sandboxes import lifecycle
 from openswe.sandboxes.lifecycle import (
     bind_mda_sandbox,
-    reconnect_replaced_sandbox,
     refresh_thread_github_proxy,
 )
 from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
-from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxUnreachableError
+from openswe.sandboxes.state import (
+    SANDBOX_BACKENDS,
+    SandboxDeletedError,
+    SandboxUnreachableError,
+)
 from openswe.tasks.schemas import ThreadMetadata
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,11 @@ class RunSandbox:
         try:
             await self.bind(sandbox_id, open_error=open_error)
         except SandboxUnreachableError as exc:
-            await self.tell_gone(reason=exc.reason)
+            await self.tell_gone(
+                sandbox_id=exc.sandbox_id,
+                reason=exc.reason,
+                deleted=isinstance(exc, SandboxDeletedError),
+            )
             raise
 
     async def finish_git_identity(self) -> None:
@@ -122,22 +127,6 @@ class RunSandbox:
             backend = sandbox.current
             if isinstance(backend, TimeoutLangSmithSandbox):
                 await backend.ensure_git_identity()
-
-    async def reconnect(self) -> None:
-        """Connect again to the sandbox, which MDA replaced with a fresh one."""
-
-        async def reconnect(_runtime: Runtime) -> None:
-            if self._cfg.thread_id is None:
-                raise ValueError("This run has no thread")
-            repositories, permissions = self._github_scope()
-            await reconnect_replaced_sandbox(
-                self._cfg.thread_id,
-                github_proxy_repositories=repositories,
-                github_proxy_permissions=permissions,
-                invocation_id=self._cfg.invocation_id,
-            )
-
-        await in_graph_context({**self.config, "run_name": "sandbox"}, reconnect)
 
     async def github_scope(self) -> tuple[list[str] | None, PermissionMap | None]:
         """How the run narrows its sandbox's GitHub token beyond its thread's own scope, as
@@ -166,10 +155,23 @@ class RunSandbox:
             force_refresh=force_refresh,
         )
 
-    async def tell_gone(self, *, sandbox_id: str | None = None, reason: str | None = None) -> None:
-        """Tell the person the sandbox is gone, unless a review's own notice tells its PR."""
+    async def tell_gone(
+        self,
+        *,
+        sandbox_id: str | None = None,
+        reason: str | None = None,
+        deleted: bool | None = None,
+    ) -> None:
+        """Tell the person the sandbox is gone, unless a review's own notice tells its PR.
+
+        One LangSmith ``deleted`` is told as such, since only a new thread goes on from it;
+        unless the caller knows, LangSmith is asked about the sandbox the thread is bound to.
+        """
         if self.reviews:
             return
+        if deleted is None and self._cfg.thread_id is not None:
+            metadata = await lifecycle.get_sandbox_metadata(self._cfg.thread_id)
+            deleted = await ThreadMetadata.model_validate(metadata).mda_sandbox_deleted()
         await post_sandbox_unreachable_notification(
-            self.config, sandbox_id=sandbox_id, reason=reason
+            self.config, sandbox_id=sandbox_id, reason=reason, deleted=bool(deleted)
         )

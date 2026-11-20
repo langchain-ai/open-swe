@@ -8,11 +8,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import ClassVar, Literal, TypedDict
+from typing import TYPE_CHECKING, ClassVar, Literal, TypedDict
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
 from managed_deepagents._connections import ConnectionReference, is_connection_reference
+
+if TYPE_CHECKING:
+    from managed_deepagents.runtime import _LazyManagedSandboxBackend
 
 
 @dataclass(frozen=True, repr=False)
@@ -161,40 +164,26 @@ class BoundSandboxMissingError(RuntimeError):
     """The provider confirmed that the thread's bound workspace no longer exists."""
 
 
-@dataclass(frozen=True)
-class SandboxReplacement:
-    """A thread's box replaced by a fresh one under its name; the old box is kept, renamed."""
-
-    old_name: str
-    new_name: str
-    old_stopped: bool
-    stop_error: str | None = None
-
-
-async def open_sandbox(backend: object, *, wait: bool = True) -> str:
+async def open_sandbox(backend: object) -> str:
     """Adopt or create the run's managed sandbox now and return its name.
 
-    ``backend`` is ``runtime.backend``. The box is otherwise opened on first use.
-    Without ``wait`` this returns as soon as the box is asked for, while it boots;
-    its first use waits for it to be ready and runs the connectors' hooks.
+    ``backend`` is ``runtime.backend``. Without this call, the sandbox opens on
+    its first use.
     """
-    from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
-
-    return await _managed_sandbox_of(backend).aopen(wait=wait)
+    return await _managed_sandbox(backend).aopen()
 
 
-async def replace_sandbox(
-    backend: object, sandbox: SandboxDefinition | None = None, *, missing_only: bool = False
-) -> SandboxReplacement:
-    """Give the run's thread a fresh managed sandbox under the same name.
+def _managed_sandbox(backend: object) -> _LazyManagedSandboxBackend:
+    """The run's managed sandbox behind ``runtime.backend``, which tools may see composited."""
+    from deepagents.backends import CompositeBackend  # noqa: PLC0415
 
-    The fresh box is created from ``sandbox``'s options, the run's own by default.
-    The old box is stopped and kept, renamed, until its lifecycle deletes it.
-    ``backend`` is ``runtime.backend``.
-    """
-    from managed_deepagents.runtime import _managed_sandbox_of  # noqa: PLC0415
+    from managed_deepagents.runtime import _LazyManagedSandboxBackend  # noqa: PLC0415
 
-    return await _managed_sandbox_of(backend).areplace(sandbox, missing_only=missing_only)
+    while isinstance(backend, CompositeBackend):
+        backend = backend.default
+    if not isinstance(backend, _LazyManagedSandboxBackend):
+        raise TypeError("This run has no managed sandbox")
+    return backend
 
 
 def is_per_thread(options: Mapping[str, object]) -> bool:
@@ -250,10 +239,8 @@ __all__ = [
     "ProxyHeader",
     "ProxyRule",
     "SandboxDefinition",
-    "SandboxReplacement",
     "basic",
     "bearer",
     "normalize_sandbox_options",
     "open_sandbox",
-    "replace_sandbox",
 ]

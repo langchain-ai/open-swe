@@ -55,6 +55,11 @@ class SandboxUnreachableError(RuntimeError):
         )
 
 
+class SandboxDeletedError(SandboxUnreachableError):
+    """LangSmith confirmed the thread's sandbox is deleted: nothing replaces it, so the thread
+    can never run again, and a new thread is the way on."""
+
+
 class SandboxHandedOverError(SandboxUnreachableError):
     """The thread's old sandbox is gone or set aside: its next run starts in a fresh one MDA opens."""
 
@@ -530,8 +535,8 @@ def get_or_create_sandbox_backend_proxy(
 async def get_sandbox_metadata(thread_id: str) -> dict[str, Any]:
     """Fetch sandbox metadata from the live thread.
 
-    Never from the run config: a run queued before ``recreate_sandbox`` carries
-    the sandbox the thread has since left.
+    Never from the run config: a run queued before the thread was bound to another
+    sandbox carries the one it has since left.
     """
     # A failed lookup must not read as "unbound": the caller would create a
     # replacement and bind it over the thread's real sandbox.

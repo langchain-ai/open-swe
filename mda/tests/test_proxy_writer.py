@@ -34,16 +34,6 @@ def test_the_config_is_asked_for_again_before_its_token_expires(
     assert writer._stale() is stale
 
 
-def test_a_replaced_sandbox_forgets_the_config_and_its_token() -> None:
-    writer = _holding()
-    writer._backend_expires_at = datetime.now(UTC)
-
-    writer.replaced()
-
-    assert writer.config() is None
-    assert not writer._stale()
-
-
 async def test_rewriting_after_a_refusal_asks_for_a_newly_minted_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

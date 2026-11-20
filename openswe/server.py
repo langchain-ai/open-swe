@@ -220,7 +220,6 @@ from openswe.tools import (
     read_only_sql,
     read_user_settings,
     recheck_pr_approval,
-    recreate_sandbox,
     reorder_sidebar_threads,
     reorder_thread_pins,
     report_platform_issue,
@@ -615,7 +614,6 @@ INCIDENT_KICKOFF_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "snapshotctl",
         "save_user_skill",
         "delete_user_skill",
-        "recreate_sandbox",
     }
 )
 
@@ -759,7 +757,6 @@ AGENT_TOOLS: Final = (
     add_managed_tools_server,
     connect_managed_tools,
     discover_managed_tools,
-    recreate_sandbox,
     report_platform_issue,
     upload_session,
     schedule_thread_wakeup,

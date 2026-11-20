@@ -30,7 +30,6 @@ async def test_global_defaults_are_pinned_and_public_metadata_cannot_expand_auth
         pinned = await SandboxCreateConfig.resolve()
         assert pinned.snapshot_id == "global-1"
         assert pinned.proxy_config == {"rules": [{"name": "original"}]}
-        assert (await SandboxCreateConfig.resolve(source="base")).snapshot_id is None
         existing = await SandboxCreateConfig.for_thread(
             {
                 "sandbox_id": "old",
@@ -62,7 +61,11 @@ async def test_mda_recreation_tracks_the_image_without_changing_bound_authority(
     monkeypatch.setattr(
         "openswe.sandboxes.managed.get_sandbox_metadata", AsyncMock(return_value=metadata)
     )
-    config = await SandboxCreateConfig.resolve(source=source)
+    config = (
+        SandboxCreateConfig(snapshot_id=None, create_params={"preserve_memory_on_stop": True})
+        if source == "base"
+        else await SandboxCreateConfig.resolve()
+    )
     original = config.langsmith_options()
     await SANDBOX_EXECUTION.bind("thread-1", "mda-sandbox", config.authority_profile(), {})
 
@@ -109,6 +112,14 @@ _UNBOUND = {"sandbox_id": None, "sandbox_base_proxy_config": None}
         ),
         # The sandbox the backend made is gone: this run starts in MDA's instead of failing.
         ({"sandbox_id": "gone-sandbox"}, {}, "own", None, [("thread-1", _UNBOUND)]),
+        # A sandbox of MDA's that is gone stays bound: nothing replaces it, a review's included.
+        (
+            {"sandbox_id": "gone-sandbox", "sandbox_owner": "mda"},
+            {},
+            "own",
+            "gone-sandbox",
+            [],
+        ),
         # A worker shares the sandbox its coordinator is bound to now, whatever its own copy says.
         ({**_WORKER}, {"sandbox_id": "sandbox", "sandbox_owner": "mda"}, _HOST, "sandbox", []),
         (
@@ -240,26 +251,6 @@ async def test_mda_adopts_a_backend_sandbox_only_one_thread_is_bound_to(
         ({}, None, {"sandbox_owner": "mda"}),
         ({"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}, "mda-sandbox", None),
         ({"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}, None, None),
-        # A thread handed over by ``recreate_sandbox`` gets the sandbox it asked for, once.
-        (
-            {"sandbox_replacement": {"workspace": "default", "source": "base"}},
-            "mda-sandbox",
-            {
-                "sandbox_owner": "mda",
-                "sandbox_id": "mda-sandbox",
-                "sandbox_replacement": None,
-                "sandbox_base_proxy_config": {},
-            },
-        ),
-        (
-            {
-                "sandbox_id": "mda-sandbox",
-                "sandbox_owner": "mda",
-                "sandbox_replacement": {"workspace": "default", "source": "base"},
-            },
-            "mda-sandbox",
-            None,
-        ),
     ],
 )
 async def test_the_backend_binds_the_sandbox_mda_reports(
@@ -270,11 +261,7 @@ async def test_the_backend_binds_the_sandbox_mda_reports(
     reported: str | None,
     update: dict[str, object] | None,
 ) -> None:
-    from openswe.sandboxes.lifecycle import (
-        bind_mda_sandbox,
-        ensure_sandbox_for_thread,
-        request_mda_replacement,
-    )
+    from openswe.sandboxes.lifecycle import bind_mda_sandbox, ensure_sandbox_for_thread
     from openswe.sandboxes.state import SandboxUnreachableError
 
     execution_defaults.create_params = {"proxy_config": {"rules": []}}
@@ -290,13 +277,7 @@ async def test_the_backend_binds_the_sandbox_mda_reports(
     monkeypatch.setattr("openswe.threads.store.THREADS.update", write_metadata)
     monkeypatch.setattr("openswe.execution_images.EXECUTION_IMAGES.maybe_start_update", AsyncMock())
 
-    if "sandbox_replacement" in metadata and "sandbox_id" not in metadata:
-        with pytest.raises(ValueError, match="not privately pinned"):
-            await bind_mda_sandbox("thread-1", reported)
-        await request_mda_replacement("thread-1", source="base", invocation_id="request-1")
-        updates.clear()
-
-    profile = await ExecutionProfile.resolve(thread_id="thread-1")
+    profile = await ExecutionProfile.resolve()
     if reported is None and "sandbox_id" not in metadata:
         with pytest.raises(SandboxUnreachableError, match="could not open.*HTTP 503") as raised:
             await bind_mda_sandbox("thread-1", reported, open_error="SandboxClientError: HTTP 503")
@@ -311,18 +292,42 @@ async def test_the_backend_binds_the_sandbox_mda_reports(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("replacement_pending", [False, True])
-async def test_replicas_cannot_rebind_a_thread_to_a_different_sandbox(
-    monkeypatch, replacement_pending: bool
-) -> None:
+@pytest.mark.parametrize("deleted", [False, True])
+async def test_a_bound_sandbox_langsmith_deleted_ends_the_run(monkeypatch, deleted: bool) -> None:
+    """MDA could not open the thread's sandbox: the thread keeps its binding, and the run ends
+    only where LangSmith confirms the sandbox deleted, since nothing replaces it."""
+    from openswe.sandboxes.lifecycle import bind_mda_sandbox
+    from openswe.sandboxes.state import SandboxDeletedError
+
+    metadata = {"sandbox_id": "original", "sandbox_owner": "mda"}
+    updates = AsyncMock()
+    monkeypatch.setattr(
+        "openswe.sandboxes.lifecycle.get_sandbox_metadata", AsyncMock(return_value=metadata)
+    )
+    monkeypatch.setattr("openswe.threads.store.THREADS.update", updates)
+    monkeypatch.setattr(
+        "openswe.sandboxes.providers.langsmith.sandbox_exists",
+        AsyncMock(return_value=not deleted),
+    )
+    error = "BoundSandboxMissingError: The thread's bound sandbox 'original' no longer exists"
+
+    if deleted:
+        with pytest.raises(SandboxDeletedError) as raised:
+            await bind_mda_sandbox("thread-1", None, open_error=error)
+        assert (raised.value.sandbox_id, raised.value.reason) == ("original", error)
+    else:
+        await bind_mda_sandbox("thread-1", None, open_error=error)
+    updates.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_replicas_cannot_rebind_a_thread_to_a_different_sandbox(monkeypatch) -> None:
     from unittest.mock import MagicMock
 
     from openswe.sandboxes.lifecycle import bind_mda_sandbox
     from openswe.sandboxes.state import SANDBOX_CONNECTIONS, SandboxUnreachableError
 
     metadata: dict[str, object] = {"sandbox_id": "original", "sandbox_owner": "mda"}
-    if replacement_pending:
-        metadata["sandbox_replacement"] = {"workspace": "default", "source": "base"}
     updates: list[dict[str, object]] = []
     connection = MagicMock()
     monkeypatch.setitem(SANDBOX_CONNECTIONS, "original", connection)
@@ -347,199 +352,6 @@ async def test_replicas_cannot_rebind_a_thread_to_a_different_sandbox(
         assert metadata["sandbox_id"] == "original"
         assert SANDBOX_CONNECTIONS["original"] is connection
     assert updates == []
-
-
-@pytest.mark.asyncio
-async def test_explicit_replacement_privately_pins_global_authority(
-    monkeypatch,
-    registry_db,
-) -> None:
-    from openswe.execution import SANDBOX_EXECUTION
-    from openswe.sandboxes.lifecycle import reconnect_replaced_sandbox, request_mda_replacement
-
-    defaults = ExecutionDefaults(create_params={"proxy_config": {"rules": ["other"]}})
-    monkeypatch.setattr(EXECUTION_DEFAULTS, "load", AsyncMock(return_value=defaults))
-    thread_metadata: dict[str, object] = {
-        "sandbox_id": "mda-sandbox",
-        "sandbox_owner": "mda",
-        "sandbox_base_proxy_config": {"rules": ["original"]},
-    }
-    updates: list[dict[str, object]] = []
-    publication_failures: list[Exception] = [RuntimeError("metadata unavailable")]
-
-    async def read_metadata(thread_id: str) -> dict[str, object]:
-        return thread_metadata
-
-    async def write_metadata(*, thread_id: str, metadata: dict[str, object]) -> None:
-        if publication_failures:
-            raise publication_failures.pop()
-        updates.append(metadata)
-        thread_metadata.update(metadata)
-
-    ensure = AsyncMock()
-    monkeypatch.setattr("openswe.sandboxes.lifecycle.get_sandbox_metadata", read_metadata)
-    monkeypatch.setattr("openswe.threads.store.THREADS.update", write_metadata)
-    monkeypatch.setattr("openswe.sandboxes.lifecycle.ensure_sandbox_for_thread", ensure)
-    monkeypatch.setattr("openswe.execution_images.EXECUTION_IMAGES.maybe_start_update", AsyncMock())
-
-    with pytest.raises(RuntimeError, match="metadata unavailable"):
-        await request_mda_replacement("thread-1", source="defaults", invocation_id="request-1")
-    requested = await request_mda_replacement(
-        "thread-1", source="defaults", invocation_id="request-1"
-    )
-    assert (
-        await request_mda_replacement("thread-1", source="defaults", invocation_id="request-1")
-        == requested
-    )
-    queued = await ExecutionProfile.resolve(thread_id="thread-1")
-    defaults.create_params["proxy_config"] = {"rules": ["changed"]}
-    with pytest.raises(ValueError, match="different replacement requires a new run"):
-        await request_mda_replacement("thread-1", source="defaults", invocation_id="request-1")
-    with pytest.raises(ValueError, match="has not completed"):
-        await request_mda_replacement("thread-1", source="defaults", invocation_id="request-2")
-    existing = await SandboxCreateConfig.for_thread(thread_metadata, thread_id="thread-1")
-    assert existing.proxy_config == {}
-    with pytest.raises(ValueError, match="does not own"):
-        await reconnect_replaced_sandbox("thread-1", invocation_id="request-2")
-    publication_failures.append(RuntimeError("metadata unavailable"))
-    with pytest.raises(RuntimeError, match="metadata unavailable"):
-        await reconnect_replaced_sandbox("thread-1", invocation_id="request-1")
-    with pytest.raises(ValueError, match="has not completed"):
-        await request_mda_replacement("thread-1", source="defaults", invocation_id="request-2")
-    await reconnect_replaced_sandbox("thread-1", invocation_id="request-1")
-    assert updates[-1] == {
-        "sandbox_base_proxy_config": {"rules": ["other"]},
-        "sandbox_replacement": None,
-    }
-    bound = await SANDBOX_EXECUTION.bound("thread-1", "mda-sandbox")
-    assert bound is not None and bound.create == requested
-    publications = len(updates)
-    await SANDBOX_EXECUTION.bind(
-        "thread-1",
-        "mda-sandbox",
-        bound,
-        {"sandbox_base_proxy_config": {"rules": ["stale-duplicate"]}},
-        replacement=queued.replacement,
-    )
-    assert len(updates) == publications
-    assert thread_metadata["sandbox_base_proxy_config"] == {"rules": ["other"]}
-    with pytest.raises(ValueError, match="completed sandbox replacement has different authority"):
-        await SANDBOX_EXECUTION.bind(
-            "thread-1", "different-sandbox", bound, {}, replacement=queued.replacement
-        )
-    thread_metadata["sandbox_base_proxy_config"] = {"rules": ["injected"]}
-    thread_metadata["sandbox_create_options"] = {"extra_fields": {"proxy_config": "injected"}}
-    existing = await SandboxCreateConfig.for_thread(thread_metadata, thread_id="thread-1")
-    assert existing.proxy_config == {"rules": ["other"]}
-    defaults.create_params["proxy_config"] = {"rules": ["other"]}
-    await request_mda_replacement("thread-1", source="defaults", invocation_id="request-2")
-    with pytest.raises(ValueError, match="does not own"):
-        await reconnect_replaced_sandbox("thread-1", invocation_id="request-1")
-    with ExecutionProfile.bind(queued), pytest.raises(ValueError, match="changed; start a new run"):
-        await SandboxCreateConfig.for_thread({}, thread_id="thread-1")
-    ensure.assert_awaited_once_with(
-        "thread-1",
-        github_proxy_repositories=None,
-        github_proxy_permissions=None,
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["error", "interrupted"])
-async def test_failed_replacement_can_be_retried_without_accepting_stale_callbacks(
-    monkeypatch, registry_db, execution_defaults: ExecutionDefaults, status: str
-) -> None:
-    import asyncio
-    from datetime import UTC, datetime
-
-    from openswe.execution import SANDBOX_EXECUTION
-    from openswe.run_config import RunConfig
-    from openswe.sandboxes.lifecycle import reconnect_replaced_sandbox, request_mda_replacement
-    from openswe.threads.runtimes import RUNTIMES, MdaRun, MdaRuntime
-
-    metadata: dict[str, object] = {"sandbox_id": "mda-sandbox", "sandbox_owner": "mda"}
-
-    monkeypatch.setattr(
-        RunConfig,
-        "from_runtime",
-        lambda: RunConfig(invocation_id="invocation-1", run_id="runtime-1"),
-    )
-    monkeypatch.setattr("openswe.threads.store.THREADS.update", AsyncMock())
-    monkeypatch.setattr(
-        "openswe.sandboxes.lifecycle.get_sandbox_metadata", AsyncMock(return_value=metadata)
-    )
-    monkeypatch.setattr("openswe.sandboxes.lifecycle.ensure_sandbox_for_thread", AsyncMock())
-    runtime_run = AsyncMock()
-    runtime = MdaRuntime("https://mda.test")
-    monkeypatch.setattr(runtime, "run", runtime_run)
-    monkeypatch.setattr(type(RUNTIMES), "mda_runtime", property(lambda _: runtime))
-    await request_mda_replacement("thread-1", source="base")
-    pending = await SANDBOX_EXECUTION.pending("thread-1")
-    assert pending is not None and pending.run_id == "runtime-1"
-
-    for owner_status in ("pending", "running", None):
-        runtime_run.return_value = (
-            MdaRun(run_id="runtime-1", status=owner_status, created_at=datetime.now(UTC))
-            if owner_status is not None
-            else None
-        )
-        with pytest.raises(ValueError, match="has not completed"):
-            await request_mda_replacement(
-                "thread-1",
-                source="base",
-                invocation_id="invocation-2",
-                run_id="runtime-2",
-            )
-    runtime_run.side_effect = RuntimeError("runtime unavailable")
-    with pytest.raises(RuntimeError, match="runtime unavailable"):
-        await request_mda_replacement(
-            "thread-1",
-            source="base",
-            invocation_id="invocation-2",
-            run_id="runtime-2",
-        )
-    assert await SANDBOX_EXECUTION.pending("thread-1") == pending
-    runtime_run.side_effect = None
-    runtime_run.return_value = MdaRun.model_validate(
-        {"run_id": "runtime-1", "status": status, "created_at": datetime.now(UTC)}
-    )
-    requested = await request_mda_replacement(
-        "thread-1",
-        source="base",
-        invocation_id="invocation-2",
-        run_id="runtime-2",
-    )
-    runtime_run.assert_awaited_with("thread-1", "runtime-1")
-    pending = await SANDBOX_EXECUTION.pending("thread-1")
-    assert pending is not None and pending.invocation_id == "invocation-2"
-    with pytest.raises(ValueError, match="does not own"):
-        await reconnect_replaced_sandbox("thread-1", invocation_id="invocation-1")
-    await reconnect_replaced_sandbox("thread-1", invocation_id="invocation-2")
-    assert await SANDBOX_EXECUTION.pending("thread-1") is None
-    bound = await SANDBOX_EXECUTION.bound("thread-1", "mda-sandbox")
-    assert bound is not None and bound.create == requested
-
-    await SANDBOX_EXECUTION.request("thread-1", bound, "invocation-3", {}, run_id="runtime-3")
-    contenders = asyncio.Barrier(2)
-
-    async def finished_run(thread_id: str, run_id: str) -> MdaRun:
-        assert (thread_id, run_id) == ("thread-1", "runtime-3")
-        await contenders.wait()
-        return MdaRun(run_id=run_id, status="error", created_at=datetime.now(UTC))
-
-    runtime_run.side_effect = finished_run
-    results = await asyncio.gather(
-        *(
-            SANDBOX_EXECUTION.request(
-                "thread-1", bound, f"invocation-{index}", {}, run_id=f"runtime-{index}"
-            )
-            for index in (4, 5)
-        ),
-        return_exceptions=True,
-    )
-    assert sum(isinstance(result, ValueError) for result in results) == 1
-    pending = await SANDBOX_EXECUTION.pending("thread-1")
-    assert pending is not None and pending.pin() in results
 
 
 class TestLangSmithSandboxCredentials:
@@ -622,7 +434,7 @@ class TestLangSmithSandboxCredentials:
         metadata.update(
             sandbox_id="sandbox-ls", sandbox_owner="mda", sandbox_base_proxy_config=base_config
         )
-        await lifecycle.reconnect_replaced_sandbox("ls-thread")
+        await lifecycle.ensure_sandbox_for_thread("ls-thread")
         assert await lifecycle.refresh_thread_github_proxy("ls-thread") is None
         if mda_writes:
             # MDA writes it as the backend hands it over, with no GitHub rules.
@@ -665,15 +477,11 @@ async def test_legacy_run_digest_is_frozen_and_rejects_modified_records(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_external_sandbox_skips_credentials_proxy_and_recreation(monkeypatch) -> None:
-    import importlib
-
+async def test_external_sandbox_skips_credentials_and_proxy(monkeypatch) -> None:
     from openswe.sandboxes.lifecycle import SandboxCredentialPolicy, refresh_thread_github_proxy
     from openswe.sandboxes.managed import ManagedSandbox
     from openswe.tasks.schemas import ThreadMetadata
-    from openswe.tools.recreate_sandbox import recreate_sandbox
 
-    recreate_mod = importlib.import_module("openswe.tools.recreate_sandbox")
     metadata: dict[str, object] = {
         "owner_type": "system",
         "sandbox_id": "tb-task-1",
@@ -686,7 +494,6 @@ async def test_external_sandbox_skips_credentials_proxy_and_recreation(monkeypat
     monkeypatch.setattr(
         "openswe.sandboxes.lifecycle.get_sandbox_metadata", AsyncMock(return_value=metadata)
     )
-    monkeypatch.setattr(recreate_mod, "get_sandbox_metadata", AsyncMock(return_value=metadata))
     configure_proxy = AsyncMock()
     monkeypatch.setattr("openswe.sandboxes.lifecycle.configure_sandbox_proxy", configure_proxy)
 
@@ -720,9 +527,3 @@ async def test_external_sandbox_skips_credentials_proxy_and_recreation(monkeypat
     ).allows_github()
     assert await refresh_thread_github_proxy("thread-worker") is None
     configure_proxy.assert_not_awaited()
-
-    monkeypatch.setattr(
-        "openswe.run_config.get_config", lambda: {"configurable": {"thread_id": "thread-ext"}}
-    )
-    recreated = await recreate_sandbox()
-    assert recreated["success"] is False

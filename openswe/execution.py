@@ -31,14 +31,6 @@ class ReplacementPin(SandboxAuthority):
     invocation_id: str = Field(min_length=1)
 
 
-class PendingReplacement(ReplacementPin):
-    pending: bool = True
-    run_id: str | None = None
-
-    def pin(self) -> ReplacementPin:
-        return ReplacementPin(execution=self.execution, invocation_id=self.invocation_id)
-
-
 class ExecutionProfile(BaseModel):
     """Pinned run data whose historical serialization stays frozen for digest verification."""
 
@@ -52,15 +44,15 @@ class ExecutionProfile(BaseModel):
     refresh_workspace: str | None = None
     captured_at: str | None = None
     refresh_enabled: bool = False
+    # Nothing sets it; profiles kept with one must still load and hash as they were kept.
     replacement: ReplacementPin | None = None
 
     @classmethod
-    async def resolve(cls, *, thread_id: str | None = None) -> Self:
+    async def resolve(cls) -> Self:
         from openswe.execution_images import EXECUTION_IMAGES
         from openswe.sandboxes.lifecycle import SandboxCreateConfig
 
         defaults = await EXECUTION_DEFAULTS.load()
-        pending = await SANDBOX_EXECUTION.pending(thread_id) if thread_id else None
         image = await EXECUTION_IMAGES.state()
         return cls(
             uses_defaults=True,
@@ -69,7 +61,6 @@ class ExecutionProfile(BaseModel):
             repos=defaults.repos,
             captured_at=image.captured_at(defaults.snapshot_id),
             refresh_enabled=bool(defaults.update_script),
-            replacement=pending.pin() if pending else None,
         )
 
     def stale(self, *, interval_seconds: int = 8 * 60 * 60) -> bool:
@@ -133,84 +124,16 @@ class SandboxExecutionBindings:
         pin = SandboxAuthority.model_validate(data)
         return await ExecutionProfile.kept(pin.execution)
 
-    async def pending(self, thread_id: str) -> PendingReplacement | None:
-        data = await _records.get(f"replacement:{thread_id}")
-        if not data:
-            return None
-        pending = PendingReplacement.model_validate(data)
-        return pending if pending.pending else None
-
-    async def request(
-        self,
-        thread_id: str,
-        profile: ExecutionProfile,
-        invocation_id: str,
-        metadata: JsonObject,
-        *,
-        run_id: str | None = None,
-    ) -> ReplacementPin:
-        from openswe.threads.runtimes import RUNTIMES
-        from openswe.threads.store import THREADS
-
-        recoverable = await self.pending(thread_id)
-        if recoverable is not None and recoverable.invocation_id != invocation_id:
-            owner = (
-                await RUNTIMES.mda_runtime.run(thread_id, recoverable.run_id)
-                if recoverable.run_id is not None
-                else None
-            )
-            if owner is None or owner.active:
-                raise ValueError("The previous sandbox replacement has not completed")
-        pin = ReplacementPin(execution=await profile.keep(), invocation_id=invocation_id)
-        key = f"replacement:{thread_id}"
-        async with postgres.session() as session:
-            data = await _records.lock(key, session=session)
-            previous = PendingReplacement.model_validate(data) if data else None
-            if previous is not None and previous.invocation_id == invocation_id:
-                if previous.pin() != pin:
-                    raise ValueError("A different replacement requires a new run")
-                publish = previous.pending
-            else:
-                if previous is not None and previous.pending and previous != recoverable:
-                    raise ValueError("The previous sandbox replacement has not completed")
-                await _records.patch(
-                    key,
-                    PendingReplacement(**pin.model_dump(), run_id=run_id).model_dump(mode="json"),
-                    session=session,
-                )
-                publish = True
-        if publish:
-            await THREADS.update(thread_id=thread_id, metadata=metadata)
-        return pin
-
     async def bind(
-        self,
-        thread_id: str,
-        sandbox_id: str,
-        profile: ExecutionProfile,
-        metadata: JsonObject,
-        *,
-        replacement: ReplacementPin | None = None,
+        self, thread_id: str, sandbox_id: str, profile: ExecutionProfile, metadata: JsonObject
     ) -> None:
         from openswe.threads.store import THREADS
 
         execution = await profile.keep()
-        key = f"replacement:{thread_id}"
+        sandbox_key = f"sandbox:{thread_id}:{sandbox_id}"
         async with postgres.session() as session:
-            data = await _records.lock(key, session=session)
-            pending = PendingReplacement.model_validate(data) if data else None
-            if (pending is not None and pending.pending) or replacement is not None:
-                if pending is None or pending.pin() != replacement:
-                    raise ValueError("The sandbox replacement changed; start a new run")
-                if execution != pending.execution:
-                    raise ValueError("The sandbox replacement authority does not match")
-            sandbox_key = f"sandbox:{thread_id}:{sandbox_id}"
             bound = await _records.get(sandbox_key, session=session)
-            if replacement is not None and pending is not None and not pending.pending:
-                if not bound or bound.get("execution") != execution:
-                    raise ValueError("The completed sandbox replacement has different authority")
-                return
-            if bound and bound.get("execution") != execution and replacement is None:
+            if bound and bound.get("execution") != execution:
                 raise ValueError("The sandbox already has different creation authority")
             await _records.patch(
                 sandbox_key,
@@ -218,13 +141,6 @@ class SandboxExecutionBindings:
                 session=session,
             )
         await THREADS.update(thread_id=thread_id, metadata=metadata)
-        if replacement is not None:
-            async with postgres.session() as session:
-                data = await _records.lock(key, session=session)
-                completed = PendingReplacement.model_validate(data)
-                if completed.pin() != replacement:
-                    raise ValueError("The sandbox replacement changed; start a new run")
-                await _records.patch(key, {"pending": False}, session=session)
 
 
 SANDBOX_EXECUTION = SandboxExecutionBindings()

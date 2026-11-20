@@ -6,7 +6,7 @@
 
 ## What
 
-`is_per_thread` only marks a sandbox as a thread's own. The 2026-10-29 policies (preserve-thread-sandbox, authoritative-sandbox-binding, deleted-bound-sandbox) key on it: never create a second workspace for a thread, only reconnect to an existing replacement, never replace the sandbox implicitly after a tool error. It no longer changes how a sandbox is selected or keyed.
+`is_per_thread` only marks a sandbox as a thread's own. The 2026-10-29 policies (preserve-thread-sandbox, authoritative-sandbox-binding, deleted-bound-sandbox) key on it: never create a second workspace for a thread, only reconnect to a sandbox that already holds its name, never replace the sandbox after a tool error. It no longer changes how a sandbox is selected or keyed.
 
 ## Upstream
 

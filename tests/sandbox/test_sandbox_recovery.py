@@ -124,14 +124,17 @@ async def test_only_a_review_skips_the_lost_sandbox_notice(
         RemoteRun(thread_id="thread-1", assistant_id=assistant_id, configurable={}, expires_at=0),
         "run-1",
     )
-    with patch.object(
-        run_sandbox, "post_sandbox_unreachable_notification", new_callable=AsyncMock
-    ) as notify:
+    with (
+        patch.object(
+            run_sandbox, "post_sandbox_unreachable_notification", new_callable=AsyncMock
+        ) as notify,
+        patch.object(run_sandbox.lifecycle, "get_sandbox_metadata", AsyncMock(return_value={})),
+    ):
         await run.sandbox_unreachable(SandboxGone(sandbox_id="sb-dead", reason="Image pull failed"))
 
     if notified:
         notify.assert_awaited_once_with(
-            run.config, sandbox_id="sb-dead", reason="Image pull failed"
+            run.config, sandbox_id="sb-dead", reason="Image pull failed", deleted=False
         )
     else:
         notify.assert_not_awaited()

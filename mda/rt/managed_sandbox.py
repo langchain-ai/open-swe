@@ -1,4 +1,4 @@
-"""The thread's sandbox as MDA's own sandbox: declared, opened as the run starts, replaced on request.
+"""The thread's sandbox as MDA's own sandbox: declared, and opened as the run starts.
 
 The graph declares one sandbox (``sandbox``) for every run; each run's catalog says which
 sandbox it uses and the options MDA creates it with (``SandboxSpec``): its thread's own, one
@@ -11,10 +11,9 @@ Where preparing reaches no sandbox (``SandboxSpec.bind_after_prepare``), the san
 asked for while the run prepares and calls the model, and reported once it is open
 (``rt.sandbox_binding``); the run's first tool call, whichever it is, waits for that.
 Opening and booting are retried while the sandbox service fails transiently; otherwise
-the backend hears why, from preparing or from the call that needed the sandbox.
-``recreate_sandbox`` on such a sandbox comes back from the backend as what to replace it
-with; MDA replaces it, the backend reconnects, and the call answers as it does
-in-process.
+the backend hears why, from preparing or from the call that needed the sandbox. A
+thread and its sandbox are one: nothing replaces a sandbox the thread is bound to, so one
+that is gone leaves the run unable to open it, and the backend says why.
 
 The backend writes the sandbox's proxy config, unless the catalog says MDA does
 (``SandboxSpec.writes_proxy``). Then MDA writes all of it, before each command it runs
@@ -28,12 +27,10 @@ it in the sandbox: it is retried for as long as the host takes to suspend an idl
 sandbox, while the sandbox API takes no proxy config, and then a failure ends the run at
 that call, since the backend writes none of it. It writes it again every few minutes
 before a model or tool call, for the
-commands the backend runs in the sandbox, and after a replacement, which keeps the
-config it was created with until then. A backend that refuses the call writes it itself.
+commands the backend runs in the sandbox. A backend that refuses the call writes it itself.
 """
 
 import asyncio
-import json
 import logging
 import random
 import re
@@ -44,6 +41,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Final, Protocol, runtime_checkable
 
 import httpx2
+from deepagents.backends import CompositeBackend
 from deepagents.backends.protocol import SandboxBackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
@@ -61,36 +59,28 @@ from langsmith.sandbox import (
     SandboxNotReadyError,
 )
 from managed_deepagents import define_sandbox
-from managed_deepagents.sandbox import (
-    BoundSandboxMissingError,
-    SandboxDefinition,
-    open_sandbox,
-    replace_sandbox,
-)
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from managed_deepagents.sandbox import SandboxDefinition
+from pydantic import JsonValue
 from runtime_api.catalog import SandboxCreate, SandboxSpec
 from runtime_api.endpoint import call
-from runtime_api.loop import SANDBOX_REPLACED, SANDBOX_UNREACHABLE, SandboxGone
-from runtime_api.operations import RunRequest
+from runtime_api.loop import SANDBOX_UNREACHABLE, SandboxGone
 from runtime_api.sandbox_proxy import SANDBOX_PROXY, SandboxProxyRequest
 
 from rt.backend import (
     BackendCallError,
     BackendRefusedError,
-    OpenSweBackend,
     Run,
     RunContext,
     RunLocal,
     current_run,
 )
 from rt.sandbox_binding import SandboxBinding
-from rt.sandbox_setup import SandboxUnavailableError, sandbox_setup
+from rt.sandbox_setup import SandboxUnavailableError
 from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
-_json_object = TypeAdapter(dict[str, JsonValue])
 # As the backend's sandbox: a command without a timeout of its own gets five minutes.
 EXECUTE_TIMEOUT_SECONDS: Final = 300
 # A partial sandbox-service outage passes within a minute or two; a run waits that long.
@@ -120,6 +110,13 @@ _PERMANENT_WRITE_FAILURES: Final = (ResourceNotFoundError,)
 # MDA writes the proxy config before each command it runs in the sandbox, this one included.
 _NO_OP: Final = ":"
 _NO_OP_TIMEOUT_SECONDS: Final = 60
+
+
+@runtime_checkable
+class _Openable(Protocol):
+    """MDA's handle on the run's sandbox, which adopts or asks for it now."""
+
+    async def aopen(self, *, wait: bool = True) -> str: ...
 
 
 @runtime_checkable
@@ -185,18 +182,6 @@ class SandboxProxyWriter:
         expires_at = self._backend_expires_at
         return expires_at is not None and expires_at - datetime.now(UTC) < _BACKEND_TOKEN_MARGIN
 
-    def replaced(self) -> None:
-        """The sandbox was replaced, so the backend's part, which follows the thread's rules the
-        replacement may change, is asked for again.
-
-        Until then MDA writes none of it, and the new sandbox keeps the config it was created
-        with: never the old sandbox's workspace rules.
-        """
-        self._backend_config = None
-        self._backend_expires_at = None
-        self._deferred = None
-        self._writing = None
-
     def defer(self, sandbox_id: str) -> None:
         """Leave the first write on sandbox ``sandbox_id`` to its boot (``write_deferred``).
 
@@ -254,7 +239,7 @@ class SandboxProxyWriter:
             return
         self._due_at = time.monotonic() + _PROXY_RETRY_SECONDS
         if self._backend_config is None or self._stale():
-            name = sandbox_id or await open_sandbox(getattr(runtime, "backend", None))
+            name = sandbox_id or await OpenedSandbox.open(getattr(runtime, "backend", None))
             request = SandboxProxyRequest(
                 run_id=run_id(), sandbox_id=name, force_refresh=self._force_refresh
             )
@@ -370,7 +355,17 @@ class OpenedSandbox:
 
     sandbox_id: str | None = None
     error: str | None = None
-    workspace_lost: bool = False
+
+    @staticmethod
+    async def open(backend: object, *, wait: bool = True) -> str:
+        """Adopt or create the run's sandbox now and return its name; without ``wait``, before
+        it boots, its first use waiting for it. ``backend`` is ``runtime.backend``, which tools
+        may see composited."""
+        while isinstance(backend, CompositeBackend):
+            backend = backend.default
+        if not isinstance(backend, _Openable):
+            raise TypeError("This run has no managed sandbox")
+        return await backend.aopen(wait=wait)
 
 
 def _transient(exc: BaseException) -> bool:
@@ -418,12 +413,7 @@ async def opened_sandbox(runtime: Runtime) -> OpenedSandbox:
     write is left to the boot; where the run prepares in the sandbox, that boot comes before
     it prepares (``BackendRunMiddleware._proxied``).
     """
-    planned = _planned(runtime)
-    opened = await _opening(
-        getattr(runtime, "backend", None),
-        wait=False,
-        replace_missing=not (planned is not None and planned[1].external),
-    )
+    opened = await _opening(getattr(runtime, "backend", None), wait=False)
     if opened.sandbox_id is not None and (proxy := _written_proxy(runtime)) is not None:
         proxy.defer(opened.sandbox_id)
     return opened
@@ -449,32 +439,19 @@ async def booted_sandbox(runtime: Runtime) -> OpenedSandbox:
             raise
         except Exception as exc:
             return OpenedSandbox(error=_cause(exc))
-    return await _opening(
-        getattr(runtime, "backend", None),
-        wait=True,
-        replace_missing=not (planned is not None and planned[1].external),
-    )
+    return await _opening(getattr(runtime, "backend", None), wait=True)
 
 
-async def _opening(backend: object, *, wait: bool, replace_missing: bool = True) -> OpenedSandbox:
+async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
     """``backend``'s sandbox, retried while the sandbox service fails transiently.
 
-    A bound sandbox that is gone is replaced, and the run told its workspace was lost.
+    A bound sandbox that is gone (``BoundSandboxMissingError``) is neither retried nor
+    replaced: the backend tells the person it was deleted.
     """
     deadline = time.monotonic() + OPEN_MAX_ELAPSED_SECONDS
     for backoff in OPEN_BACKOFF_SECONDS:
         try:
-            return OpenedSandbox(sandbox_id=await open_sandbox(backend, wait=wait))
-        except BoundSandboxMissingError as exc:
-            if not replace_missing:
-                return _not_opened(exc)
-            try:
-                await replace_sandbox(backend, missing_only=True)
-                return OpenedSandbox(
-                    sandbox_id=await open_sandbox(backend, wait=wait), workspace_lost=True
-                )
-            except Exception as exc:
-                return _not_opened(exc)
+            return OpenedSandbox(sandbox_id=await OpenedSandbox.open(backend, wait=wait))
         except Exception as exc:
             delay = backoff * random.uniform(0.8, 1.2)
             if not _transient(exc) or time.monotonic() + delay > deadline:
@@ -486,19 +463,16 @@ async def _opening(backend: object, *, wait: bool, replace_missing: bool = True)
             )
             await asyncio.sleep(delay)
     try:
-        return OpenedSandbox(sandbox_id=await open_sandbox(backend, wait=wait))
+        return OpenedSandbox(sandbox_id=await OpenedSandbox.open(backend, wait=wait))
     except Exception as exc:
         return _not_opened(exc)
 
 
 class ManagedSandboxMiddleware(AgentMiddleware):
-    """Carry out ``recreate_sandbox`` for the sandbox MDA owns, keep the proxy config MDA
-    writes there fresh, and hold every tool call until the thread is bound to the sandbox."""
+    """Keep the proxy config MDA writes on the thread's sandbox fresh, and hold every tool
+    call until the thread is bound to the sandbox."""
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
-
-    def __init__(self, backend: OpenSweBackend) -> None:
-        self._backend = backend
 
     async def awrap_model_call(
         self,
@@ -538,53 +512,9 @@ class ManagedSandboxMiddleware(AgentMiddleware):
         proxy = _written_proxy(request.runtime)
         if proxy is not None:
             # No call goes ahead of the sandbox's first proxy config: the backend may run it
-            # there, and a replacement asks for the backend's part again.
+            # there.
             await proxy.write_deferred(request.runtime)
             # A resumed run reaches a tool call before any model call, and its sandbox may
             # hold a token that expired while it waited.
             await proxy.keep_fresh(request.runtime)
-        result = await handler(request)
-        if request.tool_call["name"] != "recreate_sandbox" or not isinstance(result, ToolMessage):
-            return result
-        if self._backend.run.sandbox.external:
-            # An attached sandbox (evals) is never replaced.
-            return result
-        try:
-            reply = _json_object.validate_json(result.text)
-            create = SandboxCreate.model_validate(reply.get("replace"))
-        except ValidationError:
-            return result
-        files = getattr(request.runtime, "backend", None)
-        try:
-            # Created with the proxy config the backend chose for it, never the one MDA
-            # last wrote: a cloud identity rule applies only at create.
-            replacement = await replace_sandbox(files, definition(create))
-            await call(self._backend, SANDBOX_REPLACED, RunRequest(run_id=run_id()))
-        except Exception as exc:
-            logger.warning("Could not replace the thread's sandbox", exc_info=True)
-            answer: dict[str, JsonValue] = {"success": False, "error": str(exc)}
-        else:
-            if proxy is not None:
-                proxy.replaced()
-                try:
-                    await proxy.write(request.runtime, replacement.new_name)
-                except GraphBubbleUp:
-                    raise
-                except Exception:
-                    logger.warning(
-                        "Could not write the replaced sandbox's proxy config", exc_info=True
-                    )
-            # Readied through a handle that writes the new sandbox's own proxy config, never
-            # the one this hook's handle resolved for the old sandbox.
-            sandbox_setup(self._backend.run).start(
-                _rebound(request.runtime) if proxy is not None else files,
-                self._backend.run.git_identity,
-            )
-            answer = {
-                "success": True,
-                "old_sandbox_id": replacement.old_name,
-                "new_sandbox_id": replacement.new_name,
-                "old_sandbox_stopped": replacement.old_stopped,
-                "old_sandbox_stop_error": replacement.stop_error,
-            }
-        return result.model_copy(update={"content": json.dumps(answer)})
+        return await handler(request)

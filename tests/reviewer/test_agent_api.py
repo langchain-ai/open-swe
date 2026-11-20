@@ -179,15 +179,12 @@ async def test_each_backend_operation_compiles_its_graph_once_and_runs_its_own_w
     assert runs._graph.cache_info().currsize == 1
 
 
-async def test_a_runs_thread_files_are_built_once_until_its_sandbox_changes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_a_runs_thread_files_are_built_once() -> None:
     """Reaching the thread's files reads the thread and the run's skill stores; the run's
-    later files calls reach the same files, and a fresh sandbox builds them again."""
+    later files calls reach the same files."""
     from deepagents.backends.protocol import BackendProtocol, FileInfo, LsResult
 
     from openswe.agent_api import run_calls
-    from openswe.agent_api.run_sandbox import RunSandbox
 
     class Blobs(BackendProtocol):
         async def als(self, path: str) -> LsResult:
@@ -199,9 +196,6 @@ async def test_a_runs_thread_files_are_built_once_until_its_sandbox_changes(
         async def files(self, config: RunnableConfig) -> Blobs:
             built.append(config["configurable"].get("run_id"))
             return Blobs()
-
-    async def reconnected(self: RunSandbox) -> None:
-        return None
 
     run_calls._files.clear()
     kind = Kind()
@@ -218,10 +212,6 @@ async def test_a_runs_thread_files_are_built_once_until_its_sandbox_changes(
     await TokenRun.answer(kind, other, "files.ls", {"path": "/blobs/", "run_id": "run-3"})
     assert built == ["run-1", "run-3"]
 
-    monkeypatch.setattr(RunSandbox, "reconnect", reconnected)
-    await TokenRun.answer(kind, run, "sandbox_replaced", {"run_id": "run-1"})
-    await TokenRun.answer(kind, run, "files.ls", {"path": "/blobs/", "run_id": "run-1"})
-    assert built == ["run-1", "run-3", "run-1"]
     run_calls._files.clear()
 
 

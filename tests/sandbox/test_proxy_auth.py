@@ -343,7 +343,7 @@ class TestRefreshThreadGithubProxy:
 
 
 _TAG = "00000000-0000-0000-0000-000000000001"
-# The cloud identity rule of the workspace a replacement asked for.
+# The cloud identity rule of another sandbox configuration.
 _AWS_RULE = {
     "name": "aws",
     "type": "aws",
@@ -351,18 +351,15 @@ _AWS_RULE = {
 }
 # The egress rule of the workspace the thread's sandbox was last bound in.
 _RECORDED_RULE = {"name": "mine-egress", "match_hosts": ["internal.mine.invalid"]}
-_REPLACEMENT = {"workspace": "other", "source": "workspace"}
 
 
 class TestMdaProxyConfig:
     @pytest.mark.parametrize(
         ("metadata", "expected"),
         [
-            ({"sandbox_replacement": _REPLACEMENT}, None),
             (
                 {
                     "sandbox_id": "sandbox-abc",
-                    "sandbox_replacement": _REPLACEMENT,
                     SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [_RECORDED_RULE]},
                     "sandbox_create_options": {
                         "extra_fields": {"proxy_config": {"rules": [_AWS_RULE]}}
@@ -380,9 +377,9 @@ class TestMdaProxyConfig:
         ],
     )
     async def test_public_metadata_cannot_grant_cloud_authority(
-        self, metadata: dict[str, object], expected: list[dict[str, object]] | None
+        self, metadata: dict[str, object], expected: list[dict[str, object]]
     ) -> None:
-        """Informational replacement metadata cannot select a different cloud identity."""
+        """Thread metadata cannot select a different cloud identity."""
         from openswe.sandboxes.lifecycle import mda_proxy_config
 
         tools_rule = {"name": "open-swe-thread-tools", "match_hosts": ["backend.invalid"]}
@@ -398,10 +395,6 @@ class TestMdaProxyConfig:
                 return_value=tools_rule,
             ),
         ):
-            if expected is None:
-                with pytest.raises(ValueError, match="not privately pinned"):
-                    await mda_proxy_config("thread-123", "sandbox-abc")
-                return
             config, expires_at = await mda_proxy_config("thread-123", "sandbox-abc")
 
         assert config["rules"] == [tools_rule, *expected]

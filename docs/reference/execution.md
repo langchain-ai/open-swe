@@ -41,8 +41,7 @@ Publishing changes what everyone's future sandboxes boot from; it requires an ex
 No build or update button is provided on the Defaults page.
 
 Existing sandboxes retain their files and creation settings.
-Only an explicit recreation request replaces a thread's sandbox: `recreate_sandbox(source="defaults")` uses current global defaults, while `source="base"` starts from the empty base snapshot.
-The old sandbox is preserved but becomes inaccessible from the thread after the handoff.
+Nothing replaces a thread's sandbox: a new thread boots from the current global defaults.
 
 ### Scripts and preloaded repositories
 

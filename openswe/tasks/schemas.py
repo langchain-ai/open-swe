@@ -59,6 +59,23 @@ class ThreadMetadata(BaseModel):
     def json_metadata(self) -> dict[str, JsonValue]:
         return _JSON_OBJECT.validate_python(self.model_dump(mode="json", exclude_unset=True))
 
+    async def mda_sandbox_deleted(self) -> bool:
+        """Whether LangSmith confirms deleted the sandbox of MDA's the thread is bound to; not
+        when it is bound to none of MDA's, or LangSmith cannot tell."""
+        if self.sandbox_owner != "mda" or self.sandbox_id is None:
+            return False
+        from openswe.sandboxes.providers.langsmith import sandbox_exists
+
+        try:
+            return not await sandbox_exists(self.sandbox_id)
+        except Exception:
+            logger.warning(
+                "Could not tell whether a thread's sandbox still exists",
+                extra={"sandbox_id": self.sandbox_id},
+                exc_info=True,
+            )
+            return False
+
     @classmethod
     async def for_new_thread(cls, metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
         values = dict(metadata)

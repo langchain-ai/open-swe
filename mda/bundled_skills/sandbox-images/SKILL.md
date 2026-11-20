@@ -15,7 +15,7 @@ Do not infer an existing sandbox's contents from today's saved defaults.
 Only authorized admins can change shared execution configuration or images.
 Private diagnostics require a private dashboard admin thread or authenticated Slack DM; supported shared writes require a verified sole-writer thread and return acknowledgements only.
 If the asker is not an admin, explain what an admin needs to do; do not try the tools.
-Never publish an image, recreate a sandbox, or delete images without the corresponding explicit request.
+Never publish an image or delete images without the corresponding explicit request.
 
 ## Configure, build, or publish
 
@@ -59,7 +59,7 @@ For example, an image that runs as root with mise and Rust under `/root` can use
 Use paths appropriate to the command user, retain required system paths, and supply a complete literal value: `$PATH`, `$HOME`, and `~` are not shell-expanded in this JSON.
 Read existing provider, mount, federation, proxy, and run configuration privately before editing; do not replace it with an empty object or store credentials in it.
 Creation settings apply to new sandboxes, not existing ones.
-Do not recreate a sandbox to apply them without the user's explicit request.
+An existing thread keeps its sandbox; a new thread picks them up.
 
 Before publishing, check tool lookup and versions from a **separate execute call**, with no inline exports or activation, in the repository where they will run.
 If new creation settings need verification, a disposable sandbox also requires appropriate authorization; exporting the same PATH in the build command does not test them.
@@ -90,12 +90,10 @@ Use background-task completion rather than a polling loop.
 On failure, inspect the script, exit code, and output; fix the saved configuration and request a new build.
 Logs and scripts under `/open-swe/environment/logs/` (`setup.log`, `update.log`) are captured into images.
 
-## Recreate only when requested
+## A thread keeps its sandbox
 
-`recreate_sandbox(source="defaults")` boots the current global image and creation settings; `defaults` is the default source.
-For an empty sandbox, use `recreate_sandbox(source="base")` only when explicitly requested.
-The old sandbox is preserved but becomes inaccessible from the thread after the handoff.
-No source preserves the thread's current files, worktree state, or running processes in its replacement.
+Nothing replaces a thread's sandbox.
+For a fresh sandbox from the current global image and creation settings, start a new thread.
 
 ## Snapshot names
 

@@ -95,7 +95,6 @@ from rt.backend import (
     OpenSweBackend,
     RunContext,
     RunLocal,
-    harness_message,
     human_messages,
     namespace,
     reporting,
@@ -508,24 +507,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         update = {**update, "open_swe_prepared_for": invocation}
         if (thread_id := self._thread_id()) is not None:
             update["open_swe_thread"] = thread_id
-        if opened.workspace_lost:
-            messages = update.get("messages", [])
-            update["messages"] = [
-                *(messages if isinstance(messages, list) else []),
-                self._workspace_lost(),
-            ]
         return update, opened.error is None
-
-    def _workspace_lost(self) -> BaseMessage:
-        """What the model is told once the thread's bound workspace turned out deleted."""
-        return harness_message(
-            "The sandbox provider confirmed that this thread's bound workspace "
-            "was deleted. A fresh workspace was created under the same name. "
-            "Tell the user that local files and unpushed work from the deleted "
-            "workspace are unavailable; do not claim they were recovered.",
-            message_id=f"run-guidance:workspace-lost:{self._invocation()}",
-            source="run_guidance",
-        )
 
     def _started(self, state: RunState, prepared: Prepared) -> RunStarted:
         """The run's start, for the transcript to open its turn and the thread to record it."""
@@ -618,16 +600,10 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if inbox.items.queued or inbox.items.events:
             # Alongside the call it is answered by, as the transcript's reports go.
             self._backend.outbox.received(InboxReceipt(run_id=run_id(), items=inbox.items))
-        # A sandbox opened behind the run's preparation was found lost only after it.
-        lost = (
-            _json_dicts.validate_python(messages_to_dict([self._workspace_lost()]))
-            if SandboxBinding.of(self._backend.run).take_workspace_lost()
-            else []
-        )
         update = _apply(
             planned.model_copy(
                 update={
-                    "messages": [*inbox.messages, *planned.messages, *lost],
+                    "messages": [*inbox.messages, *planned.messages],
                     "update": {**inbox.update, **planned.update},
                 }
             )

@@ -1,9 +1,11 @@
-# Recover a confirmed-deleted bound workspace
+# Report a confirmed-deleted bound workspace as missing
 
-**Verdict: upstream with adaptation.** Missing bound workspaces need a typed recovery signal rather than an indistinguishable runtime error.
+**Verdict: upstream with adaptation.** A missing bound workspace needs a typed signal rather than an indistinguishable runtime error.
 
-**Changed:** `managed_deepagents/runtime.py` and `managed_deepagents/sandbox.py`.
+**Changed:** `managed_deepagents/runtime.py` (`_claim_langsmith_sandbox`) and `managed_deepagents/sandbox.py` (`BoundSandboxMissingError`).
 
-A bound-name lookup returning provider `ResourceNotFoundError` raises `BoundSandboxMissingError`. Open SWE handles that signal before preparation by creating a fresh workspace under the same bound name and carrying a workspace-loss notice to the model. Other lookup failures and unhealthy live sandboxes still fail closed. Replacement permits a missing old sandbox without attempting to rename or stop it; a concurrent creator is adopted under the same name.
+A bound-name lookup returning provider `ResourceNotFoundError` raises `BoundSandboxMissingError`. Robin does not retry it and never creates a fresh workspace under the bound name: a thread and its sandbox are one. The backend asks LangSmith whether the bound sandbox is deleted, so it tells the person to start a new thread whichever error MDA raised. A review fails the same way. Other lookup failures and unhealthy live sandboxes also fail closed.
 
-The typed signal and absent-old-sandbox replacement support belong upstream. Open SWE's pre-prepare recovery and user notification remain application policy. No automatic recovery can restore files from the deleted workspace.
+## Upstream
+
+Shipped as `SandboxMissingError` with #67614 in `sdks/managed-deepagents`: MDA binds each thread to its sandbox and never recreates it. Drop this note when the vendored tree moves to that upstream. No recovery can restore files from the deleted workspace.
