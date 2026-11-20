@@ -24,7 +24,8 @@ Always resolve the target to a canonical `https://github.com/<owner>/<repo>/pull
 2. Fetch fresh PR state with `gh pr view` and the complete attached check set with `gh pr checks --json name,bucket,state,workflow,link`.
 3. On local/desktop runs, do not call `manage_baby_sit`.
    For `stop`, end the local workflow.
-   Otherwise, when checks are pending, run `gh pr checks <PR URL> --watch --interval 60` with the `execute` tool's timeout set to 3300 seconds, then re-fetch the complete PR and check state.
+   Otherwise, when checks are pending, run `gh pr checks <PR URL> --watch --fail-fast --interval 60` with the `execute` tool's timeout set to 3300 seconds, then re-fetch the complete PR and check state.
+   Drop `--fail-fast` while a check you exclude or only report is already failing, since the watch would return at once.
    This bounded foreground watch is the only allowed local polling loop.
 4. For cloud `stop`, call `manage_baby_sit` with action `stop`, report the result in the source thread, and end.
 5. If the PR is closed or all checks are already terminal and non-failing, report that no watch is needed.
