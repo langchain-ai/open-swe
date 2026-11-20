@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useRef, useState } from "react"
+import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { LinearProgress } from "@langchain/macaw-components/LinearProgress"
@@ -25,6 +26,8 @@ export function AnnouncementsSection() {
   const qc = useQueryClient()
   const [text, setText] = useState("")
   const [confirming, setConfirming] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const historyButton = useRef<HTMLButtonElement>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -117,12 +120,34 @@ export function AnnouncementsSection() {
         )}
         {message && <p className="text-xs text-secondary">{message}</p>}
         {error && <p className="text-xs text-error-secondary">{error}</p>}
-        <AnnouncementHistory
-          loading={announcements.isLoading}
-          failed={announcements.isError}
-          items={announcements.data?.items ?? []}
-        />
+        <Button
+          ref={historyButton}
+          size="sm"
+          color="secondary"
+          variant="plain"
+          className="self-start"
+          onClick={() => setHistoryOpen(true)}
+        >
+          View delivery history
+        </Button>
       </div>
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent
+          title="Delivery history"
+          description="Past announcements and their delivery status."
+          className="w-[calc(100vw-2rem)] max-w-2xl"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            historyButton.current?.focus()
+          }}
+        >
+          <AnnouncementHistory
+            loading={announcements.isLoading}
+            failed={announcements.isError}
+            items={announcements.data?.items ?? []}
+          />
+        </DialogContent>
+      </Dialog>
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
@@ -265,10 +290,10 @@ function AnnouncementHistory({
       </div>
     )
   }
-  if (!items.length) return null
+  if (!items.length)
+    return <p className="text-sm text-secondary">No announcements yet.</p>
   return (
-    <div className="flex flex-col gap-space-3 pt-space-3">
-      <h3 className="text-xs font-medium text-secondary">Delivery history</h3>
+    <div className="flex flex-col gap-space-3">
       {items.map((item) => (
         <AnnouncementCard key={item.id} item={item} />
       ))}

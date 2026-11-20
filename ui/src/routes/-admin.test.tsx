@@ -210,7 +210,7 @@ describe("AnnouncementsSection", () => {
     client.clear()
   })
 
-  it("renders Slack formatting and cancels remaining deliveries", async () => {
+  it("opens delivery history in a modal and cancels remaining deliveries", async () => {
     const item = {
       id: "announcement-1",
       text: "*Release notes*\nRead <https://example.com|the update>",
@@ -242,7 +242,18 @@ describe("AnnouncementsSection", () => {
         <AnnouncementsSection />
       </QueryClientProvider>
     )
-    expect(await screen.findByText("23 of 230 delivered")).toBeTruthy()
+    expect(
+      await screen.findByText("230 people with Slack connected")
+    ).toBeTruthy()
+    expect(screen.queryByText("Release notes")).toBeNull()
+    const historyButton = screen.getByRole("button", {
+      name: "View delivery history",
+    })
+    fireEvent.click(historyButton)
+    const dialog = await screen.findByRole("dialog", {
+      name: "Delivery history",
+    })
+    expect(within(dialog).getByText("23 of 230 delivered")).toBeTruthy()
     expect(screen.getByText("Release notes").tagName).toBe("STRONG")
     expect(
       screen.getByRole("link", { name: "the update" }).getAttribute("href")
@@ -253,6 +264,12 @@ describe("AnnouncementsSection", () => {
     expect(
       screen.queryByRole("button", { name: "Cancel remaining" })
     ).toBeNull()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }))
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull()
+      expect(document.activeElement).toBe(historyButton)
+    })
+    expect(screen.queryByText("Release notes")).toBeNull()
     client.clear()
   })
 })
