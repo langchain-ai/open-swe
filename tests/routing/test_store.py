@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 
 from openswe.database import postgres
-from openswe.routing.store import INTEGRATIONS, ChannelMode, RepositoryBinding, SlackChannelBinding
+from openswe.routing.store import INTEGRATIONS, RepositoryBinding, SlackChannelBinding
 from openswe.slack.channels import SlackChannel
 from openswe.users import User
 from openswe.utils.json_types import JsonObject
@@ -42,10 +42,10 @@ async def test_repository_binding_preserves_identity_and_separates_workflow_perm
     assert replacement.id != before.id
 
 
-@pytest.mark.parametrize("mode", ["kitchen", "ask"])
+@pytest.mark.parametrize("prompt", ["", "Investigate database reports; ask before making changes."])
 @pytest.mark.parametrize("eligible", [True, False])
-async def test_channel_mode_checks_live_eligibility_before_writing(
-    monkeypatch: pytest.MonkeyPatch, mode: ChannelMode, eligible: bool
+async def test_channel_prompt_checks_live_eligibility_before_writing(
+    monkeypatch: pytest.MonkeyPatch, prompt: str, eligible: bool
 ) -> None:
     payload: JsonObject = {
         "id": "C0TEST",
@@ -57,13 +57,13 @@ async def test_channel_mode_checks_live_eligibility_before_writing(
     load = AsyncMock(return_value=SlackChannel(id="C0TEST", payload=payload))
     monkeypatch.setattr(SlackChannel, "load", load)
     if eligible:
-        await INTEGRATIONS.configure_channel("c0test", mode=mode, actor=None)
-        assert await INTEGRATIONS.channel_mode("C0TEST") == mode
-        assert await INTEGRATIONS.is_kitchen_channel("C0TEST")
+        await INTEGRATIONS.configure_channel("c0test", prompt=prompt, actor=None)
+        assert await INTEGRATIONS.channel_prompt("C0TEST") == prompt
+        assert await INTEGRATIONS.listens_to_channel("C0TEST")
     else:
         with pytest.raises(ValueError, match="joined"):
-            await INTEGRATIONS.configure_channel("C0TEST", mode=mode, actor=None)
-        assert await INTEGRATIONS.channel_mode("C0TEST") is None
+            await INTEGRATIONS.configure_channel("C0TEST", prompt=prompt, actor=None)
+        assert await INTEGRATIONS.channel_prompt("C0TEST") is None
     load.assert_awaited_once_with("C0TEST", use_cache=False, raise_unavailable=True)
 
 
@@ -80,15 +80,15 @@ async def test_channel_reconfiguration_keeps_one_binding_and_removal_is_idempote
     monkeypatch.setattr(
         SlackChannel, "load", AsyncMock(return_value=SlackChannel(id="C0TEST", payload=payload))
     )
-    await INTEGRATIONS.configure_channel("C0TEST", mode="ask", actor=None)
+    await INTEGRATIONS.configure_channel("C0TEST", prompt="Investigate only", actor=None)
     async with postgres.session() as session:
         before = (await session.scalars(select(SlackChannelBinding))).one()
-    await INTEGRATIONS.configure_channel("C0TEST", mode="kitchen", actor=None)
+    await INTEGRATIONS.configure_channel("C0TEST", prompt="", actor=None)
     async with postgres.session() as session:
         after = (await session.scalars(select(SlackChannelBinding))).one()
     assert before.id == after.id
-    assert not await INTEGRATIONS.is_ask_channel("C0TEST")
+    assert await INTEGRATIONS.channel_prompt("C0TEST") == ""
     await INTEGRATIONS.remove_channel("C0TEST")
     await INTEGRATIONS.remove_channel("C0TEST")
     assert (await INTEGRATIONS.settings()).slack_channels == []
-    assert not await INTEGRATIONS.is_kitchen_channel("C0TEST")
+    assert not await INTEGRATIONS.listens_to_channel("C0TEST")

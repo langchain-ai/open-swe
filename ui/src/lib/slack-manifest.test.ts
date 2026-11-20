@@ -6,15 +6,13 @@ import {
 } from "./slack-manifest"
 
 describe("slackAppManifest", () => {
-  it("includes channel onboarding, history and description permissions", () => {
+  it("includes channel onboarding and history permissions", () => {
     const manifest = slackAppManifest()
     expect(manifest.oauth_config.scopes.bot).toEqual(
       expect.arrayContaining([
         "channels:join",
         "channels:read",
         "channels:history",
-        "channels:write.topic",
-        "groups:write.topic",
       ])
     )
     const events = manifest.settings.event_subscriptions.bot_events

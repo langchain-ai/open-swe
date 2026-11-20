@@ -263,7 +263,6 @@ test("records every message the model is handed as people come and go", async ({
   // turn has to restate it.
   expect(first.dispatch[0]).toContain('kind="channel"');
   expect(first.dispatch[0]).toContain("name: #demo");
-  expect(first.dispatch[0]).toContain("topic: Demo channel topic");
   expect(first.dispatch[0]).toContain("default_repo: fakeorg/demo");
   expect(first.dispatch[0]).toContain("web_url: ");
   expect(first.run).toHaveLength(1);
@@ -286,14 +285,12 @@ test("records every message the model is handed as people come and go", async ({
     given: "turn 1 has run to completion",
     when: "Alice replies in the same Slack thread: also add a docstring",
     outcome:
-      "her envelope alone — the channel is described, her turn-1 message and the bot's replies are already in the thread, and nothing about her has changed",
+      "current channel instructions and her envelope — the channel is described, her turn-1 message and the bot's replies are already in the thread, and nothing about her has changed",
     ran: true,
   });
   expect(second.run).toHaveLength(0);
-  // Only what is new: no channel block again, no replay of what the thread
-  // already holds, and none of the bot's own Slack replies.
-  expect(second.dispatch).toHaveLength(1);
-  expect(second.dispatch[0]).toContain("also add a docstring");
+  expect(second.dispatch).toHaveLength(2);
+  expect(second.dispatch[1]).toContain("also add a docstring");
 
   await sendSlack(page, {
     text: "<@U0BOT> make it return bytes",
@@ -309,7 +306,7 @@ test("records every message the model is handed as people come and go", async ({
       "the run adds his block; Alice's is not re-sent, and dispatch does not describe her either",
     ran: true,
   });
-  expect(third.dispatch).toHaveLength(1);
+  expect(third.dispatch).toHaveLength(2);
   expect(third.run).toHaveLength(1);
   expect(third.run[0]).toContain("display_name: Bob");
   expect(third.run[0]).toContain("workspace_admin: no");
@@ -403,7 +400,6 @@ test("records every message the model is handed as people come and go", async ({
   const everything = thread.turns
     .flatMap((turn) => [...turn.dispatch, ...turn.run])
     .join("\n");
-  expect(everything).toContain('kind="system" id="system:slack-context"');
   expect(everything).not.toContain("system:open-swe");
 
   const dump = normalize(renderDump(thread.turns), thread.threadId);

@@ -2,7 +2,7 @@
 
 The handler decides what a message starts from the message itself, as the
 backend's ``/webhooks/slack`` decides for the conversations it holds: a mention,
-a direct message, a kitchen channel's message, a follow-up in a thread only its
+a direct message, a listening channel's message, a follow-up in a thread only its
 author talks in, a ``/btw`` question, a breakout or a move. It asks the backend
 only for what needs Open SWE's records (``runtime_api.slack``): the facts the
 decision needs (``slack_message_facts``), then the turn (``start_slack_turn``),
@@ -63,7 +63,7 @@ from rt.slack_message import Breakout, ParsedSlackMessage, SlackAction
 EXTERNAL_CHANNEL: Final = "Robin does not operate in channels with external participants."
 #: The message subtypes this channel starts runs for, as Trigger Server forwards them.
 _STARTED_SUBTYPES: Final = frozenset({"", "file_share"})
-#: The subtypes an untagged message in a kitchen channel or a solo thread counts with.
+#: The subtypes an untagged message in a listening channel or a solo thread counts with.
 _REQUEST_SUBTYPES: Final = frozenset({"", "file_share", "thread_broadcast"})
 #: A concierge DM's one conversation, as the backend keys it.
 CONCIERGE_TS: Final = "0"
@@ -335,8 +335,8 @@ def _decide(
         and any(link in message.text for link in _PULL_REQUEST_LINKS)
         else None
     )
-    kitchen_channel = facts.kitchen_channel and not dm
-    kitchen = kitchen_channel and is_message and not explicit
+    listening_channel = facts.listening_channel and not dm
+    listening = listening_channel and is_message and not explicit
     leading = _LEADING_MENTION.match(message.text)
     if not dm and not bot and leading and leading[1] != bot_user_id:
         # Addressed to another person.
@@ -344,7 +344,7 @@ def _decide(
     direct_message = dm and bool(message.user_id)
     if not (
         explicit
-        or (kitchen and message.subtype in _REQUEST_SUBTYPES)
+        or (listening and message.subtype in _REQUEST_SUBTYPES)
         or (bot and facts.allowed_bot)
         or direct_message
         or facts.solo_followup
@@ -359,8 +359,8 @@ def _decide(
         **message.model_dump(),
         kind=kind,
         concierge=facts.concierge,
-        kitchen_channel=kitchen_channel,
-        treat_all_messages_as_mentions=direct_message or kitchen or facts.solo_followup,
+        listening_channel=listening_channel,
+        treat_all_messages_as_mentions=direct_message or listening or facts.solo_followup,
         performance_command=performance_command,
         move_channel_id=breakout.channel_id if kind == "move" else "",
     )
@@ -556,12 +556,12 @@ async def _start_turn(
                 *cast(list[dict[str, Any]], images),
             ],
             turn_context=slack_prompt.thread_turn_context(
-                request="\n\n".join(prompt.turn_sections), resolved_links=links_section
+                request="\n\n".join(prompt.turn_sections),
+                resolved_links=links_section,
+                channel_prompt=prompt.channel_prompt,
             ),
             constant_context=slack_prompt.thread_constant_context(
                 concierge=facts.concierge,
-                kitchen=turn.kitchen_channel,
-                ask=prompt.ask_channel,
             ),
             dispatched_timestamps=dispatched,
             run_described_person_ids={

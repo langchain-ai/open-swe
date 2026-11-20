@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from openswe.audit_logs.tools import audit_tool
-from openswe.routing.store import INTEGRATIONS, ChannelMode
+from openswe.routing.store import INTEGRATIONS, ChannelPrompt
 from openswe.run_config import RunConfig
 from openswe.tools.access import Policy, access, ack
 from openswe.tools.mcp_exposure import expose_mcp
@@ -26,7 +26,7 @@ class RoutingActor:
 @expose_mcp(access="admin")
 @access(_READ)
 async def list_integration_bindings() -> dict[str, object]:
-    """List instance repository bindings and Slack channel modes."""
+    """List instance repository bindings and listening Slack channels."""
     return {"ok": True, **(await INTEGRATIONS.settings()).model_dump(mode="json")}
 
 
@@ -58,11 +58,11 @@ async def unbind_repository(repo: str) -> dict[str, object]:
 @expose_mcp(access="admin")
 @audit_tool()
 @access(_WRITE)
-async def bind_slack_channel(channel_id: str, mode: ChannelMode) -> dict[str, object]:
-    """Enable Kitchen or Ask for an eligible Slack channel."""
+async def bind_slack_channel(channel_id: str, prompt: ChannelPrompt) -> dict[str, object]:
+    """Listen in an eligible Slack channel with its own instructions."""
     record = await INTEGRATIONS.configure_channel(
         channel_id,
-        mode=mode,
+        prompt=prompt,
         actor=await RoutingActor.id(),
     )
     return {"ok": True, **record.model_dump(mode="json")}
@@ -72,6 +72,6 @@ async def bind_slack_channel(channel_id: str, mode: ChannelMode) -> dict[str, ob
 @audit_tool()
 @access(_WRITE)
 async def unbind_slack_channel(channel_id: str) -> dict[str, object]:
-    """Remove one Slack channel binding; personal kitchen preferences remain independent."""
+    """Remove one Slack channel binding."""
     await INTEGRATIONS.remove_channel(channel_id)
     return {"ok": True}

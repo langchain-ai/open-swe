@@ -88,7 +88,7 @@ class QueueRecovery:
         ):
             raise PermissionError("Recovery requires a linked, authorized queue operator")
         channel = await SlackChannel.load(settings.channel_id, use_cache=False)
-        if channel is None or not channel.can_be_kitchen:
+        if channel is None or not channel.can_listen:
             raise PermissionError("Recovery channel is no longer verified and readable")
         return user
 

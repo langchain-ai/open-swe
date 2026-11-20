@@ -224,15 +224,11 @@ def test_formats_cards_forwarded_messages_and_authors() -> None:
 
 
 def test_the_guidance_texts_match_the_backends() -> None:
-    assert slack_prompt.thread_constant_context(concierge=True, kitchen=False) == "\n\n".join(
-        [
-            slack_prompt.CONCIERGE_CONTEXT,
-            slack_prompt.NON_KITCHEN_CONTEXT,
-        ]
+    turn_context = slack_prompt.thread_turn_context(
+        message_update=True, resolved_links="resolved evidence", channel_prompt="Investigate only"
     )
-    assert slack_prompt.thread_turn_context(message_update=True, resolved_links="links") == (
-        f"{slack_prompt.MESSAGE_UPDATE_PREAMBLE}\n\nlinks"
-    )
+    assert "resolved evidence" in turn_context
+    assert "Investigate only" in turn_context
     assert slack_prompt.dm_origin_section(
         {"channel_id": "C1", "subject": "the PR"}, permalink="", agent_thread_id="t-1"
     ).startswith(
@@ -244,10 +240,18 @@ def test_the_guidance_texts_match_the_backends() -> None:
     )
 
 
-def test_the_channel_identity_has_what_stays_true_of_the_thread() -> None:
-    channel = slack_prompt.channel_context(
-        "C1", {"name": "eng", "topic": {"value": " Ship it "}, "purpose": ""}
-    )
+@pytest.mark.parametrize("legacy_context", [False, True])
+def test_the_channel_identity_has_what_stays_true_of_the_thread(legacy_context: bool) -> None:
+    channel = {
+        "name": "eng",
+        "topic": "description-only-routing topic",
+        "purpose": "description-only-routing purpose",
+        "description": "description-only-routing description",
+    }
+    if not legacy_context:
+        channel = slack_prompt.channel_context(
+            "C1", {**channel, "topic": {"value": channel["topic"]}}
+        )
     assert slack_prompt.channel_identity(
         "C1", "1.0", channel, default_repo="acme/api", web_url="https://x/t"
     ) == {
@@ -255,7 +259,6 @@ def test_the_channel_identity_has_what_stays_true_of_the_thread() -> None:
         "platform": "slack",
         "name": "#eng",
         "thread_id": "1.0",
-        "topic": "Ship it",
         "default_repo": "acme/api",
         "web_url": "https://x/t",
     }

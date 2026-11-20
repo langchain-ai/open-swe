@@ -13,7 +13,7 @@ from openswe.expedited_review import slack as expedited_review
 from openswe.human_review import offer as review_offer
 from openswe.human_review import slack as human_review
 from openswe.human_review.posted import watch_post
-from openswe.routing.store import is_kitchen_channel
+from openswe.routing.store import is_listening_channel
 from openswe.slack import app_modals, mda_forwarding, retry, suggested_actions, workflow_approval
 from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
@@ -244,7 +244,7 @@ async def _retry_channel_verification(envelope: SlackEventEnvelope) -> bool:
     channel_id = event.resolve_channel_id()
     if event.channel_type == "im":
         return True
-    if await is_kitchen_channel(channel_id, slack_user_id=event.user):
+    if await is_listening_channel(channel_id):
         return True
     return bool(event.thread_ts) and await allow_solo_thread_followup(
         channel_id=channel_id,
@@ -531,11 +531,9 @@ class SlackEventsDelivery:
                 return ignored("No user-visible message changes")
 
         in_dm_channel = event.channel_type == "im" or is_dm_channel(channel_context)
-        kitchen_channel = not in_dm_channel and await is_kitchen_channel(
-            channel_id, slack_user_id=user_id
-        )
-        in_kitchen_channel = (
-            kitchen_channel
+        listening_channel = not in_dm_channel and await is_listening_channel(channel_id)
+        in_listening_channel = (
+            listening_channel
             and event.type == "message"
             and not (bot_user_id and f"<@{bot_user_id}>" in text)
         )
@@ -639,20 +637,20 @@ class SlackEventsDelivery:
                     explicit_mention=False,
                 )
         if (
-            (in_kitchen_channel or solo_followup)
+            (in_listening_channel or solo_followup)
             and not (explicit_mention or is_message_update or allowed_bot)
             and not await AskChannelMessage.for_robin(
                 channel_id=channel_id, thread_ts=thread_ts, message_ts=original_message_ts
             )
         ):
-            in_kitchen_channel = solo_followup = False
-        if not (in_kitchen_channel or solo_followup):
+            in_listening_channel = solo_followup = False
+        if not (in_listening_channel or solo_followup):
             suggest_review()
         if not (
             explicit_mention
             or is_message_update
             or (
-                in_kitchen_channel
+                in_listening_channel
                 and event.type == "message"
                 and event.subtype in {"", "file_share", "thread_broadcast"}
             )
@@ -788,9 +786,9 @@ class SlackEventsDelivery:
                     bot_user_id=bot_user_id,
                     thread_id=thread_id,
                     treat_all_messages_as_mentions=is_direct_message
-                    or in_kitchen_channel
+                    or in_listening_channel
                     or solo_followup,
-                    kitchen_channel=kitchen_channel,
+                    listening_channel=listening_channel,
                     explicit_mention=explicit_mention,
                     concierge_mode=in_concierge_mode,
                     reply_thread_ts=reply_thread_ts if in_concierge_mode else "",

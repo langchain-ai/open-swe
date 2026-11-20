@@ -1,4 +1,4 @@
-"""Jev's judgment of whether an untagged Ask channel message needs a Robin response."""
+"""Judge untagged messages against each listening channel's instructions."""
 
 import logging
 from collections.abc import Mapping
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AskResponse:
-    """What Jev says Robin should do with an Ask channel message."""
+    """What Jev says Robin should do with a listening-channel message."""
 
     ACTIONS: ClassVar[frozenset[str]] = frozenset(
         {"follow_up_only", "do_nothing", "react_only", "react_and_follow_up"}
@@ -62,7 +62,7 @@ class AskResponse:
 
 
 class AskChannelMessage:
-    """An untagged Ask channel message, answered only when a Robin response is needed."""
+    """An untagged listening-channel message, answered when a Robin response is needed."""
 
     # Jev reads 32k tokens; the transcript gets most of them, the instructions the rest.
     _TRANSCRIPT_MAX_CHARS = 22_000 * 4
@@ -86,7 +86,7 @@ class AskChannelMessage:
 
     @classmethod
     async def for_robin(cls, *, channel_id: str, thread_ts: str, message_ts: str) -> bool:
-        """Whether an untagged message is for this Robin, with Jev deciding in Ask channels."""
+        """Whether an untagged message is for this Robin, using its configured channel prompt."""
         if thread_ts != message_ts:
             other_robin = await SlackThread.another_robin_started(
                 channel_id, thread_ts, bot_user_id=common.SLACK_BOT_USER_ID
@@ -94,15 +94,15 @@ class AskChannelMessage:
             if other_robin is not False:
                 return False
         try:
-            ask_channel = await INTEGRATIONS.is_ask_channel(channel_id)
+            channel_prompt = await INTEGRATIONS.channel_prompt(channel_id)
         except Exception:
             logger.warning(
-                "Ask channel lookup failed; answering the message as usual",
+                "Listening channel lookup failed; answering the message as usual",
                 extra={"slack_channel_id": channel_id},
                 exc_info=True,
             )
             return True
-        if not ask_channel:
+        if channel_prompt is None:
             return True
         try:
             messages = await cls._messages(channel_id, thread_ts, message_ts)
@@ -113,14 +113,14 @@ class AskChannelMessage:
             names = await get_slack_user_names(user_ids) if user_ids else {}
         except Exception:
             logger.warning(
-                "Ask channel message check failed; answering the message as usual",
+                "Listening channel message check failed; answering the message as usual",
                 extra={"slack_channel_id": channel_id, "thread_ts": thread_ts},
                 exc_info=True,
             )
             return True
-        response = await cls.judge(messages, names, channel)
+        response = await cls.judge(messages, names, channel, channel_prompt=channel_prompt)
         logger.info(
-            "Ask channel message judged",
+            "Listening channel message judged",
             extra={
                 "slack_channel_id": channel_id,
                 "thread_ts": thread_ts,
@@ -140,15 +140,20 @@ class AskChannelMessage:
 
     @classmethod
     async def judge(
-        cls, messages: list[SlackMessage], names: Mapping[str, str], channel: SlackChannelContext
+        cls,
+        messages: list[SlackMessage],
+        names: Mapping[str, str],
+        channel: SlackChannelContext,
+        *,
+        channel_prompt: str = "",
     ) -> AskResponse:
         """What Robin should do with the last of `messages`, the one being judged."""
         instructions = prompt(
             "slack/ask-message-instructions",
             about_robin=prompt("decision-models/robin"),
-            channel=channel.model_dump_json(include={"name", "topic", "purpose", "description"}),
+            channel=channel.model_dump_json(include={"name"}),
             sent_at=slack_ts_time(messages[-1].ts),
-            channel_instructions=prompt("runs/slack-ask-channel"),
+            channel_instructions=channel_prompt,
         )
         try:
             response = await JEV.ask(

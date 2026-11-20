@@ -1043,7 +1043,7 @@ async def _open_pull_request(
     retitle_thread: bool = True,
     state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    ask_channel = await GitHubCredentialScope.is_public_ask()
+    ask_channel = await GitHubCredentialScope.is_public_listening_channel()
     token, kind = await _resolve_pr_author_token()
     if ask_channel and kind != "user":
         raise GitHubUserAuthRequired(RunConfig.from_runtime().source or "slack", None)

@@ -1,15 +1,12 @@
+import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@langchain/macaw-components/Button"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
-import { Select, type SelectOption } from "@langchain/macaw-components/Select"
+import { Textarea } from "@langchain/macaw-components/Textarea"
 import { Switch } from "@langchain/macaw-components/Switch"
 
 import { SettingsPanel, SettingsSection } from "@/components/AppShell"
-import {
-  api,
-  type ChannelMode,
-  type RoutingSettings as RoutingData,
-} from "@/lib/api"
+import { api, type RoutingSettings as RoutingData } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import {
   slackChannelHref,
@@ -21,13 +18,9 @@ import { RepositoryPicker, SlackChannelPicker } from "./RoutingBindingPickers"
 
 type RoutingChange =
   | { kind: "repository"; repo: string; allowed: boolean | null }
-  | { kind: "channel"; id: string; mode: ChannelMode | null }
+  | { kind: "channel"; id: string; prompt: string | null }
 
 const QUERY_KEY = ["routing"]
-const CHANNEL_MODES: Array<SelectOption<ChannelMode>> = [
-  { value: "kitchen", label: "Kitchen" },
-  { value: "ask", label: "Ask" },
-]
 
 export function RoutingSettings() {
   const qc = useQueryClient()
@@ -47,9 +40,9 @@ export function RoutingSettings() {
           if (change.allowed === null)
             await api.removeRoutingRepository(change.repo)
           else await api.configureRoutingRepository(change.repo, change.allowed)
-        } else if (change.mode === null)
+        } else if (change.prompt === null)
           await api.removeRoutingChannel(change.id)
-        else await api.configureRoutingChannel(change.id, change.mode)
+        else await api.configureRoutingChannel(change.id, change.prompt)
       }
     },
     onMutate: async (changes) => {
@@ -71,10 +64,10 @@ export function RoutingSettings() {
               ]
           } else {
             channels = channels.filter((row) => row.channel_id !== change.id)
-            if (change.mode !== null)
+            if (change.prompt !== null)
               channels = [
                 ...channels,
-                { channel_id: change.id, mode: change.mode },
+                { channel_id: change.id, prompt: change.prompt },
               ]
           }
         }
@@ -194,12 +187,12 @@ export function RoutingSettings() {
       </SettingsSection>
       <SettingsSection
         title="Slack channels"
-        description="Enable Kitchen or Ask in internal channels Robin has joined. Both let Robin respond without an @mention. Ask investigates reports and suggests next steps."
+        description="Listen to internal channels Robin has joined and respond without an @mention. Set instructions for when to respond, what to do, and who owns the channel."
       >
         <SettingsPanel>
           {channels.length === 0 ? (
             <p className="text-sm text-secondary">
-              No channels configured for Kitchen or Ask.
+              Robin isn’t listening to any channels.
             </p>
           ) : (
             <ul className="divide-y divide-default">
@@ -212,7 +205,7 @@ export function RoutingSettings() {
                 return (
                   <li
                     key={row.channel_id}
-                    className="flex flex-wrap items-center justify-between gap-space-3 py-space-2"
+                    className="flex flex-col gap-space-2 py-space-3"
                   >
                     <MacawLink
                       variant="xs"
@@ -226,19 +219,16 @@ export function RoutingSettings() {
                     >
                       {label}
                     </MacawLink>
-                    <Select
-                      aria-label={`Channel type for ${label}`}
-                      size="sm"
-                      triggerClassName="w-32 shrink-0"
-                      value={row.mode}
-                      options={CHANNEL_MODES}
+                    <ChannelPromptEditor
+                      label={label}
+                      prompt={row.prompt}
                       disabled={disabled}
-                      onChange={(mode) => {
-                        if (mode)
-                          save.mutate([
-                            { kind: "channel", id: row.channel_id, mode },
-                          ])
-                      }}
+                      onSave={(prompt, onSuccess) =>
+                        save.mutate(
+                          [{ kind: "channel", id: row.channel_id, prompt }],
+                          { onSuccess }
+                        )
+                      }
                     />
                   </li>
                 )
@@ -254,13 +244,17 @@ export function RoutingSettings() {
               const changes: RoutingChange[] = [
                 ...channelIds
                   .filter((id) => !desired.has(id))
-                  .map((id) => ({ kind: "channel" as const, id, mode: null })),
+                  .map((id) => ({
+                    kind: "channel" as const,
+                    id,
+                    prompt: null,
+                  })),
                 ...next
                   .filter((id) => !known.has(id))
                   .map((id) => ({
                     kind: "channel" as const,
                     id,
-                    mode: "kitchen" as const,
+                    prompt: "",
                   })),
               ]
               if (changes.length) save.mutate(changes)
@@ -269,5 +263,72 @@ export function RoutingSettings() {
         </SettingsPanel>
       </SettingsSection>
     </>
+  )
+}
+
+function ChannelPromptEditor({
+  label,
+  prompt,
+  disabled,
+  onSave,
+}: {
+  label: string
+  prompt: string
+  disabled: boolean
+  onSave: (prompt: string, onSuccess: () => void) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  return draft === null ? (
+    <div className="flex flex-col items-start gap-space-2">
+      <p className="line-clamp-2 text-sm whitespace-pre-line text-secondary">
+        {prompt ||
+          "Respond when helpful and follow the conversation naturally."}
+      </p>
+      <Button
+        size="xs"
+        color="secondary"
+        variant="outlined"
+        aria-label={`Edit instructions for ${label}`}
+        disabled={disabled}
+        onClick={() => setDraft(prompt)}
+      >
+        Edit instructions
+      </Button>
+    </div>
+  ) : (
+    <div className="flex flex-col gap-space-2">
+      <Textarea
+        label="Channel Instructions"
+        aria-label={`Instructions for ${label}`}
+        size="md"
+        rows={6}
+        maxLength={32000}
+        autoFocus
+        value={draft}
+        onChange={setDraft}
+        disabled={disabled}
+        placeholder="e.g. Investigate bug reports and suggest next steps. Ask before opening a PR. The channel DRI is @name."
+        hintText="Describe when Robin should respond, how it should help, and who to involve. Leave blank for general assistance."
+      />
+      <div className="flex flex-wrap items-center gap-space-2">
+        <Button
+          size="xs"
+          color="primary"
+          disabled={disabled || draft.trim() === prompt}
+          onClick={() => onSave(draft.trim(), () => setDraft(null))}
+        >
+          Save instructions
+        </Button>
+        <Button
+          size="xs"
+          color="secondary"
+          variant="outlined"
+          disabled={disabled}
+          onClick={() => setDraft(null)}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
   )
 }

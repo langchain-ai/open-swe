@@ -75,8 +75,6 @@ from openswe.utils.thread_settings import load_thread_settings
 from openswe.webhooks import common
 
 _CONCIERGE_CONTEXT = prompt("runs/slack-concierge")
-_KITCHEN_CONTEXT = prompt("runs/slack-kitchen")
-_NON_KITCHEN_CONTEXT = prompt("runs/slack-non-kitchen")
 _MESSAGE_UPDATE_PREAMBLE = prompt("runs/slack-message-update")
 
 
@@ -156,14 +154,6 @@ async def _slack_channel_identity(
         channel["name"] = f"#{channel_name}"
     if thread_ts:
         channel["thread_id"] = thread_ts
-    topic, purpose = channel_context.topic.strip(), channel_context.purpose.strip()
-    if topic:
-        channel["topic"] = topic
-    if purpose:
-        channel["purpose"] = purpose
-    # Slack's own `description` is usually the topic and purpose run together.
-    if not topic and not purpose and channel_context.description.strip():
-        channel["description"] = channel_context.description.strip()
     if repo is not None:
         channel["default_repo"] = repo.full_name
     dashboard_url = common.dashboard_thread_url(thread_id)
@@ -702,7 +692,7 @@ class SlackAuthorization:
             and not is_dm_channel(channel)
             and channel.is_mpim is not True
             and (not channel.id or channel.id == channel_id)
-            and await INTEGRATIONS.is_ask_channel(channel_id)
+            and await INTEGRATIONS.listens_to_channel(channel_id)
         )
 
     @property
@@ -1326,24 +1316,15 @@ async def _process_slack_mention_impl(
     # Guidance that holds for the whole thread, deduped by content so the model
     # is told once; only what this turn adds travels as a message.
     try:
-        ask_channel = unlinked_ask or await INTEGRATIONS.is_ask_channel(channel_id)
+        channel_prompt = await INTEGRATIONS.channel_prompt(channel_id)
     except Exception:
         common.logger.warning(
-            "Ask channel lookup failed; retaining normal Slack guidance",
+            "Listening channel lookup failed; retaining normal Slack guidance",
             extra={"channel_id": channel_id},
             exc_info=True,
         )
-        ask_channel = False
-    constant_context = "\n\n".join(
-        section
-        for section in (
-            _CONCIERGE_CONTEXT if concierge_mode else "",
-            prompt("runs/slack-ask-channel")
-            if ask_channel
-            else (_KITCHEN_CONTEXT if request.kitchen_channel else _NON_KITCHEN_CONTEXT),
-        )
-        if section
-    )
+        channel_prompt = None
+    constant_context = _CONCIERGE_CONTEXT if concierge_mode else ""
     # A thread started under a DM Open SWE sent for another thread is about that thread's work.
     dm_origin = (
         await DmOrigin.of(channel_id, thread_ts)
@@ -1378,6 +1359,7 @@ async def _process_slack_mention_impl(
             request.turn_context,
             review_section,
             resolved_links_section,
+            prompt("runs/slack-channel", instructions=channel_prompt),
         )
         if section
     )
@@ -1490,7 +1472,7 @@ async def _process_slack_mention_impl(
     # behind it.
     interrupt_active_run = (
         concierge_mode
-        or request.kitchen_channel
+        or request.listening_channel
         or _interrupts_active_run(
             text,
             bot_user_id,
@@ -1513,7 +1495,7 @@ async def _process_slack_mention_impl(
                 for section in (dm_origin_section, request.turn_context, review_section)
                 if section
             ],
-            ask_channel=ask_channel,
+            channel_prompt=channel_prompt,
         )
         channel_run.run = SlackChannelRun(
             input={"messages": []},

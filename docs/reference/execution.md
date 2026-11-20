@@ -12,8 +12,11 @@ Admins use `list_integration_bindings`, `bind_repository`, `unbind_repository`, 
 
 - `bind_repository(repo="owner/name", may_start_threads=False)` binds a repository without granting GitHub Actions permission to start threads
 - Only an explicit `may_start_threads=True` authorizes federated workflow starts; repository access and OIDC verification still apply
-- `bind_slack_channel(channel_id="C0123456789", mode="kitchen")` enables Kitchen (`kitchen`) or Ask (`ask`)
+- `bind_slack_channel(channel_id="C0123456789", prompt="Investigate reports; ask before implementing fixes.")` listens with editable channel instructions
 - Removing a binding does not delete its repository, Slack channel, threads, or image contents
+
+Slack bindings contain `channel_id` and `prompt`; an empty prompt uses standard behavior.
+Instructions guide classification, explicit mentions, and follow-ups without changing Slack descriptions or granting authorization.
 
 The dashboard API exposes `GET /dashboard/api/routing`, `PUT` and `DELETE /dashboard/api/routing/repositories/{owner}/{name}`, and `PUT` and `DELETE /dashboard/api/routing/slack-channels/{id}`.
 Bindings do not select different settings, personal credentials, or execution profiles.

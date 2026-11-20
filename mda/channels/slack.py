@@ -2,7 +2,7 @@
 
 The app delivers its events and clicks to LangSmith Trigger Server, which hands this
 channel the conversations it can start (mentions, including allowed bots', DMs,
-kitchen channels, new concierge DMs, ``/btw`` questions and breakouts), everything
+listening channels, new concierge DMs, ``/btw`` questions and breakouts), everything
 later in them and the clicks there. This channel owns those conversations' threads. Its handler decides what
 each message starts and builds the turn's prompt, asking the backend only for what
 needs Open SWE's records (``rt.slack``), and what a click starts

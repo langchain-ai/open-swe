@@ -122,7 +122,7 @@ export function SlackChannelPicker({
     icon: <SlackChannelIcon channel={channel} />,
     disabled: !channel.is_member || channel.is_ext_shared,
     warning: channel.is_ext_shared
-      ? "Kitchen and Ask require an internal channel."
+      ? "Listening requires an internal channel."
       : channel.is_member
         ? undefined
         : "Invite Robin to this channel, then refresh to select it.",
@@ -134,9 +134,9 @@ export function SlackChannelPicker({
   return (
     <BindingPicker
       triggerLabel="Choose channels"
-      additionsLabel="Save and enable Kitchen"
+      additionsLabel="Save and start listening"
       title="Slack channels"
-      description="New channels start in Kitchen. You can switch them to Ask from the channel list."
+      description="Robin can respond without an @mention in these channels. Customize each channel’s instructions after adding it."
       noun="channel"
       pluralNoun="channels"
       items={items}

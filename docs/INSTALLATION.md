@@ -346,13 +346,11 @@ The app posts events to your deployment's URL, so it needs the same public URL a
                 "channels:history",
                 "channels:read",
                 "channels:join",
-                "channels:write.topic",
                 "chat:write",
                 "files:read",
                 "files:write",
                 "groups:history",
                 "groups:read",
-                "groups:write.topic",
                 "im:history",
                 "im:read",
                 "im:write",
@@ -421,10 +419,6 @@ Robin refuses Slack Connect channels (`is_ext_shared`) and fails closed when it 
 
 `files:read` lets Robin download files attached to a message (images, archives, logs, CSVs) and stage them in the thread's sandbox, where the agent reads them by path; images also reach the model as vision input.
 Existing installations must add the scope in **OAuth & Permissions** and reinstall the app before attachments reach the agent; without it, uploads stay invisible and only the message text is used.
-
-`channels:write.topic` and `groups:write.topic` let Robin label personal kitchen channel descriptions in public and private channels without granting broader channel-management permissions.
-Existing installations must add both bot scopes in **OAuth & Permissions** and reinstall or reauthorize the Slack app before description updates can work; deploying Robin or changing the manifest alone does not grant them to an existing token.
-After reauthorization, save the personal kitchen setting again to retry any label update that exhausted its retries.
 
 Slack verifies the events Request URL the first time it can reach it; if the backend is not up yet when you create the app, use **Retry** under **Event Subscriptions** after step 7.
 
@@ -515,21 +509,24 @@ Without it, Slack senders stay unlinked until they connect from **Settings → C
 The manifest already registers the OIDC redirect; make sure the `openid`, `email`, and `profile` user scopes are available, then set `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET` from **Basic Information → App Credentials**, and optionally `SLACK_TEAM_ID` (`T...`) to restrict linking to one workspace.
 When they are unset the link is simply hidden.
 
-**Kitchen and Ask channels.**
-Admins can enable Kitchen or Ask under **Integrations** (`/admin/integrations`), or with `bind_slack_channel(channel_id=..., mode="kitchen"|"ask")`.
-A channel must be bound to use Kitchen or Ask, and Robin must have joined it.
-In a Kitchen or Ask channel, a top-level human message starts a new agent thread and replies continue it without tagging Robin; ordinary untagged replies queue behind an active run.
-Ask channels answer ordinary questions without requiring a Robin account; unlinked askers can receive public assistance without personal credentials.
-Implementation and PR requests require the requester to sign into Robin and link Slack and their own GitHub account in **Settings → Connections**.
-Ask channels attempt reproduction, distinguish confirmed bugs from expected behavior and unverified reports, and recommend fixes.
-They search available Linear issues and ongoing PRs for related work before proposing new work, linking existing work instead of duplicating it.
-For actionable reports, they offer to file a Linear ticket or implement a fix and open a PR, then wait for an explicit human choice.
-A bug report alone authorizes neither; requesting a ticket does not authorize implementation.
-Public Ask-channel PRs remain drafts and open as the person requesting them, using their linked GitHub authorization and repository access without falling back to Robin.
-Robin does not automatically tag teammates or on-call responders, assign validation ownership, or ask the thread to find an owner; contacting or assigning someone requires an explicit human request.
-Requested PRs still require independent human validation and approval.
-Jev decides whether untagged messages need a response: new reports, questions for Robin, and choices of an offered action continue the work; human-to-human discussion and updates needing no action stay quiet.
-Ordinary Kitchen channels retain their existing behavior.
+**Listening channels.**
+Admins configure listening channels and their editable instructions under **Integrations** (`/admin/integrations`), or with `bind_slack_channel(channel_id=..., prompt=...)`.
+Robin must have joined the internal channel; externally shared channels are not eligible.
+The prompt can describe what Robin should respond to, a DRI, escalation guidance, and whether to investigate only or implement requested fixes.
+Slack topics, purposes, and descriptions no longer configure behavior or repository defaults; existing description instructions are not migrated.
+Prompts accept up to 32,000 characters; an empty prompt uses standard response behavior.
+Updating the binding replaces its instructions without changing its channel or existing conversations.
+Jev uses those instructions to decide whether an untagged message needs a response, a reaction, or no action.
+A responding top-level message starts an agent thread and replies continue it without tagging Robin; ordinary untagged replies queue behind an active run.
+The current instructions reach every turn, including explicit mentions and follow-ups in existing threads.
+Deploy the UI, backend, and runtime together.
+The listening-channel migration clears existing channel bindings; re-add channels and enter their instructions after deployment.
+Existing conversations are not deleted.
+Listening channels can answer ordinary questions from unlinked humans without borrowing personal credentials.
+Implementation and PR requests require the requester to sign in and link Slack and their own GitHub account in **Settings → Connections**.
+Public listening-channel PRs remain drafts and require the requester's linked GitHub authorization and repository access, without falling back to Robin.
+Instructions cannot grant credentials or tool permissions.
+Slack-triggered automations remain useful for separate event-driven tasks; they do not replace listening channels' ongoing conversation and reply handling.
 
 To enable private channels, update the Slack app with the current manifest and reinstall it so Slack sends the `message.groups` event (the base manifest already includes the `groups:history` scope).
 
@@ -822,14 +819,14 @@ Admin schedules retain their management tools through authorization tied to the 
 The graph and tools recheck the creator's current admin status; later participants do not inherit that authorization.
 Automation management from these system runs also uses deployment credentials.
 
-PR authorship is bound to the saved thread owner outside public Ask channels, never inferred from conversation text.
-Slack follow-ups carry their own requester identity whether they interrupt or queue behind an active run; that identity does not replace the saved owner outside Ask.
+PR authorship is bound to the saved thread owner outside public listening channels, never inferred from conversation text.
+Slack follow-ups carry their own requester identity whether they interrupt or queue behind an active run; that identity does not replace the saved owner outside public listening channels.
 Dashboard messages and Slack edits injected into an existing run do not change its identity.
-A collaborator outside Ask must start their own thread to publish under their own account.
+A collaborator outside public listening channels must start their own thread to publish under their own account.
 Workflow push approval starts a run with the authenticated actor's identity without changing the saved PR owner.
-Public Ask-channel PRs use the authenticated requester's own linked GitHub authorization, including background completions of an existing explicit PR request when that requester identity is available.
+Public listening-channel PRs use the authenticated requester's own linked GitHub authorization, including background completions of an existing explicit PR request when that requester identity is available.
 Missing requester authorization blocks the PR rather than borrowing the thread owner's or App's authorization.
-Outside Ask channels, PRs use the saved thread owner's identity, including background completions; system-owned and legacy unowned threads retain bot authorship.
+Outside listening channels, PRs use the saved thread owner's identity, including background completions; system-owned and legacy unowned threads retain bot authorship.
 GitHub prevents the author from approving their own PR; person-authored PRs otherwise follow the repository's review rules.
 
 Public threads load Robin's LangSmith Managed Tools bot kit and organization skills.

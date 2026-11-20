@@ -208,30 +208,23 @@ def test_an_allowed_bot_can_mention_the_agent_in_its_own_attachment(
 
 
 @pytest.mark.parametrize("grant_path", ["event", "assistant_thread", "absent", "invalid"])
-@pytest.mark.parametrize("ask", [True, False])
+@pytest.mark.parametrize("channel_prompt", ["Handle database alerts; DRI is Alex.", None])
 @pytest.mark.parametrize(("interrupts", "strategy"), [(True, "interrupt"), (False, "enqueue")])
 @pytest.mark.usefixtures("slack_reads")
 def test_a_turn_redirects_the_work_in_progress_or_waits_as_the_backend_says(
     monkeypatch: pytest.MonkeyPatch,
     interrupts: bool,
     strategy: str,
-    ask: bool,
+    channel_prompt: str | None,
     grant_path: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    contexts: list[bool] = []
-
-    def context(**modes: bool) -> str:
-        contexts.append(modes["ask"])
-        return "channel guidance"
-
-    monkeypatch.setattr(slack.slack_prompt, "thread_constant_context", context)
     backend = _backend(
         monkeypatch,
         SlackTurnStarted(
             run=_RUN,
             interrupts=interrupts,
-            prompt=_PROMPT.model_copy(update={"ask_channel": ask}),
+            prompt=_PROMPT.model_copy(update={"channel_prompt": channel_prompt}),
         ),
     )
 
@@ -256,7 +249,6 @@ def test_a_turn_redirects_the_work_in_progress_or_waits_as_the_backend_says(
         secret if grant_path in {"event", "assistant_thread"} else ""
     )
 
-    assert contexts == [ask]
     [facts] = backend.asked_facts
     assert (facts.app_id, facts.team_id, facts.channel_id) == ("A1", "T1", "C1")
     assert facts.explicit_mention
@@ -276,6 +268,8 @@ def test_a_turn_redirects_the_work_in_progress_or_waits_as_the_backend_says(
     prompt = _texts(cast(Mapping[str, Any], run["input"]))
     assert "the build is red" in prompt
     assert "@openswe and the tests too" in prompt
+    if channel_prompt is not None:
+        assert channel_prompt in prompt
     # A list of one run, as a dict alone would be state: MDA starts it on the conversation.
     [normalized] = normalize_run_inputs(
         result, RunChannel(name="slack", provider="slack", conversation_thread_id=_THREAD_ID)
@@ -615,7 +609,7 @@ def test_a_branch_whose_conversation_cant_be_read_is_still_answered(
         # An untagged reply nobody asked the agent for.
         (_event("thanks!", key="message"), SlackMessageFacts(conversation="mda")),
         # The same in a conversation the backend holds: the backend's own checks (a solo
-        # follow-up, a kitchen channel) are in the facts and say no.
+        # follow-up, a listening channel) are in the facts and say no.
         (_event("thanks!", key="message"), SlackMessageFacts(conversation="backend")),
         # A kind of message this channel never starts, in one of its own conversations.
         (
@@ -776,11 +770,11 @@ def test_other_pull_request_links_stay_unwatched(
     ids=["untagged", "mentioned-message", "app-mention"],
 )
 @pytest.mark.usefixtures("slack_reads")
-def test_a_kitchen_channel_message_or_solo_followup_is_a_turn(
+def test_a_listening_channel_message_or_solo_followup_is_a_turn(
     monkeypatch: pytest.MonkeyPatch, event: SlackMessageEvent
 ) -> None:
     for facts in (
-        SlackMessageFacts(kitchen_channel=True, conversation="new"),
+        SlackMessageFacts(listening_channel=True, conversation="new"),
         SlackMessageFacts(solo_followup=True, conversation="mda"),
     ):
         backend = _backend(monkeypatch, SlackTurnStarted(run=_RUN, prompt=_PROMPT), facts)
@@ -790,7 +784,7 @@ def test_a_kitchen_channel_message_or_solo_followup_is_a_turn(
         assert turn.treat_all_messages_as_mentions is (
             facts.solo_followup or not turn.explicit_mention
         )
-        assert turn.kitchen_channel is facts.kitchen_channel
+        assert turn.listening_channel is facts.listening_channel
 
 
 def test_the_channel_asks_its_handlers_for_every_message_and_click() -> None:
@@ -902,9 +896,9 @@ def test_an_edit_of_a_message_the_agent_never_got_starts_nothing(
         "unmentioned",
         "bot",
         "mention",
-        "kitchen",
+        "listening",
         "mention-failed",
-        "kitchen-failed",
+        "listening-failed",
         "backend",
         "reply",
         "own-user",
@@ -932,7 +926,7 @@ def test_watched_posts_reach_automations_without_taking_the_normal_turn(
         payload["type"] = "app_mention"
     facts = SlackMessageFacts(
         automation_channel=True,
-        kitchen_channel=mode.startswith("kitchen"),
+        listening_channel=mode.startswith("listening"),
         conversation="backend" if mode == "backend" else "mda",
     )
     backend = _backend(monkeypatch, SlackTurnStarted(run=_RUN, prompt=_PROMPT), facts)
@@ -950,7 +944,13 @@ def test_watched_posts_reach_automations_without_taking_the_normal_turn(
 
     result = asyncio.run(slack.start_turn(event, _thread()))
 
-    continues = mode in {"mention", "kitchen", "mention-failed", "kitchen-failed", "app-mention"}
+    continues = mode in {
+        "mention",
+        "listening",
+        "mention-failed",
+        "listening-failed",
+        "app-mention",
+    }
     assert bool(result) is continues
     assert len(backend.turns) == int(continues)
     assert len(backend.handed_back) == int(
@@ -959,9 +959,9 @@ def test_watched_posts_reach_automations_without_taking_the_normal_turn(
             "unmentioned",
             "bot",
             "mention",
-            "kitchen",
+            "listening",
             "mention-failed",
-            "kitchen-failed",
+            "listening-failed",
             "backend",
         }
     )

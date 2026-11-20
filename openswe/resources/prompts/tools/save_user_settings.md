@@ -5,11 +5,6 @@ No login, email, thread ID, or on-behalf-of identity is accepted.
 Model selection uses shared defaults and per-thread overrides, not personal settings.
 
 Supported profile fields:
-- `personal_kitchen_channel_id`: one internal Slack channel the requester created and Robin has joined; requires a linked Slack account.
-  Pass the channel ID; an empty string clears it.
-  Only the requester’s untagged messages get kitchen handling, without changing shared kitchen channel bindings.
-  Robin queues a personal-kitchen label for the channel description, preserving existing text, and removes its label when switched or cleared.
-  The existing description and label must fit Slack’s 250-character limit.
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
 - `auto_fix_ci`: boolean preference.
 - `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.

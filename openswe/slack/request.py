@@ -51,7 +51,7 @@ class SlackRequest(BaseModel):
     # Guidance for this turn alone, from whatever stood in for a typed message.
     turn_context: str = ""
     treat_all_messages_as_mentions: bool = False
-    kitchen_channel: bool = False
+    listening_channel: bool = False
     message_update: bool = False
     concierge_mode: bool = False
     web_only: bool = False

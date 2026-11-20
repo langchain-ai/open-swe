@@ -215,14 +215,8 @@ async def dispatch_input(
             channel_context = slack_thread.channel_context
             if channel_context is not None:
                 name = channel_context.label
-                topic = channel_context.topic
-                purpose = channel_context.purpose
                 if name:
                     channel["name"] = name
-                if topic:
-                    channel["topic"] = topic
-                if purpose:
-                    channel["purpose"] = purpose
             if slack_thread.thread_ts:
                 channel["thread_id"] = slack_thread.thread_ts
             channels.append(channel)

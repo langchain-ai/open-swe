@@ -24,7 +24,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
-from openswe.jobs.queue import Job
 from openswe.slack.client import post_slack_top_level_message_with_ts
 from openswe.slack.http import (
     SLACK_REQUEST_ERRORS,
@@ -41,11 +40,6 @@ logger = logging.getLogger(__name__)
 PAYLOAD_TTL = timedelta(seconds=300)
 _NEVER_FETCHED = datetime.fromtimestamp(0, UTC)
 HISTORY_MAX_MESSAGES = 100
-PERSONAL_KITCHEN_JOB: Final = "slack_personal_kitchen_description"
-_PERSONAL_KITCHEN_LABEL: Final = (
-    "Robin personal kitchen: responds to the channel creator's untagged messages."
-)
-
 _CHANNEL_TYPES: Final = "public_channel,private_channel"
 _PAGE_SIZE: Final = 1000
 # conversations.list allows about 20 pages a minute, so a large workspace's walk
@@ -127,56 +121,13 @@ class SlackChannel(Base):
 
     @property
     def context(self) -> SlackChannelContext:
-        """This channel's identity and description, for prompts and thread metadata."""
+        """This channel's cached Slack metadata and sharing flags."""
         return self.details.to_context(self.id)
 
     @property
-    def can_be_kitchen(self) -> bool:
+    def can_listen(self) -> bool:
         """Whether Slack delivers this channel's messages and it is not externally shared."""
         return self.context.allows_operations and self.payload.get("is_member") is True
-
-    async def personal_kitchen_purpose(self, *, enabled: bool) -> str:
-        raw = self.payload.get("purpose", "")
-        value = raw.get("value", "") if isinstance(raw, dict) else raw
-        purpose = value if isinstance(value, str) else ""
-        purpose = "\n".join(line for line in purpose.split("\n") if line != _PERSONAL_KITCHEN_LABEL)
-        if enabled:
-            purpose = (purpose + "\n" if purpose else "") + _PERSONAL_KITCHEN_LABEL
-            if len(purpose) > 250:
-                raise ValueError(
-                    "Shorten the Slack channel description to leave room for the personal "
-                    "kitchen label (250 characters total)"
-                )
-        return purpose
-
-    @classmethod
-    async def reconcile_personal_kitchen(cls, job: Job) -> None:
-        from openswe.users import User
-
-        channel_id = job.payload.get("channel_id")
-        if not isinstance(channel_id, str) or not channel_id:
-            raise ValueError("A personal kitchen description needs a channel ID")
-        channel = await cls.load(channel_id, use_cache=False, raise_unavailable=True)
-        if channel is None:
-            raise SlackRequestError("channel_lookup_failed")
-        if not channel.can_be_kitchen:
-            return
-        owner = await User.for_identity("slack", channel.details.creator)
-        enabled = (
-            owner is not None and owner.typed_preferences.personal_kitchen_channel_id == channel.id
-        )
-        purpose = await channel.personal_kitchen_purpose(enabled=enabled)
-        raw = channel.payload.get("purpose", "")
-        current = raw.get("value", "") if isinstance(raw, dict) else raw
-        if purpose == current:
-            return
-        try:
-            async with SlackClient.bot() as client:
-                await client.conversations_setPurpose(channel=channel.id, purpose=purpose)
-        except SLACK_REQUEST_ERRORS as exc:
-            raise SlackRequestError(slack_error(exc)) from None
-        channel.payload = {**channel.payload, "purpose": {"value": purpose}}
-        await cls.save_all(channel.payload)
 
     @classmethod
     def from_payload(cls, payload: JsonObject) -> Self | None:

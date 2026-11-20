@@ -10,7 +10,7 @@ from openswe.dashboard.deps import ADMIN_DEP, DashboardReadDep
 from openswe.dashboard.oauth import session_user_id
 from openswe.routing.store import (
     INTEGRATIONS,
-    ChannelMode,
+    ChannelPrompt,
     ChannelSettings,
     IntegrationSettings,
     RepositorySettings,
@@ -29,7 +29,7 @@ class RepositoryConfiguration(BaseModel):
 class ChannelConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: ChannelMode
+    prompt: ChannelPrompt
 
 
 class RoutingErrors:
@@ -81,7 +81,7 @@ async def api_configure_slack_channel(
     return await INTEGRATIONS.configure_channel(
         channel_id,
         actor=session_user_id(admin),
-        mode=body.mode,
+        prompt=body.prompt,
     )
 
 

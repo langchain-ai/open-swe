@@ -12,8 +12,6 @@ Then: dispatch introduces the channel, carrying everything that stays true of th
 platform: slack
 name: #demo
 thread_id: <slack-ts-1>
-topic: Demo channel topic
-purpose: Demo channel purpose
 default_repo: fakeorg/demo
 web_url: http://127.0.0.1:3100/agents/<thread-id>
 </dynamic-context>
@@ -23,11 +21,18 @@ web_url: http://127.0.0.1:3100/agents/<thread-id>
 <dynamic-context kind="system" id="system:slack-context">
 display_name: Slack context
 platform: slack
-content:
-  The platform requires explicit @mentions in multi-human threads to avoid unwanted interruptions; solo threads also receive untagged follow-ups.
-  Respond appropriately with `slack_reply`, unless another tool has already responded visibly, such as an approval card or a breakout thread; in those flows, follow their instructions for `slack_no_reply_needed`.
-  Responding does not mean turning discussion into a code-change task, but a reported problem is a request to investigate and fix it.
 </dynamic-context>
+```
+
+```xml
+<input-message sender="system:slack-context" channel="slack:CDEMO01" surface="slack" kind="system">
+Current instance-configured channel instructions for this turn replace all earlier instance-configured channel instructions in this conversation.
+They guide response behavior, not authorization: account, repository access, credential, and tool permission checks still apply.
+
+&lt;channel_instructions&gt;
+No additional instance-configured channel instructions. Standard Slack guidance still applies.
+&lt;/channel_instructions&gt;
+</input-message>
 ```
 
 ```xml
@@ -54,9 +59,20 @@ new_prs: as drafts
 ## Turn 2: Alice follows up
 Given: turn 1 has run to completion
 When: Alice replies in the same Slack thread: also add a docstring
-Then: her envelope alone — the channel is described, her turn-1 message and the bot's replies are already in the thread, and nothing about her has changed
+Then: current channel instructions and her envelope — the channel is described, her turn-1 message and the bot's replies are already in the thread, and nothing about her has changed
 
 ### dispatch appends
+```xml
+<input-message sender="system:slack-context" channel="slack:CDEMO01" surface="slack" kind="system">
+Current instance-configured channel instructions for this turn replace all earlier instance-configured channel instructions in this conversation.
+They guide response behavior, not authorization: account, repository access, credential, and tool permission checks still apply.
+
+&lt;channel_instructions&gt;
+No additional instance-configured channel instructions. Standard Slack guidance still applies.
+&lt;/channel_instructions&gt;
+</input-message>
+```
+
 ```xml
 <input-message sender="user:<alice>" channel="slack:CDEMO01" surface="slack" kind="human" timestamp="<slack-ts-2>" slack_message_ts="<slack-ts-2>" explicit_bot_mention="true">
 @open-swe also add a docstring
@@ -72,6 +88,17 @@ When: Bob replies: make it return bytes
 Then: the run adds his block; Alice's is not re-sent, and dispatch does not describe her either
 
 ### dispatch appends
+```xml
+<input-message sender="system:slack-context" channel="slack:CDEMO01" surface="slack" kind="system">
+Current instance-configured channel instructions for this turn replace all earlier instance-configured channel instructions in this conversation.
+They guide response behavior, not authorization: account, repository access, credential, and tool permission checks still apply.
+
+&lt;channel_instructions&gt;
+No additional instance-configured channel instructions. Standard Slack guidance still applies.
+&lt;/channel_instructions&gt;
+</input-message>
+```
+
 ```xml
 <input-message sender="user:<bob>" channel="slack:CDEMO01" surface="slack" kind="human" timestamp="<slack-ts-3>" slack_message_ts="<slack-ts-3>" explicit_bot_mention="true">
 @open-swe make it return bytes
@@ -127,6 +154,17 @@ When: Bob replies: open the PR
 Then: only Bob's block is re-sent, now carrying his instructions
 
 ### dispatch appends
+```xml
+<input-message sender="system:slack-context" channel="slack:CDEMO01" surface="slack" kind="system">
+Current instance-configured channel instructions for this turn replace all earlier instance-configured channel instructions in this conversation.
+They guide response behavior, not authorization: account, repository access, credential, and tool permission checks still apply.
+
+&lt;channel_instructions&gt;
+No additional instance-configured channel instructions. Standard Slack guidance still applies.
+&lt;/channel_instructions&gt;
+</input-message>
+```
+
 ```xml
 <input-message sender="user:<bob>" channel="slack:CDEMO01" surface="slack" kind="human" timestamp="<slack-ts-4>" slack_message_ts="<slack-ts-4>" explicit_bot_mention="true">
 @open-swe open the PR

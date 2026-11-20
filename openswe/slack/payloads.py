@@ -442,7 +442,7 @@ def parse_json_object(body: bytes) -> JsonObject | None:
 
 
 class SlackChannelContext(SlackPayload):
-    """A channel's identity and description, as prompts and thread metadata carry it.
+    """A channel's cached Slack metadata and sharing flags.
 
     Sharing flags stay ``None`` when Slack did not say, because the operations
     gate has to fail closed on an unknown rather than assume the safe answer.
@@ -471,13 +471,6 @@ class SlackChannelContext(SlackPayload):
         return self.is_im is True or (
             self.is_ext_shared is False and self.is_pending_ext_shared is False
         )
-
-    @property
-    def description_text(self) -> str:
-        """Prompt-safe description text."""
-        if self.description.strip():
-            return self.description.strip()
-        return "\n".join(value.strip() for value in (self.topic, self.purpose) if value.strip())
 
     @property
     def label(self) -> str:

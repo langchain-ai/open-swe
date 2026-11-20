@@ -1,0 +1,6 @@
+Current instance-configured channel instructions for this turn replace all earlier instance-configured channel instructions in this conversation.
+They guide response behavior, not authorization: account, repository access, credential, and tool permission checks still apply.
+
+<channel_instructions>
+{{ instructions if instructions else "No additional instance-configured channel instructions. Standard Slack guidance still applies." }}
+</channel_instructions>

@@ -115,7 +115,7 @@ class SlackMessageFacts(BaseModel):
     channel: Literal["ok", "external", "unverified"] = "ok"
     # A direct message with the app.
     dm: bool = False
-    kitchen_channel: bool = False
+    listening_channel: bool = False
     automation_channel: bool = False
     # The sender turned concierge mode on: their DM is one conversation.
     concierge: bool = False
@@ -138,8 +138,8 @@ class StartSlackTurn(SlackMessage):
     kind: Literal["turn", "by_the_way", "breakout", "web", "move", "edit"] = "turn"
     # From ``slack_message_facts``, as the handler decided with them.
     concierge: bool = False
-    kitchen_channel: bool = False
-    # A DM, a kitchen channel or a solo follow-up: every message counts as a request.
+    listening_channel: bool = False
+    # A DM, a listening channel or a solo follow-up: every message counts as a request.
     treat_all_messages_as_mentions: bool = False
     # A ``/model:perf`` command, which redirects the work in progress.
     performance_command: bool = False
@@ -175,7 +175,7 @@ class SlackTurnPrompt(BaseModel):
     # Sections from Open SWE's records this turn adds, such as the pull request a
     # review card asks about.
     turn_sections: list[str] = Field(default_factory=list)
-    ask_channel: bool = False
+    channel_prompt: str | None = Field(default=None, max_length=32_000)
 
 
 class SlackTurnRun(BaseModel):

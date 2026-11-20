@@ -91,15 +91,20 @@ async def test_invalid_channel_and_unavailable_slack_do_not_create_bindings(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert (
-        await client.put("/dashboard/api/routing/slack-channels/D0DM", json={"mode": "ask"})
+        await client.put(
+            "/dashboard/api/routing/slack-channels/D0DM", json={"prompt": "Investigate reports"}
+        )
     ).status_code == 400
     assert (
         await client.put("/dashboard/api/routing/slack-channels/C0TEST", json={"mode": "mentions"})
     ).status_code == 422
+    for invalid in (None, 42, "x" * 32_001):
+        rejected = await client.put(
+            "/dashboard/api/routing/slack-channels/C0TEST", json={"prompt": invalid}
+        )
+        assert rejected.status_code == 422
     monkeypatch.setattr(SlackChannel, "load", AsyncMock(side_effect=ChannelLookupUnavailable(17)))
-    retry = await client.put(
-        "/dashboard/api/routing/slack-channels/C0TEST", json={"mode": "kitchen"}
-    )
+    retry = await client.put("/dashboard/api/routing/slack-channels/C0TEST", json={"prompt": ""})
     assert retry.status_code == 503
     assert retry.headers["Retry-After"] == "17"
     assert (await INTEGRATIONS.settings()).slack_channels == []

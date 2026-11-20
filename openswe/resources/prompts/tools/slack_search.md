@@ -13,7 +13,7 @@ Do not infer whether a grant exists from `explicit_bot_mention` alone; try the t
 If the grant is missing or expired, continue with `slack_read_channel_messages` in relevant accessible channels and `slack_read_thread_messages` for linked or candidate threads.
 `slack_search_channel_directory` can locate candidate public channels without a grant.
 Each tool enforces its own access rules.
-Do not stop the investigation or ask the person to repeat their request with an @mention just to unlock search, including in kitchen channels and untagged follow-ups.
+Do not stop the investigation or ask the person to repeat their request with an @mention just to unlock search, including in listening channels and untagged follow-ups.
 Use other available sources too, and ask only for concrete missing information that still prevents the answer after those fallbacks.
 Reading specific channels and threads is not a workspace-wide search.
 When you answer from those reads, name the channels and threads you read, say you could not search all of Slack, and do not call those reads a search.

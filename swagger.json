@@ -1440,21 +1440,18 @@
       "ChannelConfiguration": {
         "additionalProperties": false,
         "properties": {
-          "mode": {
-            "$ref": "#/components/schemas/ChannelMode"
+          "prompt": {
+            "$ref": "#/components/schemas/ChannelPrompt"
           }
         },
         "required": [
-          "mode"
+          "prompt"
         ],
         "title": "ChannelConfiguration",
         "type": "object"
       },
-      "ChannelMode": {
-        "enum": [
-          "kitchen",
-          "ask"
-        ],
+      "ChannelPrompt": {
+        "maxLength": 32000,
         "type": "string"
       },
       "ChannelSettings": {
@@ -1464,13 +1461,13 @@
             "title": "Channel Id",
             "type": "string"
           },
-          "mode": {
-            "$ref": "#/components/schemas/ChannelMode"
+          "prompt": {
+            "$ref": "#/components/schemas/ChannelPrompt"
           }
         },
         "required": [
           "channel_id",
-          "mode"
+          "prompt"
         ],
         "title": "ChannelSettings",
         "type": "object"
@@ -5722,17 +5719,6 @@
               }
             ],
             "title": "Experimental Force Code Mode"
-          },
-          "personal_kitchen_channel_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Personal Kitchen Channel Id"
           },
           "review_draft_prs": {
             "anyOf": [

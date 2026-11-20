@@ -390,9 +390,7 @@ def test_format_slack_messages_for_prompt_renders_app_card_attachments() -> None
 def _setup_slack_mention_fakes(
     monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
 ) -> None:
-    monkeypatch.setattr(
-        slack_webhooks.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=False)
-    )
+    monkeypatch.setattr(slack_webhooks.INTEGRATIONS, "channel_prompt", AsyncMock(return_value=None))
 
     async def fake_get_slack_user_info(user_id: str) -> dict:
         return {
@@ -755,22 +753,68 @@ async def test_a_slack_turn_reaches_its_thread_in_process_not_over_http(
     assert threads.metadata["source"] == "slack"
 
 
-@pytest.mark.parametrize("ask_channel", [False, True])
+@pytest.mark.parametrize("channel_prompt", [None, "Only investigate database reports", ""])
 async def test_a_channel_run_does_not_wait_on_the_sandbox_for_slack_files(
-    slack_file_mention, monkeypatch, ask_channel
+    slack_file_mention, monkeypatch, channel_prompt
 ):
     request, threads, captured = slack_file_mention
+    request = request.model_copy(
+        update={
+            "channel_context": SlackChannelContext(
+                name="eng",
+                topic="description-only-routing topic",
+                purpose="description-only-routing purpose",
+                description="description-only-routing description",
+            )
+        }
+    )
     monkeypatch.setattr(
-        slack_webhooks.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=ask_channel)
+        slack_webhooks.INTEGRATIONS, "channel_prompt", AsyncMock(return_value=channel_prompt)
     )
 
     prepared, _ = await slack_webhooks.prepare_slack_channel_run(request, None)
 
     # MDA's channel starts the run; nothing holds up its answer for a sandbox.
     assert prepared is not None
+    if channel_prompt:
+        assert channel_prompt in str(prepared.input)
+    assert "description-only-routing" not in str(prepared.input)
     assert "run_create" not in captured
     assert "/workspace/.open-swe/slack-files/" not in str(prepared.input)
     assert threads.metadata["owner_login"] == "mason-gh"
+
+
+async def test_channel_instruction_edits_and_reversions_reach_existing_thread_turns(
+    slack_file_mention, monkeypatch
+):
+    request, _, _ = slack_file_mention
+    for instructions in (
+        "Investigate database failures",
+        "Only answer release questions",
+        "Investigate database failures",
+        "",
+    ):
+        monkeypatch.setattr(
+            slack_webhooks.INTEGRATIONS,
+            "channel_prompt",
+            AsyncMock(return_value=instructions),
+        )
+        prepared, current = await slack_webhooks.prepare_slack_channel_run(
+            request,
+            None,
+            read=slack_webhooks.SlackTurnRead(
+                clean_text="continue investigating",
+                context_user_ids=["U123"],
+                participant_user_ids=["U123"],
+            ),
+        )
+        assert prepared is not None
+        assert current is not None
+        assert current.channel_prompt == instructions
+        prepared_legacy, _ = await slack_webhooks.prepare_slack_channel_run(request, None)
+        assert prepared_legacy is not None
+        if instructions:
+            assert instructions in str(prepared_legacy.input)
 
 
 @pytest.mark.parametrize("failure", ["account", "public-persistence", "private-persistence"])
@@ -806,9 +850,9 @@ async def test_slack_files_wait_only_for_an_account_and_a_persisted_thread(
 
 
 @pytest.mark.parametrize("explicitly_tagged", [True, False])
-@pytest.mark.parametrize("kitchen_channel", [True, False])
+@pytest.mark.parametrize("listening_channel", [True, False])
 def test_slack_followup_publishes_as_the_owner(
-    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, kitchen_channel: bool
+    monkeypatch: pytest.MonkeyPatch, explicitly_tagged: bool, listening_channel: bool
 ) -> None:
     import importlib
 
@@ -837,8 +881,8 @@ def test_slack_followup_publishes_as_the_owner(
                 team_id="T123",
                 text="<@UBOT> create the PR" if explicitly_tagged else "create the PR",
                 bot_user_id="UBOT",
-                kitchen_channel=kitchen_channel,
-                treat_all_messages_as_mentions=kitchen_channel,
+                listening_channel=listening_channel,
+                treat_all_messages_as_mentions=listening_channel,
             ),
             webhook_common.SlackRepoResolution(
                 Repo(owner="langchain-ai", name="open-swe"), explicit=True
@@ -849,7 +893,7 @@ def test_slack_followup_publishes_as_the_owner(
     assert isinstance(run_create, dict)
     kwargs = run_create["kwargs"]
     assert kwargs["multitask_strategy"] == (
-        "interrupt" if explicitly_tagged or kitchen_channel else "enqueue"
+        "interrupt" if explicitly_tagged or listening_channel else "enqueue"
     )
     trigger = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
     assert trigger.get("explicit_bot_mention") == str(explicitly_tagged).lower()
@@ -1129,7 +1173,7 @@ async def test_unlinked_ask_answers_without_borrowing_an_account(monkeypatch, bo
             ),
         }
     )
-    monkeypatch.setattr(INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(INTEGRATIONS, "listens_to_channel", AsyncMock(return_value=True))
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=None))
     monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value=None))
     monkeypatch.setattr(User, "login_for_email", AsyncMock(return_value="email-owner"))
@@ -1211,7 +1255,7 @@ async def test_unlinked_ask_preserves_account_and_private_boundaries(
         }
     )
     monkeypatch.setattr(
-        INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=boundary != "unconfigured")
+        INTEGRATIONS, "listens_to_channel", AsyncMock(return_value=boundary != "unconfigured")
     )
     authorization = slack_webhooks.SlackAuthorization(
         "U123", None, None, "revoked" if boundary == "revoked" else "unlinked"
@@ -1249,7 +1293,7 @@ async def test_unlinked_ask_fails_closed_if_ownership_cannot_be_saved(
             ),
         }
     )
-    monkeypatch.setattr(INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(INTEGRATIONS, "listens_to_channel", AsyncMock(return_value=True))
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=None))
     if failure == "write":
         monkeypatch.setattr(threads, "create", AsyncMock(side_effect=RuntimeError("offline")))

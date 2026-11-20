@@ -10,7 +10,7 @@ from pydantic import BaseModel, ValidationError
 
 from openswe import event_claims
 from openswe.prompts import prompt
-from openswe.routing.store import is_kitchen_channel
+from openswe.routing.store import is_listening_channel
 from openswe.slack.blocks import actions, block_payload, button, section
 from openswe.slack.client import (
     fetch_slack_message_by_ts,
@@ -185,7 +185,7 @@ class SlackRetry(BaseModel):
             team_id=team_id,
             reply_thread_ts=self.reply_thread_ts,
             concierge_mode=self.thread_ts == CONCIERGE_TS and self.channel_id.startswith("D"),
-            kitchen_channel=await is_kitchen_channel(self.channel_id, slack_user_id=actor),
+            listening_channel=await is_listening_channel(self.channel_id),
             treat_all_messages_as_mentions=True,
             explicit_request=True,
         )

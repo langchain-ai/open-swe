@@ -20,8 +20,11 @@ class RoutingSettingsServer {
       { repo: "acme/web", may_start_threads: false },
     ],
     slack_channels: [
-      { channel_id: "CTEAM0001", mode: "kitchen" },
-      { channel_id: "COTHER001", mode: "ask" },
+      { channel_id: "CTEAM0001", prompt: "Help with engineering work." },
+      {
+        channel_id: "COTHER001",
+        prompt: "Investigate reports before proposing fixes.",
+      },
     ],
   }
   writes: Array<{ path: string; method: string; body: unknown }> = []
@@ -90,7 +93,7 @@ class RoutingSettingsServer {
         (row) => row.channel_id !== channel_id
       )
       if (method === "PUT")
-        this.routing.slack_channels.push({ channel_id, mode: body.mode })
+        this.routing.slack_channels.push({ channel_id, prompt: body.prompt })
     }
     return Response.json({})
   }
@@ -169,7 +172,7 @@ it("adds a repository with Actions permission off without rewriting unrelated bi
   ).toBeTruthy()
 })
 
-it("requires an explicit Kitchen action to add a channel", async () => {
+it("requires an explicit listening action to add a channel", async () => {
   const server = new RoutingSettingsServer()
   server.render()
   fireEvent.click(
@@ -178,14 +181,14 @@ it("requires an explicit Kitchen action to add a channel", async () => {
   fireEvent.click(await screen.findByRole("checkbox", { name: "#new" }))
   expect(server.writes).toHaveLength(0)
   fireEvent.click(
-    screen.getByRole("button", { name: "Save and enable Kitchen" })
+    screen.getByRole("button", { name: "Save and start listening" })
   )
   await vi.waitFor(() =>
     expect(server.writes).toEqual([
       {
         path: "/routing/slack-channels/CNEW00001",
         method: "PUT",
-        body: { mode: "kitchen" },
+        body: { prompt: "" },
       },
     ])
   )
@@ -210,43 +213,64 @@ it("removes only the chosen channel binding", async () => {
   )
   await vi.waitFor(() =>
     expect(
-      screen.queryByRole("combobox", { name: "Channel type for #team" })
+      screen.queryByRole("button", { name: "Edit instructions for #team" })
     ).toBeNull()
   )
   expect(
-    screen.getByRole("combobox", { name: "Channel type for #other" })
-      .textContent
-  ).toContain("Ask")
+    screen.getByText("Investigate reports before proposing fixes.")
+  ).toBeTruthy()
 })
 
-it("rolls back a failed channel mode and retries without changing other bindings", async () => {
+it("preserves failed instruction edits for retry without changing other channels", async () => {
   const server = new RoutingSettingsServer()
-  server.failure = "Channel mode refused"
+  server.failure = "Channel instructions refused"
   server.holdNextSave()
   server.render()
-  const mode = await screen.findByRole("combobox", {
-    name: "Channel type for #team",
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Edit instructions for #team" })
+  )
+  const instructions = screen.getByRole<HTMLTextAreaElement>("textbox", {
+    name: "Instructions for #team",
   })
-  fireEvent.click(mode)
-  fireEvent.click(await screen.findByRole("option", { name: "Ask" }))
+  fireEvent.change(instructions, {
+    target: { value: "Triage reports. The DRI is @owner." },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Save instructions" }))
   await vi.waitFor(() => expect(server.writes).toHaveLength(1))
-  expect(mode.textContent).toContain("Ask")
+  expect(instructions.disabled).toBe(true)
   server.release?.()
   expect((await screen.findByRole("alert")).textContent).toBe(
-    "Channel mode refused"
+    "Channel instructions refused"
   )
-  await vi.waitFor(() => expect(mode.textContent).toContain("Kitchen"))
-  fireEvent.click(mode)
-  fireEvent.click(await screen.findByRole("option", { name: "Ask" }))
-  await vi.waitFor(() =>
-    expect(server.routing.slack_channels).toEqual([
-      { channel_id: "COTHER001", mode: "ask" },
-      { channel_id: "CTEAM0001", mode: "ask" },
-    ])
+  await vi.waitFor(() => expect(instructions.disabled).toBe(false))
+  expect(instructions.value).toBe("Triage reports. The DRI is @owner.")
+  expect(server.routing.slack_channels[0]?.prompt).toBe(
+    "Help with engineering work."
   )
+  fireEvent.click(screen.getByRole("button", { name: "Save instructions" }))
+  expect(
+    await screen.findByText("Triage reports. The DRI is @owner.")
+  ).toBeTruthy()
+  expect(server.routing.slack_channels).toEqual([
+    {
+      channel_id: "COTHER001",
+      prompt: "Investigate reports before proposing fixes.",
+    },
+    { channel_id: "CTEAM0001", prompt: "Triage reports. The DRI is @owner." },
+  ])
   expect(server.writes[1]).toEqual({
     path: "/routing/slack-channels/CTEAM0001",
     method: "PUT",
-    body: { mode: "ask" },
+    body: { prompt: "Triage reports. The DRI is @owner." },
   })
+  fireEvent.click(
+    screen.getByRole("button", { name: "Edit instructions for #team" })
+  )
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Instructions for #team" }),
+    { target: { value: "Unsaved" } }
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+  expect(screen.getByText("Triage reports. The DRI is @owner.")).toBeTruthy()
+  expect(server.writes).toHaveLength(2)
 })

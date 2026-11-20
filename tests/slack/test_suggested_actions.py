@@ -38,7 +38,7 @@ async def test_accepting_a_suggestion_asks_the_slack_threads_agent_once(
     monkeypatch.setattr(slack_events, "_claim_remotely", AsyncMock(return_value=True))
     respond = AsyncMock(return_value=True)
     monkeypatch.setattr(suggested_actions, "respond_to_slack_interaction", respond)
-    monkeypatch.setattr(suggested_actions, "is_kitchen_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(suggested_actions, "is_listening_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(
         common, "resolve_slack_channel_context", AsyncMock(return_value=SlackChannelContext())
     )

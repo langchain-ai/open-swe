@@ -24,18 +24,17 @@ Use `read_execution_image` for private admin diagnostics, `rebuild_execution_ima
 Publication does not stop the source sandbox.
 
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work; rename a thread with `manage_thread(action="rename", title=...)` in cloud or desktop.
-  Ask channels investigate bug reports, search related work, and recommend next steps without automatically tagging teammates.
-  Ask channels suggest filing a Linear ticket or opening a PR and wait for an explicit human choice; requested PRs are authored as that person, not Robin.
   Sidebar order is personal and persisted across devices: use `reorder_thread_pins` for the requester's already pinned threads, or `reorder_sidebar_threads` within a project, repository, or no-project folder.
   Global recents stay in activity order.
-- **Integrations** (`/admin/integrations`, admins only): flat repository routing bindings, **Can start threads** permissions for GitHub Actions, Slack channels configured for Kitchen or Ask, plus bots allowed to trigger Robin from Slack.
-  Use `list_integration_bindings`, `bind_repository`, `unbind_repository`, `bind_slack_channel`, and `unbind_slack_channel`.
+- **Integrations** (`/admin/integrations`, admins only): flat repository routing bindings, **Can start threads** permissions for GitHub Actions, listening Slack channels with editable per-channel instructions, plus bots allowed to trigger Robin from Slack.
+  Use `list_integration_bindings`, `bind_repository`, `unbind_repository`, `bind_slack_channel(channel_id, prompt)`, and `unbind_slack_channel`.
+  Channel instructions define response behavior and can name a DRI without changing Slack descriptions; they apply to messages, mentions, and follow-ups and never grant authorization.
   Adding a preload under Defaults does not add a binding or grant access; only explicit `may_start_threads=true` permits federated workflow starts.
   Admins use `list_slack_bots`, `allow_slack_bot`, and `remove_slack_bot`.
   Listing requires a private admin surface; writes also work in verified sole-writer shared threads and are audited with the affected bot ID.
 - **Projects** (sidebar folders and the composer's project picker): named folders of threads, personal or shared with teammates, optionally bound to one repository whose threads then file under it.
   Use `list_projects`, `create_project`, `update_project`, `share_project`, `unshare_project` and `move_thread_to_project`; deleting a project stays in the dashboard.
-- **Settings → General** (`/my-settings`): theme, thread defaults (visibility and follow-up behavior), whether the Changes panel opens when a run that edited files finishes, personal kitchen channel (your untagged messages in one internal Slack channel you created; Robin labels its description), and notifications.
+- **Settings → General** (`/my-settings`): theme, thread defaults (visibility and follow-up behavior), whether the Changes panel opens when a run that edited files finishes, and notifications.
 - **Settings → Agent** (`/my-settings/agent`): automatic human-review assignment preferences.
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.

@@ -9,7 +9,7 @@ from openswe.database import postgres
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 
-async def test_expand_migration_preserves_bindings_flags_queue_identity_and_legacy_rows() -> None:
+async def test_routing_migrations_reset_channels_and_preserve_repositories_and_history() -> None:
     migrations = postgres.load_migrations()
     first, second = uuid7(), uuid7()
     allowed, ordinary, mismatched = uuid7(), uuid7(), uuid7()
@@ -178,11 +178,7 @@ async def test_expand_migration_preserves_bindings_flags_queue_identity_and_lega
         }
         assert all(config is None for _, _, config, _ in bindings[1:])
         assert all(binding_id.version == 7 for _, _, _, binding_id in bindings)
-        assert (
-            await conn.execute(
-                text("SELECT channel_id, mode FROM integration_slack_channel ORDER BY channel_id")
-            )
-        ).all() == [("C0ASK", "ask"), ("C0KITCHEN", "kitchen")]
+        assert await conn.scalar(text("SELECT count(*) FROM integration_slack_channel")) == 0
         assert set(
             await conn.scalars(text("SELECT id FROM slack_channel WHERE id LIKE 'C0%'"))
         ) == {"C0ASK", "C0KITCHEN", "C0MENTIONS"}

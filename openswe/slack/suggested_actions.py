@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from fastapi import BackgroundTasks
 
 from openswe.prompts import prompt
-from openswe.routing.store import is_kitchen_channel
+from openswe.routing.store import is_listening_channel
 from openswe.slack import webhook as service
 from openswe.slack.blocks import ButtonElement, actions, block_payload, button, section
 from openswe.slack.client import post_slack_ephemeral_message, respond_to_slack_interaction
@@ -168,7 +168,7 @@ async def handle_button(
             text=action.request.format(subject=value.subject),
             bot_user_id=common.SLACK_BOT_USER_ID,
             thread_id=thread_id,
-            kitchen_channel=await is_kitchen_channel(channel_id, slack_user_id=user_id),
+            listening_channel=await is_listening_channel(channel_id),
             turn_context=action.turn_context(user_id, value.subject),
         ),
         repo,

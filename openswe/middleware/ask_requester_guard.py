@@ -1,10 +1,4 @@
-"""Record whoever has an Ask channel run push to a pull request as one of its requesters.
-
-Robin authors Ask channel pull requests as itself, so the ``Robin Approves`` check must
-exclude everyone whose request put commits on the branch, not only the person who
-opened it. Before an Ask run pushes, its requester is added to every open pull request
-linked to the thread; the push doesn't run if that fails.
-"""
+"""Exclude every public listening-channel push requester from approving its pull requests."""
 
 import json
 import logging
@@ -34,7 +28,7 @@ _PUSH = re.compile(r"\bgit\b.*\bpush\b", re.DOTALL)
 
 
 class AskRequesterGuardMiddleware(OpenSWEMiddleware):
-    """Add an Ask run's requester to its pull requests before the run pushes to them."""
+    """Record a listening-channel run's requester before it pushes to a pull request."""
 
     state_schema = AgentState
 
@@ -97,7 +91,7 @@ class AskRequesterGuardMiddleware(OpenSWEMiddleware):
             if (
                 cfg.thread_id
                 and cfg.github_login
-                and await GitHubCredentialScope.is_public_ask(config)
+                and await GitHubCredentialScope.is_public_listening_channel(config)
             ):
                 try:
                     for pull in self._pushed(
@@ -108,7 +102,7 @@ class AskRequesterGuardMiddleware(OpenSWEMiddleware):
                         )
                 except Exception:
                     logger.exception(
-                        "Failed to record the Ask push requester",
+                        "Failed to record the listening-channel push requester",
                         extra={"thread_id": cfg.thread_id},
                     )
                     return ToolMessage(

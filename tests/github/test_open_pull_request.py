@@ -304,7 +304,9 @@ def test_person_authored_pr_requires_user_token(monkeypatch: pytest.MonkeyPatch,
         if ask
         else None,
     )
-    monkeypatch.setattr(opr.GitHubCredentialScope, "is_public_ask", AsyncMock(return_value=ask))
+    monkeypatch.setattr(
+        opr.GitHubCredentialScope, "is_public_listening_channel", AsyncMock(return_value=ask)
+    )
 
     from openswe.dashboard import profiles
 
@@ -463,7 +465,9 @@ async def _passthrough_body(body: str, _state: dict[str, Any] | None = None) -> 
 
 
 def _stub_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(opr.GitHubCredentialScope, "is_public_ask", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        opr.GitHubCredentialScope, "is_public_listening_channel", AsyncMock(return_value=False)
+    )
     monkeypatch.setattr(opr, "private_credential_login", AsyncMock(return_value="test-owner"))
     monkeypatch.setattr(opr, "pr_author_login", AsyncMock(return_value="alice"))
     monkeypatch.setattr(opr, "_resolve_pr_author_token", lambda *_a, **_k: _coro(("tok", "user")))
@@ -780,7 +784,9 @@ def test_an_accountless_ask_request_cannot_borrow_a_participant_or_use_the_app(
         {"thread_id": "guest-thread", "source": "slack", "background_task_completion": background},
         metadata={"visibility": "public", "owner_type": "system", "participant_logins": ["bob"]},
     )
-    monkeypatch.setattr(opr.GitHubCredentialScope, "is_public_ask", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        opr.GitHubCredentialScope, "is_public_listening_channel", AsyncMock(return_value=True)
+    )
     personal = AsyncMock(return_value="bob-token")
     app = AsyncMock(return_value="app-token")
     monkeypatch.setattr("openswe.dashboard.profiles.get_valid_access_token", personal)
@@ -814,7 +820,9 @@ def test_ask_pr_uses_requesters_authorization(
             "participant_logins": ["alice", "bob"],
         },
     )
-    monkeypatch.setattr(opr.GitHubCredentialScope, "is_public_ask", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        opr.GitHubCredentialScope, "is_public_listening_channel", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(
         "openswe.dashboard.profiles.get_valid_access_token",
         AsyncMock(side_effect={"alice": "alice-token", "bob": "bob-token"}.get),

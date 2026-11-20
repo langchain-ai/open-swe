@@ -545,8 +545,10 @@ async def test_a_slack_mention_without_github_prepares_a_canonical_chat_run(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cached_context", [False, True])
 async def test_slack_repository_defaults_use_only_the_explicit_account_link(
     monkeypatch: pytest.MonkeyPatch,
+    cached_context: bool,
 ) -> None:
     client = SimpleNamespace(threads=SimpleNamespace(get=AsyncMock(return_value={"metadata": {}})))
     monkeypatch.setattr(slack_ask.common, "get_client", lambda **_kwargs: client)
@@ -557,16 +559,27 @@ async def test_slack_repository_defaults_use_only_the_explicit_account_link(
     profile_repo = AsyncMock(return_value={"owner": "acme", "name": "billing"})
     monkeypatch.setattr(slack_ask.common, "get_profile_default_repo", profile_repo)
 
+    context = SlackChannelContext(
+        name="eng",
+        topic="repo:acme/old-topic",
+        purpose="repo:acme/old-purpose",
+        description="repo:acme/old-description",
+    )
+    monkeypatch.setattr(
+        slack_ask.common.SlackChannel, "context_for", AsyncMock(return_value=context)
+    )
+
     result = await slack_ask.common.get_slack_repo_config(
         "C1",
         "1.0",
         slack_user_id="U1",
-        channel_context=SlackChannelContext(name="eng"),
+        channel_context=context if cached_context else None,
         thread_id="t-1",
     )
 
     assert result.repo is not None
     assert result.repo.full_name == "acme/billing"
+    assert result.explicit is False
     linked_login.assert_awaited_once_with("U1")
     profile_repo.assert_awaited_once_with("explicit-user")
     email_login.assert_not_awaited()

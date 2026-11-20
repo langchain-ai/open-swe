@@ -432,11 +432,9 @@ Users can override either on a per-comment basis by including `repo:owner/name` 
 
 ### Customizing Slack routing
 
-Slack repo resolution (`get_slack_repo_config` in `openswe/webapp.py`) checks, in order:
+Slack repo resolution (`get_slack_repo_config` in `openswe/webhooks/common.py`) checks, in order:
 
 1. Repo carried over from the existing Slack thread's metadata.
-1. A `repo:owner/name` (or GitHub URL) token in the channel's **topic or purpose** (its "description").
-   This lets a channel be pinned to a repo without anyone repeating it per-message.
 1. The triggering user's dashboard `default_repo`.
 1. The global default repository.
 1. `SLACK_REPO_OWNER`/`SLACK_REPO_NAME`, falling back to `DEFAULT_REPO_OWNER`/`DEFAULT_REPO_NAME`.
@@ -444,7 +442,8 @@ Slack repo resolution (`get_slack_repo_config` in `openswe/webapp.py`) checks, i
 Users can still override per-message with `repo:owner/name` syntax in their Slack message (this is read from the message text by the agent).
 A shorthand `repo:name` (without the org) is also supported — the org defaults to `DEFAULT_REPO_OWNER`.
 
-Reading the channel topic/purpose requires the bot's Slack token to have the `channels:read` (and `groups:read` for private channels) scope so `conversations.info` succeeds.
+Channel topics, purposes, and descriptions no longer configure instructions, routing, or repository defaults.
+Put channel-specific workflow and repository guidance in the listening channel's instructions under **Integrations**; existing description text is not migrated.
 
 ### Adding a new trigger
 

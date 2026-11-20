@@ -42,7 +42,7 @@ from openswe import event_claims
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import RunInput
 from openswe.mda_channels.api import ChannelCall
-from openswe.routing.store import is_kitchen_channel
+from openswe.routing.store import is_listening_channel
 from openswe.schedules.store import slack_channel_watched
 from openswe.slack import forks, mda_forwarding
 from openswe.slack import webhook as service
@@ -123,7 +123,7 @@ async def slack_message_facts(
         if message.bot_id
         else None
     )
-    kitchen = not dm and await is_kitchen_channel(message.channel_id, slack_user_id=message.user_id)
+    listening = not dm and await is_listening_channel(message.channel_id)
     concierge = dm and await User.concierge_mode_for_slack(message.user_id)
     parsed = ParsedSlackMessage.parse(
         message.text, common.SLACK_BOT_USER_ID, common.SLACK_BOT_USERNAME
@@ -151,7 +151,7 @@ async def slack_message_facts(
                 explicit_mention=False,
             )
     if (
-        (kitchen or solo_followup)
+        (listening or solo_followup)
         and not (message.explicit_mention or message.bot_id)
         and not await AskChannelMessage.for_robin(
             channel_id=message.channel_id,
@@ -159,13 +159,13 @@ async def slack_message_facts(
             message_ts=message.message_ts,
         )
     ):
-        kitchen = solo_followup = False
+        listening = solo_followup = False
     return SlackMessageFacts(
         dm=dm,
         automation_channel=not dm
         and (not message.reply_thread_ts or message.reply_thread_ts == message.message_ts)
         and await slack_channel_watched(message.channel_id),
-        kitchen_channel=kitchen,
+        listening_channel=listening,
         concierge=concierge,
         allowed_bot=allowed_bot is not None,
         bot_name=(allowed_bot.name.strip() or "Bot") if allowed_bot is not None else "",
@@ -310,7 +310,7 @@ async def _start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTur
         thread_id=conversation,
         held_thread_id=branch_of,
         treat_all_messages_as_mentions=turn.treat_all_messages_as_mentions,
-        kitchen_channel=turn.kitchen_channel,
+        listening_channel=turn.listening_channel,
         explicit_mention=turn.explicit_mention,
         concierge_mode=turn.concierge,
         reply_thread_ts=turn.reply_thread_ts if turn.concierge else "",

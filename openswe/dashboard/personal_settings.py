@@ -18,7 +18,6 @@ from openswe.users import User, UserPreferencesPatch
 from openswe.utils.time import now_iso
 
 SQL_FLAG_KEYS = feature_flag_names(UserPreferencesPatch)
-SQL_SETTING_KEYS = SQL_FLAG_KEYS | {"personal_kitchen_channel_id"}
 
 PROFILE_SETTING_KEYS = frozenset(
     {
@@ -47,14 +46,14 @@ async def patch_personal_settings(
     """Validate every requested change before writing either settings record."""
     if not settings:
         raise ValueError("Provide at least one personal setting to update")
-    unknown = settings.keys() - PROFILE_SETTING_KEYS - PREFERENCE_SETTING_KEYS - SQL_SETTING_KEYS
+    unknown = settings.keys() - PROFILE_SETTING_KEYS - PREFERENCE_SETTING_KEYS - SQL_FLAG_KEYS
     if unknown:
         raise ValueError(f"Unsupported personal settings: {', '.join(sorted(unknown))}")
     profile_patch = {key: value for key, value in settings.items() if key in PROFILE_SETTING_KEYS}
     preferences_patch = {
         key: value for key, value in settings.items() if key in PREFERENCE_SETTING_KEYS
     }
-    sql_patch = {key: value for key, value in settings.items() if key in SQL_SETTING_KEYS}
+    sql_patch = {key: value for key, value in settings.items() if key in SQL_FLAG_KEYS}
     flag_patch = {
         key: value
         for key, value in settings.items()

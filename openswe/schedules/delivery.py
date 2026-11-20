@@ -48,7 +48,7 @@ class AutomationThreadDelivery(AutomationSlackReply):
         ):
             raise DeliveryRefused("This run has no authorized Slack automation reply destination.")
         channel = await SlackChannel.load(route.channel_id, use_cache=False)
-        if channel is None or channel.id != route.channel_id or not channel.can_be_kitchen:
+        if channel is None or channel.id != route.channel_id or not channel.can_listen:
             raise DeliveryRefused(
                 "The triggering Slack channel is no longer verified and readable."
             )

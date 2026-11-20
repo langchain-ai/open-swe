@@ -110,9 +110,11 @@ _SLACK_HEADERS = {
 @pytest.fixture(autouse=True)
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
-    monkeypatch.setattr(slack_service.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        slack_service.INTEGRATIONS, "listens_to_channel", AsyncMock(return_value=False)
+    )
     monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
-    monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(slack_routes, "is_listening_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(
         "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
     )
@@ -473,7 +475,7 @@ def facts(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock | Mock]:
     """Open SWE's records as ``slack_message_facts`` reads them: a plain public channel."""
     lookups: dict[str, AsyncMock | Mock] = {
         "watched": AsyncMock(return_value=False),
-        "kitchen": AsyncMock(return_value=False),
+        "listening": AsyncMock(return_value=False),
         "concierge": AsyncMock(return_value=False),
         "bot": AsyncMock(return_value=None),
         "solo": AsyncMock(return_value=False),
@@ -483,7 +485,7 @@ def facts(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock | Mock]:
         "indexed": AsyncMock(return_value=None),
     }
     monkeypatch.setattr(slack_channel, "slack_channel_watched", lookups["watched"])
-    monkeypatch.setattr(slack_channel, "is_kitchen_channel", lookups["kitchen"])
+    monkeypatch.setattr(slack_channel, "is_listening_channel", lookups["listening"])
     monkeypatch.setattr(slack_channel.User, "concierge_mode_for_slack", lookups["concierge"])
     monkeypatch.setattr(slack_channel, "resolve_allowed_slack_bot", lookups["bot"])
     monkeypatch.setattr(slack_channel, "allow_solo_thread_followup", lookups["solo"])
@@ -509,7 +511,7 @@ async def test_facts_of_a_mention_in_a_plain_channel(
     assert answered.json() == {
         "channel": "ok",
         "dm": False,
-        "kitchen_channel": False,
+        "listening_channel": False,
         "automation_channel": False,
         "concierge": False,
         "allowed_bot": False,
@@ -535,14 +537,14 @@ async def test_an_untagged_reply_the_agent_answers_is_a_solo_followup(
     facts["track"].assert_not_called()
 
 
-async def test_a_kitchen_channels_message_is_one(
+async def test_a_listening_channels_message_is_one(
     monkeypatch: pytest.MonkeyPatch, facts: dict[str, AsyncMock | Mock]
 ) -> None:
-    facts["kitchen"].return_value = True
+    facts["listening"].return_value = True
 
     answered = await _facts(_api(monkeypatch), text="the nightly build is red")
 
-    assert answered.json()["kitchen_channel"] is True
+    assert answered.json()["listening_channel"] is True
 
 
 async def test_a_concierge_dms_conversation_is_the_dms_one_thread(
@@ -558,8 +560,8 @@ async def test_a_concierge_dms_conversation_is_the_dms_one_thread(
         "concierge": True,
         "conversation": "mda",
     }
-    # A DM has no kitchen and no solo follow-ups.
-    facts["kitchen"].assert_not_awaited()
+    # A DM has no listening and no solo follow-ups.
+    facts["listening"].assert_not_awaited()
     facts["track"].assert_not_called()
 
 
@@ -942,7 +944,9 @@ async def test_an_unlinked_ask_sender_can_start_without_a_personal_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _prepared(monkeypatch, prompt=_PROMPT)
-    monkeypatch.setattr(slack_service.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        slack_service.INTEGRATIONS, "listens_to_channel", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr(
         slack_service,
         "account_link_needed",
@@ -1623,7 +1627,7 @@ async def test_a_retry_runs_as_the_clicker_with_the_original_message(
         "fetch_slack_thread_message_by_ts",
         AsyncMock(return_value={"user": original_user_id or "U1", "text": "Fix the bug"}),
     )
-    monkeypatch.setattr(retry, "is_kitchen_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(retry, "is_listening_channel", AsyncMock(return_value=False))
     repo = AsyncMock(return_value=None)
     monkeypatch.setattr(webhook_common, "get_slack_repo_config", repo)
 
@@ -1878,7 +1882,7 @@ async def test_a_retry_sends_the_requesters_message_again(
         "fetch_slack_thread_message_by_ts",
         AsyncMock(return_value={"type": "message", "user": "U1", "ts": "171.2", "text": "fix CI"}),
     )
-    monkeypatch.setattr(retry, "is_kitchen_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(retry, "is_listening_channel", AsyncMock(return_value=False))
 
     start = await _post_click(
         app, _plan_click({"kind": "retry", "thread_ts": "171.1", "message_ts": "171.2"})

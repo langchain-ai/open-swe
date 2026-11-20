@@ -93,7 +93,7 @@ from openswe.rollout_events import (
     remembered_merge_sha,
     subscribe_merged_thread,
 )
-from openswe.routing.store import is_kitchen_channel
+from openswe.routing.store import is_listening_channel
 from openswe.run_config import Repo
 from openswe.slack.channels import SlackChannel
 from openswe.slack.client import (
@@ -740,11 +740,7 @@ async def upsert_agent_thread_metadata(
 
 @dataclass(frozen=True)
 class SlackRepoResolution:
-    """A Slack run's repository, plus whether anything actually named it.
-
-    ``explicit`` is true only for a repository the thread
-    or the channel description named.
-    """
+    """A Slack run's repository, explicit only when saved in thread metadata."""
 
     repo: Repo | None = None
     explicit: bool = False
@@ -759,12 +755,11 @@ async def get_slack_repo_config(
 ) -> SlackRepoResolution:
     """Resolve the default repository hint for a Slack-triggered run, if any source names one.
 
-    Priority, the first two explicit and the rest defaults:
+    Priority, only the first explicit:
         1. Repo carried over from the existing Slack thread's metadata.
-        2. A ``repo:owner/name`` token in the channel's topic/purpose.
-        3. The explicitly linked Slack user's dashboard ``default_repo``.
-        4. The instance default repository.
-        5. ``SLACK_REPO_*`` env defaults.
+        2. The explicitly linked Slack user's dashboard ``default_repo``.
+        3. The instance default repository.
+        4. ``SLACK_REPO_*`` env defaults.
 
     An empty resolution is not an error: the agent clones lazily and the message
     itself usually names the repository when one matters.
@@ -786,28 +781,6 @@ async def get_slack_repo_config(
         pass
     except Exception:  # noqa: BLE001
         logger.debug("Failed to fetch Slack thread %s for repo resolution", thread_id)
-
-    if not repo_config:
-        try:
-            if channel_context is not None:
-                channel_description = channel_context.description_text
-            else:
-                channel_description = (await SlackChannel.context_for(channel_id)).description_text
-            if channel_description:
-                channel_repo_config = extract_repo_from_text(
-                    channel_description, default_owner=default_owner
-                )
-                if channel_repo_config:
-                    logger.info(
-                        "Applying repo from Slack channel %s description: %s/%s",
-                        channel_id,
-                        channel_repo_config["owner"],
-                        channel_repo_config["name"],
-                    )
-                    repo_config = channel_repo_config
-                    explicit = True
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to resolve repo from Slack channel description")
 
     if not repo_config and slack_user_id:
         try:
@@ -1631,8 +1604,8 @@ async def update_agent_thread_pr_state(payload: dict[str, Any]) -> None:
                 if (
                     was_all_merged != all_merged
                     and location is not None
-                    and not skip_on_preview("kitchen_thread_merge_reaction")
-                    and await is_kitchen_channel(location[0])
+                    and not skip_on_preview("listening_thread_merge_reaction")
+                    and await is_listening_channel(location[0])
                 ):
                     if all_merged:
                         if not await add_slack_reaction(*location, "merged"):

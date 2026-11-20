@@ -1,7 +1,11 @@
-Bind a Slack channel to Robin and choose how ordinary messages start conversations.
+Bind a Slack channel to Robin and set its editable channel instructions.
 Requires an authorized admin; supported writes also work in verified sole-writer shared threads, returning only an acknowledgement.
 
 - `channel_id`: the Slack channel to bind; Robin must have joined it
-- `mode`: `kitchen` for ordinary top-level messages, or `ask` for investigation and recommendations that wait for a human choice before filing tickets or implementing fixes
+- `prompt`: instructions for what Robin should respond to, how to respond, and any DRI or escalation guidance; use an empty string for standard behavior
 
-This changes integration behavior, not execution defaults, personal kitchen preferences, credentials, or sandbox images.
+Instructions apply to untagged messages, explicit mentions, and replies.
+Updating a binding replaces its instructions; Slack topics, purposes and descriptions do not configure Robin.
+Instructions do not grant credentials, repository access, or tool permissions.
+
+This changes integration behavior, not execution defaults, credentials, or sandbox images.

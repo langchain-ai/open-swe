@@ -82,14 +82,14 @@ class GitHubCredentialScope:
         return "personal" if self.login is not None else "system"
 
     @classmethod
-    async def is_public_ask(cls, config: Mapping[str, Any] | None = None) -> bool:
+    async def is_public_listening_channel(cls, config: Mapping[str, Any] | None = None) -> bool:
         _, metadata = await _thread_scope(config)
         slack = SourceContext.from_metadata(metadata).slack_thread
         return (
             metadata.get("visibility", "public") == "public"
             and slack is not None
             and bool(slack.channel_id)
-            and await INTEGRATIONS.is_ask_channel(slack.channel_id)
+            and await INTEGRATIONS.listens_to_channel(slack.channel_id)
         )
 
     @classmethod
@@ -100,13 +100,13 @@ class GitHubCredentialScope:
 
 
 async def pr_author_login() -> str | None:
-    """Use the saved owner outside Ask, and the authenticated requester within Ask."""
+    """Use the authenticated requester in public listening channels, otherwise the saved owner."""
     cfg, metadata = await _thread_scope()
     if not cfg.github_linked:
         raise PermissionError("GitHub is not linked for this thread")
     if metadata.get("visibility", "public") == "private":
         return _private_owner_login(cfg, metadata)
-    ask = await GitHubCredentialScope.is_public_ask()
+    ask = await GitHubCredentialScope.is_public_listening_channel()
     if ask:
         login = (cfg.github_login or "").strip()
         if not login:

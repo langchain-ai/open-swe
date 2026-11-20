@@ -59,7 +59,9 @@ async def test_tools_refuse_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
         assert (await routing_tools.list_integration_bindings())["ok"] is False
         assert (await routing_tools.bind_repository("acme/app"))["ok"] is False
         assert (await routing_tools.unbind_repository("acme/app"))["ok"] is False
-        assert (await routing_tools.bind_slack_channel("C0NEW", "kitchen"))["ok"] is False
+        assert (await routing_tools.bind_slack_channel("C0NEW", "Investigate database reports"))[
+            "ok"
+        ] is False
         assert (await routing_tools.unbind_slack_channel("C0NEW"))["ok"] is False
         assert (await snapshotctl("stop"))["ok"] is False
         assert (await read_execution_image())["ok"] is False
@@ -115,7 +117,7 @@ async def test_roster_admin_flag_is_the_participants_own(monkeypatch: pytest.Mon
 
 
 @pytest.mark.parametrize("eligible", [True, False])
-async def test_channel_binding_checks_kitchen_eligibility(
+async def test_channel_binding_checks_listening_eligibility(
     monkeypatch: pytest.MonkeyPatch, eligible: bool
 ) -> None:
     monkeypatch.setenv("CONFIGURED_ADMINS", "ramonn")
@@ -130,9 +132,11 @@ async def test_channel_binding_checks_kitchen_eligibility(
         patch.object(SlackChannel, "load", AsyncMock(return_value=channel)),
     ):
         if eligible:
-            result = await routing_tools.bind_slack_channel("C0NEW", "kitchen")
+            result = await routing_tools.bind_slack_channel("C0NEW", "Investigate database reports")
             assert result["ok"] is True
         else:
             with pytest.raises(ValueError, match="internal channel"):
-                await routing_tools.bind_slack_channel("C0NEW", "kitchen")
-    assert await INTEGRATIONS.channel_mode("C0NEW") == ("kitchen" if eligible else None)
+                await routing_tools.bind_slack_channel("C0NEW", "Investigate database reports")
+    assert await INTEGRATIONS.channel_prompt("C0NEW") == (
+        "Investigate database reports" if eligible else None
+    )

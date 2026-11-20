@@ -593,11 +593,23 @@ async def test_dispatch_keys_a_linked_slack_sender_on_their_person(
     run_input = await dispatch.dispatch_input(
         "hello",
         "slack",
-        {"slack_thread": {"triggering_user_id": "U123", "channel_id": "C123"}},
+        {
+            "slack_thread": {
+                "triggering_user_id": "U123",
+                "channel_id": "C123",
+                "channel_context": {
+                    "name": "eng",
+                    "topic": "description-only-routing topic",
+                    "purpose": "description-only-routing purpose",
+                    "description": "description-only-routing description",
+                },
+            }
+        },
     )
 
     envelope = ElementTree.fromstring(run_input["messages"][-1]["content"])
     assert envelope.attrib["sender"] == f"user:{user.id}"
+    assert "description-only-routing" not in str(run_input)
 
 
 async def test_dispatch_uses_moved_slack_destination_from_metadata(

@@ -14,8 +14,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import Field
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs.middleware import audit_endpoint
@@ -29,7 +29,6 @@ from openswe.dashboard.oauth_refresh import refresh_guard
 from openswe.database import postgres
 from openswe.encryption import decrypt_token, encrypt_token
 from openswe.users import UserPreferencesPatch
-from openswe.users.preferences import KitchenChannelPreference
 from openswe.users.records import UserRecords
 from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
@@ -89,7 +88,7 @@ PROFILES = ProfileRecords("profile")
 GITHUB_OAUTH_TOKENS = UserRecords("github_oauth_token")
 
 
-class ProfileUpdate(KitchenChannelPreference):
+class ProfileUpdate(BaseModel):
     default_repo: str | None = None
     base_branch: str | None = None
     branch_prefix: str | None = None
@@ -385,21 +384,10 @@ async def dismiss_slack_onboarding(reader: DashboardReadDep) -> dict[str, object
 async def put_my_profile(update: ProfileUpdate, reader: DashboardReadDep) -> dict[str, object]:
     login = reader.principal.subject
     patch = UserPreferencesPatch(
-        personal_kitchen_channel_id=update.personal_kitchen_channel_id,
         concierge_mode=update.concierge_mode,
         experimental_classify=update.experimental_classify,
         experimental_force_code_mode=update.experimental_force_code_mode,
     )
-    # Channel validation may call Slack; it must precede the write transaction.
-    if patch.personal_kitchen_channel_id is not None:
-        await reader.close()
-        try:
-            await patch.validate_channel(reader.user)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        preferences = await reader.user.merge_validated_preferences(patch)
-        profile = await upsert_profile(login, reader.email or "", update)
-    else:
-        preferences = await reader.user.merge_validated_preferences(patch, session=reader.session)
-        profile = await upsert_profile(login, reader.email or "", update, session=reader.session)
+    preferences = await reader.user.merge_preferences(patch, session=reader.session)
+    profile = await upsert_profile(login, reader.email or "", update, session=reader.session)
     return {**normalize_profile_for_response(profile), **preferences.model_dump()}

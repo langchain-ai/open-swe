@@ -9,6 +9,7 @@ from openswe.dashboard.personal_settings import SettingValue, patch_personal_set
 from openswe.dashboard.user_preferences import USER_PREFERENCES
 from openswe.tools.read_user_settings import read_user_settings
 from openswe.tools.save_user_settings import save_user_settings
+from openswe.users import User, UserPreferences
 from tests.conftest import FakeUserRecords, serve_threads_from
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -212,8 +213,6 @@ async def test_feature_flag_requires_user_and_validates_before_writing(
     saved_scope: dict[str, object],
     flag: str,
 ) -> None:
-    from openswe.users import User, UserPreferences
-
     with patch.object(
         User, "update_preferences", new_callable=AsyncMock, return_value=None
     ) as save:
@@ -282,7 +281,14 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
         },
     )
     user_records.seed("profile", "bob", {"default_repo": "org/bob"})
-    result = await read_user_settings()
+    person = User(preferences={})
+    with patch.object(
+        User,
+        "preferences_for_login",
+        new_callable=AsyncMock,
+        return_value=person.typed_preferences,
+    ):
+        result = await read_user_settings()
     assert result["participants"] == [
         {
             "login": "Alice",
@@ -290,7 +296,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 **ordinary,
                 "auto_human_review_enabled": True,
                 "concierge_mode": False,
-                "personal_kitchen_channel_id": "",
                 "experimental_classify": False,
                 "experimental_force_code_mode": False,
             },

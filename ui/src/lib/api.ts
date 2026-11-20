@@ -370,7 +370,6 @@ export interface Profile {
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
-  personal_kitchen_channel_id?: string
   updated_at?: string
 }
 
@@ -387,7 +386,6 @@ export interface ProfileUpdate {
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
-  personal_kitchen_channel_id?: string
 }
 
 export interface SlackBotOption {
@@ -895,11 +893,9 @@ export interface RepositorySettings {
   may_start_threads: boolean
 }
 
-export type ChannelMode = "kitchen" | "ask"
-
 export interface RoutingSettings {
   repos: RepositorySettings[]
-  slack_channels: Array<{ channel_id: string; mode: ChannelMode }>
+  slack_channels: Array<{ channel_id: string; prompt: string }>
 }
 
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
@@ -1577,10 +1573,10 @@ export const api = {
       `/routing/repositories/${repo.split("/").map(encodeURIComponent).join("/")}`,
       { method: "DELETE" }
     ),
-  configureRoutingChannel: (channelId: string, mode: ChannelMode) =>
+  configureRoutingChannel: (channelId: string, prompt: string) =>
     request<void>(`/routing/slack-channels/${encodeURIComponent(channelId)}`, {
       method: "PUT",
-      body: JSON.stringify({ mode }),
+      body: JSON.stringify({ prompt }),
     }),
   removeRoutingChannel: (channelId: string) =>
     request<void>(`/routing/slack-channels/${encodeURIComponent(channelId)}`, {

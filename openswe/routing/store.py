@@ -3,11 +3,11 @@
 import logging
 import re
 from datetime import datetime
-from typing import Literal
+from typing import Annotated
 from uuid import UUID, uuid7
 
-from pydantic import BaseModel, ConfigDict, JsonValue
-from sqlalchemy import CheckConstraint, ForeignKey, Text, delete, func, select
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from sqlalchemy import ForeignKey, Text, delete, func, select
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,11 +18,10 @@ from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 from openswe.slack.channels import SlackChannel
 from openswe.ui_invalidations import Topic
-from openswe.users import User
 
 logger = logging.getLogger(__name__)
 
-type ChannelMode = Literal["kitchen", "ask"]
+type ChannelPrompt = Annotated[str, Field(max_length=32_000)]
 
 
 class IntegrationRecord(Base, kw_only=True):
@@ -53,14 +52,11 @@ class RepositoryBinding(IntegrationRecord):
 
 class SlackChannelBinding(IntegrationRecord):
     __tablename__ = "integration_slack_channel"
-    __table_args__ = (
-        CheckConstraint("mode IN ('kitchen', 'ask')", name="integration_slack_channel_mode_check"),
-    )
 
     channel_id: Mapped[str] = mapped_column(
         ForeignKey("slack_channel.id", ondelete="CASCADE"), unique=True
     )
-    mode: Mapped[ChannelMode] = mapped_column(Text)
+    prompt: Mapped[str] = mapped_column(Text, default="", server_default="")
 
 
 class RepositorySettings(BaseModel):
@@ -74,7 +70,7 @@ class ChannelSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     channel_id: str
-    mode: ChannelMode
+    prompt: ChannelPrompt
 
 
 class IntegrationSettings(BaseModel):
@@ -115,7 +111,7 @@ class IntegrationStore:
             slack_channels=[
                 ChannelSettings(
                     channel_id=row.channel_id,
-                    mode=row.mode,
+                    prompt=row.prompt,
                 )
                 for row in channels
             ],
@@ -202,44 +198,42 @@ class IntegrationStore:
 
         await Topic.ROUTING.invalidate()
 
-    async def channel_mode(self, channel_id: str) -> ChannelMode | None:
+    async def channel_prompt(self, channel_id: str) -> str | None:
         async with postgres.session() as session:
             return await session.scalar(
-                select(SlackChannelBinding.mode).where(
+                select(SlackChannelBinding.prompt).where(
                     SlackChannelBinding.channel_id == channel_id.strip().upper()
                 )
             )
 
-    async def is_ask_channel(self, channel_id: str) -> bool:
-        return await self.channel_mode(channel_id) == "ask"
-
-    async def is_kitchen_channel(self, channel_id: str) -> bool:
-        return await self.channel_mode(channel_id) in {"kitchen", "ask"}
+    async def listens_to_channel(self, channel_id: str) -> bool:
+        return await self.channel_prompt(channel_id) is not None
 
     async def configure_channel(
         self,
         channel_id: str,
         *,
-        mode: ChannelMode,
+        prompt: str,
         actor: UUID | None,
     ) -> ChannelSettings:
         normalized = self.channel_id(channel_id)
+        settings = ChannelSettings(channel_id=normalized, prompt=prompt)
         channel = await SlackChannel.load(normalized, use_cache=False, raise_unavailable=True)
         if channel is None:
             raise ValueError("Choose a Slack channel Robin can access")
-        if not channel.can_be_kitchen:
-            raise ValueError("Kitchen and Ask require an internal channel Robin has joined")
+        if not channel.can_listen:
+            raise ValueError("Listening requires an internal channel Robin has joined")
         async with postgres.session() as session:
             row = SlackChannelBinding(
                 channel_id=normalized,
-                mode=mode,
+                prompt=prompt,
                 created_by=actor,
                 updated_by=actor,
             )
             upsert = insert(SlackChannelBinding).values(
                 id=row.id,
                 channel_id=normalized,
-                mode=mode,
+                prompt=prompt,
                 created_by=actor,
                 updated_by=actor,
             )
@@ -247,14 +241,14 @@ class IntegrationStore:
                 upsert.on_conflict_do_update(
                     index_elements=[SlackChannelBinding.channel_id],
                     set_={
-                        "mode": mode,
+                        "prompt": prompt,
                         "updated_by": actor,
                         "updated_at": func.clock_timestamp(),
                     },
                 )
             )
         await Topic.ROUTING.invalidate()
-        return ChannelSettings(channel_id=normalized, mode=mode)
+        return settings
 
     async def remove_channel(self, channel_id: str) -> None:
         normalized = self.channel_id(channel_id)
@@ -269,19 +263,11 @@ class IntegrationStore:
 INTEGRATIONS = IntegrationStore()
 
 
-async def is_kitchen_channel(channel_id: str, *, slack_user_id: str = "") -> bool:
+async def is_listening_channel(channel_id: str) -> bool:
     try:
-        if await INTEGRATIONS.is_kitchen_channel(channel_id):
-            return True
-        if not channel_id or not slack_user_id:
-            return False
-        user = await User.for_identity("slack", slack_user_id)
-        return (
-            user is not None
-            and user.typed_preferences.personal_kitchen_channel_id == channel_id.strip().upper()
-        )
+        return await INTEGRATIONS.listens_to_channel(channel_id)
     except Exception:
         logger.error(
-            "Kitchen channel lookup failed", extra={"slack_channel_id": channel_id}, exc_info=True
+            "Listening channel lookup failed", extra={"slack_channel_id": channel_id}, exc_info=True
         )
         return False

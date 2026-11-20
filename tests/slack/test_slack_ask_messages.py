@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from langchain_typesafe import ClassifierResponse
+from langchain_typesafe import Choice, ClassifierResponse
 
 from openswe.slack import ask_messages
 from openswe.slack.ask_messages import AskChannelMessage, AskResponse
@@ -69,8 +69,8 @@ async def test_ask_channel_messages_need_jev(
     allowed: bool,
     posted_emoji: str | None,
 ) -> None:
-    async def is_ask_channel(_channel_id: str) -> bool:
-        return ask_channel
+    async def channel_prompt(_channel_id: str) -> str | None:
+        return "Investigate database reports" if ask_channel else None
 
     async def messages(_channel_id: str, _thread_ts: str, _message_ts: str) -> list[SlackMessage]:
         return [SlackMessage(ts="2.0", text="dude shut up robin")]
@@ -81,16 +81,27 @@ async def test_ask_channel_messages_need_jev(
         reactions.append((channel_id, message_ts, emoji))
         return reaction_succeeds
 
-    async def ask(*_args: object, **_kwargs: object) -> ClassifierResponse:
+    async def ask(*_args: object, **kwargs: object) -> ClassifierResponse:
+        questions = kwargs["questions"]
+        assert isinstance(questions, dict)
+        decision = questions["action"]
+        assert isinstance(decision, Choice)
+        assert "Investigate database reports" in decision.instructions
+        assert "description-only-routing" not in decision.instructions
         if choice == "failure":
             raise JevUnavailable("classifier_error")
         return _jev_answer(choice, reaction)
 
-    monkeypatch.setattr(ask_messages.INTEGRATIONS, "is_ask_channel", is_ask_channel)
+    monkeypatch.setattr(ask_messages.INTEGRATIONS, "channel_prompt", channel_prompt)
     monkeypatch.setattr(AskChannelMessage, "_messages", staticmethod(messages))
 
     async def channel_context(_channel_id: str) -> SlackChannelContext:
-        return SlackChannelContext(name="help")
+        return SlackChannelContext(
+            name="help",
+            topic="description-only-routing topic",
+            purpose="description-only-routing purpose",
+            description="description-only-routing description",
+        )
 
     monkeypatch.setattr(ask_messages, "JEV", SimpleNamespace(ask=ask))
     monkeypatch.setattr(ask_messages, "add_slack_reaction", react)
@@ -154,7 +165,7 @@ async def test_untagged_replies_stay_with_the_robin_that_started_the_thread(
     allowed: bool,
 ) -> None:
     monkeypatch.setattr(ask_messages.common, "SLACK_BOT_USER_ID", "BOT")
-    monkeypatch.setattr(ask_messages.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(ask_messages.INTEGRATIONS, "channel_prompt", AsyncMock(return_value=None))
     slack_api.respond(
         {
             "ok": True,
@@ -192,7 +203,7 @@ async def test_unknown_origin_blocks_followups_until_rechecked(
         return False
 
     monkeypatch.setattr(ask_messages.common, "SLACK_BOT_USER_ID", "BOT")
-    monkeypatch.setattr(ask_messages.INTEGRATIONS, "is_ask_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(ask_messages.INTEGRATIONS, "channel_prompt", AsyncMock(return_value=None))
     fetch = AsyncMock(side_effect=stalled)
     if failure == "timeout":
         monkeypatch.setattr(SlackThread, "_fetch_other_robin_origin", fetch)
@@ -246,8 +257,8 @@ async def test_unknown_origin_blocks_followups_until_rechecked(
 async def test_ask_attachments_bypass_jev(
     monkeypatch: pytest.MonkeyPatch, message: JsonObject, allowed: bool
 ) -> None:
-    async def is_ask_channel(_channel_id: str) -> bool:
-        return True
+    async def channel_prompt(_channel_id: str) -> str | None:
+        return ""
 
     async def fetch(_channel_id: str, _thread_ts: str) -> list[dict[str, object]]:
         return [
@@ -264,7 +275,7 @@ async def test_ask_attachments_bypass_jev(
         classified.append(True)
         return _jev_answer("do_nothing", None)
 
-    monkeypatch.setattr(ask_messages.INTEGRATIONS, "is_ask_channel", is_ask_channel)
+    monkeypatch.setattr(ask_messages.INTEGRATIONS, "channel_prompt", channel_prompt)
     monkeypatch.setattr(ask_messages, "fetch_slack_thread_messages", fetch)
     monkeypatch.setattr(ask_messages.common, "resolve_slack_channel_context", channel_context)
     monkeypatch.setattr(ask_messages, "JEV", SimpleNamespace(ask=ask))

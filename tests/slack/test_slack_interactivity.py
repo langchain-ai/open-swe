@@ -235,7 +235,7 @@ async def test_retry_is_channel_scoped_and_dispatches_only_once(
     )
     repo = AsyncMock(return_value=None)
     monkeypatch.setattr(slack_routes.common, "get_slack_repo_config", repo)
-    monkeypatch.setattr(retry, "is_kitchen_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(retry, "is_listening_channel", AsyncMock(return_value=False))
     update = AsyncMock()
     monkeypatch.setattr(slack_routes.common, "update_slack_message", update)
     notify = AsyncMock()

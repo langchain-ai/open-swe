@@ -117,7 +117,7 @@ describe("BindingPicker", () => {
     expect(screen.queryByLabelText("Slack channel ID")).toBeNull()
     fireEvent.click(screen.getByRole("checkbox", { name: "#engineering" }))
     fireEvent.click(
-      screen.getByRole("button", { name: "Save and enable Kitchen" })
+      screen.getByRole("button", { name: "Save and start listening" })
     )
     expect(onChange).toHaveBeenCalledWith(["CJOINED01"])
 
@@ -136,7 +136,7 @@ describe("BindingPicker", () => {
     expect(joined.disabled).toBe(false)
     fireEvent.click(joined)
     fireEvent.click(
-      screen.getByRole("button", { name: "Save and enable Kitchen" })
+      screen.getByRole("button", { name: "Save and start listening" })
     )
     expect(onChange).toHaveBeenLastCalledWith(["CJOINED01", "CABSENT01"])
   })

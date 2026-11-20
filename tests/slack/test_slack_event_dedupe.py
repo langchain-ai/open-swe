@@ -276,7 +276,7 @@ async def test_unverified_channel_retries_without_reply_or_run(
     resolve_context = AsyncMock(return_value=context)
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", resolve_context)
     monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
-    monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_routes, "is_listening_channel", AsyncMock(return_value=True))
     payload = _channel_message_payload()
     payload["event"]["text"] = "open a feature request"
 
@@ -317,7 +317,7 @@ async def test_transient_lookup_does_not_retry_irrelevant_events(
         "resolve_slack_channel_context",
         AsyncMock(return_value=SlackChannelContext(lookup_retry_after=30)),
     )
-    monkeypatch.setattr(slack_routes, "is_kitchen_channel", AsyncMock(return_value=False))
+    monkeypatch.setattr(slack_routes, "is_listening_channel", AsyncMock(return_value=False))
     payload = _channel_message_payload()
     payload["event"].update(event)
     tasks = _FakeBackgroundTasks()

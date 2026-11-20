@@ -106,8 +106,6 @@ _SUPPORTED_IMAGE_TYPES: Final = frozenset({"image/jpeg", "image/png", "image/gif
 _SUMMARIZATION_EVENT_KEY: Final = "_summarization_event"
 
 CONCIERGE_CONTEXT: Final = prompt("slack-concierge")
-KITCHEN_CONTEXT: Final = prompt("slack-kitchen")
-NON_KITCHEN_CONTEXT: Final = prompt("slack-non-kitchen")
 MESSAGE_UPDATE_PREAMBLE: Final = prompt("slack-message-update")
 
 type SlackMessage = dict[str, Any]
@@ -481,27 +479,16 @@ def participant_ids(messages: Iterable[Mapping[str, object]]) -> set[str]:
 
 
 def channel_context(channel_id: str, payload: Mapping[str, Any]) -> dict[str, str]:
-    """A ``conversations.info`` channel's name, topic and purpose, as the backend keeps them."""
-
-    def section(key: str) -> str:
-        raw = payload.get(key)
-        if isinstance(raw, Mapping):
-            value = raw.get("value")
-            return value.strip() if isinstance(value, str) else ""
-        return raw.strip() if isinstance(raw, str) else ""
+    """A ``conversations.info`` channel's identity, without description-derived context."""
 
     def text(key: str) -> str:
         value = payload.get(key)
         return value.strip() if isinstance(value, str) else ""
 
-    topic, purpose = section("topic"), section("purpose")
     return {
         "id": channel_id,
         "name": text("name"),
         "name_normalized": text("name_normalized"),
-        "topic": topic,
-        "purpose": purpose,
-        "description": "\n".join(value for value in (topic, purpose) if value),
     }
 
 
@@ -530,14 +517,6 @@ def channel_identity(
         identity["name"] = f"#{channel_name}"
     if thread_ts:
         identity["thread_id"] = thread_ts
-    topic, purpose = text("topic"), text("purpose")
-    if topic:
-        identity["topic"] = topic
-    if purpose:
-        identity["purpose"] = purpose
-    # Slack's own `description` is usually the topic and purpose run together.
-    if not topic and not purpose and text("description"):
-        identity["description"] = text("description")
     if default_repo:
         identity["default_repo"] = default_repo
     if web_url:
@@ -547,16 +526,9 @@ def channel_identity(
     return identity
 
 
-def thread_constant_context(*, concierge: bool, kitchen: bool, ask: bool = False) -> str:
+def thread_constant_context(*, concierge: bool) -> str:
     """Guidance that holds for the whole thread, which the model is told once."""
-    return "\n\n".join(
-        section
-        for section in (
-            CONCIERGE_CONTEXT if concierge else "",
-            prompt("slack-ask") if ask else KITCHEN_CONTEXT if kitchen else NON_KITCHEN_CONTEXT,
-        )
-        if section
-    )
+    return CONCIERGE_CONTEXT if concierge else ""
 
 
 def dm_origin_section(origin: Mapping[str, str], *, permalink: str, agent_thread_id: str) -> str:
@@ -581,6 +553,7 @@ def thread_turn_context(
     request: str = "",
     review_request: str = "",
     resolved_links: str = "",
+    channel_prompt: str | None = None,
 ) -> str:
     """What this turn adds, in the order the backend writes it."""
     return "\n\n".join(
@@ -591,6 +564,7 @@ def thread_turn_context(
             request,
             review_request,
             resolved_links,
+            prompt("slack-channel", instructions=channel_prompt),
         )
         if section
     )
