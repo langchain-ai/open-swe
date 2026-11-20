@@ -1744,7 +1744,9 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     if thread_id is None:
         raise ValueError("An agent run needs a thread")
 
-    credential_scope = asyncio.ensure_future(_credential_scope(config))
+    credential_scope = asyncio.ensure_future(
+        _timed(thread_id, "factory.credential_scope", _credential_scope(config))
+    )
     # MCP loading needs only who the run acts for, and it is the slowest lookup here, so
     # it overlaps every lookup below.
     mcp_tools_task = asyncio.ensure_future(
@@ -1756,9 +1758,11 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         task_coordination,
         (thread_settings, settings_changed),
     ) = await asyncio.gather(
-        resolve_github_login(as_json_object(config)),
+        _timed(thread_id, "factory.github_login", resolve_github_login(as_json_object(config))),
         credential_scope,
-        TaskCoordinationMiddleware.for_thread(thread_id),
+        _timed(
+            thread_id, "factory.task_coordination", TaskCoordinationMiddleware.for_thread(thread_id)
+        ),
         _timed(thread_id, "factory.thread_settings", _thread_settings(thread_id)),
     )
 
@@ -1812,7 +1816,14 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     # would run without routing. A person's own automation runs on Auto, as their threads
     # do: it runs as them and is billed to them.
     personal_automation = (
-        bool(cfg.schedule_id) and (await AutomationPolicy.for_schedule(cfg.schedule_id)).personal
+        bool(cfg.schedule_id)
+        and (
+            await _timed(
+                thread_id,
+                "factory.automation_policy",
+                AutomationPolicy.for_schedule(cfg.schedule_id),
+            )
+        ).personal
     )
     automated = RoutingArm.automated(cfg) and not personal_automation
     routes_enabled = adaptive_model_routing and cfg.source != "incidents_agent" and not automated
@@ -1916,7 +1927,10 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     sender_draft_prs = None if sender_profile is None else profile_draft_prs(sender_profile)
     try:
         # Most runs continue a thread whose task exists; only a new one takes the creation lock.
-        if cfg.source != "incidents_agent" and await Task.of_thread(thread_id) is None:
+        if (
+            cfg.source != "incidents_agent"
+            and (await _timed(thread_id, "factory.thread_task", Task.of_thread(thread_id))) is None
+        ):
             indexed = await THREADS.get(thread_id)
             title = indexed.metadata.get("title") if indexed is not None else None
             await Task.for_thread(
@@ -1994,7 +2008,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     configurable["resolved_agent_model_id"] = model_id
     configurable["resolved_agent_effort"] = profile_effort
 
-    mcp_tools = await mcp_tools_task
+    # Its own span (``factory.mcp_tools``) starts once the credential scope is known.
+    mcp_tools = await _timed(thread_id, "factory.mcp_wait", mcp_tools_task)
     if cfg.source == "incidents_agent":
         # Status-page updates publish to customers; a kickoff run only researches.
         mcp_tools = mcp_tools.without("status_page_update")
@@ -2012,7 +2027,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         slack_search,
         slack_breakout_thread,
     ]
-    indexed_thread = await THREADS.get(thread_id)
+    indexed_thread = await _timed(thread_id, "factory.indexed_thread", THREADS.get(thread_id))
     recovery_thread = (
         indexed_thread is not None and indexed_thread.metadata.get("merge_queue_recovery") is True
     )
