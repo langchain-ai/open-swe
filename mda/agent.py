@@ -79,7 +79,7 @@ from rt.run_tools import (
 )
 from rt.skills import RunSkillsMiddleware, SkillFiles
 from rt.slack_move import SlackMoveMiddleware
-from rt.task_retry import task_retry
+from rt.task_errors import TaskErrorMiddleware
 from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY, RootAgentTraceMiddleware
 from runtime_api.catalog import Catalog, ModelSpec
@@ -276,7 +276,7 @@ def _parts(graph: Graph) -> _Parts:
             AutomationBudgetMiddleware(backend),
             *reports,
             files,
-            task_retry(),
+            TaskErrorMiddleware(),
             # A Slack conversation's move goes through MDA, before the backend's tool would.
             SlackMoveMiddleware(backend),
             RunToolsMiddleware(toolsets, backend_tools=backend_tools),
