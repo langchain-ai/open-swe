@@ -428,21 +428,28 @@ class RobinAgent(BaseAgent):
             try:
                 await process.communicate(instruction.encode())
             except asyncio.CancelledError:
-                # Harbor's agent timeout cancels this coroutine; stop the remote run first.
+                # Harbor's agent timeout cancels this coroutine; stop the remote run first, and
+                # keep the thread's link, which Harbor saves with the trial all the same.
                 await asyncio.shield(self.stop(process))
+                self.record(context, stdout_path, None)
                 raise
-        out = stdout_path.read_text(errors="replace")
+        thread = self.record(context, stdout_path, process.returncode)
         err = stderr_path.read_text(errors="replace")
-        thread = self.THREAD_LINE.search(out)
-        context.metadata = {
-            **(context.metadata or {}),
-            "robin_exit_code": process.returncode,
-            "robin_thread_url": thread.group(1) if thread else None,
-        }
         # Robin finished, or stopped to ask a question: either way an attempt the verifier grades.
         # Anything else (the backend refused the thread, or the run failed) never was one.
         if thread is None or not (process.returncode == 0 or self.INTERRUPTED.search(err)):
             raise RuntimeError(f"robin exited {process.returncode}: {err.strip()[-500:]}")
+
+    def record(self, context: AgentContext, stdout_path: Path, exit_code: int | None) -> str | None:
+        """Notes the run's exit code and Robin's thread on the trial; returns the thread's URL."""
+        thread = self.THREAD_LINE.search(stdout_path.read_text(errors="replace"))
+        url = thread.group(1) if thread else None
+        context.metadata = {
+            **(context.metadata or {}),
+            "robin_exit_code": exit_code,
+            "robin_thread_url": url,
+        }
+        return url
 
     @override
     def populate_context_post_run(self, context: AgentContext) -> None:
