@@ -194,19 +194,25 @@ def _copy_config(config: dict[str, JsonValue], values: dict[str, object]) -> Non
             config[key] = value
 
 
-def _run_config(
+async def _run_config(
     thread_id: str,
     owner: str,
     repo: str,
     number: int,
     metadata: dict[str, object],
 ) -> dict[str, JsonValue]:
-    config: dict[str, JsonValue] = {}
-    _copy_config(config, {key: metadata.get(key) for key in _CONFIG_KEYS})
-    _copy_config(config, SourceContext.from_metadata(metadata).dump())
-    email = metadata.get("triggering_user_email")
-    if not isinstance(config.get("user_email"), str) and isinstance(email, str) and email:
-        config["user_email"] = email
+    config: dict[str, JsonValue]
+    if metadata.get("visibility") == "private":
+        from openswe.tasks.service import recipient_config
+
+        config = await recipient_config(thread_id)
+    else:
+        config = {}
+        _copy_config(config, {key: metadata.get(key) for key in _CONFIG_KEYS})
+        _copy_config(config, SourceContext.from_metadata(metadata).dump())
+        email = metadata.get("triggering_user_email")
+        if not isinstance(config.get("user_email"), str) and isinstance(email, str) and email:
+            config["user_email"] = email
     if slack_thread := _requested_slack_thread(metadata):
         config["slack_thread"] = slack_thread.dump()
     config["thread_id"] = thread_id
@@ -302,7 +308,7 @@ async def subscribe_merged_thread(
             multitask_strategy="enqueue",
             one_shot=False,
             instructions=_instructions(merge_sha, metadata),
-            run_config=_run_config(thread_id, owner, repo, number, metadata),
+            run_config=await _run_config(thread_id, owner, repo, number, metadata),
             expires_at=datetime.now(UTC) + timedelta(days=_LISTEN_DAYS),
         ).create()
     except Exception:  # noqa: BLE001
@@ -356,7 +362,7 @@ async def ask_to_monitor_rollout(
             return
         if not await _rollout_skill_at_merge(owner, repo, sha):
             return
-        config = _run_config(
+        config = await _run_config(
             thread_id,
             owner,
             repo,

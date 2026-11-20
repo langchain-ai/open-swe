@@ -205,3 +205,25 @@ async def test_ask_to_monitor_rollout_does_not_ask_when_a_yes_cannot_subscribe(
     monkeypatch.setattr("openswe.rollout_events.dispatch_agent_run", dispatch)
     await ask_to_monitor_rollout("thread-1", owner="lc", repo="repo", number=7, metadata={})
     dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_private_thread_rollout_resolves_owner_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _ready(monkeypatch)
+    _skill_file(monkeypatch, b"name: rollout-check\n")
+    dispatch = AsyncMock()
+    monkeypatch.setattr("openswe.rollout_events.dispatch_agent_run", dispatch)
+    monkeypatch.setattr(
+        "openswe.tasks.service.recipient_config",
+        AsyncMock(
+            side_effect=lambda _: {"thread_id": "t1", "source": "dashboard", "github_login": "octo"}
+        ),
+    )
+    meta: dict[str, object] = {"visibility": "private", "owner_type": "user", "owner_login": "octo"}
+    await ask_to_monitor_rollout("t1", owner="lc", repo="repo", number=7, metadata=meta, sha=_SHA)
+    await subscribe_merged_thread("t1", owner="lc", repo="repo", number=7, sha=_SHA, metadata=meta)
+    assert dispatch.await_args is not None
+    assert dispatch.await_args.args[2]["github_login"] == "octo"
+    assert created[0].run_config["github_login"] == "octo"
