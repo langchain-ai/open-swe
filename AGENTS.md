@@ -114,6 +114,19 @@ The backend never runs middleware around a model call; the only middleware objec
   Convert to user-facing errors only at API/tool boundaries.
 - Never discard an error: every `except` re-raises or logs what it swallowed.
 
+## Async side-effect lifecycle
+
+- Define the operation's identity and how it handles duplicate or out-of-order events, partial completion, cancellation, and shutdown.
+  Deduplicate work without losing new information from later events.
+- Persist intent before dispatch and retry through the job queue.
+  A saved intent isn't a delivery receipt.
+  Verify the external outcome before retrying a non-idempotent action.
+- Never await work that may need your lease.
+  After reacquiring a lease, reread state and preserve newer receipts and decisions.
+  Database serialization doesn't order external API completions.
+- On lease loss or shutdown, stop owned work before releasing its claim.
+  Extend behavioral tests for races and lost responses, not helper call order.
+
 ## Testing
 
 Never run the full test suite locally; run only tests related to the change.
