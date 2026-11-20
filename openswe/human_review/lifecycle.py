@@ -4,6 +4,7 @@ Every Slack write here edits or posts the one card, and only because someone
 just acted, a GitHub event arrived, or one of the request's deadlines passed.
 """
 
+import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -70,6 +71,7 @@ from openswe.threads.pr_fixes import dispatch_pull_request_prompt
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_thread_url
 from openswe.utils.preview import skip_on_preview
+from openswe.utils.startup_trace import apm_span
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +125,9 @@ class ReviewCard:
         image_key = [request.head_sha, fingerprint, request.slack_diff_file_id]
         if request.slack_diff_file_id and request.run_config.get("slack_diff_image") == image_key:
             return request.slack_diff_file_id
-        file_id = await SlackDiffImage(shown, f"diff-{request.head_sha[:12]}.png").upload()
+        file_id = await SlackDiffImage(shown, f"diff-{request.head_sha[:12]}.png").upload(
+            self._span_tags
+        )
         request.run_config = {
             **request.run_config,
             "slack_diff_image": [request.head_sha, fingerprint, file_id or ""],
@@ -151,10 +155,15 @@ class ReviewCard:
             raise SlackRequestError("draft card is author-only")
         if not approval.slack_channel_id:
             raise SlackRequestError("no Slack channel")
-        approval.slack_diff_file_id = await self._diff_image_id(files) or ""
-        if not approval.slack_channel_choices:
-            approval.slack_channel_choices = await channel_choices(approval)
-        warning, prefix = await self._warn_target(("", []))
+        # Hosting the diff image takes seconds (render, upload, then Slack's processing),
+        # so the card's other lookups run meanwhile.
+        diff_image_id, choices, (warning, prefix) = await asyncio.gather(
+            self._diff_image_id(files),
+            self._initial_channel_choices(),
+            self._warn_target(("", [])),
+        )
+        approval.slack_diff_file_id = diff_image_id or ""
+        approval.slack_channel_choices = choices
         footer = self._thread_footer()
         text, blocks = expedited_card.open_card(
             approval,
@@ -167,19 +176,31 @@ class ReviewCard:
             max_blocks=MESSAGE_MAX_BLOCKS - len(prefix) - len(footer),
         )
         text, blocks = text + warning, [*prefix, *blocks, *footer]
-        if not approval.slack_thread_ts:
-            channel = await SlackChannel.load(approval.slack_channel_id)
-            if channel is None:
-                raise SlackRequestError("channel_not_found")
-            approval.slack_thread_ts = await channel.post(text, blocks=block_payload(blocks))
-            return approval.slack_thread_ts
-        return await post_slack_thread_reply_with_ts(
-            approval.slack_channel_id,
-            approval.slack_thread_ts,
-            text,
-            blocks=block_payload(blocks),
-            agent_thread_id=approval.thread_id or None,
-        )
+        with apm_span("expedited_review.card.send", self._span_tags):
+            if not approval.slack_thread_ts:
+                channel = await SlackChannel.load(approval.slack_channel_id)
+                if channel is None:
+                    raise SlackRequestError("channel_not_found")
+                approval.slack_thread_ts = await channel.post(text, blocks=block_payload(blocks))
+                return approval.slack_thread_ts
+            return await post_slack_thread_reply_with_ts(
+                approval.slack_channel_id,
+                approval.slack_thread_ts,
+                text,
+                blocks=block_payload(blocks),
+                agent_thread_id=approval.thread_id or None,
+            )
+
+    @property
+    def _span_tags(self) -> dict[str, object]:
+        return {"human_review.request_id": str(self.request.id)}
+
+    async def _initial_channel_choices(self) -> list[ChannelChoice]:
+        """The channels a new card offers to copy itself to, unless it already has some."""
+        if self.request.slack_channel_choices:
+            return self.request.slack_channel_choices
+        with apm_span("expedited_review.card.channel_choices", self._span_tags):
+            return await channel_choices(self.request)
 
     async def prompt_author_ready(self) -> str | None:
         """Ask only the author to undraft; return a delivery problem, if any."""

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from openswe.expedited_review.diff_image import render_diff_png
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.slack.client import upload_slack_thread_file, wait_for_slack_file
+from openswe.utils.startup_trace import apm_span
 
 logger = logging.getLogger(__name__)
 
@@ -16,14 +17,20 @@ class SlackDiffImage:
     files: list[ChangedFile]
     filename: str
 
-    async def upload(self) -> str | None:
+    async def upload(self, tags: dict[str, object]) -> str | None:
         """Return a ready Slack file id, or let the caller fall back to text."""
         if not self.files:
             return None
         try:
-            png = await asyncio.to_thread(render_diff_png, self.files)
-            file_id = await upload_slack_thread_file(None, None, self.filename, png, title="Diff")
-            if await wait_for_slack_file(file_id):
+            with apm_span("slack.diff_image.render", tags):
+                png = await asyncio.to_thread(render_diff_png, self.files)
+            with apm_span("slack.diff_image.upload", tags):
+                file_id = await upload_slack_thread_file(
+                    None, None, self.filename, png, title="Diff"
+                )
+            with apm_span("slack.diff_image.processing", tags):
+                ready = await wait_for_slack_file(file_id)
+            if ready:
                 return file_id
             logger.warning(
                 "Slack did not finish processing the diff image",
