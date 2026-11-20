@@ -123,17 +123,6 @@ def chunk_output_as_jsonl(content: str) -> str:
     return "\n".join(json.dumps(record, ensure_ascii=False) for record in records)
 
 
-def bounded_inline_results(results: str) -> str:
-    """Search results too large to keep inline, cut to what is."""
-    if len(results) <= MAX_INLINE_CHARS:
-        return results
-    return (
-        results[:MAX_INLINE_CHARS]
-        + "\n... [results truncated: "
-        + f"{MAX_INLINE_CHARS}/{len(results)} chars]\n"
-    )
-
-
 def truncated_markdown(markdown: str) -> str:
     """A fetched page's markdown, cut to what a result keeps."""
     if len(markdown) <= MAX_INLINE_CHARS:

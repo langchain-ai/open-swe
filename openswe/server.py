@@ -33,7 +33,6 @@ from runtime_api.catalog import (
     ReplyRules,
     RoutingRules,
 )
-from runtime_api.connections import ConnectionRef
 from runtime_api.endpoint import QUICK_CALL_SECONDS
 from runtime_api.gateway_auth import GatewayBearer
 from runtime_api.loop import RunSender, RunStarted
@@ -257,7 +256,6 @@ from openswe.tools import (
     update_automation,
     update_project,
     upload_session,
-    web_search,
     write_database_rows,
 )
 from openswe.tools.access import permitted, resolve_access
@@ -707,7 +705,6 @@ AGENT_TOOLS: Final = (
     *MERGE_QUEUE_RECOVERY_TOOLS,
     http_request,
     fetch_url,
-    web_search,
     transcribe_audio,
     classify,
     background_execute,
@@ -969,7 +966,6 @@ _NOT_FROM_CODE = frozenset({"task"}) | frozenset(
 _DIRECT_IN_CODE_MODE = SANDBOX_TOOL_NAMES | {
     SEARCH_TOOLS,
     "monitor",
-    "web_search",
     "fetch_url",
     "transcribe_audio",
 }
@@ -1021,14 +1017,8 @@ _RUNTIME_TOOLS = frozenset(
 )
 
 
-def runtime_runs(name: str, connections: Sequence[ConnectionRef]) -> bool:
-    """Whether the run's runtime runs a tool itself rather than calling its operation.
-
-    ``web_search`` only where its key is the deployment's connection, which the runtime
-    reads; the backend's own key stays here.
-    """
-    if name == "web_search":
-        return any(ref.owner == "agent" for ref in connections)
+def runtime_runs(name: str) -> bool:
+    """Whether the run's runtime runs a tool itself rather than calling its operation."""
     return name in _RUNTIME_TOOLS
 
 

@@ -112,7 +112,6 @@ _SUBAGENTS: Final[dict[Graph, str]] = {
 _REVIEWER_PTC_TOOLS: Final = (
     "read_file",
     "write_file",
-    "web_search",
     "fetch_url",
     "http_request",
     "list_findings",

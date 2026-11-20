@@ -60,11 +60,9 @@ class OperationConnection:
         return None if ref is None else _carried.get().get(ref.slug)
 
 
-EXA: Final = OperationConnection(ENV.MDA_EXA_CONNECTION, "agent")
 GITHUB_USER: Final = OperationConnection(ENV.MDA_GITHUB_USER_CONNECTION, "user")
 
 _READ_BY: Final[Mapping[str, tuple[OperationConnection, ...]]] = {
-    "web_search": (EXA,),
     "open_pull_request": (GITHUB_USER,),
 }
 

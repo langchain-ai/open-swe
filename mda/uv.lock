@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.14"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -640,24 +640,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f5/22/900cb125c76b7aaa450ce02fd727f452243f2e91a61af068b40adba60ea9/email_validator-2.3.0.tar.gz", hash = "sha256:9fc05c37f2f6cf439ff414f8fc46d917929974a82244c20eb10231ba60c54426", size = 51238, upload-time = "2025-08-26T13:09:06.831Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/de/15/545e2b6cf2e3be84bc1ed85613edd75b8aea69807a71c26f4ca6a9258e82/email_validator-2.3.0-py3-none-any.whl", hash = "sha256:80f13f623413e6b197ae73bb10bf4eb0908faf509ad8362c5edeb0be7fd450b4", size = 35604, upload-time = "2025-08-26T13:09:05.858Z" },
-]
-
-[[package]]
-name = "exa-py"
-version = "2.22.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpcore" },
-    { name = "httpx" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "requests" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/56/90/c419d46bd030fa4ddf7e7ed84fa26e6f2a927f8fe0cf6bc8f7d34c3f7c8f/exa_py-2.22.2.tar.gz", hash = "sha256:2b45e747ef2b0d6cfeb7604f505e8997f789b437012b6aabeac2f3a81c55fc71", size = 81907, upload-time = "2026-09-21T17:39:00.625Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/34/25/b79795fe7b22b8f07aae1980027de89483cd88511f378b006056d2291e18/exa_py-2.22.2-py3-none-any.whl", hash = "sha256:3f757eae1f9460836bb4689ec27a7b233c023cdba0f8cd3f3a0a106531d7f591", size = 111287, upload-time = "2026-09-21T17:38:59.382Z" },
 ]
 
 [[package]]
@@ -1722,7 +1704,6 @@ version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "deepagents" },
-    { name = "exa-py" },
     { name = "httpx2" },
     { name = "jinja2" },
     { name = "langchain", extra = ["mcp"] },
@@ -1750,7 +1731,6 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "deepagents", specifier = "==0.7.41" },
-    { name = "exa-py", specifier = "==2.22.2" },
     { name = "httpx2", specifier = ">=2.12.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.5.2" },

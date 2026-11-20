@@ -28,7 +28,6 @@ def test_webapp_does_not_import_agent_stack() -> None:
             "anthropic",
             "langchain_anthropic",
             "openai",
-            "exa_py",
             "openswe.server",
             "openswe.middleware",
             "openswe.tools",

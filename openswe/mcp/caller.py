@@ -38,7 +38,6 @@ _TOOL_MODULES: Final = (
     "openswe.tools.read_only_sql",
     "openswe.tools.fetch_url",
     "openswe.tools.http_request",
-    "openswe.tools.web_search",
     "openswe.tools.save_user_instructions",
     "openswe.tools.save_user_settings",
     "openswe.tools.projects",

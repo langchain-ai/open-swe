@@ -7,7 +7,6 @@ not goes to the operation. The model's own requests go only to public addresses
 (``rt.public_http``), and large results go to the thread's sandbox, which MDA owns.
 """
 
-import asyncio
 import json
 import logging
 import posixpath
@@ -73,73 +72,6 @@ type _Answer = _Content | tuple[_Content, dict[str, JsonValue]]
 @dataclass(frozen=True)
 class _LocalTool:
     run: Callable[[_Call, Mapping[str, JsonValue]], Awaitable[_Answer]]
-
-
-@validate_call(config=_arbitrary)
-async def web_search(
-    call: SkipValidation[_Call], /, query: str, num_results: int = 5, include_contents: bool = True
-) -> _Answer:
-    api_key = next(
-        (
-            call.credentials[ref.slug]
-            for ref in call.spec.connections
-            if ref.slug in call.credentials
-        ),
-        None,
-    )
-    if not api_key:
-        logger.warning("exa_api_key_missing")
-        return {
-            "success": False,
-            "error": "EXA_API_KEY is not configured. Please add it to your environment variables.",
-        }
-    try:
-        from exa_py import Exa  # noqa: PLC0415 - heavy import, as the backend defers it
-
-        client = Exa(api_key=api_key)
-        if include_contents:
-            found = await asyncio.to_thread(
-                # The backend's call, whose result this one's must match.
-                client.search_and_contents,  # ty: ignore[deprecated]
-                query,
-                text=True,
-                num_results=num_results,
-                type="auto",
-            )
-        else:
-            found = await asyncio.to_thread(
-                client.search, query, num_results=num_results, type="auto"
-            )
-        text = str(found)
-        try:
-            path = await call.write_output(
-                "web-search", results.chunk_output_as_jsonl(text), "jsonl"
-            )
-        except Exception:
-            logger.info("Web search sandbox unavailable; returning bounded inline results")
-            return {
-                "success": True,
-                "results_path": None,
-                "results": results.bounded_inline_results(text),
-                "result_chars": len(text),
-                "error": None,
-            }
-        return {
-            "success": True,
-            "results_path": path,
-            "results": None,
-            "result_chars": len(text),
-            "error": None,
-        }
-    except Exception as exc:
-        logger.exception("web_search failed")
-        return {
-            "success": False,
-            "results_path": None,
-            "results": None,
-            "result_chars": 0,
-            "error": f"{type(exc).__name__}: {exc}",
-        }
 
 
 @validate_call(config=_arbitrary)
@@ -273,7 +205,6 @@ def _with_call(answer: Callable[..., Awaitable[_Answer]]) -> _LocalTool:
 
 
 _LOCAL_TOOLS: Final[Mapping[str, _LocalTool]] = {
-    "web_search": _with_call(web_search),
     "fetch_url": _with_call(fetch_url),
     "http_request": _with_call(http_request),
     "slack_no_reply_needed": _LocalTool(_no_reply_needed),

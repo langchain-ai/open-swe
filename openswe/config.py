@@ -233,11 +233,6 @@ ENV.var(
     default="true",
 )
 ENV.var(
-    "MDA_EXA_CONNECTION",
-    "Slug of the MDA deployment's agent connection holding the Exa API key, e.g. "
-    "open-swe-exa: runs' web_search reads its key there. Unset: EXA_API_KEY.",
-)
-ENV.var(
     "MDA_GITHUB_USER_CONNECTION",
     "Slug of the MDA deployment's user GitHub OAuth connection, e.g. open-swe-github-prod: "
     "open_pull_request opens the requester's own PR with their grant there, which MDA asks "
@@ -493,7 +488,6 @@ ENV.var(
     "Reasoning effort for the default model (low, medium, high, max) when no global or profile setting applies.",
 )
 ENV.var("LLM_FALLBACK_MODEL_ID", "Fallback model in provider:model form.")
-ENV.var("EXA_API_KEY", "Exa API key enabling web search.", secret=True)
 ENV.var(
     "API_STANDARDS_SKILL_HANDLE", "Hub handle of the API standards skill.", default="api-standards"
 )

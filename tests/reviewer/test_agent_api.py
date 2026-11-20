@@ -698,18 +698,11 @@ async def test_a_model_failure_leaves_its_code_for_the_failure_reply(
     assert _failure_reason_code({"error": "ValueError"}, metadata, "run-1") is None
 
 
-@pytest.mark.parametrize("exa_connection", [None, "open-swe-exa"])
-async def test_the_runtime_runs_only_the_backends_own_tools_that_read_nothing_of_it(
-    monkeypatch: pytest.MonkeyPatch, exa_connection: str | None
-) -> None:
+async def test_the_runtime_runs_only_the_backends_own_tools_that_read_nothing_of_it() -> None:
     from openswe.agent_api.run_catalog import RunCatalog
-    from openswe.tools import fetch_url, http_request, publish_artifact, web_search
+    from openswe.tools import fetch_url, http_request, publish_artifact
 
-    if exa_connection is None:
-        monkeypatch.delenv("MDA_EXA_CONNECTION", raising=False)
-    else:
-        monkeypatch.setenv("MDA_EXA_CONNECTION", exa_connection)
-    surface = ToolSurface(base_tools=[web_search, fetch_url, http_request, publish_artifact])
+    surface = ToolSurface(base_tools=[fetch_url, http_request, publish_artifact])
     await surface.prepare()
     # A client's tool of the same name is the client's to run.
     client = {"kind": "function", "name": "http_request", "parameters": {"type": "object"}}
@@ -717,20 +710,16 @@ async def test_the_runtime_runs_only_the_backends_own_tools_that_read_nothing_of
 
     specs = RunCatalog(RunKind(), RUN, surface, config).tool_set().tools
 
-    # web_search only with its key in the deployment's connection, which the runtime reads.
-    assert {spec.name for spec in specs if spec.runtime_runs} == {
-        "fetch_url",
-        *(() if exa_connection is None else ("web_search",)),
-    }
+    assert {spec.name for spec in specs if spec.runtime_runs} == {"fetch_url"}
 
 
 async def test_a_starting_run_describes_its_tools_once(monkeypatch: pytest.MonkeyPatch) -> None:
     """The tool set and the catalog list the same specs, which a run with hundreds of
     integrations would otherwise work out twice as it starts."""
     from openswe.agent_api.run_catalog import RunCatalog
-    from openswe.tools import fetch_url, web_search
+    from openswe.tools import fetch_url, http_request
 
-    surface = ToolSurface(base_tools=[web_search, fetch_url])
+    surface = ToolSurface(base_tools=[http_request, fetch_url])
     await surface.prepare()
     described = 0
     catalog_of = ToolSurface.catalog
@@ -1345,7 +1334,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
             surface.base_tools = [
                 integration(name)
                 for name in (
-                    "web_search",
+                    "fetch_url",
                     "manage_thread",
                     "slack_reply",
                     "message_task_thread",
@@ -1387,7 +1376,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     operations = catalog["operations"]
     assert isinstance(operations, list)
     names = {op["name"] for op in operations if isinstance(op, dict)}
-    assert {"web_search", "manage_thread", "slack_reply"} <= names
+    assert {"fetch_url", "manage_thread", "slack_reply"} <= names
     assert "message_task_thread" in names
     # Integrations stay on the backend, whether code can call them or not.
     assert "mcp_search" not in names
@@ -1409,10 +1398,10 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         "delete",
         "edit_file",
         "execute",
+        "fetch_url",
         "ls",
         "read_file",
         "search_tools",
-        "web_search",
         "write_file",
     ]
     assert catalog["code_only"] == ["manage_thread"]

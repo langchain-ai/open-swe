@@ -199,9 +199,8 @@ class RunCatalog:
                 reads_all=injections.reads_all,
                 code_name=code_name(described.name),
                 seconds=call_seconds(described.name),
-                connections=(connections := operation_connections(described.name, self.config)),
-                runtime_runs=described.name not in clients
-                and runtime_runs(described.name, connections),
+                connections=operation_connections(described.name, self.config),
+                runtime_runs=described.name not in clients and runtime_runs(described.name),
             )
             for described in self.surface.catalog()
             if described.name in tools

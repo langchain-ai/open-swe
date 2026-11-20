@@ -170,7 +170,6 @@ The backend:
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 | `MDA_SERVICE_SECRET` | The same value as this deployment's; `/mda/channel-api/*` and `/github/channel/*` answer only calls signed with it |
 | `MDA_BIND_SANDBOX_AFTER_PREPARE` | `false`: every run opens its sandbox, and the backend binds its thread to it, before the run prepares. Unset or `true`: a run whose preparation reaches no sandbox prepares and makes its first model call meanwhile, and its first tool call waits for the sandbox (`bind_sandbox`) |
-| `MDA_EXA_CONNECTION` | The deployment's agent connection holding the Exa key (`open-swe-exa`), which `web_search` then uses, run in MDA. Unset: the backend runs it with its `EXA_API_KEY` |
 | `MDA_GITHUB_USER_CONNECTION` | The deployment's user GitHub OAuth connection (`open-swe-github-<env>`): `open_pull_request` opens the requester's own PR with their grant there when it is the account Robin knows them by. Unset, or for another participant: their dashboard GitHub sign-in |
 
 ## Run locally

@@ -10,10 +10,6 @@ from urllib.parse import urlparse
 import httpx2
 import pytest
 
-exa_py_stub = types.ModuleType("exa_py")
-exa_py_stub.__dict__["Exa"] = object
-sys.modules.setdefault("exa_py", exa_py_stub)
-
 importlib.import_module("openswe.tools.fetch_url")
 importlib.import_module("openswe.tools.http_request")
 fetch_url_tool = sys.modules["openswe.tools.fetch_url"]

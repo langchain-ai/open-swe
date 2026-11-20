@@ -98,7 +98,6 @@ _TOOL_MODULES = {
     "update_automation": ".automations",
     "update_finding": ".update_finding",
     "transcribe_audio": ".transcribe_audio",
-    "web_search": ".web_search",
 }
 
 __all__ = [
@@ -197,7 +196,6 @@ __all__ = [
     "update_automation",
     "update_finding",
     "transcribe_audio",
-    "web_search",
 ]
 
 if TYPE_CHECKING:
@@ -302,7 +300,6 @@ if TYPE_CHECKING:
     from openswe.tools.update_finding import update_finding
     from openswe.tools.upload_session import upload_session
     from openswe.tools.user_skills import delete_user_skill, save_user_skill
-    from openswe.tools.web_search import web_search
 
 
 def _load_export(name: str) -> Any:

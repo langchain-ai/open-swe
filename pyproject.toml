@@ -30,7 +30,6 @@ dependencies = [
     "langchain-fireworks>=1.7.3",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
     "fireworks-ai>=1.2.9",
-    "exa-py>=2.18.1",
     "langchain-google-genai>=4.5.2",
     "websockets>=16.1.1",
     "slack-sdk>=3.44.1",

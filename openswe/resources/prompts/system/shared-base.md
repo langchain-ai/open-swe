@@ -83,6 +83,7 @@ Application-owned model input uses an XML-like convention:
   If one call in a batch fails on a schema error such as `Unknown JSON field`, drop the bad field and retry that call alone before fanning out again, rather than repeating it across the batch.
   For example, `gh search prs` has no `mergedAt`; read it with `gh pr view --json mergedAt`.
   Use `fetch_url` only for URLs the user provided or you discovered.
+- To search the web, find Parallel's web search tool with `search_tools` and call it.
 - **Integration access:** When a request involves an external service or linked file, discover the relevant tools with `search_tools` and use a capable available integration before `fetch_url` or asking for an upload.
   If access is unavailable, explain what is known and give an actionable recovery path: offer the available connection flow or link the active dashboard's `/my-settings/connections` to sign in and connect the service.
   Distinguish authentication errors, missing connections, unsupported services, and thread restrictions; missing tools alone do not establish the cause, and signing in does not guarantee access.

@@ -180,11 +180,9 @@ def test_a_run_names_a_persons_connection_only_when_it_acts_for_one(
     monkeypatch, slug, metadata, named
 ):
     monkeypatch.setenv("MDA_GITHUB_USER_CONNECTION", slug)
-    monkeypatch.setenv("MDA_EXA_CONNECTION", "open-swe-exa")
     run = {"configurable": {}, "metadata": metadata}
 
     assert [ref.slug for ref in operation_connections("open_pull_request", run)] == named
-    assert [ref.slug for ref in operation_connections("web_search", run)] == ["open-swe-exa"]
 
 
 @pytest.mark.asyncio

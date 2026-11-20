@@ -8,7 +8,6 @@ Each backend setting is off until set, and unset keeps that credential on the ba
 |---|---|---|---|
 | none: a person's Agent Auth principal | user | The backend's runs for a person on a channel's thread | `MDA_WORKSPACE_ID`, when not the backend's workspace |
 | `mda/github-token` | agent | The GitHub channel, as it reads an issue and its comments | none |
-| `open-swe-exa` | agent | `web_search` | `MDA_EXA_CONNECTION=open-swe-exa` |
 | `open-swe-github-<env>` | user | `open_pull_request`, for the requester's own PR | `MDA_GITHUB_USER_CONNECTION=open-swe-github-<env>` |
 | `mda/linear-token` | agent | The Linear channel; its `mda deploy` keeps it | none |
 | `mda/slack-bot-token` | agent | The backend's own Slack calls, with the Slack app's bot token; the Slack channel's `mda deploy` keeps it | `MDA_DEPLOYMENT_ID`, this deployment's id |
@@ -59,19 +58,7 @@ uv run --project mda --locked mda connections list --project mda --json \
 
 Sandboxes' GitHub tokens never come from this connection: the backend mints them and hands them to MDA with the sandbox's proxy config (`sandbox_proxy`).
 
-## 3. `open-swe-exa`: the Exa key for `web_search`
-
-With `EXA_API_KEY` in the shell or `mda/.env`:
-
-```bash
-uv run --project mda --locked mda connections create open-swe-exa \
-  --project mda --deployment-id "$DEPLOYMENT_ID" --secret-from-env EXA_API_KEY
-```
-
-Then set `MDA_EXA_CONNECTION=open-swe-exa` on the backend.
-The backend keeps `EXA_API_KEY` for Robin's own MCP server.
-
-## 4. `open-swe-github-<env>`: each person's GitHub, for the PRs they open
+## 3. `open-swe-github-<env>`: each person's GitHub, for the PRs they open
 
 The environment's GitHub App is the OAuth client, so a person grants Robin's own App.
 With the App's `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` in the shell or `mda/.env`:
@@ -87,14 +74,14 @@ A person who has not granted it is asked to connect GitHub the first time a run 
 Only Slack can show that request today: a GitHub or Linear run links its pause to LangSmith Studio, which cannot resume with a person's grant, so the run stays paused.
 Set `MDA_GITHUB_USER_CONNECTION=open-swe-github-$ENV` on the backend only once those channels can ask, or where Slack is the only channel.
 
-## 5. `mda/linear-token`: nothing to create
+## 4. `mda/linear-token`: nothing to create
 
 The Linear channel's `mda deploy` keeps the Linear app's token under this reserved slug, and Agent Auth renews it.
 Linear holds one app token per app, so a client that requests its own for the same app, such as with client credentials, revokes the channel's.
 
 Robin keeps no MCP servers on connections: runs' MCP servers come from LangSmith Managed Tools kits, which are managed in LangSmith.
 
-## 6. Verify
+## 5. Verify
 
 ```bash
 uv run --project mda --locked mda connections list --project mda --json | jq -r '.[].slug' | grep -E '^open-swe-'

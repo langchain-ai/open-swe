@@ -104,7 +104,6 @@ from openswe.tools import (
     resolve_finding_thread,
     suggest_task,
     update_finding,
-    web_search,
 )
 from openswe.tools.review_apps import ReviewAppTools
 from openswe.utils import ttl_cache
@@ -1107,7 +1106,6 @@ def reviewer_tools() -> list[BaseTool]:
             publish_review,
             resolve_finding_thread,
             reply_to_finding_thread,
-            web_search,
             fetch_url,
             http_request,
             suggest_task,

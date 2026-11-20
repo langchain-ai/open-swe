@@ -30,7 +30,6 @@ _BUILTINS = frozenset(
         "execute",
         "eval",
         "search_tools",
-        "web_search",
         "fetch_url",
         "http_request",
         "browser_run",
