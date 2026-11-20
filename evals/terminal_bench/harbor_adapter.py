@@ -11,6 +11,7 @@ network policy is the one Harbor set.
 
 import asyncio
 import io
+import logging
 import os
 import platform
 import re
@@ -19,6 +20,9 @@ import signal
 import tarfile
 import tempfile
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from hashlib import sha256
 from pathlib import Path
 from typing import ClassVar, override
@@ -32,11 +36,40 @@ from harbor.models.agent.context import AgentContext
 from pydantic import Field
 
 
+class _TrialLogForwarder(logging.Handler):
+    """Routes `langsmith.sandbox` warnings from the current asyncio task into its trial log."""
+
+    _target: ClassVar[ContextVar[logging.Logger | None]] = ContextVar(
+        "robin_sandbox_trial_logger", default=None
+    )
+    _installed: ClassVar[bool] = False
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if (target := self._target.get()) is not None:
+            target.handle(record)
+        elif not logging.root.handlers and logging.lastResort is not None:
+            logging.lastResort.handle(record)
+
+    @classmethod
+    @contextmanager
+    def capture(cls, logger: logging.Logger) -> Iterator[None]:
+        if not cls._installed:
+            logging.getLogger("langsmith.sandbox").addHandler(cls(level=logging.WARNING))
+            cls._installed = True
+        token = cls._target.set(logger)
+        try:
+            yield
+        finally:
+            cls._target.reset(token)
+
+
 class RobinSandbox(LangSmithEnvironment):
     """Harbor's LangSmith environment, with the label Robin requires before it attaches a sandbox
     it didn't create. The sandbox API only takes labels at creation."""
 
     LABELS: ClassVar[dict[str, str]] = {"robin.external": "true"}
+    # Harbor 0.24's grace on a command's own timeout before it gives up waiting.
+    EXEC_TIMEOUT_GRACE_SECONDS = 10
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
@@ -76,6 +109,51 @@ class RobinSandbox(LangSmithEnvironment):
             )
         finally:
             client.close()
+
+    # Harbor 0.24's `_run_sandbox_command`, except that a dropped connection doesn't kill the
+    # command: Harbor's `kill_on_disconnect=True` cut verifiers off mid-run, leaving no reward
+    # file. The handle reconnects to the command instead, and its own timeout still bounds it.
+    @override
+    async def _run_sandbox_command(
+        self, command: str, *, cwd: str | None, env: dict[str, str] | None, timeout_sec: int
+    ) -> object:
+        client = self._create_async_sandbox_client()
+        try:
+            sandbox = self._async_sandbox_from_state(client)
+            with _TrialLogForwarder.capture(self.logger):
+                async with asyncio.timeout(
+                    None if timeout_sec <= 0 else timeout_sec + self.EXEC_TIMEOUT_GRACE_SECONDS
+                ):
+                    handle = await sandbox.run(
+                        command,
+                        timeout=timeout_sec,
+                        cwd=cwd,
+                        env=env,
+                        idle_timeout=-1,
+                        kill_on_disconnect=False,
+                        ttl_seconds=max(600, timeout_sec + 60),
+                        headers=self._langsmith_client_headers(),
+                        wait=False,
+                    )
+                    # The result is read in a task of its own, so a cancelled wait leaves the
+                    # command's stream open to carry the kill: closing it no longer kills the command.
+                    result = asyncio.ensure_future(handle.result)
+                    try:
+                        return await asyncio.shield(result)
+                    except BaseException:
+                        await self._bounded_command_cleanup(
+                            handle.kill(), "Failed to kill abandoned LangSmith sandbox command"
+                        )
+                        result.cancel()
+                        await self._bounded_command_cleanup(
+                            asyncio.gather(result, return_exceptions=True),
+                            "Failed to stop reading an abandoned LangSmith sandbox command",
+                        )
+                        raise
+        finally:
+            await self._bounded_command_cleanup(
+                client.aclose(), "Failed to close LangSmith async sandbox client"
+            )
 
 
 class RobinOptions(AgentOptions):
