@@ -350,7 +350,8 @@ class ExpeditedReviewNomination:
         if review_channel and broadcast_target is None:
             return self.failure(
                 f"The configured review channel {review_channel!r} is unavailable to the bot. "
-                "Invite the bot to that channel or update `reviewChannel` in `.open-swe/settings.json`."
+                "Invite the bot to that channel or update `reviewChannel` in `.robin/settings.json` "
+                "(or legacy `.open-swe/settings.json`)."
             )
         broadcast_choice: list[ChannelChoice] = (
             [{"id": broadcast_target.id, "name": broadcast_target.name}]

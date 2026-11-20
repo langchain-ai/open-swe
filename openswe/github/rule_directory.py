@@ -15,20 +15,18 @@ import logging
 import re
 from collections.abc import Sequence
 from fnmatch import fnmatchcase
-from typing import Final, Self
+from typing import Self
 
 import httpx2
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from openswe.github.http import RepoClient
-from openswe.github.repo_files import RepoSettings
+from openswe.github.repo_files import CONFIG_DIRS, RepoSettings
 
 logger = logging.getLogger(__name__)
 
 RULE_MAX_CHARS = 15_000
-# A repository's Robin configuration directories; the first is where new configuration goes.
-CONFIG_DIRS: Final = (".robin", ".open-swe")
 _FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 
 

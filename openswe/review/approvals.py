@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from openswe.expedited_review.eligibility import ChangedFile
 from openswe.github.http import GitHubClient, RepoClient, RepoFileUnreadableError
-from openswe.github.repo_files import SETTINGS_MAX_CHARS, SETTINGS_PATH, RepoSettings
+from openswe.github.repo_files import SETTINGS_MAX_CHARS, SETTINGS_PATHS, RepoSettings
 from openswe.github.repo_names import RepoFullName
 from openswe.github.rule_directory import RULE_MAX_CHARS, RuleDirectory, ScopedRule
 from openswe.prompts import prompt
@@ -157,16 +157,18 @@ class ApprovalPolicy(BaseModel):
         errors: list[str] = []
         if any(cls.changes_rules(path) for path in changed):
             errors.extend((await cls.fetch(repo, head_sha)).errors)
-        if SETTINGS_PATH in changed:
+        for path in SETTINGS_PATHS:
+            if path not in changed:
+                continue
             try:
                 content = await repo.read_file(
-                    SETTINGS_PATH, head_sha, max_chars=SETTINGS_MAX_CHARS, strict=True
+                    path, head_sha, max_chars=SETTINGS_MAX_CHARS, strict=True
                 )
             except RepoFileUnreadableError as exc:
                 errors.append(str(exc))
             else:
                 if content is not None:
-                    errors.extend(RepoSettings.problems(content))
+                    errors.extend(RepoSettings.problems(content, path))
         return errors
 
 

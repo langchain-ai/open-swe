@@ -73,7 +73,7 @@ Once approved, the diff and buttons go and the card says who approved.
 Once merged or cancelled, the whole card becomes one line, such as *Expedited review: merged* or *Expedited review: dismissed by @someone*, and the PR link.
 Reactions are never votes.
 
-When `reviewChannel` is configured in `.open-swe/settings.json`, the ready card is automatically broadcast there, without send controls.
+When `reviewChannel` is configured in `.robin/settings.json`, the ready card is automatically broadcast there, without send controls.
 Drafts wait until the author marks them ready.
 The destination must be public and not externally shared.
 

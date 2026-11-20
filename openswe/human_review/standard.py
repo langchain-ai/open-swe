@@ -250,7 +250,7 @@ async def target_channel(
     if not configured.strip():
         return _failure(
             f"{pr_ref.owner}/{pr_ref.repo} has no review channel. Set `reviewChannel` in "
-            "`.open-swe/settings.json`, or name a Slack channel."
+            "`.robin/settings.json` (or legacy `.open-swe/settings.json`), or name a Slack channel."
         )
     try:
         channel = await SlackChannel.resolve(configured, raise_unavailable=True)

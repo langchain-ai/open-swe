@@ -933,18 +933,29 @@ async def test_repo_settings_prefer_the_pull_request_head() -> None:
         settings = await RepoSettings.fetch(_repo(), ref="abc123")
     assert settings.review_channel == "#eng-reviews"
     _client, _method, url = request.await_args.args
-    assert url.endswith("/repos/o/r/contents/.open-swe/settings.json")
+    assert url.endswith("/repos/o/r/contents/.robin/settings.json")
     assert request.await_args.kwargs["params"] == {"ref": "abc123"}
 
 
-async def test_repo_settings_fall_back_to_the_default_branch() -> None:
+async def test_repo_settings_fall_back_to_legacy_then_the_default_branch() -> None:
     request = AsyncMock(
-        side_effect=[_response(404), _response(200, '{"reviewChannel": "#eng-reviews"}')]
+        side_effect=[
+            *[_response(404)] * 3,
+            _response(200, '{"reviewChannel": "#eng-reviews"}'),
+        ]
     )
     with patch("openswe.github.http.github_request", request):
         settings = await RepoSettings.fetch(_repo(), ref="abc123")
     assert settings.review_channel == "#eng-reviews"
-    assert [call.kwargs["params"] for call in request.await_args_list] == [{"ref": "abc123"}, None]
+    assert [
+        (call.args[2].split("/contents/")[1], call.kwargs["params"])
+        for call in request.await_args_list
+    ] == [
+        (".robin/settings.json", {"ref": "abc123"}),
+        (".open-swe/settings.json", {"ref": "abc123"}),
+        (".robin/settings.json", None),
+        (".open-swe/settings.json", None),
+    ]
 
 
 @pytest.mark.parametrize(("status", "text"), [(404, ""), (200, "not json"), (200, "[]")])
@@ -953,6 +964,17 @@ async def test_missing_or_invalid_settings_have_no_review_channel(status: int, t
         "openswe.github.http.github_request", AsyncMock(return_value=_response(status, text))
     ):
         assert (await RepoSettings.fetch(_repo())).review_channel == ""
+
+
+@pytest.mark.parametrize(("status", "text"), [(200, ""), (200, "not json"), (500, "")])
+async def test_unusable_robin_settings_never_fall_back_to_legacy(status: int, text: str) -> None:
+    request = AsyncMock(
+        side_effect=[_response(status, text), _response(200, '{"reviewChannel": "#old"}')]
+    )
+    with patch("openswe.github.http.github_request", request):
+        settings = await RepoSettings.fetch(_repo())
+    assert settings.review_channel == ""
+    assert request.await_count == 1
 
 
 @pytest.mark.usefixtures("registry_db")

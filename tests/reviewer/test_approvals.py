@@ -129,6 +129,7 @@ async def test_fetch_yields_no_policy_when_github_is_unreachable() -> None:
 async def test_config_errors_cover_changed_settings_and_rules_at_the_head() -> None:
     head = "b" * 40
     files = [
+        {"filename": ".robin/settings.json"},
         {"filename": ".open-swe/settings.json"},
         {"filename": ".open-swe/auto-approve-rules/x.md"},
     ]
@@ -144,9 +145,10 @@ async def test_config_errors_cover_changed_settings_and_rules_at_the_head() -> N
     )
     repo.full_name = "o/r"
     errors = await ApprovalPolicy.config_errors(repo, 1, head)
-    assert len(errors) == 2
+    assert len(errors) == 3
     assert errors[0].startswith("`.open-swe/auto-approve-rules/x.md`: invalid frontmatter")
-    assert errors[1].startswith("`.open-swe/settings.json`: supplementaryReviews[0]")
+    assert errors[1].startswith("`.robin/settings.json`: supplementaryReviews[0]")
+    assert errors[2].startswith("`.open-swe/settings.json`: supplementaryReviews[0]")
 
 
 async def test_unset_mode_is_dry_run_and_off_skips_the_file(registry_db: None) -> None:

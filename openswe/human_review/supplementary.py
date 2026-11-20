@@ -1,6 +1,6 @@
 """Supplementary reviews: specialist reviewers a repository configures alongside engineering review.
 
-Each policy in ``supplementaryReviews`` (``.open-swe/settings.json``) names a GitHub team, the
+Each policy in ``supplementaryReviews`` (``.robin/settings.json``) names a GitHub team, the
 paths it cares about, and the criteria an isolated assessment judges the pull request by. When a
 pull request qualifies, a member of that team is rotated in and notified. Their approval never
 stands in for engineering review.

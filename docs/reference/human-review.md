@@ -22,13 +22,14 @@ Only successful transactions emit state-change events; event-log failures do not
 
 ## Configuration
 
-`.open-swe/settings.json` in the repository:
+`.robin/settings.json` in the repository:
 
 ```json
 { "reviewChannel": "#eng-reviews" }
 ```
 
 The value is a channel name or id.
+Robin still reads a legacy `.open-swe/settings.json`, but only when `.robin/settings.json` is absent; the two files are never merged.
 It is read from the pull request's head commit, falling back to the default branch when the head has no settings file.
 The `request_human_review` tool accepts a `channel` that overrides it or stands in when the repository sets none.
 

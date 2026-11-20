@@ -1,4 +1,5 @@
-"""Small configuration files Open SWE reads from a repository's ``.open-swe`` directory."""
+"""Small configuration files Robin reads from a repository's ``.robin`` (or legacy ``.open-swe``)
+directory."""
 
 import hashlib
 import json
@@ -7,7 +8,7 @@ import random
 from collections import Counter
 from datetime import timedelta
 from fnmatch import fnmatchcase
-from typing import Annotated
+from typing import Annotated, Final
 
 import httpx2
 from pydantic import (
@@ -34,7 +35,10 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["RepoFileUnreadableError", "RepoSettings", "fetch_repo_file"]
 
-SETTINGS_PATH = ".open-swe/settings.json"
+# A repository's Robin configuration directories; the first is where new configuration goes.
+CONFIG_DIRS: Final = (".robin", ".open-swe")
+# The first of these present is the settings file; the others are ignored.
+SETTINGS_PATHS: Final = tuple(f"{directory}/settings.json" for directory in CONFIG_DIRS)
 SETTINGS_MAX_CHARS = 10_000
 SETTINGS_FRESH_FOR = timedelta(minutes=30)
 SETTINGS_MAX_AGE = timedelta(hours=24)
@@ -115,7 +119,8 @@ class ReviewFile(BaseModel):
 
 
 class RepoSettings(BaseModel):
-    """``.open-swe/settings.json``; unknown keys are ignored so the file can grow."""
+    """``.robin/settings.json`` (or legacy ``.open-swe/settings.json``); unknown keys are ignored
+    so the file can grow."""
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -156,32 +161,31 @@ class RepoSettings(BaseModel):
         return policies
 
     @classmethod
-    def problems(cls, content: str) -> list[str]:
-        """Why ``content`` is not a valid settings file, including entries reading would drop."""
+    def problems(cls, content: str, path: str) -> list[str]:
+        """Why ``content`` of ``path`` is not a valid settings file, including entries reading would
+        drop."""
         try:
             raw = json.loads(content)
         except ValueError as exc:
-            return [f"`{SETTINGS_PATH}` is not valid JSON: {exc}"]
+            return [f"`{path}` is not valid JSON: {exc}"]
         try:
             cls.model_validate(raw)
         except ValidationError as exc:
-            return [f"`{SETTINGS_PATH}`: {cls.describe(exc)}"]
+            return [f"`{path}`: {cls.describe(exc)}"]
         entries = raw.get("supplementaryReviews", []) if isinstance(raw, dict) else []
         if not isinstance(entries, list):
-            return [f"`{SETTINGS_PATH}`: supplementaryReviews must be a list"]
+            return [f"`{path}`: supplementaryReviews must be a list"]
         problems: list[str] = []
         seen: set[str] = set()
         for index, entry in enumerate(entries):
             try:
                 policy = SupplementaryReviewPolicy.model_validate(entry)
             except ValidationError as exc:
-                problems.append(
-                    f"`{SETTINGS_PATH}`: supplementaryReviews[{index}]: {cls.describe(exc)}"
-                )
+                problems.append(f"`{path}`: supplementaryReviews[{index}]: {cls.describe(exc)}")
                 continue
             if policy.id in seen:
                 problems.append(
-                    f"`{SETTINGS_PATH}`: supplementaryReviews[{index}]: duplicate id {policy.id!r}"
+                    f"`{path}`: supplementaryReviews[{index}]: duplicate id {policy.id!r}"
                 )
             seen.add(policy.id)
         return problems
@@ -307,29 +311,39 @@ class RepoSettings(BaseModel):
         """The settings at ``ref``, or the default branch's when ``ref`` has none.
 
         With ``strict``, an unreadable or invalid file raises instead of reading as empty.
+        Only an absent file falls back to the next path or ref, never an unreadable one.
         """
-        content = None
-        if ref:
-            content = await repo.read_file(
-                SETTINGS_PATH, ref, max_chars=SETTINGS_MAX_CHARS, strict=strict
-            )
-        if content is None:
-            content = await repo.read_file(
-                SETTINGS_PATH, None, max_chars=SETTINGS_MAX_CHARS, strict=strict
-            )
-        if content is None:
+        try:
+            found = await cls._read(repo, ref) if ref else None
+            if found is None:
+                found = await cls._read(repo, None)
+        except RepoFileUnreadableError:
+            if strict:
+                raise
             return cls()
+        if found is None:
+            return cls()
+        path, content = found
         try:
             return cls.model_validate_json(content)
         except ValidationError as exc:
             logger.warning(
                 "repository settings file is invalid; ignoring it",
-                extra={"repository": repo.full_name},
+                extra={"repository": repo.full_name, "path": path},
                 exc_info=True,
             )
             if strict:
-                raise RepoFileUnreadableError(f"{SETTINGS_PATH} is invalid") from exc
+                raise RepoFileUnreadableError(f"{path} is invalid") from exc
             return cls()
+
+    @staticmethod
+    async def _read(repo: RepoClient, ref: str | None) -> tuple[str, str] | None:
+        """The first settings file in ``SETTINGS_PATHS`` present at ``ref``, with its path."""
+        for path in SETTINGS_PATHS:
+            content = await repo.read_file(path, ref, max_chars=SETTINGS_MAX_CHARS, strict=True)
+            if content is not None:
+                return path, content
+        return None
 
     @classmethod
     async def cached(cls, owner: str, repo: str) -> RepoSettings:
