@@ -105,7 +105,7 @@ function ReviewsPage() {
       className={cn(
         "flex flex-wrap items-center gap-space-3",
         isDesktop
-          ? "min-h-11 border-b border-muted py-space-1 pr-space-3 pl-[80px] [.desktop-fullscreen_&]:pl-space-3"
+          ? "min-h-11 border-b border-muted py-space-1 pr-space-3 pl-[80px] [.desktop-fullscreen_&]:pl-space-3 [.version-mismatch_&]:pl-space-3"
           : selection && "border-b border-muted px-space-3 py-space-2"
       )}
     >

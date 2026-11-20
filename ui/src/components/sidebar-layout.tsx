@@ -296,7 +296,7 @@ function WindowControls({
   return (
     <div
       data-no-drag=""
-      className="fixed top-2 left-[90px] z-sidebar flex items-center gap-0.5 [.desktop-fullscreen_&]:left-[12px]"
+      className="fixed top-2 left-[90px] z-sidebar flex items-center gap-0.5 [.desktop-fullscreen_&]:left-[12px] [.version-mismatch_&]:left-[12px]"
     >
       {toggle && (
         <IconButton
