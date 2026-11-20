@@ -326,8 +326,9 @@ export function buildCommandItems(
     )
   }
 
-  const paths: Array<ComposerCommandItem> = mentionPaths
-    .filter((path) => new FuzzySearch(query).matches(path))
+  const search = new FuzzySearch(query)
+  const paths: Array<ComposerCommandItem> = search
+    .rank(mentionPaths, (path) => path)
     .map((path) => ({
       id: `path:${path}`,
       type: "path",
@@ -336,11 +337,17 @@ export function buildCommandItems(
       description: path,
     }))
   const people: Array<ComposerCommandItem> = slackUsers
-    .filter((user) =>
-      [user.name, user.display_name, user.real_name].some((name) =>
-        new FuzzySearch(query).matches(name)
-      )
-    )
+    .map((user) => ({
+      user,
+      score: Math.max(
+        ...[user.name, user.display_name, user.real_name].map((name) =>
+          search.score(name)
+        )
+      ),
+    }))
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => right.score - left.score)
+    .map(({ user }) => user)
     .slice(
       0,
       paths.length > 0 ? MAX_MENTION_SUGGESTIONS / 2 : MAX_MENTION_SUGGESTIONS

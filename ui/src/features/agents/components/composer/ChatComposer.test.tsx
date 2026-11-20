@@ -655,6 +655,35 @@ describe("ChatComposer people autocomplete", () => {
     )
     vi.restoreAllMocks()
   })
+
+  it("ranks people whose names contain the query ahead of fuzzy matches", () => {
+    const person = (id: string, name: string, realName: string) => ({
+      id,
+      name,
+      display_name: realName,
+      real_name: realName,
+    })
+    const users = [
+      person("U01", "a_velichkevich", "A Velichkevich"),
+      ...["Ben", "Benny", "Beni", "Bena", "Bev", "Ken", "Kev", "Vin"].map(
+        (first, index) => person(`U1${index}`, first.toLowerCase(), first)
+      ),
+      person("U99", "kevin.lee", "Kevin Lee"),
+    ]
+
+    const labels = buildCommandItems(
+      { kind: "path", query: "kevin", rangeStart: 0, rangeEnd: 6 },
+      [],
+      [],
+      true,
+      false,
+      [],
+      [],
+      users
+    ).map((item) => item.label)
+
+    expect(labels[0]).toBe("@Kevin Lee")
+  })
 })
 
 describe("ChatComposer skill autocomplete", () => {
