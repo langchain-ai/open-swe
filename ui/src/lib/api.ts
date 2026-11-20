@@ -536,6 +536,7 @@ export interface AdminUser {
 }
 
 export interface AnnouncementSummary {
+  cancelled_at: string | null
   id: string
   text: string
   author: string
@@ -1729,6 +1730,11 @@ export const api = {
       `/admin/users?page=${page}&page_size=${pageSize}&search=${encodeURIComponent(search)}`
     ),
   listAnnouncements: () => request<AnnouncementsView>("/admin/announcements"),
+  cancelAnnouncement: (id: string) =>
+    request<void>(`/admin/announcements/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    }),
+
   decideAnnouncement: (
     id: string,
     decision: "approve" | "reject",

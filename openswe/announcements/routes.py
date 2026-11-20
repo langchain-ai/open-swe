@@ -4,7 +4,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 
 from openswe.announcements.authorization import ApprovalAuthorization
@@ -114,3 +114,15 @@ async def api_send_announcement(
         logger.exception("Announcement could not be started")
         raise HTTPException(502, "Could not start sending. Try again.") from exc
     return AnnouncementSent(test=False, recipients=recipients)
+
+
+@router.post("/{announcement_id}/cancel", status_code=204)
+@audit_endpoint
+async def api_cancel_announcement(
+    announcement_id: UUID, _admin: dict[str, object] = ADMIN_DEP
+) -> Response:
+    announcement = await Announcement.get(announcement_id)
+    if announcement is None:
+        raise HTTPException(404, "Announcement not found.")
+    await announcement.cancel()
+    return Response(status_code=204)

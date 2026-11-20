@@ -51,6 +51,7 @@ class AnnouncementSummary(BaseModel):
     author: str
     created_at: datetime
     finished_at: datetime | None
+    cancelled_at: datetime | None
     recipients: int
     sent: int
     failed: int
@@ -71,6 +72,7 @@ class Announcement(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default_factory=uuid7)
     created_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
     finished_at: Mapped[datetime | None] = mapped_column(default=None)
+    cancelled_at: Mapped[datetime | None] = mapped_column(default=None)
 
     @staticmethod
     async def recipient_count() -> int:
@@ -172,6 +174,7 @@ class Announcement(Base):
                 author=author,
                 created_at=announcement.created_at or datetime.min,
                 finished_at=announcement.finished_at,
+                cancelled_at=announcement.cancelled_at,
                 recipients=recipients,
                 sent=sent,
                 failed=failed,
@@ -211,12 +214,18 @@ class Announcement(Base):
                 AnnouncementDelivery.announcement_id == self.id,
                 AnnouncementDelivery.status == "queued",
             )
-            .order_by(AnnouncementDelivery.user_id)
+            .order_by(
+                case((AnnouncementDelivery.user_id == self.author_id, 0), else_=1),
+                AnnouncementDelivery.user_id,
+            )
             .limit(1)
             .with_for_update(skip_locked=True)
             .scalar_subquery()
         )
         async with postgres.session() as session:
+            current = await session.get(Announcement, self.id, with_for_update=True)
+            if current is None or current.cancelled_at is not None:
+                return None
             return await session.scalar(
                 update(AnnouncementDelivery)
                 .where(
@@ -227,6 +236,21 @@ class Announcement(Base):
                 .returning(AnnouncementDelivery.user_id),
                 execution_options={"synchronize_session": False},
             )
+
+    async def cancel(self) -> None:
+        """Stop claiming recipients; a DM already in flight may still finish."""
+        async with postgres.session() as session:
+            await session.execute(
+                update(Announcement)
+                .where(
+                    Announcement.id == self.id,
+                    Announcement.finished_at.is_(None),
+                    Announcement.cancelled_at.is_(None),
+                )
+                .values(cancelled_at=func.clock_timestamp()),
+                execution_options={"synchronize_session": False},
+            )
+            await Topic.ANNOUNCEMENTS.invalidate(session)
 
     async def slack_recipient(self, user_id: UUID) -> str:
         async with postgres.session() as session:

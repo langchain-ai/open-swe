@@ -2,10 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
+import { LinearProgress } from "@langchain/macaw-components/LinearProgress"
 import { SkeletonLines } from "@/components/Skeleton"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 
-import type { AnnouncementApproval, AnnouncementSummary } from "@/lib/api"
+import type {
+  AnnouncementApproval,
+  AnnouncementsView,
+  AnnouncementSummary,
+} from "@/lib/api"
+import { SlackMrkdwn } from "@/features/agents/components/messages/SlackMrkdwn"
 import { SettingsSection } from "@/components/AppShell"
 import { api } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
@@ -41,7 +47,9 @@ export function AnnouncementsSection() {
         return
       }
       setText("")
-      setMessage(`Sending to ${pluralize(result.recipients)}.`)
+      setMessage(
+        `Queued for ${pluralize(result.recipients)}. If your Slack account is connected, your DM is sent first.`
+      )
       void qc.invalidateQueries({ queryKey: QUERY_KEY })
     },
     onError: (e: Error) => {
@@ -71,7 +79,7 @@ export function AnnouncementsSection() {
             setError(null)
           }}
         />
-        <div className="flex items-center justify-between gap-space-2">
+        <div className="flex flex-wrap items-center justify-between gap-space-2">
           <span className="text-xs text-secondary">
             {announcements.isLoading
               ? "Counting recipients…"
@@ -97,6 +105,16 @@ export function AnnouncementsSection() {
             </Button>
           </div>
         </div>
+        {draft && (
+          <div className="rounded-md bg-surface-level-2 p-space-3">
+            <p className="mb-space-2 text-xs font-medium text-secondary">
+              Preview
+            </p>
+            <div className="max-h-64 overflow-y-auto text-sm break-words whitespace-pre-wrap text-primary">
+              <SlackMrkdwn text={draft} />
+            </div>
+          </div>
+        )}
         {message && <p className="text-xs text-secondary">{message}</p>}
         {error && <p className="text-xs text-error-secondary">{error}</p>}
         <AnnouncementHistory
@@ -109,14 +127,14 @@ export function AnnouncementsSection() {
         open={confirming}
         onOpenChange={setConfirming}
         title={`DM ${pluralize(recipients)}?`}
-        description="Everyone with a connected Slack account gets this message from the Robin bot. A sent announcement cannot be recalled."
+        description="If your Slack account is connected, you receive the first DM, followed by everyone else. You can cancel remaining deliveries, but messages already sent cannot be recalled."
         confirmLabel="Send announcement"
         pendingLabel="Starting…"
         pending={send.isPending}
         onConfirm={() => send.mutate(false)}
       >
         <p className="max-h-48 overflow-y-auto rounded-md border border-default p-space-2 text-xs whitespace-pre-wrap text-primary">
-          {draft}
+          <SlackMrkdwn text={draft} />
         </p>
       </ConfirmDialog>
     </SettingsSection>
@@ -249,31 +267,105 @@ function AnnouncementHistory({
   }
   if (!items.length) return null
   return (
-    <div className="flex flex-col gap-0.5 pt-space-2">
-      <span className="text-xs font-medium text-primary">Sent</span>
+    <div className="flex flex-col gap-space-3 pt-space-3">
+      <h3 className="text-xs font-medium text-secondary">Delivery history</h3>
       {items.map((item) => (
-        <div
-          key={item.id}
-          className="flex items-start justify-between gap-space-2 border-b border-default py-space-1 text-xs last:border-b-0"
-        >
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-primary">{item.text}</span>
-            <span className="text-secondary">
-              {item.author || "Unknown admin"} ·{" "}
-              {new Date(item.created_at).toLocaleString()}
-            </span>
-          </div>
-          <span className="shrink-0 text-secondary">{progress(item)}</span>
-        </div>
+        <AnnouncementCard key={item.id} item={item} />
       ))}
     </div>
   )
 }
 
-function progress(item: AnnouncementSummary): string {
-  const failed = item.failed ? `, ${item.failed} failed` : ""
-  if (item.finished_at) return `${item.sent} delivered${failed}`
-  return `Sending ${item.sent + item.failed}/${item.recipients}${failed}`
+function AnnouncementCard({ item }: { item: AnnouncementSummary }) {
+  const qc = useQueryClient()
+  const cancel = useMutation({
+    mutationFn: () => api.cancelAnnouncement(item.id),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: QUERY_KEY })
+      const previous = qc.getQueryData<AnnouncementsView>(QUERY_KEY)
+      qc.setQueryData<AnnouncementsView>(
+        QUERY_KEY,
+        (current) =>
+          current && {
+            ...current,
+            items: current.items.map((entry) =>
+              entry.id === item.id
+                ? { ...entry, cancelled_at: new Date().toISOString() }
+                : entry
+            ),
+          }
+      )
+      return { previous }
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) qc.setQueryData(QUERY_KEY, context.previous)
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: QUERY_KEY }),
+  })
+  const active = !item.finished_at && !item.cancelled_at
+  const processed = item.sent + item.failed
+  const status = cancel.isPending
+    ? "Cancelling…"
+    : item.cancelled_at
+      ? "Cancelled"
+      : item.finished_at
+        ? "Completed"
+        : "Sending"
+
+  return (
+    <article className="min-w-0 rounded-md bg-surface-level-2 p-space-3">
+      <div className="mb-space-3 flex flex-wrap items-center justify-between gap-space-2">
+        <div className="flex flex-wrap items-center gap-space-2 text-xs">
+          <span className="font-medium text-primary" role="status">
+            {status}
+          </span>
+          <span className="text-secondary">
+            {item.sent} of {item.recipients} delivered
+            {item.failed > 0 && ` · ${item.failed} failed`}
+          </span>
+        </div>
+        {(active || cancel.isPending) && (
+          <Button
+            size="sm"
+            color="secondary"
+            variant="outlined"
+            disabled={cancel.isPending}
+            onClick={() => cancel.mutate()}
+          >
+            {cancel.isPending ? "Cancelling…" : "Cancel remaining"}
+          </Button>
+        )}
+      </div>
+      {active && (
+        <LinearProgress
+          className="mb-space-3"
+          thicknessPx={3}
+          aria-label="Announcement delivery progress"
+          value={processed}
+          max={Math.max(item.recipients, 1)}
+        />
+      )}
+      <div className="max-h-64 overflow-y-auto text-sm break-words whitespace-pre-wrap text-primary">
+        <SlackMrkdwn text={item.text} />
+      </div>
+      <p className="mt-space-3 text-xs text-secondary">
+        {item.author || "Unknown admin"} ·{" "}
+        {new Date(item.created_at).toLocaleString()}
+      </p>
+      {(active || item.cancelled_at) && (
+        <p className="mt-space-1 text-xs text-secondary">
+          {item.cancelled_at
+            ? "Remaining deliveries stopped. A DM already in flight may still arrive."
+            : "Cancel stops remaining deliveries. Messages already sent cannot be recalled."}
+        </p>
+      )}
+      {cancel.isError && (
+        <p role="alert" className="mt-space-2 text-xs text-error-secondary">
+          {cancel.error.message}
+        </p>
+      )}
+    </article>
+  )
 }
 
 function pluralize(count: number): string {

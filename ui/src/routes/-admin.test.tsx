@@ -202,7 +202,57 @@ describe("AnnouncementsSection", () => {
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith("We shipped walkthroughs", false)
     )
-    expect(await screen.findByText("Sending to 12 people.")).toBeTruthy()
+    expect(
+      await screen.findByText(
+        "Queued for 12 people. If your Slack account is connected, your DM is sent first."
+      )
+    ).toBeTruthy()
+    client.clear()
+  })
+
+  it("renders Slack formatting and cancels remaining deliveries", async () => {
+    const item = {
+      id: "announcement-1",
+      text: "*Release notes*\nRead <https://example.com|the update>",
+      author: "An admin",
+      created_at: "2026-11-17T03:39:33Z",
+      finished_at: null,
+      cancelled_at: null,
+      recipients: 230,
+      sent: 23,
+      failed: 0,
+    }
+    const list = vi
+      .spyOn(api, "listAnnouncements")
+      .mockResolvedValue({ recipients: 230, items: [item], approvals: [] })
+    const cancel = vi
+      .spyOn(api, "cancelAnnouncement")
+      .mockImplementation(async () => {
+        list.mockResolvedValue({
+          recipients: 230,
+          items: [{ ...item, cancelled_at: "2026-11-17T03:40:00Z" }],
+          approvals: [],
+        })
+      })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <AnnouncementsSection />
+      </QueryClientProvider>
+    )
+    expect(await screen.findByText("23 of 230 delivered")).toBeTruthy()
+    expect(screen.getByText("Release notes").tagName).toBe("STRONG")
+    expect(
+      screen.getByRole("link", { name: "the update" }).getAttribute("href")
+    ).toBe("https://example.com")
+    fireEvent.click(screen.getByRole("button", { name: "Cancel remaining" }))
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith("announcement-1"))
+    expect(await screen.findByText("Cancelled")).toBeTruthy()
+    expect(
+      screen.queryByRole("button", { name: "Cancel remaining" })
+    ).toBeNull()
     client.clear()
   })
 })

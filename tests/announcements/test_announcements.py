@@ -498,3 +498,44 @@ async def test_slack_dm_admin_can_prepare_and_decide_in_dashboard(
         json={"payload_digest": approval["payload_digest"]},
     )
     assert response.json() == {"status": "approved"}
+
+
+async def test_sender_is_first_and_cancellation_stops_remaining_deliveries(
+    admin_client: httpx.AsyncClient, slack: FakeSlack
+) -> None:
+    await _person(("slack", "UEARLIER"))
+    sender = await _person(("slack", "USENDER"))
+    announcement = await Announcement.create("hello", sender.id)
+    assert await announcement.claim_next() == sender.id
+    await announcement.record(sender.id, "sent")
+
+    endpoint = f"/dashboard/api/admin/announcements/{announcement.id}/cancel"
+    intern = await _person(("github", "intern"))
+    async with _client({"sub": "intern", "user_id": str(intern.id)}) as client:
+        assert (await client.post(endpoint)).status_code == 403
+    assert (await admin_client.post(endpoint)).status_code == 204
+    assert (await admin_client.post(endpoint)).status_code == 204
+
+    await delivery.deliver_announcement(str(announcement.id))
+    await delivery.deliver_announcement(str(announcement.id))
+    assert slack.delivered == []
+    [summary] = await Announcement.recent()
+    assert summary.cancelled_at is not None
+    assert summary.sent == 1
+    assert summary.failed == 0
+    assert summary.recipients == 3
+    assert summary.finished_at is not None
+
+
+async def test_cancel_does_not_rewrite_completed_announcement(
+    admin_client: httpx.AsyncClient, slack: FakeSlack
+) -> None:
+    announcement = await Announcement.create("hello", None)
+    await delivery.deliver_announcement(str(announcement.id))
+    response = await admin_client.post(
+        f"/dashboard/api/admin/announcements/{announcement.id}/cancel"
+    )
+    assert response.status_code == 204
+    [summary] = await Announcement.recent()
+    assert summary.cancelled_at is None
+    assert summary.sent == 1

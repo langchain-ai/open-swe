@@ -230,6 +230,18 @@
             "title": "Author",
             "type": "string"
           },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -275,6 +287,7 @@
           "author",
           "created_at",
           "finished_at",
+          "cancelled_at",
           "recipients",
           "sent",
           "failed"
@@ -11463,6 +11476,48 @@
           }
         ],
         "summary": "Api Decide Announcement",
+        "tags": [
+          "dashboard",
+          "announcements"
+        ]
+      }
+    },
+    "/dashboard/api/admin/announcements/{announcement_id}/cancel": {
+      "post": {
+        "operationId": "api_cancel_announcement_dashboard_api_admin_announcements__announcement_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "announcement_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Announcement Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Cancel Announcement",
         "tags": [
           "dashboard",
           "announcements"
