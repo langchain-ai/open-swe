@@ -51,6 +51,7 @@ from openswe.review.findings import (
     ReviewerSlackThread,
     reviewer_thread_title,
 )
+from openswe.review.publish import settle_review_check_run
 from openswe.review.reconcile import reconcile_linked_findings
 from openswe.review.shadow import ReviewShadow
 from openswe.review_apps.outcomes import ReviewOutcomes
@@ -836,10 +837,17 @@ async def _process_github_head_update(
             details_url=common.dashboard_thread_url(thread_id),
         )
         if unchanged_check_id is not None:
-            await common.complete_review_check_run(
+            await common.track_review_check_run(
+                thread_id,
                 owner=repo_config["owner"],
                 repo=repo_config["name"],
+                token=app_token,
                 check_run_id=unchanged_check_id,
+            )
+            await settle_review_check_run(
+                thread_id=thread_id,
+                owner=repo_config["owner"],
+                repo=repo_config["name"],
                 token=app_token,
                 conclusion="success",
                 title="No new changes to review",

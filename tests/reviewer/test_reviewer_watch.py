@@ -8,6 +8,7 @@ import pytest
 from openswe.github import webhook as github_webhooks
 from openswe.review.approvals import ApprovalPolicy
 from openswe.review.assessment_feedback import PublishedAssessment
+from openswe.review.publish import ReviewCheckResult, settle_review_check_run
 
 pytestmark = pytest.mark.usefixtures("no_local_threads", "registry_db")
 
@@ -92,20 +93,22 @@ async def test_push_event_skips_when_thread_not_watching() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "approval_mode,policy,storage_fails",
+    "approval_mode,policy,storage_fails,check_fails",
     [
-        ("off", None, False),
-        ("off", None, True),
-        ("dry_run", None, False),
-        ("dry_run", "Policy", False),
-        ("approve", None, False),
-        ("approve", "Policy", False),
+        ("off", None, False, False),
+        ("off", None, False, True),
+        ("off", None, True, False),
+        ("dry_run", None, False, False),
+        ("dry_run", "Policy", False, False),
+        ("approve", None, False, False),
+        ("approve", "Policy", False, False),
     ],
 )
 async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
     approval_mode: str,
     policy: str | None,
     storage_fails: bool,
+    check_fails: bool,
 ) -> None:
     payload = _push_payload(ref="refs/heads/feat-x", after="b" * 40)
     pr = {
@@ -117,7 +120,17 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
     }
     fake_client = MagicMock()
     fake_client.runs.create = AsyncMock()
-    set_metadata = AsyncMock()
+    metadata: dict[str, object] = {
+        "kind": "reviewer",
+        "watch": True,
+        "last_reviewed_sha": "a" * 40,
+        "last_reviewed_base_sha": "previous-parent",
+    }
+    set_metadata = AsyncMock(
+        side_effect=lambda thread_id, **kwargs: metadata.update(
+            {**kwargs, **kwargs.get("extra", {})}
+        )
+    )
     assessment = PublishedAssessment(
         review_id=19,
         owner="lc",
@@ -163,12 +176,7 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
         patch(
             "openswe.webhooks.common.get_thread_metadata_safe",
             new_callable=AsyncMock,
-            return_value={
-                "kind": "reviewer",
-                "watch": True,
-                "last_reviewed_sha": "a" * 40,
-                "last_reviewed_base_sha": "previous-parent",
-            },
+            return_value=metadata,
         ),
         patch(
             "openswe.webhooks.common._fetch_compare_diff",
@@ -179,15 +187,18 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
             ],
         ),
         patch("openswe.webhooks.common.set_reviewer_thread_metadata", new=set_metadata),
+        patch("openswe.webhooks.common.queue.schedule", new_callable=AsyncMock) as schedule,
+        patch("openswe.review.publish.get_thread_metadata", AsyncMock(return_value=metadata)),
+        patch("openswe.review.publish.set_reviewer_thread_metadata", new=set_metadata),
         patch(
             "openswe.webhooks.common.create_review_check_run",
             new_callable=AsyncMock,
             return_value=42,
         ) as create_check,
         patch(
-            "openswe.webhooks.common.complete_review_check_run",
+            "openswe.review.publish.complete_review_check_run",
             new_callable=AsyncMock,
-            return_value=True,
+            return_value=not check_fails,
         ) as complete_check,
         patch("openswe.webhooks.common.get_client", return_value=fake_client),
     ):
@@ -199,16 +210,32 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
             complete_check.assert_not_awaited()
             return
         await github_webhooks.process_github_push_event(payload)
+        schedule.assert_awaited_once()
+        assert schedule.await_args is not None
+        assert schedule.await_args.args[1]["check_run_id"] == 42
+        if check_fails:
+            assert metadata["review_check_run_id"] == 42
+            pending = ReviewCheckResult.model_validate(metadata["review_check_pending_result"])
+            assert pending.conclusion == "success"
+            assert pending.title == "No new changes to review"
+            complete_check.return_value = True
+            await settle_review_check_run(
+                thread_id=github_webhooks.reviewer_thread_id("lc", "repo", 7),
+                owner="lc",
+                repo="repo",
+                token="t",
+                **pending.model_dump(),
+            )
+        assert metadata["review_check_run_id"] is None
+        assert metadata["review_check_pending_result"] is None
 
     completion.assert_awaited_once_with(
         reviewer_thread_id=github_webhooks.reviewer_thread_id("lc", "repo", 7),
         head_sha="b" * 40,
     )
     fake_client.runs.create.assert_not_called()
-    set_metadata.assert_awaited_once()
-    assert set_metadata.await_args is not None
-    assert set_metadata.await_args.kwargs["last_reviewed_sha"] == "b" * 40
-    assert set_metadata.await_args.kwargs["last_reviewed_base_sha"] == "basesha"
+    assert metadata["last_reviewed_sha"] == "b" * 40
+    assert metadata["last_reviewed_base_sha"] == "basesha"
     assert saved_assessments[0].head_sha == "b" * 40
     assert saved_assessments[0].decision == "needs_human_review"
     assert saved_assessments[0].approved is False
@@ -217,7 +244,7 @@ async def test_push_event_skips_when_pr_diff_unchanged_since_last_review(
     create_check.assert_awaited_once()
     assert create_check.await_args is not None
     assert create_check.await_args.kwargs["head_sha"] == "b" * 40
-    complete_check.assert_awaited_once()
+    assert complete_check.await_count == (2 if check_fails else 1)
     assert complete_check.await_args is not None
     assert complete_check.await_args.kwargs["check_run_id"] == 42
     assert complete_check.await_args.kwargs["conclusion"] == "success"
