@@ -20,7 +20,8 @@ from langsmith import Client
 
 from evals.trajectories.score import RobinTraces
 
-_THREAD = re.compile(r"^Thread (\S+/agents/([0-9a-f-]{36}))", re.MULTILINE)
+# The CLI prints the thread's URL on a line of its own once the backend accepts the run.
+_THREAD = re.compile(r"^(https?://\S+/agents/([0-9a-f-]{36}))$", re.MULTILINE)
 _COLUMNS = ("blocking_execute_seconds", "used_background", "slow_eval_seconds", "replied")
 
 
@@ -37,7 +38,7 @@ class Trial:
     def of(cls, directory: Path) -> Self:
         result = json.loads((directory / "result.json").read_text())
         rewards = (result.get("verifier_result") or {}).get("rewards") or {}
-        log = directory / "agent" / "oswe.txt"
+        log = directory / "agent" / "robin.stdout"
         found = _THREAD.search(log.read_text()) if log.exists() else None
         return cls(
             task=result["task_name"],

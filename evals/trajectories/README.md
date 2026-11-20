@@ -38,24 +38,24 @@ Each has an instruction, a Docker environment, a `tests/test.sh` grader and a re
 | `repo-search` | `grep -r` over vendored code and a generated patch (RBN-227) | Uses `rg`/`git grep`; decoys in ignored files give a wrong answer |
 | `answer-first` | Slow setup before a simple question (RBN-220) | Answers from the code without running `make setup` |
 
-`harbor_agent.py` runs the deployed Robin agent on each task through `oswe run`, with the task's container as its sandbox (ported from Johannes's Terminal-Bench harness).
-Point it at a deployment with a workspace API key:
+Each task runs in a LangSmith sandbox of its own, which the `robin` CLI attaches to the deployed agent (`robin run --sandbox`), using the Terminal-Bench adapter (`evals/terminal_bench/harbor_adapter.py`).
+Point it at a deployment with a service key (`lsv2_sk_…`) from the deployment's workspace, which both creates the sandboxes and starts the threads:
 
 ```bash
-export OPEN_SWE_BACKEND_URL=https://<staging-backend>
-export OPEN_SWE_API_KEY=osk_...
-PYTHONPATH=. uvx --from harbor harbor run -p evals/trajectories/tasks \
-  -a evals.trajectories.harbor_agent:Robin -n 3
+export ROBIN_EVAL_BACKEND_URL=https://staging.robin.langchain.dev
+export ROBIN_EVAL_API_KEY=lsv2_sk_...
+export LANGSMITH_API_KEY="$ROBIN_EVAL_API_KEY"
+PYTHONPATH=. uvx --python 3.13 --from 'harbor[langsmith]==0.26.0' harbor run -p evals/trajectories/tasks -n 3 \
+  -a evals.terminal_bench.harbor_adapter:RobinAgent -e evals.terminal_bench.harbor_adapter:RobinSandbox
 ```
 
 The grader scores the outcome.
 Score the trajectory of each trial's thread with `evals.trajectories.score --thread <id> --project <staging project>`.
-Commands over ~10 min through the sandbox bridge lose their reply (RBN-213), so `long-build` stays under that.
 
 ### In CI
 
 `.github/workflows/robin_trajectory_evals.yml` runs the tasks on demand (Actions → "Robin: replay trajectory evals") against staging, or preview to measure a PR labeled `robin-preview` before it merges, and writes each trial's reward and trajectory scores to the job summary (`python -m evals.trajectories.report <job-dir>`).
-The CLI in each task container signs in with a GitHub OIDC token for that deployment only, minted on the runner by `oidc_broker.py` (the container never holds the job's token-request credentials), so a workspace admin must first allow `langchain-ai/langchainplus` to start threads (`may_start_threads`, set with Robin's `configure_repository` tool).
+It loads the deployment's service key from 1Password (`CI secrets/robin-evals/<deployment>_service_key`); only staging has one so far, so a preview run needs `preview_service_key` added first (`deployments/secrets/ci/robin-evals/`).
 Harbor's LangSmith plugin also records each run as its own experiment on the `robin-trajectory-replays` dataset, with each trial's reward and latency, so runs compare side by side under Datasets & Experiments.
 The experiments have no token or cost figures, since those live in Robin's own traces rather than in Harbor.
-Both use the workspace key Robin's MDA deploys use, loaded from 1Password; it stays on the runner.
+The report reads the traces with the workspace key Robin's MDA deploys use.
