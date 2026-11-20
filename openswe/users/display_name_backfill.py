@@ -14,10 +14,12 @@ from sqlalchemy import select, update
 
 from openswe.database import postgres
 from openswe.users.models import User, UserIdentity
+from openswe.users.shared_reads import SharedUserReads
 
 logger = logging.getLogger(__name__)
 
 
+@SharedUserReads.forgets
 async def persist_display_name(slack_user_id: str, name: str) -> None:
     """Give the person behind ``slack_user_id`` their Slack name, if they are nameless.
 

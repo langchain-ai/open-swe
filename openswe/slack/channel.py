@@ -65,6 +65,7 @@ from openswe.threads import index
 from openswe.threads.router import channel_run_metadata, channel_run_starting
 from openswe.threads.runtimes import RUNTIMES
 from openswe.users import User
+from openswe.users.shared_reads import SharedUserReads
 from openswe.webhooks import common
 
 logger = logging.getLogger(__name__)
@@ -214,7 +215,7 @@ async def start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTurn
     again under the same ``webhook-id`` gets the run built again, but no decline it
     answered already.
     """
-    async with service.SlackAuthorization.shared():
+    async with service.SlackAuthorization.shared(), SharedUserReads.scope():
         return await _start_slack_turn(call, turn)
 
 

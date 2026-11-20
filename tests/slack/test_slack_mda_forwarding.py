@@ -789,7 +789,7 @@ async def test_a_turn_gets_its_prompts_facts_and_a_signed_run_for_mdas_prompt(
 async def test_a_turn_checks_its_senders_sign_in_once(
     monkeypatch: pytest.MonkeyPatch, slack_api: SlackAPI
 ) -> None:
-    """The account gate, the thread's owner and the run's build share one sign-in check."""
+    """The gate, the thread's owner and the run's build share one sign-in check and lookup."""
     monkeypatch.setattr(mda_forwarding, "owned_thread", AsyncMock(return_value=_MDA_THREAD))
     monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", _CHANNEL_CONTEXT)
     await SlackChannel.save_all({"id": "C1", "name": "engineering"})
@@ -802,8 +802,14 @@ async def test_a_turn_checks_its_senders_sign_in_once(
     prepare = _prepared(monkeypatch, prompt=_PROMPT)
     prepared = prepare.return_value
 
+    lookup = AsyncMock(return_value=None)
+    monkeypatch.setattr(User, "_for_identity", lookup)
+
     async def build(*_args: object, **_kwargs: object) -> object:
         await slack_service.SlackAuthorization.resolve("U1")
+        # The run's helpers look the sender up again and again.
+        await User.for_identity("slack", "U1")
+        await User.for_identity("slack", "U1")
         return prepared
 
     prepare.side_effect = build
@@ -812,6 +818,7 @@ async def test_a_turn_checks_its_senders_sign_in_once(
 
     assert start["run"] is not None
     check.assert_awaited_once_with("U1")
+    lookup.assert_awaited_once_with("slack", "U1")
 
 
 async def test_a_sign_in_check_is_shared_only_inside_its_block(

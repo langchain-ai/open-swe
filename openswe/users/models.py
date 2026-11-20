@@ -40,6 +40,7 @@ from openswe.users.authorization import (
     is_authorized_github_login,
 )
 from openswe.users.preferences import UserPreferences, UserPreferencesPatch
+from openswe.users.shared_reads import SharedUserReads
 from openswe.utils import ttl_cache
 from openswe.utils.json_types import JsonObject
 from openswe.utils.search import FuzzySearch
@@ -159,6 +160,7 @@ class User(Base):
             self.desktop_seen_at is not None and self.desktop_seen_at > datetime.now(UTC) - window
         )
 
+    @SharedUserReads.forgets
     async def note_desktop_use(self, *, session: AsyncSession | None = None) -> None:
         """Record that this person has the desktop app open, at most hourly."""
         async with postgres.session(session) as session:
@@ -176,6 +178,13 @@ class User(Base):
 
     @classmethod
     async def get(cls, user_id: UUID, *, session: AsyncSession | None = None) -> Self | None:
+        if session is None:
+            # A caller's own transaction may hold writes the shared reads haven't seen.
+            return await SharedUserReads.read(("id", user_id), lambda: cls._get(user_id))
+        return await cls._get(user_id, session=session)
+
+    @classmethod
+    async def _get(cls, user_id: UUID, *, session: AsyncSession | None = None) -> Self | None:
         async with postgres.session(session) as session:
             return await cls._load(session, user_id)
 
@@ -419,6 +428,7 @@ class User(Base):
         await patch.validate_channel(user)
         return await user.merge_validated_preferences(patch, keep_existing=keep_existing)
 
+    @SharedUserReads.forgets
     async def merge_validated_preferences(
         self,
         patch: UserPreferencesPatch,
@@ -517,6 +527,17 @@ class User(Base):
         cls, provider: Provider, external_id: str, *, session: AsyncSession | None = None
     ) -> Self | None:
         """The person owning that provider account, or ``None``."""
+        if session is None:
+            return await SharedUserReads.read(
+                ("identity", provider, external_id),
+                lambda: cls._for_identity(provider, external_id),
+            )
+        return await cls._for_identity(provider, external_id, session=session)
+
+    @classmethod
+    async def _for_identity(
+        cls, provider: Provider, external_id: str, *, session: AsyncSession | None = None
+    ) -> Self | None:
         async with postgres.session(session) as session:
             return await session.scalar(
                 cls._with_identities(select(cls))
@@ -595,6 +616,16 @@ class User(Base):
         if login.startswith("user:"):
             user_id = cls.key_id(login)
             return await cls.get(user_id, session=session) if user_id is not None else None
+        if session is None:
+            return await SharedUserReads.read(
+                ("login", provider, login.lower()), lambda: cls._for_login(provider, login)
+            )
+        return await cls._for_login(provider, login, session=session)
+
+    @classmethod
+    async def _for_login(
+        cls, provider: Provider, login: str, *, session: AsyncSession | None = None
+    ) -> Self | None:
         async with postgres.session(session) as session:
             return await session.scalar(
                 cls._with_identities(select(cls))
@@ -608,6 +639,7 @@ class User(Base):
             )
 
     @classmethod
+    @SharedUserReads.forgets
     async def sign_in(
         cls,
         provider: Provider,
@@ -653,6 +685,7 @@ class User(Base):
             raise RuntimeError(f"user {user_id} vanished during sign in")
         return stored
 
+    @SharedUserReads.forgets
     async def link(
         self,
         provider: Provider,
@@ -698,6 +731,7 @@ class User(Base):
             raise RuntimeError(f"user {self.id} vanished during link")
         return stored
 
+    @SharedUserReads.forgets
     async def join_github(
         self,
         external_id: str,
@@ -813,6 +847,7 @@ class User(Base):
         """The ``sub`` of this person's LangSmith session: their GitHub login once linked."""
         return self.github_login or f"user:{self.id}"
 
+    @SharedUserReads.forgets
     async def rename(self, display_name: str) -> None:
         """Replace a person's display name, for the one backfill that knows better."""
         cls = type(self)
@@ -847,6 +882,7 @@ class User(Base):
         return count
 
     @classmethod
+    @SharedUserReads.forgets
     async def _claim(
         cls,
         session: AsyncSession,
