@@ -247,6 +247,11 @@ async def start_turn(
     if decided is None:
         return None
     kind, turn = decided
+    if bot_id and facts.bot_trigger_mode == "true" and not message.explicit_mention:
+        card = slack_prompt.card_text(raw)
+        text = "\n".join(part for part in (event.text.strip(), card) if part)
+        message.text = turn.text = text
+        parsed = ParsedSlackMessage.parse(text, bot_user_id, bot_username)
     # Only a message that starts a turn is traced, so the channel's chatter isn't.
     send = SlackSendTrace.open(
         thread_id=str(thread.id),
@@ -308,15 +313,29 @@ def _decide(
     for nothing, a reply's text, :data:`BACKEND` for one the backend answers itself, or
     the turn's kind and the call that starts it."""
     explicit = message.explicit_mention
+    if message.bot_app_id == message.app_id or (bot_user_id and message.user_id == bot_user_id):
+        return None
     if facts.channel != "ok":
         # A person's mention in a channel with external participants hears why.
-        refused = facts.channel == "external" and explicit and not message.subtype
+        refused = (
+            facts.channel == "external" and explicit and not (message.subtype or message.bot_id)
+        )
         return EXTERNAL_CHANNEL if refused and message.user_id else None
 
-    bot = bool(message.bot_id)
+    bot = bool(message.bot_id or message.bot_app_id or message.subtype == "bot_message")
     if bot and not (
-        facts.allowed_bot
-        and explicit
+        message.bot_id
+        and facts.allowed_bot
+        and facts.bot_trigger_mode != "false"
+        and (
+            explicit
+            or (
+                facts.bot_trigger_mode == "true"
+                and facts.listening_channel
+                and not facts.dm
+                and (not message.reply_thread_ts or message.reply_thread_ts == message.message_ts)
+            )
+        )
         and message.subtype in {"", "bot_message"}
         and message.bot_app_id != message.app_id
     ):
@@ -378,7 +397,7 @@ def _kind(
 ) -> Kind | _Backend | None:
     """Which kind of turn a message addressed to Open SWE starts, :data:`BACKEND` when
     the backend answers it, as for a conversation it holds, or ``None`` for nothing."""
-    started = message.subtype in _STARTED_SUBTYPES
+    started = message.subtype in _STARTED_SUBTYPES or (bot and message.subtype == "bot_message")
     command = message.explicit_mention and not (dm or bot) and started
     if command and parsed.action is SlackAction.BY_THE_WAY:
         return "by_the_way"

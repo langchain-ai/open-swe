@@ -120,6 +120,7 @@ class SlackMessageFacts(BaseModel):
     # The sender turned concierge mode on: their DM is one conversation.
     concierge: bool = False
     # A bot's message: whether the bot is on Open SWE's allow-list, and its name there.
+    bot_trigger_mode: Literal["mentions", "true", "false"] = "mentions"
     allowed_bot: bool = False
     bot_name: str = ""
     # An untagged reply the agent answers anyway, in a thread only one person talks in.

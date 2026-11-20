@@ -74,17 +74,18 @@ class SlackPost(SlackPayload):
     def is_from_bot(self) -> bool:
         return self.subtype == "bot_message" or bool(self.bot_id)
 
-    def text_for(self, user_id: str) -> str | None:
+    def text_for(self, user_id: str, *, include_bot_card: bool = False) -> str | None:
         """The text, followed by a bot's own card when only the card mentions ``user_id``.
 
-        An alert bot posts a summary line as ``text`` and its message, mention and all, as
-        an attachment.
+        Set ``include_bot_card`` for admitted bot posts that need no mention.
         """
         mention = f"<@{user_id}>"
-        if not (user_id and self.is_from_bot) or mention in (self.text or ""):
+        if not self.is_from_bot or (
+            not include_bot_card and (not user_id or mention in (self.text or ""))
+        ):
             return self.text
         card = self.card_text_of({**(self.model_extra or {}), "attachments": self.attachments})
-        if mention not in card:
+        if not include_bot_card and mention not in card:
             return self.text
         return "\n".join(part for part in ((self.text or "").strip(), card) if part)
 

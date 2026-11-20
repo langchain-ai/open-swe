@@ -107,6 +107,7 @@ class SettingsUpdate(BaseModel):
     expedited_review_enabled: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
+    slack_bot_trigger_mode: Literal["mentions", "true", "false"] | None = None
     slack_follow_up_suggestions: bool | None = Field(
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
@@ -340,6 +341,7 @@ def _default_settings() -> dict[str, Any]:
         "model_routing_enabled": True,
         "model_routing_split": False,
         "model_selection_enabled": False,
+        "slack_bot_trigger_mode": "mentions",
         "fable_enabled": False,
         "expedited_review_enabled": False,
         "human_review_auto_merge_enabled": True,

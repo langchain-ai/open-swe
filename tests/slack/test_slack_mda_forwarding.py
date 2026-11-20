@@ -24,12 +24,15 @@ from starlette.requests import Request
 
 from openswe import dispatch, event_claims
 from openswe.agent_api.tokens import verify_runtime_token
+from openswe.database import postgres
 from openswe.mda_channels import api as channel_api
+from openswe.routing.store import INTEGRATIONS, SlackChannelBinding
+from openswe.routing.store import is_listening_channel as real_is_listening_channel
 from openswe.slack import ask as slack_ask
+from openswe.slack import bot_triggers, forks, mda_forwarding
 from openswe.slack import channel as slack_channel
 from openswe.slack import events as slack_events
 from openswe.slack import failures as slack_failures
-from openswe.slack import forks, mda_forwarding
 from openswe.slack import routes as slack_routes
 from openswe.slack import webhook as slack_service
 from openswe.slack.allowed_bots import AllowedSlackBot
@@ -46,6 +49,7 @@ from tests.support.slack_api import SlackAPI
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 
+_PERSISTENT_EVENT_CLAIM = event_claims.claim
 _MDA_THREAD = str(uuid.uuid4())
 # The real sender checks, which the autouse fixture stubs.
 _ACCOUNT_LINK_NEEDED = slack_service.account_link_needed
@@ -514,6 +518,7 @@ async def test_facts_of_a_mention_in_a_plain_channel(
         "listening_channel": False,
         "automation_channel": False,
         "concierge": False,
+        "bot_trigger_mode": "mentions",
         "allowed_bot": False,
         "bot_name": "",
         "solo_followup": False,
@@ -1034,6 +1039,7 @@ async def test_an_allowed_bots_turn_links_no_account_and_no_person_owns_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prepare = _prepared(monkeypatch, prompt=_PROMPT)
+    monkeypatch.setattr(slack_channel, "resolve_allowed_slack_bot", AsyncMock(return_value=_BOT))
 
     await _start(_start_app(monkeypatch), user_id="UBOT", bot_id="B1", bot_app_id="A2")
 
@@ -2147,3 +2153,197 @@ async def test_automation_delivery_does_not_consume_the_normal_slack_event(
     normal, normal_tasks = await _hand_back(event, "msg_1")
     assert normal.acted
     assert any(task is slack_service.process_slack_mention for task, _args in normal_tasks.tasks)
+
+
+@pytest.mark.parametrize("prompt", ["Handle Kitchen alerts", "Answer Ask questions"])
+@pytest.mark.parametrize(
+    ("alert_text", "card", "expected"),
+    [
+        ("An alert", "", "An alert"),
+        ("", "Disk full", "Disk full"),
+        ("Alert", "Disk full", "Alert\nDisk full"),
+    ],
+)
+async def test_true_routes_unmentioned_allowlisted_bots_in_every_listened_channel(
+    monkeypatch: pytest.MonkeyPatch,
+    prompt: str,
+    alert_text: str,
+    card: str,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(
+        bot_triggers,
+        "get_instance_settings",
+        AsyncMock(return_value={"slack_bot_trigger_mode": "true"}),
+    )
+    await SlackChannel.save_all({"id": "C1", "name": "listened-channel"})
+    async with postgres.session() as session:
+        session.add(SlackChannelBinding(channel_id="C1", prompt=prompt))
+    assert await INTEGRATIONS.channel_prompt("C1") == prompt
+    monkeypatch.setattr(
+        INTEGRATIONS,
+        "listens_to_channel",
+        type(INTEGRATIONS).listens_to_channel.__get__(INTEGRATIONS),
+    )
+    monkeypatch.setattr(slack_routes, "is_listening_channel", real_is_listening_channel)
+    monkeypatch.setattr(slack_routes, "resolve_allowed_slack_bot", AsyncMock(return_value=_BOT))
+    monkeypatch.setattr(slack_routes.BotTriggers, "claim", AsyncMock(return_value=True))
+    process = AsyncMock()
+    monkeypatch.setattr(slack_service, "process_slack_mention", process)
+    payload = _mention(
+        type="message",
+        subtype="bot_message",
+        user="UBOT",
+        bot_id="B1",
+        app_id="A2",
+        text=alert_text,
+        attachments=[{"text": card}] if card else [],
+    )
+
+    response, tasks, _request = await _webhook(payload)
+
+    assert response == {"status": "accepted", "message": "Slack mention queued"}
+    [(task, (request, repo))] = tasks.tasks
+    assert task is process
+    assert request.listening_channel is True
+    assert request.explicit_mention is False
+    assert request.thread_ts == request.original_message_ts == "1786573369.551099"
+    assert request.text == expected
+    assert request.triggering_bot_id == "B1"
+    assert repo is None
+
+
+@pytest.mark.parametrize(
+    ("mode", "listed", "self_bot", "subtype", "reply", "budget"),
+    [
+        ("false", True, False, "bot_message", "", True),
+        ("mentions", True, False, "bot_message", "", True),
+        ("true", False, False, "bot_message", "", True),
+        ("true", True, True, "bot_message", "", True),
+        ("true", True, False, "file_share", "", True),
+        ("true", True, False, "bot_message", "1.1", True),
+        ("true", True, False, "bot_message", "", False),
+    ],
+)
+async def test_rejected_bot_events_are_logged_without_starting_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    listed: bool,
+    self_bot: bool,
+    subtype: str,
+    reply: str,
+    budget: bool,
+) -> None:
+    monkeypatch.setattr(
+        bot_triggers,
+        "get_instance_settings",
+        AsyncMock(return_value={"slack_bot_trigger_mode": mode}),
+    )
+    monkeypatch.setattr(bot_triggers, "is_listening_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        slack_routes, "resolve_allowed_slack_bot", AsyncMock(return_value=_BOT if listed else None)
+    )
+    monkeypatch.setattr(slack_routes.BotTriggers, "claim", AsyncMock(return_value=budget))
+    record = AsyncMock()
+    monkeypatch.setattr(slack_routes.EventLog, "record", record)
+    payload = _mention(
+        type="message",
+        subtype=subtype,
+        user="BOT" if self_bot else "UBOT",
+        bot_id="B1",
+        app_id="A2",
+        text="An alert",
+        thread_ts=reply,
+    )
+
+    response, tasks, _request = await _webhook(payload)
+
+    assert response == {
+        "status": "ignored",
+        "reason": "Event from this bot user" if self_bot else "Event from a bot",
+    }
+    assert tasks.tasks == []
+    record.assert_awaited_once()
+
+
+@pytest.mark.parametrize("mode", ["mentions", "true", "false"])
+async def test_facts_report_stored_bot_mode_without_consuming_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    facts: dict[str, AsyncMock | Mock],
+    mode: str,
+) -> None:
+    monkeypatch.setattr(
+        bot_triggers,
+        "get_instance_settings",
+        AsyncMock(return_value={"slack_bot_trigger_mode": mode}),
+    )
+    claim = AsyncMock()
+    monkeypatch.setattr(slack_channel.BotTriggers, "claim", claim)
+    facts["bot"].return_value = _BOT
+
+    response = await _facts(_api(monkeypatch), user_id="UBOT", bot_id="B1", bot_app_id="A2")
+
+    assert response.json()["bot_trigger_mode"] == mode
+    claim.assert_not_awaited()
+
+
+@pytest.mark.parametrize("mode", ["false", "true"])
+async def test_start_turn_rechecks_bot_policy_and_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    monkeypatch.setattr(
+        bot_triggers,
+        "get_instance_settings",
+        AsyncMock(return_value={"slack_bot_trigger_mode": mode}),
+    )
+    monkeypatch.setattr(slack_channel, "resolve_allowed_slack_bot", AsyncMock(return_value=None))
+    prepare = _prepared(monkeypatch, prompt=_PROMPT)
+
+    response = await _start(_start_app(monkeypatch), user_id="UBOT", bot_id="B1", bot_app_id="A2")
+
+    assert response == _NO_RUN
+    prepare.assert_not_awaited()
+
+
+async def test_unmentioned_budget_is_persistent_and_shared_between_entrypoints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(event_claims, "claim", _PERSISTENT_EVENT_CLAIM)
+    args = {"team_id": "T1", "channel_id": "C1", "bot_id": "B1", "explicit_mention": False}
+    assert await slack_routes.BotTriggers.claim(**args, message_ts="1.2")
+    assert await slack_channel.BotTriggers.claim(**args, message_ts="1.2")
+    assert not await slack_channel.BotTriggers.claim(**args, message_ts="1.3")
+    assert await slack_routes.BotTriggers.claim(**(args | {"channel_id": "C2"}), message_ts="1.3")
+    assert await slack_routes.BotTriggers.claim(**(args | {"bot_id": "B2"}), message_ts="1.3")
+
+
+async def test_self_app_without_bot_id_is_recorded_without_starting_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = AsyncMock()
+    context = AsyncMock()
+    monkeypatch.setattr(slack_routes.EventLog, "record", record)
+    monkeypatch.setattr(webhook_common, "resolve_slack_channel_context", context)
+
+    response, tasks, _request = await _webhook(_mention(app_id="A1", text="A Robin reply"))
+
+    assert response == {"status": "ignored", "reason": "Event from this bot user"}
+    assert tasks.tasks == []
+    record.assert_awaited_once()
+    context.assert_not_awaited()
+
+
+async def test_app_only_bot_start_is_rejected_before_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepare = _prepared(monkeypatch, prompt=_PROMPT)
+    resolve = AsyncMock(return_value=_BOT)
+    monkeypatch.setattr(slack_channel, "resolve_allowed_slack_bot", resolve)
+
+    await _start(_start_app(monkeypatch), user_id="UBOT", bot_app_id="A2")
+
+    cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
+    cast(AsyncMock, slack_service.slack_login).assert_not_awaited()
+    prepare.assert_not_awaited()
+    resolve.assert_not_awaited()

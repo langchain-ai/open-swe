@@ -49,6 +49,7 @@ from openswe.slack import webhook as service
 from openswe.slack.allowed_bots import resolve_allowed_slack_bot
 from openswe.slack.ask import by_the_way_request, prepare_ask_channel_run
 from openswe.slack.ask_messages import AskChannelMessage
+from openswe.slack.bot_triggers import BotTriggers
 from openswe.slack.breakout import BreakoutCommand, process_slack_breakout, web_opening
 from openswe.slack.breakout_links import notify_web_breakout
 from openswe.slack.client import SlackThreadMappingError
@@ -109,11 +110,14 @@ async def slack_message_facts(
     While Slack can't confirm the channel has no external participants the call fails
     with a 503, so it is sent again.
     """
+    bot_trigger_mode = await BotTriggers.mode()
     channel_context = await common.resolve_slack_channel_context(
         message.channel_id, use_cache=False
     )
     if not channel_context.allows_operations:
-        return SlackMessageFacts(channel=_refused(channel_context, message.channel_id))
+        return SlackMessageFacts(
+            channel=_refused(channel_context, message.channel_id), bot_trigger_mode=bot_trigger_mode
+        )
     dm = message.channel_type == "im" or is_dm_channel(channel_context)
 
     allowed_bot = (
@@ -161,6 +165,7 @@ async def slack_message_facts(
     ):
         listening = solo_followup = False
     return SlackMessageFacts(
+        bot_trigger_mode=bot_trigger_mode,
         dm=dm,
         automation_channel=not dm
         and (not message.reply_thread_ts or message.reply_thread_ts == message.message_ts)
@@ -232,6 +237,35 @@ async def _start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTur
         "Slack search grant received",
         extra={**fields, "action_token_present": bool(turn.action_token)},
     )
+    if turn.user_id == common.SLACK_BOT_USER_ID or (
+        turn.bot_app_id and turn.bot_app_id == turn.app_id
+    ):
+        return SlackTurnStarted()
+    if turn.bot_id or turn.bot_app_id or turn.subtype == "bot_message":
+        if not turn.bot_id or not await BotTriggers.accepts(
+            user_id=turn.user_id,
+            app_id=turn.bot_app_id,
+            own_user_id=common.SLACK_BOT_USER_ID,
+            own_app_id=turn.app_id,
+            channel_id=turn.channel_id,
+            subtype=turn.subtype,
+            explicit_mention=turn.explicit_mention,
+            reply_thread_ts=turn.reply_thread_ts,
+            message_ts=turn.message_ts,
+            dm=turn.channel_id.startswith("D"),
+        ):
+            return SlackTurnStarted()
+        allowed_bot = await resolve_allowed_slack_bot(
+            turn.team_id, turn.bot_id, user_id=turn.user_id, app_id=turn.bot_app_id
+        )
+        if allowed_bot is None or not await BotTriggers.claim(
+            team_id=turn.team_id,
+            channel_id=turn.channel_id,
+            bot_id=allowed_bot.bot_id,
+            message_ts=turn.message_ts,
+            explicit_mention=turn.explicit_mention,
+        ):
+            return SlackTurnStarted()
     if turn.action_token:
         # Kept before the claim: the event that starts the turn may be the one without it.
         await SlackSearchGrant.keep(turn.channel_id, turn.message_ts, turn.action_token)
@@ -591,6 +625,10 @@ async def act_on_slack_message(call: ChannelCall, message: ActOnSlackMessage) ->
     backend claims each Slack message once, so Slack's message and app_mention events
     for one mention start one run.
     """
+    if message.event.get("user") == common.SLACK_BOT_USER_ID or (
+        message.event.get("app_id") and message.event.get("app_id") == message.app_id
+    ):
+        return SlackMessageActed(acted=False)
     webhook_id = call.request.headers.get("webhook-id", "")
     claim = f"act:{webhook_id}"
     if webhook_id and not await event_claims.claim(_MESSAGE_CALL_SCOPE, claim, ttl=_CALL_TTL):

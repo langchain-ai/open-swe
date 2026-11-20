@@ -24,6 +24,7 @@ from openswe.slack.ask import (
     process_slack_ask,
 )
 from openswe.slack.ask_messages import AskChannelMessage
+from openswe.slack.bot_triggers import BotTriggers
 from openswe.slack.breakout import (
     BreakoutCommand,
     process_slack_breakout,
@@ -221,13 +222,22 @@ async def _retry_channel_verification(envelope: SlackEventEnvelope) -> bool:
     ):
         return False
     leading = re.match(r"\s*<@([^>]+)>", event.text or "")
-    if event.user == bot_id or (leading and leading.group(1) != bot_id):
+    if event.user == bot_id or (
+        not (event.is_from_bot or event.app_id) and leading and leading.group(1) != bot_id
+    ):
         return False
-    if event.is_from_bot:
-        if (
-            not bot_id
-            or f"<@{bot_id}>" not in text
-            or (event.app_id and event.app_id == envelope.api_app_id)
+    if event.is_from_bot or event.app_id:
+        if not event.bot_id or not await BotTriggers.accepts(
+            user_id=event.user,
+            app_id=event.app_id,
+            own_user_id=bot_id,
+            own_app_id=envelope.api_app_id,
+            channel_id=event.resolve_channel_id(),
+            subtype=event.subtype,
+            explicit_mention=event.type == "app_mention" or f"<@{bot_id}>" in text,
+            reply_thread_ts=event.thread_ts,
+            message_ts=event.ts,
+            dm=event.channel_type == "im",
         ):
             return False
         return (
@@ -301,7 +311,7 @@ class SlackEventsDelivery:
         one MDA's channel handed back."""
         payload = parse_json_object(body)
         envelope = SlackEventEnvelope.parse(payload) if payload is not None else None
-        logged = await EventLog.record(
+        await EventLog.record(
             request,
             body,
             "slack",
@@ -356,31 +366,49 @@ class SlackEventsDelivery:
         }:
             return ignored("Reaction not tracked for feedback")
 
+        bot_user_id = envelope.bot_user_id(common.SLACK_BOT_USER_ID)
+        if (bot_user_id and event.user == bot_user_id) or (
+            event.app_id and event.app_id == envelope.api_app_id
+        ):
+            return ignored("Event from this bot user")
+
         watched = (
             event.type == "message"
             and bool(channel_id)
             and await _slack_channel_watched(channel_id)
         )
-        bot_user_id = envelope.bot_user_id(common.SLACK_BOT_USER_ID)
         is_message_update = event.type == "message" and event.subtype == "message_changed"
         updated_message = event.message if is_message_update else event
         text = updated_message.text_for(bot_user_id) if updated_message is not None else None
+        explicit_mention = bool(
+            event.type == "app_mention" or (bot_user_id and text and f"<@{bot_user_id}>" in text)
+        )
         allowed_bot = None
         rejected_bot = False
         if updated_message is not None and (
             event.is_from_bot
+            or bool(event.app_id)
             or updated_message.is_from_bot
+            or bool(updated_message.app_id)
             or (bot_user_id and updated_message.user == bot_user_id)
         ):
             rejected_bot = (
                 is_message_update
+                or not updated_message.bot_id
                 or event.type not in {"message", "app_mention"}
                 or event.subtype not in {"", "bot_message"}
-                or text is None
-                or not bot_user_id
-                or f"<@{bot_user_id}>" not in text
-                or updated_message.user == bot_user_id
-                or bool(event.app_id and event.app_id == envelope.api_app_id)
+                or not await BotTriggers.accepts(
+                    user_id=updated_message.user if isinstance(updated_message.user, str) else "",
+                    app_id=updated_message.app_id,
+                    own_user_id=bot_user_id,
+                    own_app_id=envelope.api_app_id,
+                    channel_id=channel_id,
+                    subtype=event.subtype,
+                    explicit_mention=explicit_mention,
+                    reply_thread_ts=event.thread_ts,
+                    message_ts=event.ts,
+                    dm=event.channel_type == "im",
+                )
             )
             if not rejected_bot:
                 allowed_bot = await resolve_allowed_slack_bot(
@@ -390,6 +418,16 @@ class SlackEventsDelivery:
                     app_id=updated_message.app_id,
                 )
                 rejected_bot = allowed_bot is None
+                if allowed_bot is not None:
+                    if not explicit_mention:
+                        text = updated_message.text_for(bot_user_id, include_bot_card=True)
+                    rejected_bot = text is None or not await BotTriggers.claim(
+                        team_id=team_id,
+                        channel_id=channel_id,
+                        bot_id=allowed_bot.bot_id,
+                        message_ts=event.ts,
+                        explicit_mention=explicit_mention,
+                    )
             if rejected_bot and not watched:
                 return ignored("Event from a bot")
 
@@ -398,15 +436,6 @@ class SlackEventsDelivery:
             channel_context = await common.resolve_slack_channel_context(
                 channel_id, use_cache=False
             )
-            if not logged:
-                await EventLog.record(
-                    request,
-                    body,
-                    "slack",
-                    event_type=envelope.kind,
-                    delivery_id=event_id,
-                    refs=EventRefs.slack(envelope),
-                )
             if not channel_context.allows_operations:
                 is_external = channel_context.is_ext_shared is True
                 if (
@@ -590,9 +619,6 @@ class SlackEventsDelivery:
                 )
 
         is_direct_message = not is_message_update and in_dm_channel and bool(user_id)
-        explicit_mention = bool(
-            event.type == "app_mention" or (bot_user_id and f"<@{bot_user_id}>" in text)
-        )
         leading_mention = re.match(r"\s*<@([^>]+)>", text)
         if (
             not in_dm_channel

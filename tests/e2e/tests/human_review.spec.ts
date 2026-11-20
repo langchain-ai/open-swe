@@ -634,7 +634,7 @@ test.describe("Human review in Slack", () => {
     })) as { thread_id: string | null; webhook: unknown };
     expect(echoed.webhook).toEqual({
       status: "ignored",
-      reason: "Event from a bot",
+      reason: "Event from this bot user",
     });
     expect(echoed.thread_id).toBeNull();
 

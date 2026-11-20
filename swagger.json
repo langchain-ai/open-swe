@@ -9434,6 +9434,22 @@
             ],
             "title": "Review Trace Links"
           },
+          "slack_bot_trigger_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mentions",
+                  "true",
+                  "false"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slack Bot Trigger Mode"
+          },
           "slack_follow_up_suggestions": {
             "agent_feature_flag": true,
             "anyOf": [

@@ -24,25 +24,35 @@ _WRITE = Policy(trusted="admin_surface", actor="admin", sole=ack("scope"))
 async def manage_feature_flags(
     action: Literal["read", "set"],
     flags: dict[str, bool | None] | None = None,
+    slack_bot_trigger_mode: Literal["mentions", "true", "false"] | None = None,
 ) -> dict[str, object]:
-    """Read or set Robin-wide feature flags without replacing other settings."""
+    """Manage global flags and allowlisted Slack bots: mentions (default), true (listened channels too), or false (disabled)."""
     if action == "set":
-        if not flags:
+        if not flags and slack_bot_trigger_mode is None:
             raise ValueError("Provide at least one feature flag to set")
-        unknown = flags.keys() - FEATURE_FLAGS
+        unknown = (flags or {}).keys() - FEATURE_FLAGS
         if unknown:
             raise ValueError(f"Unsupported feature flags: {', '.join(sorted(unknown))}")
-        if any(value is not None and not isinstance(value, bool) for value in flags.values()):
+        if any(
+            value is not None and not isinstance(value, bool) for value in (flags or {}).values()
+        ):
             raise ValueError("Feature flags must be true, false, or null to inherit")
-    elif flags is not None:
+        if slack_bot_trigger_mode not in {None, "mentions", "true", "false"}:
+            raise ValueError("Bot trigger mode must be mentions, true, or false")
+    elif flags is not None or slack_bot_trigger_mode is not None:
         raise ValueError("Omit flags when reading")
 
-    if flags:
+    if flags or slack_bot_trigger_mode is not None:
+        updates: dict[str, object] = dict(flags or {})
+        if slack_bot_trigger_mode is not None:
+            updates["slack_bot_trigger_mode"] = slack_bot_trigger_mode
         await upsert_instance_settings(
-            SettingsUpdate.model_validate({**await instance_record(), **flags})
+            SettingsUpdate.model_validate({**await instance_record(), **updates})
         )
     effective = await get_instance_settings()
     return {
         "scope": "instance",
-        "effective": {key: effective.get(key) for key in sorted(FEATURE_FLAGS)},
+        "effective": {
+            key: effective.get(key) for key in sorted(FEATURE_FLAGS | {"slack_bot_trigger_mode"})
+        },
     }

@@ -1312,10 +1312,24 @@ async def test_unlinked_ask_fails_closed_if_ownership_cannot_be_saved(
     assert "run_create" not in captured
 
 
+@pytest.mark.parametrize("channel_prompt", [None, "Handle Kitchen alerts", "Answer Ask questions"])
 @pytest.mark.parametrize("user_id", ["U123", ""])
-async def test_allowed_bot_starts_and_continues_a_system_thread(bot_run, user_id):
+async def test_allowed_bot_starts_and_continues_a_system_thread(
+    monkeypatch, bot_run, user_id, channel_prompt
+):
     request, threads, captured = bot_run
     request = request.model_copy(update={"user_id": user_id})
+    if channel_prompt:
+        monkeypatch.setattr(INTEGRATIONS, "channel_prompt", AsyncMock(return_value=channel_prompt))
+        request = request.model_copy(
+            update={
+                "text": "Monitor triggered",
+                "thread_ts": request.event_ts,
+                "original_message_ts": request.event_ts,
+                "listening_channel": True,
+                "explicit_mention": False,
+            }
+        )
     await slack_webhooks._process_slack_mention_impl(request, None)
     assert threads.metadata["owner_type"] == "system"
     assert threads.metadata["visibility"] == "public"
@@ -1330,7 +1344,12 @@ async def test_allowed_bot_starts_and_continues_a_system_thread(bot_run, user_id
     message = ElementTree.fromstring(kwargs["input"]["messages"][-1]["content"][0]["text"])
     assert message.attrib["sender"] == "system:slack-bot-B123"
     assert message.attrib["kind"] == "system"
-    assert (message.text or "").strip() == f"@{webhook_common.SLACK_BOT_USERNAME} Open a PR"
+    assert (message.text or "").strip() == (
+        "Monitor triggered" if channel_prompt else f"@{webhook_common.SLACK_BOT_USERNAME} Open a PR"
+    )
+    if channel_prompt:
+        assert channel_prompt in str(kwargs["input"])
+        assert config["slack_thread"]["thread_ts"] == request.event_ts
     await slack_webhooks._process_slack_mention_impl(
         request.model_copy(update={"event_ts": "1700000000.000300"}), None
     )

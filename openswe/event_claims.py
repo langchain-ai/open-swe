@@ -14,10 +14,12 @@ lapses on its own.
 """
 
 import logging
+from contextlib import nullcontext
 from datetime import timedelta
 from typing import Final, Literal
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from openswe.database.postgres import transaction
 from openswe.jobs.queue import Job
@@ -53,16 +55,18 @@ PURGE_SCHEDULE: Final = "*/5 * * * *"
 _PURGE_BATCH: Final = 5_000
 
 
-async def claim(scope: str, key: str, *, ttl: timedelta) -> bool:
+async def claim(
+    scope: str, key: str, *, ttl: timedelta, connection: AsyncConnection | None = None
+) -> bool:
     """Take the claim on ``(scope, key)``; ``False`` when someone already holds it."""
-    async with transaction() as conn:
+    async with nullcontext(connection) if connection is not None else transaction() as conn:
         result = await conn.execute(_CLAIM, {"scope": scope, "key": key, "ttl": ttl})
         return result.first() is not None
 
 
-async def held(scope: str, key: str) -> bool:
+async def held(scope: str, key: str, *, connection: AsyncConnection | None = None) -> bool:
     """Whether someone holds the claim on ``(scope, key)``, for handlers that claim once done."""
-    async with transaction() as conn:
+    async with nullcontext(connection) if connection is not None else transaction() as conn:
         result = await conn.execute(
             text(
                 "SELECT 1 FROM event_claim WHERE scope = :scope AND key = :key "

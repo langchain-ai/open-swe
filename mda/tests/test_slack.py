@@ -4,7 +4,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 import rt.slack as slack
@@ -969,3 +969,177 @@ def test_watched_posts_reach_automations_without_taking_the_normal_turn(
         [handed] = backend.handed_back
         assert handed.event == payload
         assert handed.automation_only is (mode != "backend")
+
+
+@pytest.mark.parametrize("mode", ["mentions", "true", "false"])
+@pytest.mark.parametrize("listening", [False, True])
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("subtype", ["", "bot_message", "message_changed", "channel_join"])
+@pytest.mark.parametrize("reply", [False, True])
+def test_bot_trigger_modes(
+    mode: str, listening: bool, explicit: bool, subtype: str, reply: bool
+) -> None:
+    message = SlackMessageFactsRequest(
+        thread_id=_THREAD_ID,
+        app_id="A1",
+        team_id="T1",
+        channel_id="C1",
+        message_ts="171.1",
+        thread_ts="171.0" if reply else "171.1",
+        reply_thread_ts="171.0" if reply else "",
+        bot_id="B9",
+        bot_app_id="A9",
+        text="monitor triggered",
+        explicit_mention=explicit,
+        subtype=subtype,
+    )
+    facts = SlackMessageFacts.model_validate(
+        {"bot_trigger_mode": mode, "listening_channel": listening, "allowed_bot": True}
+    )
+    decision = slack._decide(
+        message,
+        facts,
+        slack.ParsedSlackMessage.parse(message.text, "UBOT", "robin"),
+        "UBOT",
+        is_message=True,
+    )
+    expected = subtype in {"", "bot_message"} and (
+        (mode == "mentions" and explicit)
+        or (mode == "true" and (explicit or (listening and not reply)))
+    )
+    assert isinstance(decision, tuple) is expected
+    if isinstance(decision, tuple):
+        _, turn = decision
+        assert turn.listening_channel is listening
+        assert turn.treat_all_messages_as_mentions is (listening and not explicit)
+
+
+@pytest.mark.parametrize(
+    "guard", ["unlisted", "own_app", "own_user", "reply", "external", "app_only", "subtype_only"]
+)
+def test_true_mode_bot_guards(guard: str) -> None:
+    message = SlackMessageFactsRequest(
+        thread_id=_THREAD_ID,
+        app_id="A1",
+        team_id="T1",
+        channel_id="C1",
+        message_ts="171.2",
+        thread_ts="171.2",
+        bot_id="B9",
+        bot_app_id="A9",
+        text="<@UBOT> monitor triggered",
+        explicit_mention=True,
+    )
+    facts = SlackMessageFacts(bot_trigger_mode="true", allowed_bot=True, listening_channel=True)
+    if guard == "unlisted":
+        facts.allowed_bot = False
+    elif guard == "own_app":
+        message.bot_app_id = "A1"
+    elif guard == "own_user":
+        message.user_id = "UBOT"
+    elif guard == "reply":
+        message.reply_thread_ts = "171.1"
+        message.explicit_mention = False
+        message.text = "monitor triggered"
+    elif guard == "external":
+        facts.channel = "external"
+    elif guard == "app_only":
+        message.bot_id = ""
+    elif guard == "subtype_only":
+        message.bot_id = ""
+        message.bot_app_id = ""
+        message.subtype = "bot_message"
+    assert (
+        slack._decide(
+            message,
+            facts,
+            slack.ParsedSlackMessage.parse(message.text, "UBOT", "robin"),
+            "UBOT",
+            is_message=True,
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("channel_mode", ["kitchen", "ask"])
+@pytest.mark.usefixtures("slack_reads")
+def test_listened_bot_post_starts_with_channel_prompt(
+    monkeypatch: pytest.MonkeyPatch, channel_mode: str
+) -> None:
+    instructions = f"Investigate {channel_mode} alerts and notify the DRI."
+    backend = _backend(
+        monkeypatch,
+        SlackTurnStarted(
+            run=_RUN, prompt=_PROMPT.model_copy(update={"channel_prompt": instructions})
+        ),
+        SlackMessageFacts(
+            bot_trigger_mode="true",
+            listening_channel=True,
+            allowed_bot=True,
+            bot_name="Monitor",
+            conversation="new",
+        ),
+    )
+    event = _event(
+        "monitor triggered",
+        key="message",
+        user_id=None,
+        message_ts="171.1",
+        thread_ts="171.1",
+        payload={
+            "type": "message",
+            "subtype": "bot_message",
+            "bot_id": "B9",
+            "app_id": "A9",
+            "text": "monitor triggered",
+        },
+    )
+    [run] = cast(list[ChannelRun], asyncio.run(slack.start_turn(event, _thread())))
+    [turn] = backend.turns
+    assert turn.thread_ts == turn.message_ts == "171.1"
+    assert turn.listening_channel and turn.treat_all_messages_as_mentions
+    assert not turn.explicit_mention
+    assert instructions in _texts(cast(Mapping[str, Any], run["input"]))
+
+
+@pytest.mark.parametrize("summary", ["", "Monitor triggered"])
+@pytest.mark.parametrize("mode", ["true", "mentions"])
+@pytest.mark.usefixtures("slack_reads")
+def test_unmentioned_bot_card_reaches_the_admitted_turn(
+    monkeypatch: pytest.MonkeyPatch, summary: str, mode: Literal["true", "mentions"]
+) -> None:
+    backend = _backend(
+        monkeypatch,
+        SlackTurnStarted(run=_RUN, prompt=_PROMPT),
+        SlackMessageFacts(
+            allowed_bot=True,
+            bot_name="Datadog",
+            conversation="mda",
+            listening_channel=True,
+            bot_trigger_mode=mode,
+        ),
+    )
+    alert = {
+        "title": "CPU is high",
+        "text": "Investigate service latency",
+        "fields": [{"title": "Host", "value": "worker-1"}],
+    }
+    result = asyncio.run(slack.start_turn(_bot_event(summary, alert), _thread()))
+
+    if mode == "mentions":
+        assert result is None
+        assert not backend.turns
+        return
+    [turn] = backend.turns
+    assert not turn.explicit_mention
+    assert turn.clean_text == "\n".join(
+        part
+        for part in (summary, "CPU is high", "Investigate service latency", "Host", "worker-1")
+        if part
+    )
+    [run] = cast(list[ChannelRun], result)
+    prompt = _texts(cast(Mapping[str, object], run["input"]))
+    assert "CPU is high" in prompt
+    assert "Investigate service latency" in prompt
+    assert "worker-1" in prompt
+    assert "(no text in mention)" not in prompt

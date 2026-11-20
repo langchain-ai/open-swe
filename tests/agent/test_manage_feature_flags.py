@@ -120,3 +120,33 @@ async def test_sole_writer_sets_flags_but_cannot_read_them(
         "model_selection_enabled": {"before": None, "after": True}
     }
     assert current_audit_log.get() is None
+
+
+@pytest.mark.parametrize("mode", ["mentions", "true", "false"])
+async def test_global_bot_trigger_mode_preserves_other_settings(mode: str) -> None:
+    await upsert_instance_settings(SettingsUpdate(org_guidelines="Keep me"))
+    assert (await get_settings())["slack_bot_trigger_mode"] == "mentions"
+    result = await manage_feature_flags("set", slack_bot_trigger_mode=mode)
+    assert result["scope"] == "instance"
+    assert result["effective"]["slack_bot_trigger_mode"] == mode
+    assert (await instance_record())["slack_bot_trigger_mode"] == mode
+    assert (await get_settings())["org_guidelines"] == "Keep me"
+    await manage_feature_flags("set", {"pr_summaries": True})
+    assert (await get_settings())["slack_bot_trigger_mode"] == mode
+
+
+@pytest.mark.parametrize("mode", [True, False, "all", ""])
+async def test_invalid_bot_trigger_modes_are_refused(mode: object) -> None:
+    with pytest.raises(ValueError):
+        await manage_feature_flags("set", slack_bot_trigger_mode=mode)
+    with pytest.raises(ValueError):
+        SettingsUpdate.model_validate({"slack_bot_trigger_mode": mode})
+
+
+async def test_non_admin_cannot_set_bot_trigger_mode(
+    grant_tool_access: Callable[..., None],
+) -> None:
+    grant_tool_access(admin=False, admin_surface=True)
+    result = await manage_feature_flags("set", slack_bot_trigger_mode="true")
+    assert "error" in result
+    assert (await get_settings())["slack_bot_trigger_mode"] == "mentions"
