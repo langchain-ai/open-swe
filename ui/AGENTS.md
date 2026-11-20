@@ -14,6 +14,14 @@ Use the returned imports and read the installed component and styling guidance l
 Discovery reads the installed catalog; do not assume APIs from another Macaw version.
 Preserve the specialized integrations documented in DESIGN.md.
 
+## Data identity and state lifetime
+
+- Keep preferences above keyed children so date or filter changes can reset pagination without losing sort or display settings.
+- Scope both requests and reads to the current resource; disabled queries can still return cached data.
+- Reuse query factories and in-flight requests so prefetch and consumer match on selected fields and normalized query identity.
+- Publish invalidations in the same transaction as mutations and subscribe every affected reader to the existing topic; optimistic updates alone only reach the local client.
+- Extend existing tests for warm caches, delayed responses during navigation, remounts, or optimistic-to-persisted transitions; assert visible data and which state resets or persists.
+
 ## Visual style
 
 The dashboard aims for quiet, deliberate minimalism: structure comes from surface tone, not lines.
