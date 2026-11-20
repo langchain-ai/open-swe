@@ -50,7 +50,12 @@ from openswe.source_context import SourceContext
 from openswe.threads import index
 from openswe.threads.index import INDEXED_FIELDS, IndexedThread, Runtime, ThreadStatus
 from openswe.threads.start_request import RunRefused, StartRequest
-from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS, RunOrigin
+from openswe.trace_metadata import (
+    BILLING_FIELDS,
+    BILLING_USER_FIELDS,
+    RunOrigin,
+    TraceVisibility,
+)
 from openswe.utils.http_pool import KEEPALIVE_SECONDS, pooled_transport
 from openswe.utils.langsmith import resolve_tenant_id
 from openswe.utils.startup_trace import apm_span
@@ -577,27 +582,38 @@ class MdaRuntime:
         return active
 
     @staticmethod
-    async def owner_ls_user_id(thread_id: str) -> str | None:
+    async def trace_access(thread_id: str) -> dict[str, JsonValue]:
+        """The root trace metadata access policies read: the stored thread's owner and visibility.
+
+        Set before the root exists, since policies read root metadata only as ingested. A
+        thread that can't be read is traced as private, so a policy hiding private traces
+        hides it too.
+        """
         from openswe.tasks.schemas import ThreadMetadata
         from openswe.threads.store import THREADS
 
+        owner_ls_user_id: str | None = None
+        visibility = TraceVisibility.PRIVATE
         try:
             thread = await THREADS.get(thread_id)
-            if thread is None or thread.metadata.get("owner_type") != "user":
-                return None
-            metadata = ThreadMetadata.model_validate(thread.metadata)
-            if metadata.owner_user_id is None:
-                return None
-            owner = await metadata.owner()
-            identities = [item for item in owner.identities if item.provider == "langsmith"]
-            return identities[0].external_id if len(identities) == 1 else None
+            if thread is not None:
+                visibility = TraceVisibility.of(thread.metadata)
+                if thread.metadata.get("owner_type") == "user":
+                    metadata = ThreadMetadata.model_validate(thread.metadata)
+                    if metadata.owner_user_id is not None:
+                        owner = await metadata.owner()
+                        identities = [
+                            item for item in owner.identities if item.provider == "langsmith"
+                        ]
+                        if len(identities) == 1:
+                            owner_ls_user_id = identities[0].external_id
         except Exception:
             logger.warning(
-                "Could not resolve original trace owner",
+                "Could not resolve a run's trace access",
                 extra={"thread_id": thread_id},
                 exc_info=True,
             )
-            return None
+        return {"owner_ls_user_id": owner_ls_user_id, "visibility": visibility.value}
 
     async def run_payload(
         self,
@@ -682,9 +698,9 @@ class MdaRuntime:
         sender = run_metadata.get(SENDER_USER_KEY)
         if sender is not None and (sender != billed or actor not in (None, sender)):
             run_metadata.pop(SENDER_USER_KEY)
-        with apm_span("start_run.owner_ls_user_id", {}):
-            owner_ls_user_id = await self.owner_ls_user_id(thread_id)
-        run_metadata["owner_ls_user_id"] = owner_ls_user_id
+        with apm_span("start_run.trace_access", {}):
+            trace_access = await self.trace_access(thread_id)
+        run_metadata.update(trace_access)
         raw_config_metadata = config.get("metadata")
         if isinstance(raw_config_metadata, dict):
             config["metadata"] = {
@@ -694,7 +710,7 @@ class MdaRuntime:
                     if key not in _ATTRIBUTION_KEYS and key != "billed_user_id"
                 },
                 **{key: run_metadata[key] for key in _ATTRIBUTION_KEYS if key in run_metadata},
-                "owner_ls_user_id": owner_ls_user_id,
+                **trace_access,
                 "created_by": None,
             }
         context = dict(
@@ -705,7 +721,7 @@ class MdaRuntime:
                 assistant_id=assistant_id,
             )
         )
-        context["owner_ls_user_id"] = owner_ls_user_id
+        context.update(trace_access)
         if isinstance(streaming, bool):
             # Context replaces configurable on the server, so the stream marker rides in
             # it; ``False`` too, or the run inherits the ``True`` its thread kept.

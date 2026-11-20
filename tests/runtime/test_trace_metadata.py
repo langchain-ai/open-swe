@@ -38,6 +38,7 @@ async def test_run_starts_with_stored_owners_langsmith_identity(
                 "owner_type": "system" if state == "system" else "user",
                 "owner_user_id": str(owner_id) if state != "legacy" else None,
                 "owner_login": "reassigned-handle",
+                "visibility": "public",
             }
         ),
         side_effect=RuntimeError("unavailable") if state == "unavailable" else None,
@@ -49,7 +50,12 @@ async def test_run_starts_with_stored_owners_langsmith_identity(
         "original-thread",
         {
             "assistant_id": "agent",
-            "metadata": {"owner_ls_user_id": "caller", "user_id": str(uuid4()), "origin": "github"},
+            "metadata": {
+                "owner_ls_user_id": "caller",
+                "visibility": "caller",
+                "user_id": str(uuid4()),
+                "origin": "github",
+            },
             "config": {"configurable": {"source": "slack", "origin": "slack"}},
         },
         thread_metadata={"source": "slack", "origin": "slack"},
@@ -62,6 +68,11 @@ async def test_run_starts_with_stored_owners_langsmith_identity(
     assert rewritten["metadata"]["owner_ls_user_id"] == expected
     assert rewritten["config"]["metadata"]["owner_ls_user_id"] == expected
     assert rewritten["context"]["owner_ls_user_id"] == expected
+    # A thread that can't be read is traced as private, so policies hiding private traces hide it.
+    visibility = "private" if state == "unavailable" else "public"
+    assert rewritten["metadata"]["visibility"] == visibility
+    assert rewritten["config"]["metadata"]["visibility"] == visibility
+    assert rewritten["context"]["visibility"] == visibility
     handle_holder.assert_not_awaited()
     if state in {"linked", "unlinked", "ambiguous"}:
         get_owner.assert_awaited_once_with(owner_id)

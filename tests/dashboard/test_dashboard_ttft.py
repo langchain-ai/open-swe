@@ -137,7 +137,11 @@ def langsmith(monkeypatch: pytest.MonkeyPatch) -> _RecordingClient:
         ttft, "async_langsmith_client", lambda *_: SimpleNamespace(runs=client.async_runs)
     )
     monkeypatch.setattr(ttft, "resolve_project_id_by_name", AsyncMock(return_value="project-id"))
-    monkeypatch.setattr(ttft.MdaRuntime, "owner_ls_user_id", AsyncMock(return_value="ls-user-1"))
+    monkeypatch.setattr(
+        ttft.MdaRuntime,
+        "trace_access",
+        AsyncMock(return_value={"owner_ls_user_id": "ls-user-1", "visibility": "private"}),
+    )
     return client
 
 
@@ -180,6 +184,7 @@ async def test_send_trace_traces_the_commands_request_as_it_runs(
         "origin": origin.value,
         "invocation_id": "invocation-1",
         "owner_ls_user_id": "ls-user-1",
+        "visibility": "private",
     }
     assert root.get("end_time") is None
     assert _updates_of(langsmith, trace.trace_id) == []
@@ -217,6 +222,8 @@ async def test_a_send_whose_run_is_never_built_posts_its_trace_closed(
     (root,) = [run for run in langsmith.runs if run["name"] == "dashboard.send"]
     assert root["error"] == "The run could not be built (HTTPException)"
     assert trace.root.metadata["origin"] == "dashboard"
+    # No built run named the thread's visibility, so the send carrying its text is private.
+    assert root["extra"]["metadata"]["visibility"] == "private"  # type: ignore[index]
     assert root["end_time"] is not None
     commands = next(run for run in langsmith.runs if run["name"] == "commands")
     (ended,) = _updates_of(langsmith, commands["id"])

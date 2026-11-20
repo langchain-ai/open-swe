@@ -2661,6 +2661,7 @@ async def _launch_worker(
             "__run_token": "coordinator-token",
             "origin": "github",
             "owner_ls_user_id": "original-owner",
+            "visibility": "private",
         },
     )
     # Open SWE's task messages report the worker; deepagents does not poll it too.
@@ -2699,6 +2700,7 @@ async def test_a_launched_worker_carries_a_grant_never_its_coordinators_run_toke
         "__catalog": KINDS["agent"].applied(COORDINATOR_CATALOG).model_dump(mode="json"),
         "origin": "github",
         "owner_ls_user_id": "original-owner",
+        "visibility": "private",
     }
     assert launch["input"] == {
         "messages": [{"role": "user", "content": "Your assignment: Fix login"}]

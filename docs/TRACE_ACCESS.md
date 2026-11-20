@@ -9,6 +9,11 @@ Trace attribution uses that stored ID, never a current GitHub handle lookup.
 Legacy login-only threads are not backfilled and receive no personal grant.
 System-owned threads, missing identities or lookup failures keep tracing operational without a personal grant.
 
+The same step stamps `visibility`: `public` only when the stored thread is public, otherwise `private`, including when the thread can't be read.
+A Slack message's `slack.send` root takes both from the run it starts, and one that starts no run is `private`; a dashboard send's `dashboard.send` root reads them itself before it is posted.
+A deny policy on `runs:read` matching `visibility` equal to `private` hides private threads' traces from the roles it is attached to.
+A trace keeps the visibility its run started with if the thread's visibility changes later.
+
 The verified OAuth `/userinfo` `sub` stored by `LangSmithAccount` / `User._claim` is LangSmith's `ls_user_id` (`smith-go/oauth/oidc_handler.go`, `UserinfoResponse.Subject`), not the separate `auth/public.user_id`.
 No fresh login is needed to read that stored mapping.
 

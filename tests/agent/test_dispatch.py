@@ -351,6 +351,7 @@ async def test_billing_survives_service_principal_and_failed_run(
             **actor.billing_trace_metadata(),
             "created_by": None,
             "owner_ls_user_id": None,
+            "visibility": "private",
             "kind": "preserved",
             "origin": "automation",
         }
@@ -373,6 +374,7 @@ async def test_billing_survives_service_principal_and_failed_run(
         "billing_bucket": "channel" if channel else "system",
         "created_by": None,
         "owner_ls_user_id": None,
+        "visibility": "private",
     }
     assert unattributed["config"] == {"metadata": unattributed["metadata"]}
     assert "user_id" not in context.call_args.kwargs["metadata"]

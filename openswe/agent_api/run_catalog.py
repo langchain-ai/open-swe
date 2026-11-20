@@ -52,7 +52,7 @@ from openswe.server import (
     runtime_runs,
 )
 from openswe.threads.access import agent_version_metadata
-from openswe.trace_metadata import RunOrigin
+from openswe.trace_metadata import RunOrigin, TraceVisibility
 from openswe.utils.json_types import thread_metadata
 from openswe.utils.startup_trace import apm_span
 from openswe.utils.thread_reads import read_thread, shared_thread_reads
@@ -138,7 +138,7 @@ class RunCatalog:
         """Whether the run's thread is ``public`` or ``private``, so traces split by it.
 
         A thread that names none is public, as everywhere else that checks it; one that
-        can't be read leaves the trace without it rather than guessing.
+        can't be read keeps the visibility the run's start stamped (``MdaRuntime.trace_access``).
         """
         try:
             thread = await read_thread(thread_id)
@@ -149,7 +149,7 @@ class RunCatalog:
                 exc_info=True,
             )
             return None
-        return "private" if thread_metadata(thread).get("visibility") == "private" else "public"
+        return TraceVisibility.of(thread_metadata(thread)).value
 
     async def start(self) -> RunStart:
         """What MDA builds the run from, and the settings its calls read."""

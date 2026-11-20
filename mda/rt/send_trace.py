@@ -29,6 +29,9 @@ from runtime_api.slack import (
 
 logger = logging.getLogger(__name__)
 
+# The root metadata trace access policies read, as the backend stamped it on the run.
+_TRACE_ACCESS_KEYS = ("owner_ls_user_id", "visibility")
+
 
 class SlackSendTrace:
     """One Slack message's trace while the channel handles it; inert when it isn't traced."""
@@ -119,6 +122,12 @@ class SlackSendTrace:
             {
                 "thread_id": thread_id,
                 **({"invocation_id": invocation} if isinstance(invocation, str) else {}),
+                # The root carries the message, so it takes the run's access before its only post.
+                **{
+                    key: value
+                    for key in _TRACE_ACCESS_KEYS
+                    if isinstance(value := run.metadata.get(key), str)
+                },
             }
         )
         self._end_channel()
@@ -130,6 +139,8 @@ class SlackSendTrace:
             return
         self._end_channel(error)
         try:
+            # No run says whose thread the message is in, so its trace is hidden as private.
+            self.root.add_metadata({"visibility": "private"})
             self.root.end(outputs={"outcome": outcome}, error=error)
         except Exception:
             logger.warning("Could not close a Slack message's trace", exc_info=True)

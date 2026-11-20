@@ -432,6 +432,7 @@ class RunContext(BaseModel):
     invocation_id: str | None = None
     origin: str | None = None
     owner_ls_user_id: str | None = None
+    visibility: str | None = None
     # JSON, not Catalog: the gRPC runtime serializes only the context's top level.
     catalog: dict[str, JsonValue] | None = Field(default=None, alias="__catalog")
     _run: Run | None = PrivateAttr(default=None)

@@ -516,6 +516,7 @@ async def test_a_new_thread_runs_on_mda(
             "origin": "automation",
             "billing_bucket": "system",
             "owner_ls_user_id": None,
+            "visibility": "public",
             "created_by": None,
         }
     }
@@ -571,6 +572,7 @@ async def test_runs_include_the_current_slack_thread_link(
         "created_by": None,
         "billing_bucket": "system",
         "owner_ls_user_id": None,
+        "visibility": "public",
         **expected,
     }
     assert sent["config"] == {
@@ -580,6 +582,7 @@ async def test_runs_include_the_current_slack_thread_link(
             "created_by": None,
             "billing_bucket": "system",
             "owner_ls_user_id": None,
+            "visibility": "public",
             **expected,
         }
     }

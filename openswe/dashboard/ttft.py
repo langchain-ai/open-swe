@@ -110,7 +110,15 @@ class DashboardSendTrace:
     # was, so charts of root traces count and bill a send like any other run. The root's
     # own keys travel too, since a run update replaces its metadata.
     _CLOSE_KEYS: ClassVar[frozenset[str]] = frozenset(
-        {*_SPAN_KEYS, "origin", "owner_ls_user_id", "kind", "user_email", *BILLING_FIELDS}
+        {
+            *_SPAN_KEYS,
+            "origin",
+            "owner_ls_user_id",
+            "visibility",
+            "kind",
+            "user_email",
+            *BILLING_FIELDS,
+        }
     )
 
     def __init__(
@@ -203,14 +211,14 @@ class DashboardSendTrace:
         return uuid.uuid5(trace_id, name)
 
     async def adopt(self, *, thread_id: str, invocation_id: str | None) -> None:
-        """Post the root, naming the built run's invocation and owner, which the thread
-        view, cost lookups and personal trace access read; it stays open."""
+        """Post the root, naming the built run's invocation, owner and visibility, which the
+        thread view, cost lookups and trace access policies read; it stays open."""
         try:
-            owner = await MdaRuntime.owner_ls_user_id(thread_id)
+            access = await MdaRuntime.trace_access(thread_id)
             self.root.add_metadata(
                 {
                     **({"invocation_id": invocation_id} if invocation_id else {}),
-                    **({"owner_ls_user_id": owner} if owner else {}),
+                    **{key: value for key, value in access.items() if value},
                 }
             )
         except Exception:
@@ -395,6 +403,8 @@ class DashboardSendTrace:
             if self._posted:
                 self.root.patch()
             else:
+                # No built run named the thread's visibility, so the send is hidden as private.
+                self.root.add_metadata({"visibility": "private"})
                 self._post_root()
         except Exception:
             logger.warning("Could not close a dashboard send's trace", exc_info=True)

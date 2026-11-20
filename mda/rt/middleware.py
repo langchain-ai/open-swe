@@ -1108,6 +1108,7 @@ def _launch_runtime(runtime: ToolRuntime, grant: str, catalog: dict[str, JsonVal
             CATALOG_KEY: catalog,
             "origin": context.origin or "automation",
             "owner_ls_user_id": context.owner_ls_user_id,
+            "visibility": context.visibility,
         },
     )
 

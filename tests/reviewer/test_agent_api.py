@@ -2387,13 +2387,14 @@ async def test_langsmith_cloud_run_delegates_to_credential_isolated_sandbox(
         ({"visibility": "private"}, "private"),
         ({"visibility": "public"}, "public"),
         ({}, "public"),
-        ({"visibility": "shared"}, "public"),
+        ({"visibility": "shared"}, "private"),
     ],
 )
 async def test_a_runs_trace_names_its_threads_visibility(
     monkeypatch: pytest.MonkeyPatch, metadata: dict[str, object], expected: str
 ) -> None:
-    """A thread that names no visibility is public, as access checks treat it."""
+    """A thread that names no visibility is public and one naming any other is private,
+    as access checks treat them."""
     from openswe.agent_api import run_catalog
 
     async def thread(thread_id: str) -> dict[str, object]:

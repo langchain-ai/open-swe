@@ -61,7 +61,11 @@ def _opened() -> SlackSendTrace:
 
 
 def _run() -> SlackTurnRun:
-    return SlackTurnRun(input={}, context={}, metadata={"invocation_id": "inv-1"})
+    return SlackTurnRun(
+        input={},
+        context={},
+        metadata={"invocation_id": "inv-1", "owner_ls_user_id": "ls-1", "visibility": "private"},
+    )
 
 
 async def test_a_turn_traces_each_step_and_hands_the_trace_to_its_run(
@@ -99,7 +103,7 @@ async def test_a_turn_traces_each_step_and_hands_the_trace_to_its_run(
     assert headers["langsmith-trace"] == step["dotted_order"]
     assert "langsmith-metadata" not in headers.get("baggage", "")
     # The run names the trace for its completion to close; the root, posted once, stays open
-    # and names the run's thread and invocation.
+    # and names the run's thread and invocation, and who may read it.
     assert run.metadata[SEND_TRACE_ID_KEY] == str(root.id)
     assert run.metadata[SEND_DOTTED_ORDER_KEY] == root.dotted_order
     # The backend may trace into another project: it closes the trace in this one.
@@ -113,6 +117,8 @@ async def test_a_turn_traces_each_step_and_hands_the_trace_to_its_run(
         "slack_message_ts": POSTED_TS,
         "origin": "slack",
         "invocation_id": "inv-1",
+        "owner_ls_user_id": "ls-1",
+        "visibility": "private",
     }
     assert str(root.id) not in {str(update["id"]) for update in langsmith.patched}
     # The handler's span ends as it hands the run over.
@@ -131,6 +137,8 @@ def test_a_message_that_starts_no_run_closes_its_trace(langsmith: _LangSmith) ->
     root = langsmith.named("slack.send")
     assert root["end_time"] is not None
     assert root["outputs"] == {"outcome": "declined: sign_in"}
+    # No run names the thread's visibility, so the message is hidden as private.
+    assert cast(dict[str, dict[str, object]], root["extra"])["metadata"]["visibility"] == "private"
 
 
 def test_a_deployment_that_does_not_trace_leaves_the_run_alone(
@@ -145,4 +153,4 @@ def test_a_deployment_that_does_not_trace_leaves_the_run_alone(
     trace.started(run, thread_id="thread-1")
 
     assert trace.root is None
-    assert run.metadata == {"invocation_id": "inv-1"}
+    assert run.metadata == _run().metadata

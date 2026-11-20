@@ -1,5 +1,6 @@
 """Shared trace-only attribution fields for run dispatch and catalog propagation."""
 
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Final
 
@@ -43,6 +44,24 @@ class RunOrigin(StrEnum):
             except ValueError:
                 continue
         return cls.AUTOMATION
+
+
+class TraceVisibility(StrEnum):
+    """Whether a run's thread is public or private, as ``metadata.visibility`` on its root trace.
+
+    Access policies read it to hide private threads' traces, so anything but an explicitly
+    public thread counts as private.
+    """
+
+    PUBLIC = "public"
+    PRIVATE = "private"
+
+    @classmethod
+    def of(cls, thread_metadata: Mapping[str, object]) -> TraceVisibility:
+        """A thread naming no visibility is public, as everywhere else that checks it."""
+        return (
+            cls.PUBLIC if thread_metadata.get("visibility", "public") == "public" else cls.PRIVATE
+        )
 
 
 BILLING_USER_FIELDS: Final = frozenset({"user_id", "billed_robin_user_id", "billed_user_email"})
