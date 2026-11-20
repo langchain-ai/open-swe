@@ -2293,6 +2293,128 @@ async def test_walkthrough_errors_end_only_a_scout_with_a_stale_head(
         assert json.loads(str(result.content)) == {"success": False, "error": str(error)}
 
 
+async def test_a_runs_sandbox_and_its_committer_are_read_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Who commits in the sandbox is read alongside the sandbox, not after it."""
+    from runtime_api.sandbox_setup import GitIdentity
+
+    from openswe.agent_api import run_sandbox
+    from openswe.sandboxes.managed import ManagedSandbox
+    from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
+
+    started: dict[str, asyncio.Event] = {"sandbox": asyncio.Event(), "identity": asyncio.Event()}
+    sandbox = ManagedSandbox(
+        create=LangSmithCreateOptions(
+            fs_capacity_bytes=1, idle_ttl_seconds=1, delete_after_stop_seconds=1
+        ),
+        sandbox_id="sandbox-1",
+    )
+    identity = GitIdentity(name="Ada", email="ada@users.noreply.github.com")
+
+    async def managed(_self: run_sandbox.RunSandbox) -> ManagedSandbox:
+        started["sandbox"].set()
+        await started["identity"].wait()
+        return sandbox
+
+    async def git_identity(_self: run_sandbox.RunSandbox) -> GitIdentity:
+        started["identity"].set()
+        await started["sandbox"].wait()
+        return identity
+
+    monkeypatch.setattr(run_sandbox.RunSandbox, "managed", managed)
+    monkeypatch.setattr(run_sandbox.RunSandbox, "git_identity", git_identity)
+
+    # Each read waits for the other to start: read one after the other, they never finish.
+    spec = await asyncio.wait_for(
+        run_sandbox.RunSandbox({"configurable": {"thread_id": "t1"}}, reviews=False).spec(),
+        timeout=5,
+    )
+
+    assert spec is not None
+    assert spec.sandbox_id == "sandbox-1"
+    assert spec.git_identity == identity
+
+
+@pytest.mark.parametrize("fails", [False, True])
+async def test_a_failed_sandbox_read_drops_its_committer_read(
+    monkeypatch: pytest.MonkeyPatch, fails: bool
+) -> None:
+    """A failed sandbox read stops the committer read, and fails with its own error."""
+    from runtime_api.sandbox_setup import GitIdentity
+
+    from openswe.agent_api import run_sandbox
+
+    reading = asyncio.Event()
+    ended: list[str] = []
+
+    async def managed(_self: run_sandbox.RunSandbox) -> None:
+        await reading.wait()
+        raise LookupError("the sandbox could not be read")
+
+    async def git_identity(_self: run_sandbox.RunSandbox) -> GitIdentity:
+        reading.set()
+        try:
+            if fails:
+                raise RuntimeError("the owner could not be read")
+            await asyncio.Event().wait()
+        finally:
+            ended.append("read")
+        return GitIdentity()
+
+    monkeypatch.setattr(run_sandbox.RunSandbox, "managed", managed)
+    monkeypatch.setattr(run_sandbox.RunSandbox, "git_identity", git_identity)
+
+    with pytest.raises(LookupError):
+        await asyncio.wait_for(
+            run_sandbox.RunSandbox({"configurable": {"thread_id": "t1"}}, reviews=False).spec(),
+            timeout=5,
+        )
+
+    assert ended == ["read"]
+
+
+async def test_cancelling_a_run_start_while_it_drops_the_committer_read_still_cancels_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stopping the committer read after a failed sandbox read doesn't swallow the run start's
+    own cancellation."""
+    from runtime_api.sandbox_setup import GitIdentity
+
+    from openswe.agent_api import run_sandbox
+
+    reading = asyncio.Event()
+    dropping = asyncio.Event()
+    release = asyncio.Event()
+
+    async def managed(_self: run_sandbox.RunSandbox) -> None:
+        await reading.wait()
+        raise LookupError("the sandbox could not be read")
+
+    async def git_identity(_self: run_sandbox.RunSandbox) -> GitIdentity:
+        reading.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            dropping.set()
+            await release.wait()
+            raise
+        return GitIdentity()
+
+    monkeypatch.setattr(run_sandbox.RunSandbox, "managed", managed)
+    monkeypatch.setattr(run_sandbox.RunSandbox, "git_identity", git_identity)
+
+    start = asyncio.ensure_future(
+        run_sandbox.RunSandbox({"configurable": {"thread_id": "t1"}}, reviews=False).spec()
+    )
+    await asyncio.wait_for(dropping.wait(), timeout=5)
+    start.cancel()
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(start, timeout=5)
+
+
 async def test_langsmith_cloud_run_delegates_to_credential_isolated_sandbox(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -23,7 +23,6 @@ from runtime_api.catalog import (
     FilesSpec,
     ModelSpec,
     RunModels,
-    SandboxSpec,
     SubagentSpec,
     ToolSpec,
 )
@@ -307,13 +306,7 @@ class RunCatalog:
         grant of each operation to the run."""
         run_sandbox = RunSandbox(self.config, reviews=self.kind.reviews)
         with apm_span("start_run.catalog.sandbox", {}):
-            sandbox = await run_sandbox.managed()
-            spec = SandboxSpec.model_validate(
-                {
-                    **sandbox.model_dump(mode="json"),
-                    "git_identity": await run_sandbox.git_identity(),
-                }
-            )
+            spec = await run_sandbox.spec()
         with apm_span("start_run.catalog.build", {}):
             catalog = self.build()
         metadata = self.config.get("metadata") or {}

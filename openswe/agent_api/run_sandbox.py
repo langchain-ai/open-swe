@@ -1,9 +1,12 @@
 """The sandbox of a run's thread, as MDA keeps it, and what the backend does with it."""
 
+import asyncio
+import logging
 from datetime import datetime
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
+from runtime_api.catalog import SandboxSpec
 from runtime_api.sandbox_setup import GitIdentity
 
 from openswe.agent_api.runs import in_graph_context
@@ -21,6 +24,8 @@ from openswe.sandboxes.managed import ManagedSandbox
 from openswe.sandboxes.providers.langsmith import TimeoutLangSmithSandbox
 from openswe.sandboxes.state import SANDBOX_BACKENDS, SandboxUnreachableError
 from openswe.tasks.schemas import ThreadMetadata
+
+logger = logging.getLogger(__name__)
 
 
 class RunSandbox:
@@ -52,6 +57,33 @@ class RunSandbox:
             # A review's preparation works in the sandbox: its checkout and its diff.
             prepare_reaches_sandbox=self.reviews,
         )
+
+    async def spec(self) -> SandboxSpec:
+        """The sandbox MDA creates for the run, with who commits there.
+
+        Who commits is read alongside the sandbox, not after it: the two read the thread
+        and its owner independently, each in transactions of its own.
+        """
+        git_identity = asyncio.ensure_future(self.git_identity())
+        try:
+            sandbox = await self.managed()
+        except BaseException:
+            await self._drop(git_identity)
+            raise
+        return SandboxSpec.model_validate(
+            {**sandbox.model_dump(mode="json"), "git_identity": await git_identity}
+        )
+
+    @staticmethod
+    async def _drop(git_identity: asyncio.Future[GitIdentity]) -> None:
+        """Stop a committer read the run no longer needs, and wait for it to end.
+
+        Its result goes unused, so a read that already failed fails nothing more.
+        """
+        git_identity.cancel()
+        await asyncio.wait([git_identity])
+        if not git_identity.cancelled() and (error := git_identity.exception()) is not None:
+            logger.debug("An unneeded sandbox committer read failed", exc_info=error)
 
     async def git_identity(self) -> GitIdentity:
         """Who commits in the sandbox: the thread's owner, or the bot when it has no GitHub one."""
