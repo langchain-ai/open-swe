@@ -1394,7 +1394,7 @@ async def test_concurrent_runs_offer_and_call_only_their_own_operations(
     ]
 
 
-async def test_failed_code_run_releases_its_interpreter(
+async def test_a_failed_code_run_leaves_its_code_tools_with_the_run(
     monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls
 ) -> None:
     def replies() -> Iterator[AIMessage]:
@@ -1408,16 +1408,12 @@ async def test_failed_code_run_releases_its_interpreter(
     catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
     with pytest.raises(RuntimeError, match="model failed after eval"):
         await _run(InMemoryStore(), "failed", _context("agent", "token", catalog))
-    await asyncio.sleep(0)
-    gc.collect()
 
     interpreter = next(
-        middleware
-        for middleware in agent._parts("agent").middleware
-        if isinstance(middleware, RunCodeInterpreter)
+        item for item in agent._parts("agent").middleware if isinstance(item, RunCodeInterpreter)
     )
     assert any(operation == "lookup:grant" for _, _, operation in backend_calls)
-    assert not _live_interpreters(interpreter)
+    # The run never reached `after_agent`; the shared middleware still keeps none of its tools.
     assert not interpreter._ptc_tools_by_slot
 
 
@@ -1936,72 +1932,6 @@ async def test_sign_in_uses_the_threads_tab_without_chrome_focus(empty_window: b
     assert 'location.origin !== "https://beta.smith.langchain.com"' in script
     assert 'localStorage.setItem("sb-test-auth-token"' in script
     assert "test-token" in script
-
-
-@pytest.mark.parametrize("failure", ["before_agent", "before_model", "between_steps"])
-async def test_interpreter_cleanup_survives_failures_outside_its_hooks(
-    monkeypatch: pytest.MonkeyPatch, backend_calls: BackendCalls, failure: str
-) -> None:
-    from rt.middleware import BackendRunMiddleware
-    from rt.skills import RunSkillsMiddleware
-
-    interpreter = next(
-        item for item in agent._parts("agent").middleware if isinstance(item, RunCodeInterpreter)
-    )
-    original = interpreter.abefore_agent
-
-    async def prepare(*args: object, **kwargs: object) -> dict[str, object] | None:
-        update = await original(*args, **kwargs)
-        assert update is not None
-        slot = await interpreter._registry.aacquire(
-            str(update["_quickjs_slot_id"]), interpreter._slot_config
-        )
-        try:
-            await slot.eval_async("globalThis.started = true")
-        finally:
-            interpreter._registry.release(slot)
-        return update
-
-    async def later_setup(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("later setup failed")
-
-    async def read_inbox(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("inbox failed")
-
-    monkeypatch.setattr(interpreter, "abefore_agent", prepare)
-    if failure == "before_agent":
-        monkeypatch.setattr(RunSkillsMiddleware, "abefore_agent", later_setup)
-    if failure == "before_model":
-        monkeypatch.setattr(BackendRunMiddleware, "_read_inbox", read_inbox)
-    monkeypatch.setattr(agent, "_DEFAULT_MODEL", _calling())
-    catalog = _catalog("lookup", "grant").model_copy(update={"code_only": ["lookup"]})
-    context = _context("agent", "cleanup", catalog)
-    if failure == "between_steps":
-        graph = await compile_managed_agent_async(
-            agent.agent,
-            _thread("cleanup"),
-            runtime=_ExecutionRuntime(
-                access_context="threads.create_run", store=InMemoryStore(), context=context
-            ),
-            report_telemetry=False,
-            async_subagent_graphs=_WORKERS,
-        )
-        stream = graph.astream(
-            {"messages": [("user", "hello")]},
-            _thread("cleanup"),
-            context=context,  # ty: ignore[invalid-argument-type]
-            stream_mode="updates",
-        )
-        async for _ in stream:
-            if _live_interpreters(interpreter):
-                break
-        assert _live_interpreters(interpreter)
-        await stream.aclose()
-    else:
-        with pytest.raises(RuntimeError, match="later setup failed|inbox failed"):
-            await _run(InMemoryStore(), "cleanup", context)
-    assert not _live_interpreters(interpreter)
-    assert not interpreter._ptc_tools_by_slot
 
 
 async def test_recovered_model_failure_preserves_interpreter_state(

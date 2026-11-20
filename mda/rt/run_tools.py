@@ -13,7 +13,6 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from functools import partial
 from typing import Final
 
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
@@ -34,7 +33,6 @@ from langchain_quickjs.middleware import PersistenceMode, REPLState
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from managed_deepagents.run_resources import on_run_exit
 from runtime_api.catalog import Catalog, SubagentSpec, ToolSpec
 from runtime_api.loop import ModelCall
 from runtime_api.provenance import Provenance
@@ -392,17 +390,13 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         self._active = active
         self._listed_in_messages = listed_in_messages
         self._listings = RunLocal(_CodeToolsListing)
+        self._tools_by_slot = RunLocal[dict[str, tuple[BaseTool, ...]]](dict)
         super().__init__(
             ptc=[],
             subagents=subagents,
             mode=mode,
             resolve_tool=None if backend_tools is None else backend_tools.tool,
         )
-
-    async def _close_slot(self, slot_id: str) -> None:
-        """Free a finished run's interpreter: each run evals on a slot of its own, never reused."""
-        self._drop_slot_caches(slot_id)
-        await self._registry.aclose_context(slot_id, self._slot_config)
 
     @property
     def _ptc(self) -> list[str | BaseTool]:
@@ -418,6 +412,23 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
     def _ptc(self, _ptc: object) -> None:
         """The interpreter sets its tools once; these are each run's."""
 
+    @property
+    def _ptc_tools_by_slot(self) -> dict[str, tuple[BaseTool, ...]]:
+        """Each slot's code tools, kept by the run so a run that dies before ``after_agent`` frees them.
+
+        They hold the run's MCP tools and backend client, and every run evals on a slot of its
+        own, so a cache on the shared middleware would keep a failed run's until the process ends.
+        """
+        try:
+            return self._tools_by_slot.get(current_run())
+        except BackendCallError, RuntimeError:
+            # Outside a run nothing evals, so there is nothing to keep.
+            return {}
+
+    @_ptc_tools_by_slot.setter
+    def _ptc_tools_by_slot(self, _cache: object) -> None:
+        """The interpreter keeps one cache for every run; each run keeps its own."""
+
     async def _runs_code(self) -> bool:
         return self._active(await self._toolsets.ready())
 
@@ -425,8 +436,9 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         if not await self._runs_code():
             return None
         update = self._slot_update_for_runtime()
+        # Each run evals on a slot of its own. QuickJS keeps a bounded number of warm slots
+        # per process and closes the oldest past that, so a finished run's is never closed here.
         prepared: REPLState = {**state, "_quickjs_slot_id": update["_quickjs_slot_id"]}
-        on_run_exit(partial(self._close_slot, update["_quickjs_slot_id"]))
         restored = await super().abefore_agent(prepared, runtime)
         return {**update, **(restored or {})} or None
 

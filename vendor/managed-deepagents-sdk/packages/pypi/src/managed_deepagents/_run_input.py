@@ -2,7 +2,6 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator, Mapping
-from contextlib import AsyncExitStack
 from contextvars import Token
 from functools import cached_property
 from typing import Any, Self, cast
@@ -47,7 +46,6 @@ from managed_deepagents._telemetry.otel import (
     trace_id_from_metadata,
 )
 from managed_deepagents.run_context import is_managed_key
-from managed_deepagents.run_resources import _current_resources
 
 #: Run ``configurable`` key deepagents uses to name the agent that started an async subagent.
 _PARENT_KEY = "deepagents_parent"
@@ -263,7 +261,6 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         config = execution_config(self.config, config)
         config = ManagedTurnTracer.for_run(ensure_config(self.config, config))
         iterator = super().astream(input, config, context=context, **kwargs)
-        resources = AsyncExitStack()
         try:
             while True:
                 tokens = _enter_step(
@@ -277,11 +274,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
                     self.sandbox_run,
                 )
                 try:
-                    resource_token = _current_resources.set(resources)
-                    try:
-                        item = await anext(iterator)
-                    finally:
-                        _current_resources.reset(resource_token)
+                    item = await anext(iterator)
                 except StopAsyncIteration:
                     await self._adeliver(thread, merged, routing, output)
                     return
@@ -295,10 +288,7 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         finally:
             log_token = enter_log_context(log)
             try:
-                try:
-                    await iterator.aclose()
-                finally:
-                    await resources.aclose()
+                await iterator.aclose()
             finally:
                 exit_log_context(log_token)
 
