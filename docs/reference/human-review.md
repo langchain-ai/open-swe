@@ -145,6 +145,9 @@ This affects reviewer assignment, not the two-hour auto-merge deadline.
 - **Allow automatic review picks** in dashboard Settings controls whether Robin can automatically assign you, including fallback agent picks.
   It defaults to on and can also be changed with `save_user_settings` using `auto_human_review_enabled`.
   Turning it off does not prevent someone explicitly naming you as a reviewer or you signing up yourself.
+- **Slack notifications for review requests** in dashboard Settings controls the DMs Robin sends a reviewer it picked: the pick itself with its accept buttons, reminders, a snooze ending and being released.
+  It defaults to on and can also be changed with `save_user_settings` using `review_request_dms_enabled`.
+  Turning it off does not stop the GitHub review request; an unaccepted pick still expires unless you review on GitHub.
 - **I'll review** adds the clicker as a reviewer and requests their review on GitHub.
   Any number of people may sign up; they need write access and cannot be the author.
 - **Dismiss** closes the card; anyone may click it.

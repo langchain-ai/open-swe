@@ -35,7 +35,7 @@ Publication does not stop the source sandbox.
 - **Projects** (sidebar folders and the composer's project picker): named folders of threads, personal or shared with teammates, optionally bound to one repository whose threads then file under it.
   Use `list_projects`, `create_project`, `update_project`, `share_project`, `unshare_project` and `move_thread_to_project`; deleting a project stays in the dashboard.
 - **Settings → General** (`/my-settings`): theme, thread defaults (visibility and follow-up behavior), whether the Changes panel opens when a run that edited files finishes, and notifications.
-- **Settings → Agent** (`/my-settings/agent`): automatic human-review assignment preferences.
+- **Settings → Agent** (`/my-settings/agent`): automatic human-review assignment and review-request Slack DM preferences.
 - **Settings → Git** (`/my-settings/git`): default repository, base branch, branch prefix, and pull request draft/review preferences.
 - **Settings → Instructions** (`/my-settings/instructions`): personal standing instructions.
 - **Connections** (below Skills in the main sidebar at `/agents/connections`, also under **Settings → Connections** at `/my-settings/connections`): GitHub (linked after LangSmith sign-in; required for coding features), Slack, **Available Tools** from LangSmith Managed Tools (connect or disconnect; used in their private threads), and **Custom MCP Servers** they add for themselves (add or remove here, or ask you to propose one with `add_managed_tools_server`); other threads use Robin's bot kit, with accounts a LangSmith workspace admin connected for the bot, and workspace services and the bot kit are managed in LangSmith.

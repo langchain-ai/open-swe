@@ -13,6 +13,7 @@ from uuid import UUID
 
 import httpx2
 
+from openswe.dashboard.profiles import PROFILES
 from openswe.dispatch import dispatch_agent_run
 from openswe.expedited_review import card as expedited_card
 from openswe.expedited_review.channels import (
@@ -1006,6 +1007,8 @@ class ReviewPicks:
                 message.channel_id,
                 prompt("slack/concierge-dm-edited", text=message.text, status=text),
             )
+            return
+        if not await PROFILES.allows_review_request_dms(participant.github_login):
             return
         origin = self.request.dm_origin
         await send_dm(

@@ -908,7 +908,9 @@ async def assign(
     deadline = f" Accept within {minutes} minutes, or Robin will ask someone else."
     accept = actions(accept_button(added), decline_button(added), snooze_button(added))
     permalink = await added.permalink()
-    if user.slack_user_id:
+    if user.slack_user_id and await PROFILES.allows_review_request_dms(
+        user.github_login or github_login
+    ):
         where = "review card" if added.has_card else "Slack post"
         card = f" (<{permalink}|{where}>)" if permalink else ""
         dm_text = f"Robin picked you to review {label} *{escape(pr.title)}*{card}.{why}{deadline}"
@@ -1498,6 +1500,8 @@ async def _remind_reviewer(request: HumanReviewRequest, user_id: str) -> str:
         or not participant.user.slack_user_id
     ):
         return "not_assigned"
+    if not await PROFILES.allows_review_request_dms(participant.github_login):
+        return "muted"
     marker = f"review_reminded:{user_id}:{participant.joined_at.isoformat()}"
     if request.run_config.get(marker):
         return "already_reminded"
@@ -1750,7 +1754,9 @@ async def run_deadline(request_id: str, step: str) -> dict[str, str]:
         if remaining > timedelta(0):
             await _schedule(request, step, remaining)
             return {"status": "snoozed"}
-        if participant.user.slack_user_id:
+        if participant.user.slack_user_id and await PROFILES.allows_review_request_dms(
+            participant.github_login
+        ):
             text = f"Your review snooze ended: {request.pull_request.url}."
             origin = request.dm_origin
             sent = await send_dm_with_location(

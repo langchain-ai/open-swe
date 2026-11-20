@@ -295,6 +295,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
             "profile": {
                 **ordinary,
                 "auto_human_review_enabled": True,
+                "review_request_dms_enabled": True,
                 "concierge_mode": False,
                 "experimental_classify": False,
                 "experimental_force_code_mode": False,

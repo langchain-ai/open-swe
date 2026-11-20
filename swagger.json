@@ -5731,6 +5731,11 @@
             ],
             "title": "Review Draft Prs"
           },
+          "review_request_dms_enabled": {
+            "default": true,
+            "title": "Review Request Dms Enabled",
+            "type": "boolean"
+          },
           "slack_onboarding_dismissed": {
             "default": false,
             "title": "Slack Onboarding Dismissed",

@@ -332,17 +332,23 @@ async def test_opted_out_reviewer_requires_a_verified_person_naming_them(
 
 
 @pytest.mark.parametrize(
-    ("local_time", "out_of_office", "named", "recent_poster", "allowed"),
+    ("local_time", "out_of_office", "named", "recent_poster", "allowed", "dms"),
     [
-        ("2026-10-22T03:00:00", False, False, True, False),
-        ("2026-10-22T09:00:00", False, False, True, True),
-        ("2026-10-22T12:00:00", True, False, True, False),
-        ("2026-10-22T03:00:00", False, True, False, True),
-        ("2026-10-22T09:00:00", False, False, False, False),
+        ("2026-10-22T03:00:00", False, False, True, False, True),
+        ("2026-10-22T09:00:00", False, False, True, True, True),
+        ("2026-10-22T09:00:00", False, False, True, True, False),
+        ("2026-10-22T12:00:00", True, False, True, False, True),
+        ("2026-10-22T03:00:00", False, True, False, True, True),
+        ("2026-10-22T09:00:00", False, False, False, False, True),
     ],
 )
 async def test_assignment_enforces_availability_before_contacting_reviewer(
-    local_time: str, out_of_office: bool, named: bool, recent_poster: bool, allowed: bool
+    local_time: str,
+    out_of_office: bool,
+    named: bool,
+    recent_poster: bool,
+    allowed: bool,
+    dms: bool,
 ) -> None:
     from openswe.human_review import standard
     from openswe.human_review.coverage import Coverage
@@ -376,6 +382,7 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         patch.object(Coverage, "load", AsyncMock(return_value=None)),
         patch.object(User, "for_login", AsyncMock(return_value=user)),
         patch.object(standard.PROFILES, "allows_auto_human_review", AsyncMock(return_value=True)),
+        patch.object(standard.PROFILES, "allows_review_request_dms", AsyncMock(return_value=dms)),
         patch.object(
             ReviewerAvailability,
             "for_user",
@@ -400,7 +407,7 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
     assert bool(request.participants) is allowed
     if allowed:
         github_review.assert_awaited_once()
-        dm.assert_awaited_once()
+        assert dm.await_count == int(dms)
     else:
         expected = (
             "has not recently posted"

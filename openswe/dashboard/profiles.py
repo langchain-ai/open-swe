@@ -59,8 +59,14 @@ RETIRED_PROFILE_KEYS = frozenset(
 
 class ProfileRecords(UserRecords):
     async def allows_auto_human_review(self, login: str) -> bool:
+        return await self._opted_in(login, "auto_human_review_enabled")
+
+    async def allows_review_request_dms(self, login: str) -> bool:
+        return await self._opted_in(login, "review_request_dms_enabled")
+
+    async def _opted_in(self, login: str, field: str) -> bool:
         profile = await self.get(login) or {}
-        return profile.get("auto_human_review_enabled", True) is not False
+        return profile.get(field, True) is not False
 
     @staticmethod
     def cache_key(login: str) -> str:
@@ -94,6 +100,7 @@ class ProfileUpdate(BaseModel):
     branch_prefix: str | None = None
     auto_fix_ci: bool = True
     auto_human_review_enabled: bool = True
+    review_request_dms_enabled: bool = True
     concierge_mode: bool | None = None
     experimental_classify: bool | None = None
     experimental_force_code_mode: bool | None = None
@@ -108,6 +115,7 @@ class ProfileUpdate(BaseModel):
 def normalize_profile_for_response(profile: dict[str, Any]) -> dict[str, Any]:
     value = dict(profile)
     value.setdefault("auto_human_review_enabled", True)
+    value.setdefault("review_request_dms_enabled", True)
     for field in RETIRED_PROFILE_KEYS:
         value.pop(field, None)
     return value
@@ -144,6 +152,11 @@ async def upsert_profile(
                 update.auto_human_review_enabled
                 if "auto_human_review_enabled" in update.model_fields_set
                 else existing.get("auto_human_review_enabled", True)
+            ),
+            "review_request_dms_enabled": (
+                update.review_request_dms_enabled
+                if "review_request_dms_enabled" in update.model_fields_set
+                else existing.get("review_request_dms_enabled", True)
             ),
             "draft_prs": (
                 update.draft_prs

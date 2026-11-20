@@ -8,6 +8,7 @@ Supported profile fields:
 - `default_repo`, `base_branch`, `branch_prefix`: repository/branch defaults; null clears them.
 - `auto_fix_ci`: boolean preference.
 - `auto_human_review_enabled`: allow automatic review picks (default true); false opts out, but people can still explicitly name the user as a reviewer.
+- `review_request_dms_enabled`: Slack DMs when Robin picks, reminds, or releases the user as a reviewer (default true); false stops those DMs, but the GitHub review request is still sent.
 - Server-backed personal flags exposed by `read_user_settings` may also be toggled by name; flags on the user account require an existing Robin user record.
   Browser-local Feature Flags tab visibility cannot be changed here.
 - `experimental_force_code_mode`: force code-compatible tools through eval in threads the requester owns (default false).
