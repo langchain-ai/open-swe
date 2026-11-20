@@ -103,7 +103,6 @@ class ProfileUpdate(BaseModel):
     review_request_dms_enabled: bool = True
     concierge_mode: bool | None = None
     experimental_classify: bool | None = None
-    experimental_force_code_mode: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
@@ -399,7 +398,6 @@ async def put_my_profile(update: ProfileUpdate, reader: DashboardReadDep) -> dic
     patch = UserPreferencesPatch(
         concierge_mode=update.concierge_mode,
         experimental_classify=update.experimental_classify,
-        experimental_force_code_mode=update.experimental_force_code_mode,
     )
     preferences = await reader.user.merge_preferences(patch, session=reader.session)
     profile = await upsert_profile(login, reader.email or "", update, session=reader.session)

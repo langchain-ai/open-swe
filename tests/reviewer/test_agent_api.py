@@ -1295,9 +1295,8 @@ async def test_an_integration_code_cannot_call_is_still_left_to_search() -> None
     assert catalog.search_tools
 
 
-@pytest.mark.parametrize("force_code_mode", [False, True])
 async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
-    monkeypatch: pytest.MonkeyPatch, registry_db: None, force_code_mode: bool
+    monkeypatch: pytest.MonkeyPatch, registry_db: None
 ) -> None:
     """Seldom-needed tools go to MDA's code mode, not the model's schemas; the graph's own stays here.
 
@@ -1354,7 +1353,6 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
                 )
             ]
             surface.code_mode = True
-            surface.force_code_mode = force_code_mode
             surface.excluded = frozenset({"grep", "glob"})
             surface.delegates = True
             surface.model_call_limit = 20
@@ -1417,14 +1415,12 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         "web_search",
         "write_file",
     ]
-    assert catalog["code_only"] == (
-        sorted(["manage_thread", *direct_tools]) if force_code_mode else ["manage_thread"]
-    )
+    assert catalog["code_only"] == ["manage_thread"]
     # MDA runs the graph's cap on model calls, such as an incident policy's.
     assert catalog["model_call_limit"] == 20
     # Code mode calls the file and shell tools too, through MDA's own with their checks,
     # but never one the graph excludes.
-    assert catalog["also_from_code"] == ([] if force_code_mode else direct_tools)
+    assert catalog["also_from_code"] == direct_tools
     assert catalog["search_tools"] is True
     # MDA's search_tools reads as the backend describes it, with how to call what it finds.
     from openswe.prompts import prompt

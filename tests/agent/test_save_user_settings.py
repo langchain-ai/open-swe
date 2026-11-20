@@ -206,7 +206,7 @@ async def test_agent_cannot_change_concierge_mode_even_in_mixed_patch(
     assert user_records.items == before
 
 
-@pytest.mark.parametrize("flag", ["experimental_classify", "experimental_force_code_mode"])
+@pytest.mark.parametrize("flag", ["experimental_classify"])
 async def test_feature_flag_requires_user_and_validates_before_writing(
     user_records: FakeUserRecords,
     requester: dict[str, object],
@@ -298,7 +298,6 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "review_request_dms_enabled": True,
                 "concierge_mode": False,
                 "experimental_classify": False,
-                "experimental_force_code_mode": False,
             },
             "preferences": {
                 "default_visibility": "private",

@@ -33,11 +33,6 @@ function ExperimentsPage() {
           description="Robin can classify text or JSON from code mode with TypeSafe's System One model: fast, typed decisions with calibrated confidence."
         />
         <ProfileSwitchRow
-          field="experimental_force_code_mode"
-          label="Force code mode"
-          description="In threads you create, call every code-compatible tool through eval, including file, shell, and search tools. Synchronous subagents are excluded. Replies, browser, and state-changing controls stay direct. Off by default."
-        />
-        <ProfileSwitchRow
           field="experimental_background_callbacks"
           label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."

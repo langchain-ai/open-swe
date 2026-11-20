@@ -367,7 +367,6 @@ export interface Profile {
   review_request_dms_enabled?: boolean
   concierge_mode?: boolean
   experimental_classify?: boolean
-  experimental_force_code_mode?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean
@@ -384,7 +383,6 @@ export interface ProfileUpdate {
   review_request_dms_enabled?: boolean
   concierge_mode?: boolean
   experimental_classify?: boolean
-  experimental_force_code_mode?: boolean
   draft_prs?: boolean
   review_draft_prs?: boolean | null
   slack_onboarding_dismissed?: boolean

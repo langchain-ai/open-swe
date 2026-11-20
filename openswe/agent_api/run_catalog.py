@@ -46,7 +46,6 @@ from openswe.sandboxes.tool_runtime import EXCLUDED_TOOLS, ModelChoice, ToolSurf
 from openswe.server import (
     DEEP_AGENT_TOOL_NAMES,
     call_seconds,
-    callable_from_code,
     code_name,
     code_only,
     direct_and_from_code,
@@ -252,8 +251,6 @@ class RunCatalog:
         }
         searches = surface.code_mode or bool(withheld)
         offered = tools.keys() | _FILE_TOOLS | ({SEARCH_TOOLS} if searches else set())
-        if surface.force_code_mode:
-            from_code_only |= {name for name in offered - excluded if callable_from_code(name)}
         # Code mode calls tools past the model's list, so what the run excludes stays out.
         from_code = offered - excluded if surface.code_mode else frozenset()
         return Catalog(

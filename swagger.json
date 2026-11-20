@@ -5722,17 +5722,6 @@
             ],
             "title": "Experimental Classify"
           },
-          "experimental_force_code_mode": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Experimental Force Code Mode"
-          },
           "review_draft_prs": {
             "anyOf": [
               {
