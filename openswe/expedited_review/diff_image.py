@@ -495,17 +495,20 @@ class DiffImageRenderer:
         ):
             font = self._fonts.pick(bold=bold, italic=italic)
             text = ""
+            stop = 0.0
             for span in group:
-                start = font.getlength(text)
+                # Each span measured once: the face is monospaced, with nothing kerned
+                # across a span's edge, so widths add up exactly.
+                start = stop
                 text += span.text
-                stop = font.getlength(text)
+                stop = start + font.getlength(span.text)
                 if span.changed:
                     draw.rectangle(
                         (x + start, y, x + max(stop, start + 1) - 1, y + metrics.line_height - 1),
                         fill=theme.add_highlight if row.kind == "add" else theme.remove_highlight,
                     )
             draw.text((x, text_y), text, font=font, fill=color)
-            x += font.getlength(text)
+            x += stop
 
 
 def render_diff_png(files: list[ChangedFile]) -> bytes:
