@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import posixpath
-from collections import defaultdict
+import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from typing import Any
 
@@ -11,10 +11,10 @@ from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import AgentState
 from langchain_core.messages import ToolMessage
-from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+from rt.loop import visible_messages
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,9 @@ _READ_FILE = "read_file"
 _AGENTS_MD = "AGENTS.md"
 _MAX_AGENTS_LINES = 1_000
 _MAX_AGENTS_BYTES = 64 * 1024
+_DELIVERED_AGENTS = "robin_loaded_agents"
+_ABSENT_AGENTS = "robin_absent_agents"
+_MISSING_FILE = re.compile(r"(?::\s*file_not_found|^File '.*' not found)$")
 
 
 def _tool_name(request: ToolCallRequest) -> str | None:
@@ -40,22 +43,6 @@ def _tool_args(request: ToolCallRequest) -> dict[str, Any]:
         if isinstance(args, Mapping):
             return dict(args)
     return {}
-
-
-def _thread_id(request: ToolCallRequest) -> str | None:
-    runtime_config = getattr(getattr(request, "runtime", None), "config", None)
-    config: Mapping[str, Any] | None = (
-        runtime_config if isinstance(runtime_config, Mapping) else None
-    )
-    if config is None:
-        try:
-            maybe_config = get_config()
-        except Exception:
-            return None
-        config = maybe_config if isinstance(maybe_config, Mapping) else None
-    configurable = config.get("configurable") if config is not None else None
-    value = configurable.get("thread_id") if isinstance(configurable, Mapping) else None
-    return value if isinstance(value, str) and value else None
 
 
 def _file_path(args: Mapping[str, Any]) -> str | None:
@@ -84,7 +71,7 @@ def _candidate_agents_paths(file_path: str) -> list[str]:
 def _extract_text(result: Any) -> str | None:
     error = getattr(result, "error", None)
     if error:
-        return None
+        return "" if isinstance(error, str) and _MISSING_FILE.search(error) else None
 
     file_data = getattr(result, "file_data", None)
     if file_data is None:
@@ -99,8 +86,10 @@ def _extract_text(result: Any) -> str | None:
 
     if encoding is not None and encoding != "utf-8":
         return None
-    if not isinstance(content, str) or not content.strip():
+    if not isinstance(content, str):
         return None
+    if not content.strip():
+        return ""
 
     encoded = content.encode("utf-8")
     if len(encoded) <= _MAX_AGENTS_BYTES:
@@ -109,6 +98,7 @@ def _extract_text(result: Any) -> str | None:
 
 
 async def _read_agents_file(backend: BackendProtocol, path: str) -> str | None:
+    """The file's instructions, ``""`` when there are none to give, or ``None`` when the read failed."""
     try:
         return _extract_text(await backend.aread(path, offset=0, limit=_MAX_AGENTS_LINES))
     except Exception:
@@ -137,12 +127,6 @@ def _can_append_reminder(result: ToolMessage | Command) -> bool:
     )
 
 
-def _append_reminder(result: ToolMessage | Command, reminder: str | None) -> ToolMessage | Command:
-    if reminder is not None and isinstance(result, ToolMessage) and _can_append_reminder(result):
-        return result.model_copy(update={"content": f"{result.content}\n\n{reminder}"})
-    return result
-
-
 class SubdirAgentsReadMiddleware(AgentMiddleware):
     """Append applicable ancestor ``AGENTS.md`` files to ``read_file`` results."""
 
@@ -150,35 +134,35 @@ class SubdirAgentsReadMiddleware(AgentMiddleware):
 
     state_schema = AgentState
 
-    def __init__(self) -> None:
-        self._loaded: defaultdict[str, set[str]] = defaultdict(set)
-
-    def _thread_key(self, request: ToolCallRequest) -> str:
-        return _thread_id(request) or "__unknown_thread__"
-
     def backend(self, request: ToolCallRequest) -> BackendProtocol | None:
         """The thread's files: its sandbox, behind the run's backend."""
         backend = getattr(request.runtime, "backend", None)
         return backend if isinstance(backend, BackendProtocol) else None
 
-    def _mark_direct_agents_read(self, request: ToolCallRequest, file_path: str) -> bool:
-        if posixpath.basename(file_path) != _AGENTS_MD:
-            return False
-        self._loaded[self._thread_key(request)].add(file_path)
-        return True
+    @staticmethod
+    def _settled_paths(request: ToolCallRequest) -> set[str]:
+        """Paths the visible conversation already delivered or found without instructions."""
+        paths: set[str] = set()
+        for message in visible_messages(request.state):
+            if not isinstance(message, ToolMessage) or message.status == "error":
+                continue
+            for key in (_DELIVERED_AGENTS, _ABSENT_AGENTS):
+                recorded = message.additional_kwargs.get(key)
+                if isinstance(recorded, list):
+                    paths.update(path for path in recorded if isinstance(path, str))
+        return paths
 
-    async def _load_async(self, request: ToolCallRequest, file_path: str) -> str | None:
-        if self._mark_direct_agents_read(request, file_path):
-            return None
+    async def _load_async(
+        self, request: ToolCallRequest, file_path: str
+    ) -> tuple[list[tuple[str, str]], list[str]]:
         backend = self.backend(request)
         if backend is None:
-            return None
-        loaded_paths = self._loaded[self._thread_key(request)]
-        paths = [path for path in _candidate_agents_paths(file_path) if path not in loaded_paths]
-        loaded_paths.update(paths)
+            return [], []
+        settled = self._settled_paths(request)
+        paths = [path for path in _candidate_agents_paths(file_path) if path not in settled]
         texts = await asyncio.gather(*(_read_agents_file(backend, path) for path in paths))
-        loaded = [(path, text) for path, text in zip(paths, texts, strict=True) if text is not None]
-        return _system_reminder(file_path, loaded) if loaded else None
+        read = list(zip(paths, texts, strict=True))
+        return [(path, text) for path, text in read if text], [p for p, t in read if t == ""]
 
     async def awrap_tool_call(
         self,
@@ -189,6 +173,32 @@ class SubdirAgentsReadMiddleware(AgentMiddleware):
             return await handler(request)
         result = await handler(request)
         file_path = _file_path(_tool_args(request))
-        if file_path is None or not _can_append_reminder(result):
+        if (
+            file_path is None
+            or not isinstance(result, ToolMessage)
+            or not _can_append_reminder(result)
+        ):
             return result
-        return _append_reminder(result, await self._load_async(request, file_path))
+        content = result.content
+        if posixpath.basename(file_path) == _AGENTS_MD:
+            recorded = {_DELIVERED_AGENTS: [file_path]}
+        else:
+            loaded, absent = await self._load_async(request, file_path)
+            recorded = {
+                key: paths
+                for key, paths in (
+                    (_DELIVERED_AGENTS, [path for path, _ in loaded]),
+                    (_ABSENT_AGENTS, absent),
+                )
+                if paths
+            }
+            if not recorded:
+                return result
+            if loaded:
+                content = f"{content}\n\n{_system_reminder(file_path, loaded)}"
+        return result.model_copy(
+            update={
+                "content": content,
+                "additional_kwargs": {**result.additional_kwargs, **recorded},
+            }
+        )
