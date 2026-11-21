@@ -57,6 +57,15 @@ READ_ONLY: Final = (
 MAC_THREAD: Final = (
     "This Mac threads are no longer supported. Start a new cloud thread to continue."
 )
+# What a provider has the model's next call send back verbatim, by the content block that
+# carries it: OpenAI's encrypted reasoning, Anthropic's thinking signature and redacted
+# thinking. Each sits on the block as the provider returned it, or under the ``extras`` of
+# LangChain's standard ``reasoning`` block.
+_REPLAY_ONLY: Final[Mapping[str, tuple[str, ...]]] = {
+    "reasoning": ("encrypted_content", "signature"),
+    "thinking": ("signature",),
+    "redacted_thinking": ("data",),
+}
 
 
 def for_mda(metadata: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
@@ -353,19 +362,22 @@ class ThreadStore:
         select: list[str] | None = None,
         timings: dict[str, float] | None = None,
     ) -> dict[str, JsonValue]:
-        """:meth:`state_of` as a client reads it, without the encrypted reasoning OpenAI
-        returns for the model's next call: no client reads it, and on a long thread it is
-        megabytes gzip can't shrink. The thread's own state keeps it."""
+        """:meth:`state_of` as a client reads it, without what a provider has the model's
+        next call send back verbatim (:data:`_REPLAY_ONLY`): no client reads it, and on a
+        long thread it is megabytes gzip can't shrink. The thread's own state keeps it."""
         state = await self.state_of(thread, select=select, timings=timings)
         values = state.get("values")
         messages = values.get("messages") if isinstance(values, dict) else None
         for message in messages if isinstance(messages, list) else []:
             content = message.get("content") if isinstance(message, dict) else None
             for block in content if isinstance(content, list) else []:
-                if isinstance(block, dict) and block.get("type") == "reasoning":
-                    extras = block.get("extras")
+                if not isinstance(block, dict) or not isinstance(kind := block.get("type"), str):
+                    continue
+                extras = block.get("extras")
+                for key in _REPLAY_ONLY.get(kind, ()):
+                    block.pop(key, None)
                     if isinstance(extras, dict):
-                        extras.pop("encrypted_content", None)
+                        extras.pop(key, None)
         return state
 
     async def with_latest_run(self, thread: IndexedThread) -> IndexedThread:

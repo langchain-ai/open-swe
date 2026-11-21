@@ -1505,18 +1505,30 @@ async def test_thread_state_sends_select_to_the_threads_runtime_as_given(
     assert sent == [select]
 
 
-async def test_thread_state_reaches_a_client_without_openai_encrypted_reasoning(
+async def test_thread_state_reaches_a_client_without_provider_replay_data(
     monkeypatch,
 ) -> None:
-    openai = {"type": "reasoning", "id": "rs_1", "reasoning": "Checking the tests"}
-    anthropic = {"type": "reasoning", "reasoning": "Reading the diff", "extras": {"signature": "s"}}
+    # Each provider's blocks as it returns them, and as LangChain's standard blocks.
+    openai = {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "gAAAAB"}
+    openai_standard = {
+        "type": "reasoning",
+        "reasoning": "Checking the tests",
+        "extras": {"content": [], "encrypted_content": "gAAAAB"},
+    }
+    thinking = {"type": "thinking", "thinking": "Reading the diff", "signature": "EqQBCkYI"}
+    thinking_standard = {
+        "type": "reasoning",
+        "reasoning": "Reading the diff",
+        "extras": {"signature": "EqQBCkYI"},
+    }
+    redacted = {"type": "redacted_thinking", "data": "EmwKAhgB"}
     answer = {"type": "text", "text": "Done"}
 
     def agent_server(request: httpx.Request | httpx2.Request) -> httpx.Response | httpx2.Response:
         response = httpx2.Response if isinstance(request, httpx2.Request) else httpx.Response
         if request.url.path.endswith("/state"):
-            encrypted = {**openai, "extras": {"content": [], "encrypted_content": "gAAAAB"}}
-            message = {"type": "ai", "content": [encrypted, anthropic, answer]}
+            content = [openai, openai_standard, thinking, thinking_standard, redacted, answer]
+            message = {"type": "ai", "content": content}
             return response(200, json={"values": {"messages": [message]}})
         return response(200, json=[])
 
@@ -1526,8 +1538,11 @@ async def test_thread_state_reaches_a_client_without_openai_encrypted_reasoning(
 
     assert response.status_code == 200
     assert response.json()["values"]["messages"][0]["content"] == [
-        {**openai, "extras": {"content": []}},
-        anthropic,
+        {"type": "reasoning", "id": "rs_1", "summary": []},
+        {"type": "reasoning", "reasoning": "Checking the tests", "extras": {"content": []}},
+        {"type": "thinking", "thinking": "Reading the diff"},
+        {"type": "reasoning", "reasoning": "Reading the diff", "extras": {}},
+        {"type": "redacted_thinking"},
         answer,
     ]
 
