@@ -131,7 +131,6 @@ class SandboxDefinition:
 
     #: Options that shape how MDA resolves the sandbox rather than the create request.
     RESOLUTION_OPTION_KEYS: ClassVar[tuple[str, ...]] = (
-        "_openswe_sandbox_id",
         "_openswe_create_fields",
         "_openswe_no_manage_proxy",
     )
@@ -183,6 +182,9 @@ def normalize_sandbox_options(options: dict[str, object]) -> dict[str, object]:
         raise TypeError(
             "proxy_config needs MDA to manage the proxy. Remove _openswe_no_manage_proxy."
         )
+    existing = normalized.get("existing_sandbox")
+    if existing is not None and (not isinstance(existing, str) or not existing.strip()):
+        raise TypeError("existing_sandbox must be a non-empty sandbox name.")
     return normalized
 
 

@@ -20,19 +20,21 @@ import sandbox_service  # noqa: E402
 if not sandbox_service.REAL:
     from managed_deepagents import _sandbox_proxy as mda_sandbox_proxy
     from managed_deepagents import runtime as mda_runtime
+    from managed_deepagents.sandbox import SandboxDefinition
 
     def _stand_in_claim(
-        _sandbox: object, *, scope_key: str, **_kwargs: object
+        sandbox: SandboxDefinition, *, scope_key: str, **_kwargs: object
     ) -> mda_runtime._SandboxClaim:
         # A stand-in sandbox is ready at once; its first use opens it under the same name.
-        name = sandbox_service.mda_sandbox_name(scope_key)
+        name = sandbox_service.mda_sandbox_name(scope_key, sandbox.options.get("existing_sandbox"))
         return mda_runtime._SandboxClaim(None, None, adopted=False, host_name=name)
 
     def _stand_in_mda_sandbox(
-        _sandbox: object, *, scope_key: str, **_kwargs: object
-    ) -> tuple[sandbox_service.StandInSandbox, str]:
-        name = sandbox_service.mda_sandbox_name(scope_key)
-        return sandbox_service.open_mda_sandbox(name), name
+        sandbox: SandboxDefinition, *, scope_key: str, **_kwargs: object
+    ) -> tuple[sandbox_service.StandInSandbox, str, bool]:
+        name = sandbox_service.mda_sandbox_name(scope_key, sandbox.options.get("existing_sandbox"))
+        # Not a lead's sandbox a subagent opened from the lead's binding.
+        return sandbox_service.open_mda_sandbox(name), name, False
 
     def _no_proxy(*_args: object, **_kwargs: object) -> None:
         # LangSmith holds a sandbox's proxy config; the stand-in has none to write.

@@ -19,6 +19,7 @@ import re
 import socket
 import threading
 import time
+import weakref
 from collections import OrderedDict
 from collections.abc import (
     AsyncGenerator,
@@ -364,13 +365,15 @@ _SANDBOX_NAME_CONFLICT_RE = re.compile(
 class _ManagedSandboxEntry:
     """Cached sandbox plus per-thread connector sandbox sync state."""
 
-    __slots__ = ("backend", "host_name", "selection_fingerprint", "synced_threads")
+    __slots__ = ("backend", "host_name", "keeps_proxy", "selection_fingerprint", "synced_threads")
 
     def __init__(
         self,
         backend: SandboxBackendProtocol,
         host_name: str | None = None,
         selection_fingerprint: str | None = None,
+        *,
+        keeps_proxy: bool = False,
     ) -> None:
         self.backend = backend
         self.synced_threads: set[str] = set()
@@ -378,12 +381,21 @@ class _ManagedSandboxEntry:
         self.host_name = host_name
         #: Options fingerprint of the dynamic selection this process created or adopted it with.
         self.selection_fingerprint = selection_fingerprint
+        #: A lead's existing sandbox this run opened from the lead's binding: its proxy
+        #: config is left alone unless the run declares one.
+        self.keeps_proxy = keeps_proxy
+
+    def serves(self, subagent: bool) -> bool:
+        """Whether a run may reuse this entry: a lead's existing sandbox a subagent opened
+        from the lead's binding is only a subagent's, since a lead run naming no sandbox
+        opens its own."""
+        return subagent or not self.keeps_proxy
 
 
 class _SandboxClaim:
     """A sandbox adopted or created, but maybe still booting and not yet used."""
 
-    __slots__ = ("adopted", "binding", "client", "host_name", "sandbox")
+    __slots__ = ("adopted", "binding", "client", "host_name", "keeps_proxy", "sandbox")
 
     def __init__(
         self,
@@ -393,6 +405,7 @@ class _SandboxClaim:
         adopted: bool,
         host_name: str | None,
         binding: tuple[str, Mapping[str, str | None]] | None = None,
+        keeps_proxy: bool = False,
     ) -> None:
         self.client = client
         self.sandbox = sandbox
@@ -400,6 +413,12 @@ class _SandboxClaim:
         self.host_name = host_name
         #: The thread to bind the sandbox to once it boots, and its current record.
         self.binding = binding
+        #: Whether this is a lead's existing sandbox a subagent opened from the lead's binding.
+        self.keeps_proxy = keeps_proxy
+
+    def serves(self, subagent: bool) -> bool:
+        """Whether a run may use this claim; as ``_ManagedSandboxEntry.serves``."""
+        return subagent or not self.keeps_proxy
 
 
 #: Created sandboxes, keyed by thread and any dynamic selection's mounts,
@@ -410,6 +429,12 @@ _managed_sandboxes: dict[str, _ManagedSandboxEntry] = {}
 #: Sandboxes ``runtime.backend.aopen(wait=False)`` claimed, by the same key, until their
 #: first use waits for them to boot and moves them to ``_managed_sandboxes``.
 _claimed_sandboxes: dict[str, _SandboxClaim] = {}
+#: Each cached backend's sandbox name and keep-proxy flag, which outlive a later run
+#: replacing the entry for its key: a subagent keeps working in the sandbox it opened
+#: after its lead opens another. Values never hold the backend, so it can be collected.
+_backend_sandboxes: weakref.WeakKeyDictionary[SandboxBackendProtocol, tuple[str | None, bool]] = (
+    weakref.WeakKeyDictionary()
+)
 #: Guards the cache / per-key lock maps only — never held across cold create.
 _managed_sandbox_lock = threading.Lock()
 #: One lock per scope key so concurrent resolves for the *same* sandbox share a
@@ -435,6 +460,17 @@ def _peek_managed_host_name(key: str) -> str | None:
         return entry.host_name if entry is not None else None
 
 
+def _peek_backend_sandbox(key: str, backend: SandboxBackendProtocol) -> tuple[str | None, bool]:
+    """The name of the sandbox ``backend`` works in, and whether its proxy config is kept.
+
+    Recorded for ``backend`` itself: a lead run can replace the entry for ``key`` while
+    a subagent keeps working in the sandbox it opened.
+    """
+    with _managed_sandbox_lock:
+        recorded = _backend_sandboxes.get(backend)
+    return recorded if recorded is not None else (_peek_managed_host_name(key), False)
+
+
 def _bake_base(sandbox: SandboxDefinition | None) -> tuple[str, str] | None:
     """The ``(option, value)`` bake base a sandbox sets, if any."""
     if sandbox is None:
@@ -455,9 +491,12 @@ def _inherit_setup_recipe(
     The recipe is baked on the base declared in ``sandbox/__init__.py``, or on
     Host's default image when none is declared. A selection without a base, or
     with that same base, clones the recipe. Any other base was never baked, so
-    the run fails instead of starting a sandbox without ``setup.sh``.
+    the run fails instead of starting a sandbox without ``setup.sh``. A selection
+    naming an existing sandbox creates nothing, so its base is never checked.
     """
-    if not _string_option(os.environ.get(RECIPE_SNAPSHOT_ENV)):
+    if not _string_option(os.environ.get(RECIPE_SNAPSHOT_ENV)) or _string_option(
+        selected.options.get("existing_sandbox")
+    ):
         return selected
     base = _bake_base(selected)
     if base is None:
@@ -501,6 +540,7 @@ def _sandbox_create_kwargs(
             "api_key",
             "default_timeout",
             "template_name",
+            "existing_sandbox",
             *_BAKE_BASE_OPTION_KEYS,
             *SandboxDefinition.RESOLUTION_OPTION_KEYS,
         }
@@ -2754,12 +2794,14 @@ class _LazyManagedSandboxBackend(ManagedSandboxBackend):
         if not isinstance(known, _RunSandbox):
             return None
         try:
-            key = _thread_scope_key(self._config(), known.selection)
+            config = self._config()
+            key = _thread_scope_key(config, known.selection)
         except Exception:  # noqa: BLE001 — no thread, so no sandbox, as in ``id``
             return None
         with _managed_sandbox_lock:
             entry = _managed_sandboxes.get(key)
-        return entry.backend if entry is not None else None
+        helper = _parent_sandbox_scope(config, known.selection) is not None
+        return entry.backend if entry is not None and entry.serves(helper) else None
 
     @property
     def id(self) -> str:
@@ -2920,17 +2962,19 @@ class _LazyManagedSandboxBackend(ManagedSandboxBackend):
             self._source.run_config, bound_configurable=self._bound_configurable
         )
 
-    async def _sync_sandbox_proxy_config(self, run_sandbox: _RunSandbox) -> None:
+    async def _sync_sandbox_proxy_config(
+        self, run_sandbox: _RunSandbox, backend: SandboxBackendProtocol
+    ) -> None:
         from managed_deepagents.sandbox import manages_proxy  # noqa: PLC0415
 
         if not manages_proxy(run_sandbox.sandbox.options):
             return
         config = self._config()
-        key = _thread_scope_key(config, run_sandbox.selection)
+        name, keeps_proxy = _peek_backend_sandbox(
+            _thread_scope_key(config, run_sandbox.selection), backend
+        )
         await self._source.proxy_config_sync.sync(
-            run_sandbox.sandbox,
-            _peek_managed_host_name(key),
-            config,
+            run_sandbox.sandbox, name, config, keeps_proxy=keeps_proxy
         )
 
     def _backend(self, run_sandbox: _RunSandbox) -> SandboxBackendProtocol:
@@ -2979,7 +3023,7 @@ class _LazyManagedSandboxBackend(ManagedSandboxBackend):
         backend = self._backend(run_sandbox)
         try:
             if execute:
-                run_sync(self._sync_sandbox_proxy_config(run_sandbox))
+                run_sync(self._sync_sandbox_proxy_config(run_sandbox, backend))
             return operation(backend)
         except Exception as error:
             self._forget_missing(backend, error)
@@ -2999,7 +3043,7 @@ class _LazyManagedSandboxBackend(ManagedSandboxBackend):
         backend = await self._abackend(run_sandbox)
         try:
             if execute:
-                await self._sync_sandbox_proxy_config(run_sandbox)
+                await self._sync_sandbox_proxy_config(run_sandbox, backend)
             result = operation(backend)
             # Provider stand-ins may implement an ``a*`` method synchronously.
             if inspect.isawaitable(result):
@@ -3122,18 +3166,20 @@ def _resolve_managed_sandbox(
     key = _thread_scope_key(config, selection)
     thread_key = _thread_sync_key(config)
     has_sandbox = has_sandbox_connectors(connectors)
+    # A helper sharing its lead's sandbox only refreshes credentials: the lead's
+    # workspace is already set up.
+    helper = _parent_sandbox_scope(config, selection) is not None
 
     # Serialize same-key resolve/provision; different keys use different locks
     # so unrelated cold creates stay parallel.
     with _sandbox_key_lock(key):
         with _managed_sandbox_lock:
-            entry = _persisted_or_none(_managed_sandboxes.get(key), sandbox)
+            entry = _managed_sandboxes.get(key)
+        if entry is not None and not entry.serves(helper):
+            entry = None
 
         if entry is not None:
             _warn_selection_changed(entry, selection, config)
-            # A helper sharing its lead's sandbox only refreshes credentials: the
-            # lead's workspace is already set up.
-            helper = _parent_sandbox_scope(config, selection) is not None
             if has_sandbox and (thread_key in entry.synced_threads or helper):
                 # Same thread: refresh credentials / CLI wiring without re-cloning.
                 run_connector_sandbox_hooks(
@@ -3159,11 +3205,12 @@ def _resolve_managed_sandbox(
         # seconds and would wedge every other Host worker. A helper adopting its
         # lead's sandbox only refreshes credentials; one whose lead hasn't
         # created it yet creates it under the lead's scope for the lead to adopt.
-        helper = _parent_sandbox_scope(config, selection) is not None
         with _managed_sandbox_lock:
             # A claimed sandbox that fails to boot is claimed afresh by the next use.
             claim = _claimed_sandboxes.pop(key, None)
-        backend, host_name = _create_langsmith_sandbox(
+        if claim is not None and not claim.serves(helper):
+            claim = None
+        backend, host_name, keeps_proxy = _create_langsmith_sandbox(
             sandbox,
             config=config,
             connectors=connectors,
@@ -3178,10 +3225,12 @@ def _resolve_managed_sandbox(
             backend,
             host_name=host_name,
             selection_fingerprint=selection.fingerprint if selection is not None else None,
+            keeps_proxy=keeps_proxy,
         )
         entry.synced_threads.add(thread_key)
         with _managed_sandbox_lock:
             _managed_sandboxes[key] = entry
+            _backend_sandboxes[entry.backend] = (entry.host_name, entry.keeps_proxy)
         return entry.backend
 
 
@@ -3196,10 +3245,15 @@ def _claim_managed_sandbox(
     hooks, on its first use.
     """
     key = _thread_scope_key(config, selection)
+    helper = _parent_sandbox_scope(config, selection) is not None
     with _sandbox_key_lock(key):
         with _managed_sandbox_lock:
-            entry = _persisted_or_none(_managed_sandboxes.get(key), sandbox)
+            entry = _managed_sandboxes.get(key)
             claim = _claimed_sandboxes.get(key)
+        if entry is not None and not entry.serves(helper):
+            entry = None
+        if claim is not None and not claim.serves(helper):
+            claim = None
         if entry is not None:
             return entry.host_name or entry.backend.id
         if claim is None:
@@ -3209,17 +3263,6 @@ def _claim_managed_sandbox(
             with _managed_sandbox_lock:
                 _claimed_sandboxes[key] = claim
         return claim.host_name
-
-
-def _persisted_or_none(
-    entry: _ManagedSandboxEntry | None, sandbox: SandboxDefinition
-) -> _ManagedSandboxEntry | None:
-    """``entry``, unless Open SWE's backend names another sandbox for the thread
-    (``_openswe_sandbox_id``), as when another replica cached MDA's own name for it."""
-    persisted = _string_option(sandbox.options.get("_openswe_sandbox_id"))
-    if entry is None or persisted is None or entry.host_name in {None, persisted}:
-        return entry
-    return None
 
 
 def _send_create_fields(client: LangSmithSandboxClient, fields: Mapping[str, object]) -> None:
@@ -3264,26 +3307,36 @@ def _thread_sync_key(
 
 @dataclass(frozen=True, slots=True)
 class _SandboxSelection:
-    """Digests of a dynamic sandbox selection's identity options and of its mounts alone."""
+    """Digests of a dynamic sandbox selection's identity options and of its mounts alone,
+    and the existing sandbox it names."""
 
     fingerprint: str
     mounts_fingerprint: str | None
+    existing: str | None = None
 
 
 def _sandbox_selection(sandbox: SandboxDefinition) -> _SandboxSelection:
-    """Fingerprint a dynamic selection: its options for create, its mounts for the box key."""
+    """Fingerprint a dynamic selection: its options for create; its mounts and existing
+    sandbox for the box key."""
     mount_config = sandbox.options.get("mount_config")
     mounts = mount_config.get("mounts") if isinstance(mount_config, Mapping) else None
     return _SandboxSelection(
         fingerprint=_sandbox_selection_fingerprint(sandbox),
         mounts_fingerprint=_sandbox_value_digest(mounts) if mounts else None,
+        existing=_string_option(sandbox.options.get("existing_sandbox")),
     )
 
 
-def _with_selection_mounts(scope: str, selection: _SandboxSelection | None) -> str:
-    """Add a selection's mounts to a thread scope, so per-user mounts never share a box."""
-    mounts = selection.mounts_fingerprint if selection is not None else None
-    return f"{scope}:mounts:{mounts}" if mounts else scope
+def _with_selection_scope(scope: str, selection: _SandboxSelection | None) -> str:
+    """Add a selection's mounts and existing sandbox to a thread scope, so per-user mounts
+    never share a box, and a run naming another existing sandbox never reuses a cached one."""
+    if selection is None:
+        return scope
+    if selection.mounts_fingerprint:
+        scope = f"{scope}:mounts:{selection.mounts_fingerprint}"
+    if selection.existing:
+        scope = f"{scope}:existing:{selection.existing}"
+    return scope
 
 
 def _warn_selection_changed(
@@ -3407,7 +3460,7 @@ def _thread_scope_key(
     if (shared := _parent_sandbox_scope(config, selection)) is not None:
         return shared
     thread_key = f"thread:{_thread_id_from_config(config)}"
-    return _with_selection_mounts(thread_key, selection)
+    return _with_selection_scope(thread_key, selection)
 
 
 #: ``configurable`` key where deepagents puts an async subagent run's parent reference.
@@ -3454,7 +3507,7 @@ def _parent_sandbox_scope(
     if lead_thread is None or _VERIFIED_LEAD_THREAD.get() != lead_thread:
         return None
     scope = f"thread:{lead_thread}"
-    return _with_selection_mounts(scope, selection)
+    return _with_selection_scope(scope, selection)
 
 
 def _thread_id_from_config(config: ManagedRunConfig | None) -> str:
@@ -3777,10 +3830,12 @@ def _create_langsmith_sandbox(
     scope_key: str,
     selection: _SandboxSelection | None = None,
     claim: _SandboxClaim | None = None,
-) -> tuple[SandboxBackendProtocol, str | None]:
+) -> tuple[SandboxBackendProtocol, str | None, bool]:
     """Build a LangSmith sandbox, optionally from the baked recipe, and wrap it.
 
     A ``claim`` already adopted or created the sandbox; it is waited for here.
+    Returns the backend, its name, and whether its proxy config is kept
+    (``_SandboxClaim.keeps_proxy``).
     """
     if claim is None:
         claim = _claim_langsmith_sandbox(
@@ -3823,7 +3878,7 @@ def _create_langsmith_sandbox(
         identity=identity,
     )
 
-    return resolved, host_name
+    return resolved, host_name, claim.keeps_proxy
 
 
 def _claim_langsmith_sandbox(
@@ -3846,16 +3901,15 @@ def _claim_langsmith_sandbox(
     client = _sandbox_client_for(sandbox)
     _send_create_fields(client, declared_create_fields(sandbox.options))
     deployment = _managed_deployment_name()
+    # A run that names an existing sandbox opens only that one, and never creates it.
+    existing = _string_option(sandbox.options.get("existing_sandbox"))
     lookup_names = (
-        _managed_sandbox_lookup_names(deployment, scope_key, sandbox, config, selection)
+        [existing]
+        if existing is not None
+        else _managed_sandbox_lookup_names(deployment, scope_key, sandbox, config, selection)
         if deployment
         else []
     )
-    # The name Open SWE's backend recorded for the thread's sandbox, which may predate
-    # MDA's: the only one the thread may use, so a missing one is never created.
-    persisted = _string_option(sandbox.options.get("_openswe_sandbox_id"))
-    if persisted is not None:
-        lookup_names = [persisted]
     from managed_deepagents._sandbox_binding import read_bound_sandboxes  # noqa: PLC0415
 
     sandbox_name = lookup_names[0] if lookup_names else None
@@ -3867,9 +3921,13 @@ def _claim_langsmith_sandbox(
         if binding_thread
         else None
     )
+    leads = _leads_bound_sandbox(config, selection, bound, existing, lookup_names)
+    if leads is not None:
+        existing = sandbox_name = leads
+        lookup_names = [leads]
     must_exist = dict(bound or {})
-    if persisted is not None:
-        must_exist.setdefault(persisted, None)
+    if existing is not None:
+        must_exist.setdefault(existing, None)
     langsmith_sandbox, adopted = _resolve_sandbox_instance(
         client,
         create_kwargs,
@@ -3883,7 +3941,43 @@ def _claim_langsmith_sandbox(
         adopted=adopted,
         host_name=_sandbox_handle_name(langsmith_sandbox) or sandbox_name,
         binding=(binding_thread, bound) if binding_thread and bound is not None else None,
+        keeps_proxy=leads is not None,
     )
+
+
+def _leads_bound_sandbox(
+    config: ManagedRunConfig | None,
+    selection: _SandboxSelection | None,
+    bound: Mapping[str, str | None] | None,
+    existing: str | None,
+    lookup_names: list[str],
+) -> str | None:
+    """The lead's bound sandbox a subagent sharing it opens instead of its own lookup names.
+
+    A subagent's ``resolve`` runs for its own run, so it may name no sandbox, or
+    another one, while its lead is bound to one it named. A subagent without
+    mounts of its own opens the lead's one bound sandbox rather than create
+    another for the lead; one naming a different existing sandbox, or a lead
+    bound to several, fails rather than guess. A lead not bound yet is left to
+    the subagent's own lookup.
+    """
+    if not bound or _parent_sandbox_scope(config, selection) is None:
+        return None
+    if any(name in bound for name in lookup_names):
+        return None
+    if existing is not None:
+        raise RuntimeError(
+            f"This run names sandbox {existing!r}, but the lead it shares a sandbox with "
+            f"is bound to {', '.join(sorted(bound))}"
+        )
+    if selection is not None and selection.mounts_fingerprint:
+        return None
+    if len(bound) != 1:
+        raise RuntimeError(
+            "The lead this run shares a sandbox with is bound to several sandboxes, "
+            "none of them this run's"
+        )
+    return next(iter(bound))
 
 
 def _sandbox_binding_thread(

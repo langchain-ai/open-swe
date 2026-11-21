@@ -1,16 +1,10 @@
 """Config defaults for native LangGraph execution."""
 
-import asyncio
 from collections.abc import AsyncIterator, Iterator, Mapping
 from contextvars import Token
-from functools import cached_property
 from typing import Any, Self, cast
-from uuid import UUID
 
-from langchain_core.callbacks import AsyncCallbackManager, BaseCallbackHandler
 from langchain_core.runnables.config import RunnableConfig
-from langchain_core.tracers.langchain import LangChainTracer
-from langchain_core.tracers.schemas import Run
 from langgraph._internal._config import ensure_config, patch_configurable
 from langgraph._internal._constants import CONFIG_KEY_CHECKPOINTER, CONFIG_KEY_RUNTIME
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -45,6 +39,7 @@ from managed_deepagents._telemetry.otel import (
     exit_log_context,
     trace_id_from_metadata,
 )
+from managed_deepagents._turn_trace import turn_trace_config, without_tracers
 from managed_deepagents.run_context import is_managed_key
 
 #: Run ``configurable`` key deepagents uses to name the agent that started an async subagent.
@@ -70,114 +65,11 @@ def graph_default_config(config: Mapping[str, object] | None) -> RunnableConfig:
     return cast("RunnableConfig", prepared)
 
 
-class ManagedTurnTracer(LangChainTracer):
-    """Close a managed invocation's trace tree when its root finishes."""
-
-    @cached_property
-    def roots(self) -> list[Run]:
-        return []
-
-    @property
-    def root(self) -> Run | None:
-        return self.roots[0] if self.roots else None
-
-    def copy_with_metadata_defaults(
-        self, *, metadata: Mapping[str, str] | None = None, tags: list[str] | None = None
-    ) -> LangChainTracer:
-        tracer = super().copy_with_metadata_defaults(metadata=metadata, tags=tags)
-        if isinstance(tracer, ManagedTurnTracer):
-            tracer.roots = self.roots
-        return tracer
-
-    def _start_trace(self, run: Run) -> None:
-        if self.root is None:
-            self.roots.append(run)
-            run.metadata.pop("end_reason", None)
-        elif self.root.end_time is not None:
-            run.extra["__disabled"] = True
-        super()._start_trace(run)
-
-    def _errored_chain_run(
-        self, error: BaseException, inputs: dict[str, object] | None, run_id: UUID
-    ) -> Run:
-        run = super()._errored_chain_run(error, inputs, run_id)
-        if run is self.root:
-            reason = "failed"
-            if isinstance(error, (asyncio.CancelledError, GeneratorExit)):
-                reason = "cancelled" if isinstance(error, GeneratorExit) else "failed"
-                pending: list[BaseException] = [error]
-                seen: set[int] = set()
-                while pending:
-                    cause = pending.pop()
-                    if id(cause) in seen:
-                        continue
-                    seen.add(id(cause))
-                    if isinstance(cause, TimeoutError) or type(cause).__name__ == "UserTimeout":
-                        reason = "failed"
-                        break
-                    if type(cause).__name__ == "UserInterrupt":
-                        reason = (
-                            "superseded"
-                            if str(cause).startswith("superseded by run ")
-                            and "(multitask_strategy=interrupt)" in str(cause)
-                            else "cancelled"
-                        )
-                    pending.extend(arg for arg in cause.args if isinstance(arg, BaseException))
-                    if cause.__cause__ is not None:
-                        pending.append(cause.__cause__)
-                if reason != "failed":
-                    run.error = None
-            run.metadata["end_reason"] = reason
-        return run
-
-    def _end_trace(self, run: Run) -> None:
-        if run is self.root:
-            run.metadata.setdefault("end_reason", "failed" if run.error else "completed")
-            pending = list(run.child_runs)
-            while pending:
-                child = pending.pop()
-                pending.extend(child.child_runs)
-                if child.end_time is None:
-                    child.end(end_time=run.end_time)
-                    self._update_run_single(child)
-                    child.extra["__disabled"] = True
-        super()._end_trace(run)
-
-    @classmethod
-    def for_run(cls, config: RunnableConfig) -> RunnableConfig:
-        """Preserve tracing destinations and parents while isolating invocation lifecycle."""
-        manager = AsyncCallbackManager.configure(inheritable_callbacks=config.get("callbacks"))
-        # Tracing-context metadata makes ``configure`` give each list its own copy of a
-        # tracer; the copies share a run map. Both lists get the same replacement, or the
-        # graph's node runs inherit a copy that never saw the graph run and become roots.
-        tracers: dict[int, ManagedTurnTracer] = {}
-
-        def managed(handler: BaseCallbackHandler) -> BaseCallbackHandler:
-            if not isinstance(handler, LangChainTracer):
-                return handler
-            if (tracer := tracers.get(id(handler.run_map))) is None:
-                tracer = tracers[id(handler.run_map)] = cls(
-                    example_id=handler.example_id,
-                    project_name=handler.project_name,
-                    address=handler.address,
-                    client=handler.client,
-                    tags=handler.tags,
-                    metadata=handler.tracing_metadata,
-                    run_map=dict(handler.run_map),
-                    order_map=dict(handler.order_map),
-                    _external_run_ids=dict(handler._external_run_ids),  # noqa: SLF001
-                )
-            return tracer
-
-        manager.handlers = [managed(handler) for handler in manager.handlers]
-        manager.inheritable_handlers = [
-            managed(handler) for handler in manager.inheritable_handlers
-        ]
-        return {**config, "callbacks": manager}
-
-
 class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
     """Remove ingress transport before native context conversion, on every execution.
+
+    A top-level run is traced under its own ``ManagedTurnTracer`` (see
+    ``_turn_trace``), so its trace ends with it.
 
     Each step sees the run's channel and thread; when the stream ends, the run's
     result goes to its thread origin, or a scheduled run's ``deliver_to``. A
@@ -207,6 +99,16 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         copied.sandbox_run = self.sandbox_run
         return copied
 
+    def _turn_traced(self, *, replaced: bool) -> Self:
+        """The graph to run once ``turn_trace_config`` has replaced the run's tracers.
+
+        LangGraph merges a graph's bound callbacks back into the run's, so a tracer bound
+        with ``with_config`` would trace the run beside its turn tracer. This runs a copy
+        bound without it; the shared graph is left as it is.
+        """
+        defaults = without_tracers(self.config) if replaced else None
+        return self if defaults is None else self.copy(update={"config": defaults})
+
     def stream(
         self,
         input: Any,
@@ -221,7 +123,11 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         log = run_log_context(self.config, config)
         output = None if self._keeps_state(merged) else RunOutput()
         config = execution_config(self.config, config)
-        iterator = super().stream(input, config, context=context, **kwargs)
+        traced = turn_trace_config(self.config, config)
+        graph = self._turn_traced(replaced=traced is not config)
+        iterator = super(ManagedCompiledAgent, graph).stream(
+            input, traced, context=context, **kwargs
+        )
         try:
             while True:
                 tokens = _enter_step(
@@ -269,8 +175,11 @@ class ManagedCompiledAgent(CompiledStateGraph[Any, Any, Any, Any]):
         log = run_log_context(self.config, config)
         output = None if self._keeps_state(merged) else RunOutput()
         config = execution_config(self.config, config)
-        config = ManagedTurnTracer.for_run(ensure_config(self.config, config))
-        iterator = super().astream(input, config, context=context, **kwargs)
+        traced = turn_trace_config(self.config, config)
+        graph = self._turn_traced(replaced=traced is not config)
+        iterator = super(ManagedCompiledAgent, graph).astream(
+            input, traced, context=context, **kwargs
+        )
         try:
             while True:
                 tokens = _enter_step(

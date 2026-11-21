@@ -30,6 +30,7 @@ from managed_deepagents._run_local import RunLocal
 from managed_deepagents.sandbox import ConnectionHeader, SandboxDefinition
 
 if TYPE_CHECKING:
+    import httpx
     from langsmith.sandbox import SandboxProxyConfig
 
     from managed_deepagents._credential_gate import CredentialConsumer
@@ -190,7 +191,7 @@ def patch_sandbox_proxy_config(
             "Could not update sandbox proxy credentials.", "sandbox"
         ) from None
     if not response.is_success:
-        raise ProxyConfigRefusedError.of(response)
+        raise ProxyConfigRefusedError.of(response, config)
 
 
 #: Credential-shaped text an API error may echo back, never repeated in an error message.
@@ -198,35 +199,69 @@ _SECRET_TEXT = re.compile(
     r"(gh[opsu]_|github_pat_|lsv2_[a-z]{2}_|Bearer\s+|Basic\s+)[A-Za-z0-9_.=+/-]+", re.IGNORECASE
 )
 _DETAIL_LIMIT = 300
+#: Shorter pieces of a sent value (a scheme such as ``Bearer``) are not credentials.
+_SECRET_PIECE_MIN = 8
+
+
+def _sent_secrets(config: object) -> list[str]:
+    """Each credential ``config`` carries, as an API error could echo it, longest first.
+
+    That is every ``value`` the config sends (header values, opaque secrets), whole and
+    split on whitespace (a ``Bearer`` or ``Basic`` header's token), plain and JSON-escaped.
+    Workspace secret references name a secret rather than carry one.
+    """
+    found: set[str] = set()
+
+    def visit(node: object) -> None:
+        if isinstance(node, Mapping):
+            value = node.get("value")
+            if isinstance(value, str) and node.get("type") != "workspace_secret":
+                whole = " ".join(value.split())
+                for piece in (whole, *whole.split(" ")):
+                    if len(piece) >= _SECRET_PIECE_MIN:
+                        found.update((piece, json.dumps(piece)[1:-1]))
+            for child in node.values():
+                visit(child)
+        elif isinstance(node, list | tuple):
+            for child in node:
+                visit(child)
+
+    visit(config)
+    return sorted(found, key=len, reverse=True)
 
 
 class ProxyConfigRefusedError(RuntimeError):
     """The sandbox API answered a proxy config write with an error; its message says why,
     credentials removed.
 
-    Open SWE only: without it a refusal (HTTP 422) does not say which part of the config the
-    API rejected.
+    Without it a refusal (for example HTTP 422) does not say which part of the config the API
+    rejected.
     """
 
     @classmethod
-    def of(cls, response: object) -> ProxyConfigRefusedError:
-        """The error for ``response``: its status, and the API's ``detail`` where it has one."""
-        status = getattr(response, "status_code", None)
-        return cls(
-            f"Could not update sandbox proxy credentials (HTTP {status}{cls._detail(response)})."
-        )
+    def of(cls, response: httpx.Response, sent: object = None) -> ProxyConfigRefusedError:
+        """The error for ``response``: its status, and the API's ``detail`` where it has one.
+
+        ``sent`` is the config that was written: any of its values the detail echoes is
+        removed, whatever its format.
+        """
+        status, detail = response.status_code, cls._detail(response, sent)
+        return cls(f"Could not update sandbox proxy credentials (HTTP {status}{detail}).")
 
     @staticmethod
-    def _detail(response: object) -> str:
+    def _detail(response: httpx.Response, sent: object) -> str:
         try:
-            body = response.json()  # type: ignore[attr-defined]
+            body = response.json()
         except Exception:  # noqa: BLE001 — a body that is not JSON says nothing safe to repeat
             return ""
         detail = body.get("detail") if isinstance(body, Mapping) else None
         if detail is None:
             return ""
         text = detail if isinstance(detail, str) else json.dumps(detail, default=str)
-        text = _SECRET_TEXT.sub(r"\1[redacted]", " ".join(text.split()))
+        text = " ".join(text.split())
+        for secret in _sent_secrets(sent):
+            text = text.replace(secret, "[redacted]")
+        text = _SECRET_TEXT.sub(r"\1[redacted]", text)
         if len(text) > _DETAIL_LIMIT:
             text = f"{text[: _DETAIL_LIMIT - 1]}…"
         return f": {text}"
@@ -253,10 +288,19 @@ class SandboxProxyConfigSync:
         sandbox: SandboxDefinition,
         name: str | None,
         config: Mapping[str, object] | None,
+        *,
+        keeps_proxy: bool = False,
     ) -> None:
+        """Write this run's proxy config on sandbox ``name`` before its first command.
+
+        An existing sandbox, named by the run or opened from its lead's binding
+        (``keeps_proxy``), keeps its own proxy config unless the run declares one.
+        """
         from langsmith.sandbox import ResourceNotFoundError  # noqa: PLC0415
 
         template = sandbox.options.get("proxy_config")
+        if template is None and (keeps_proxy or sandbox.options.get("existing_sandbox")):
+            return
         if not name:
             raise RuntimeError("Cannot update sandbox proxy credentials without a sandbox name.")
         # Proxy state belongs to the shared Host box. Set this run's config,

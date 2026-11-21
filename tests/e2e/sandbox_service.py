@@ -79,6 +79,9 @@ def open_mda_sandbox(sandbox_id: str | None = None) -> StandInSandbox:
     return StandInSandbox(sandbox_id or f"e2e-{uuid.uuid4().hex[:12]}")
 
 
-def mda_sandbox_name(scope_key: str) -> str:
-    """The name MDA gives the sandbox it keeps for ``scope_key``, the same on every call."""
+def mda_sandbox_name(scope_key: str, existing: object = None) -> str:
+    """The sandbox MDA opens for ``scope_key``: the ``existing`` sandbox the run names, or else
+    the one it keeps for the scope, under the same name on every call."""
+    if isinstance(existing, str):
+        return existing
     return f"e2e-{hashlib.sha256(scope_key.encode()).hexdigest()[:16]}"

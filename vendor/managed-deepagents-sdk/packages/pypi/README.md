@@ -660,8 +660,12 @@ returns the run's input, as `agent.invoke` takes it, or, to also set run
 options such as `context`, `metadata` or `webhook`, a list of runs, as
 `[{"input": ..., "context": ...}]`, as the GitHub and Linear handlers do.
 `None` starts no run, and the app neither reacts nor
-replies. A handler that raises, or returns input the channel can't start,
-starts no run either; the error is logged without its message. The message's
+replies. Trigger Server gets its answer before MDA asks the handler, so a slow
+handler never times out the delivery. A handler that raises, or returns input
+the channel can't start, starts no run either; the error is logged without its
+message. To try a failing call again, retry it inside the handler with the
+backoff you choose; a delivery whose handler is still running or waiting when
+the deployment restarts is lost. The message's
 blocks and attachments are added to the handler's messages, and its files
 still reach `/workspace/attachments/`. Interrupt resumes don't go through
 `on_event`; a click on a button the agent posted does, as `"interaction"`: see
@@ -1165,9 +1169,10 @@ set. A handler that answers comments or reviews then skips `event.from_app`,
 or the agent answers itself. Issues, comments, pull requests and reviews from other bots, such as
 Dependabot, are ignored too, as on Linear and Slack; set `ignore_bots=False` to
 let them start runs. CI, `push` and `merge_group` events still reach their
-handlers. The request awaits the configured callback and run creation before
-acknowledgment (an endpoint's is asked after; see "Asking your service what to
-start"); synchronous and async callbacks are supported. A handler returns
+handlers. GitHub gets its answer first; then MDA asks the configured handler,
+a callback or an endpoint (see "Asking your service what to start"), and starts
+the run, so a slow handler never times out the delivery. Synchronous and async
+callbacks are supported. A handler returns
 what `agent.invoke` takes: a nonblank string (one user message), a message such
 as `HumanMessage(...)` with text or content blocks, or state such as
 `{"messages": [...], "todos": []}`. To set run options, it returns a list of
@@ -1189,7 +1194,14 @@ state as Agent Server's `threads.get_state` does, or `None` before any run, as
 on Slack and Linear; only a handler deciding an event can read it.
 `None` skips without a thread or run. GitHub posts no answer, so a GitHub
 handler has no `reply(message)`.
-Other results and callback failures are safely logged and start nothing.
+Other results are safely logged and start nothing. So does a handler that
+raises: GitHub already has its answer, so the delivery isn't failed; MDA logs
+the error's type only. Nor is a delivery whose run can't start, for example
+while the Agent Server is briefly unavailable: `on_finish` gets `failed` with
+reason `start`.
+To try a failing call again, retry it inside the handler with the backoff
+you choose: the handler may take as long as it needs. A delivery whose
+handler is still running or waiting when the deployment restarts is lost.
 
 Each issue or pull request has one thread, so the agent keeps the conversation:
 an issue, its comments, and a pull request with its reviews and review comments
@@ -1199,7 +1211,7 @@ because each thread runs a delivery once. The exception is an event whose only
 runs were on ephemeral threads, on a conversation that has no thread yet: those
 threads are deleted when their runs end, so a later redelivery starts them again. A comment that arrives while the agent
 is still working waits for that run to finish, so it never skips a decision the
-run stops for. There is no automatic retry.
+run stops for. GitHub never redelivers on its own.
 
 The list may hold several runs for one event, on threads the handler chooses
 (GitHub, Linear, HTTP and Slack channels):
@@ -1470,6 +1482,17 @@ LangSmith Studio, where the decision is made, also when Studio resumed it;
 replies in the session meanwhile get the same link. Comments that a
 session already delivers, such as the mention itself and replies in the
 session, don't also reach a `Comment.create` handler.
+
+Linear gets its answer before MDA asks the handler, so a slow handler never
+times out the delivery. A handler that raises starts nothing, and Linear doesn't
+send the delivery again; the error is logged by type only. The same holds for a
+run that can't start, for example while the Agent Server is briefly
+unavailable: `on_finish` gets `failed` with reason `start`. In an agent session,
+the session hears at once that something went wrong, since its author waits;
+an issue gets no comment, since its handler may have skipped the event.
+To try a failing call again, retry it inside the handler with the backoff
+you choose: the handler may take as long as it needs. A delivery whose
+handler is still running or waiting when the deployment restarts is lost.
 
 `app` also names the app deploy asks the admin to create: `name` (2-80
 characters, without "Linear"; defaults to the agent's name), `description`,
@@ -2053,11 +2076,31 @@ sandbox = define_sandbox(default_timeout=600, resolve=resolve)
   key: creation options (a bake base, `vcpus`, `mem_bytes`,
   `fs_capacity_bytes`, TTLs) and `proxy_config`. It cannot set
   `default_timeout` or `api_key`, and its proxy can reference only agent-owned
-  connections, because every run on the thread shares the sandbox. Name and
-  thread scope stay MDA's.
+  connections, because every run on the thread shares the sandbox. Thread
+  scope stays MDA's, and so does the name, unless the definition names an
+  existing sandbox.
 - Creation options apply when the thread's sandbox is created; a live sandbox
   is kept. The proxy is written before each command, so it applies to the run
-  that returned it.
+  that returned it (except on an existing sandbox, below).
+- To open a sandbox that already exists, such as one an eval harness created,
+  return a definition with `existing_sandbox` set to its name. The thread is bound
+  to it and MDA never creates it: if LangSmith no longer has it, the run fails
+  with `SandboxMissingError`. Name it on every run of the thread; a run that
+  names none opens MDA's own sandbox for the thread. Its creation options are
+  ignored. MDA leaves its proxy config alone unless the run declares a
+  `proxy_config`, which it writes as on any other sandbox; a config a run wrote
+  stays on the sandbox through later runs that declare none, so a resolver
+  that declares one should declare one on every run. The name can reach
+  any sandbox the deployment's key can, another thread's included, so take it
+  from something the agent trusts, such as its own records, never from a
+  caller's input.
+- An async subagent shares its lead's sandbox. Once the lead is bound to an
+  existing sandbox, a subagent without mounts of its own opens that sandbox
+  even if its own `resolve` names none, and leaves its proxy config alone
+  unless it declares a `proxy_config`. A subagent naming a different existing
+  sandbox, or whose lead is bound to several sandboxes, none of them its own,
+  fails. If the lead has not opened its sandbox yet, the subagent's own
+  `resolve` decides, so it should name the same `existing_sandbox` as the lead's.
 - `None` gives the run no sandbox: its files stay in agent state and
   `execute` is not offered.
 - If `resolve` raises, the model call or sandbox operation that asked for it

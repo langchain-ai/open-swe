@@ -107,6 +107,7 @@ def define_sandbox(
     registry: dict[str, str] | None = None,
     proxy_config: ProxyConfig | dict[str, object] | None = None,
     resolve: SandboxResolve | None = None,
+    existing_sandbox: str | None = None,
     _openswe_create_fields: dict[str, object] | None = None,
     _openswe_no_manage_proxy: bool = False,
     **options: object,
@@ -116,6 +117,16 @@ def define_sandbox(
     ``resolve(runtime)`` picks each run's sandbox, once per run, from the runtime
     the agent factory receives. Its definition overrides these options for that
     run; ``None`` runs it without a sandbox.
+
+    ``existing_sandbox`` names a LangSmith sandbox, in the deployment's workspace,
+    that the thread opens instead of the one MDA names for it. MDA binds the thread
+    to it but never creates it: a missing one fails the run with
+    ``SandboxMissingError``. Its proxy config is left alone unless the run declares a
+    ``proxy_config``, and a config one run wrote stays through later runs that declare
+    none. Set it on the definition ``resolve`` returns, on every
+    run of the thread; a run that names none opens MDA's own sandbox for the thread.
+    It can name any sandbox the deployment's key reaches, another thread's included,
+    so take the name from something the agent trusts, never from a caller's input.
 
     The ``_openswe_*`` arguments exist only for Open SWE's vendored copy and are not
     MDA's API: see Open SWE's vendor/mda-changes/ for why, and what MDA should offer
@@ -139,6 +150,8 @@ def define_sandbox(
     # Pydantic serializes helper dataclasses; the unresolved template must retain them.
     if proxy_config is not None:
         dumped["proxy_config"] = proxy_config
+    if existing_sandbox is not None:
+        dumped["existing_sandbox"] = existing_sandbox
     # Open SWE only; pydantic would copy or reject these, so they skip the model.
     dumped.update(
         {

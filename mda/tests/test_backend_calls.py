@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Final, Literal, Self, cast
 from unittest.mock import AsyncMock, MagicMock
 from urllib.error import URLError
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import anthropic
 import httpx
@@ -59,12 +59,10 @@ from managed_deepagents import (
     ConnectionNotFoundError,
     CredentialAuthorizationRequiredError,
     CredentialStoreError,
-    define_deep_agent,
 )
 from managed_deepagents._memory.layers import MemoryLayers
 from managed_deepagents._memory_instructions import create_memory_instructions_middleware
-from managed_deepagents._run_input import ManagedTurnTracer
-from managed_deepagents.runtime import _parent_trace, compile_managed_agent_async
+from managed_deepagents.runtime import _parent_trace
 from pydantic import BaseModel, JsonValue, SecretStr
 from rt.backend import (
     BackendCallError,
@@ -124,116 +122,6 @@ from runtime_api.operations import (
 )
 from runtime_api.reports import REPORTS, Reports, ReportsTaken
 from runtime_api.workers import LAUNCH_WORKER
-
-
-class UserInterrupt(Exception):
-    pass
-
-
-class UserTimeout(Exception):
-    pass
-
-
-@pytest.mark.parametrize(
-    ("failure", "reason"),
-    [
-        (None, "completed"),
-        (
-            asyncio.CancelledError(
-                UserInterrupt(
-                    "superseded by run 00000000-0000-4000-8000-000000000001 "
-                    "(multitask_strategy=interrupt)"
-                )
-            ),
-            "superseded",
-        ),
-        (TimeoutError("run deadline exceeded"), "failed"),
-        (asyncio.CancelledError(TimeoutError("run deadline exceeded")), "failed"),
-        (asyncio.CancelledError(UserTimeout("run deadline exceeded")), "failed"),
-        (asyncio.CancelledError(UserTimeout(TimeoutError("run deadline exceeded"))), "failed"),
-        (asyncio.CancelledError(UserInterrupt("User interrupted the run")), "cancelled"),
-        (asyncio.CancelledError(), "failed"),
-        (GeneratorExit(), "cancelled"),
-        (RuntimeError("provider failed"), "failed"),
-    ],
-)
-async def test_managed_root_records_its_end_reason(
-    failure: BaseException | None, reason: str
-) -> None:
-    client = MagicMock(spec=Client)
-    tracer = ManagedTurnTracer(client=client, project_name="test")
-    root_id = uuid4()
-    with tracing_context(enabled=True):
-        tracer.on_chain_start({}, {}, run_id=root_id)
-        if failure is None:
-            tracer.on_chain_end({"answer": "done"}, run_id=root_id)
-        else:
-            tracer.on_chain_error(failure, run_id=root_id)
-    patches = [
-        call.kwargs for call in client.update_run.call_args_list if call.kwargs["run_id"] == root_id
-    ]
-    assert patches
-    assert _run_metadata(patches[-1])["end_reason"] == reason
-    assert bool(patches[-1].get("error")) == (reason == "failed")
-    if reason == "failed":
-        assert failure is not None
-        assert str(failure) in str(patches[-1]["error"])
-
-
-async def test_managed_run_deadline_preserves_the_root_error() -> None:
-    client = MagicMock(spec=Client)
-    agent = await compile_managed_agent_async(
-        define_deep_agent(
-            name="timed-agent",
-            model=_StalledAnthropic(model_name="claude-opus-5-5", api_key="test"),
-        ),
-        {},
-        report_telemetry=False,
-    )
-    with tracing_context(enabled=True, client=client):
-        with pytest.raises(TimeoutError):
-            await asyncio.wait_for(
-                agent.ainvoke({"messages": [("user", "hello")]}, {"run_name": "timed-agent"}),
-                timeout=0.1,
-            )
-    root_id = next(
-        call.kwargs["id"]
-        for call in client.create_run.call_args_list
-        if call.kwargs["name"] == "timed-agent"
-    )
-    patches = [
-        call.kwargs for call in client.update_run.call_args_list if call.kwargs["run_id"] == root_id
-    ]
-    assert patches
-    assert _run_metadata(patches[-1])["end_reason"] == "failed"
-    assert "CancelledError" in str(patches[-1]["error"])
-
-
-async def test_root_termination_closes_children_and_suppresses_late_spans() -> None:
-    client = MagicMock(spec=Client)
-    tracer = ManagedTurnTracer(client=client, project_name="test")
-    root_id, tool_id, model_id = uuid4(), uuid4(), uuid4()
-    with tracing_context(enabled=True):
-        root = tracer.on_chain_start({}, {}, run_id=root_id, name="turn")
-        tracer.on_tool_start({}, "input", run_id=tool_id, parent_run_id=root_id)
-        tracer.on_chat_model_start(
-            {}, [[HumanMessage(content="hello")]], run_id=model_id, parent_run_id=root_id
-        )
-        tracer.on_chain_error(asyncio.CancelledError(), run_id=root_id)
-        tracer.on_tool_end("late result", run_id=tool_id)
-        tracer.on_llm_error(RuntimeError("late error"), run_id=model_id)
-        posted = client.create_run.call_count
-        late_id = uuid4()
-        tracer.on_chain_start({}, {}, run_id=late_id, parent_run_id=tool_id)
-        tracer.on_tool_start({}, "late", run_id=uuid4(), parent_run_id=late_id)
-        tracer.on_chat_model_start(
-            {}, [[HumanMessage(content="late")]], run_id=uuid4(), parent_run_id=root_id
-        )
-    assert client.create_run.call_count == posted
-    ended = {
-        call.kwargs["run_id"]: call.kwargs["end_time"] for call in client.update_run.call_args_list
-    }
-    assert ended[root_id] == ended[tool_id] == ended[model_id] == root.end_time
 
 
 def _run_metadata(patch: Mapping[str, object]) -> Mapping[str, object]:

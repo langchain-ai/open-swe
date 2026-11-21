@@ -235,13 +235,25 @@ def schedule_execution(configurable: Mapping[str, object] | None) -> ExecutionUs
 
 
 def _verified_handoff(headers: Mapping[str, object], raw: object) -> str:
-    """A handoff header's value, unless the request lacks the handoff secret."""
+    """A handoff header's value, if the request proves it came from this deployment.
+
+    The proof is the handoff secret, or the LangSmith API key this deployment
+    sends its own handoffs with. ``mda deploy`` generates a new handoff secret
+    for every revision, so while a rollout runs both revisions a handoff can
+    reach a replica that holds the other secret. The API key is the same in
+    every revision.
+    """
+    from managed_deepagents._identity_auth import _has_server_api_key  # noqa: PLC0415
+
     expected = os.environ.get("MDA_HANDOFF_SECRET")
     supplied = headers.get("x-mda-handoff-secret")
+    has_secret = (
+        bool(expected)
+        and isinstance(supplied, str)
+        and hmac.compare_digest(cast("str", expected).encode(), supplied.encode())
+    )
     if (
-        not expected
-        or not isinstance(supplied, str)
-        or not hmac.compare_digest(expected.encode(), supplied.encode())
+        not (has_secret or _has_server_api_key(headers))
         or not isinstance(raw, str)
         or len(raw) > _MAX_HANDOFF_SIZE
     ):

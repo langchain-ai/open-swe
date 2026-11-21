@@ -310,12 +310,15 @@ def definition(
 ) -> SandboxDefinition:
     """The sandbox MDA keeps for the run's thread, created from ``create``.
 
-    A task worker's run is an async subagent of its coordinator's, so MDA gives it the
-    coordinator's sandbox. MDA writes ``proxy_config`` on it before each command; without
-    one it leaves the sandbox's proxy config alone, as on the sandbox a run resolves.
+    ``sandbox_id`` is the sandbox the backend recorded for the thread, or for a task worker
+    its coordinator's: MDA opens only that one and never creates it, so one that is gone
+    ends the run. Without one MDA opens, or creates, its own sandbox for the thread; a task
+    worker's run is an async subagent of its coordinator's, so that is the coordinator's.
+    MDA writes ``proxy_config`` on it before each command; without one it leaves the
+    sandbox's proxy config alone, as on the sandbox a run resolves.
     """
     return define_sandbox(
-        _openswe_sandbox_id=sandbox_id,
+        existing_sandbox=sandbox_id,
         _openswe_no_manage_proxy=proxy_config is None,
         _openswe_create_fields=dict(create.extra_fields),
         proxy_config=proxy_config,
