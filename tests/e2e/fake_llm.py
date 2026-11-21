@@ -274,6 +274,53 @@ XLSX
 echo PREVIEW_FILES_OK
 """.strip()
 
+SCREENSHOTS_MARKER = "E2E_SCREENSHOTS"
+SCREENSHOT_PATHS = tuple(f"/screenshots/page-{page}.png" for page in range(1, 6))
+# Five PNGs of about 300 KB, as a browser screenshot of a page is, drawn from fixed
+# seeds so every run reads the same bytes: a sidebar, lines of text and a photo.
+_SCREENSHOTS_SCRIPT = """
+set -e
+mkdir -p screenshots
+python3 - <<'PY'
+import random
+import struct
+import zlib
+
+
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+
+def png(width, rows):
+    header = struct.pack(">IIBBBBB", width, len(rows), 8, 2, 0, 0, 0)
+    pixels = zlib.compress(b"".join(b"\\0" + bytes(row) for row in rows), 9)
+    return b"\\x89PNG\\r\\n\\x1a\\n" + chunk(b"IHDR", header) + chunk(b"IDAT", pixels) + chunk(b"IEND", b"")
+
+
+for page in range(1, 6):
+    rng = random.Random(page)
+    rows = []
+    for y in range(600):
+        row = bytearray(b"\\x1b\\x1c\\x20" * 960)
+        row[: 220 * 3] = b"\\x26\\x27\\x2c" * 220
+        if y < 44:
+            row[:] = b"\\x31\\x33\\x3a" * 960
+        elif 80 <= y < 280 and y % 24 < 10:
+            length = 260 + (y * 37 + page * 53) % 420
+            row[260 * 3 : (260 + length) * 3] = bytes(rng.choice((150, 170, 190)) for _ in range(length * 3))
+        elif 300 <= y < 500:
+            noise = rng.randbytes(520 * 3)
+            row[260 * 3 : 780 * 3] = bytes(
+                (value >> 1) + (40 if i % 3 == page % 3 else 0) + (y - 300) // 4
+                for i, value in enumerate(noise)
+            )
+        rows.append(row)
+    with open(f"screenshots/page-{page}.png", "wb") as shot:
+        shot.write(png(960, rows))
+PY
+echo SCREENSHOTS_OK
+""".strip()
+
 _IFRAME_HTML_PATH = "/workspace/iframe-output.html"
 _IFRAME_HTML = """<!doctype html>
 <html>
@@ -1396,6 +1443,22 @@ SCRIPT_LIBRARY: dict[str, tuple[StepSpec, ...]] = {
         ),
         StepSpec(content="Rendered the iframe preview."),
     ),
+    "screenshots": (
+        _tool_step(
+            "Taking screenshots of the pages.",
+            "execute",
+            {"command": _SCREENSHOTS_SCRIPT},
+            "call-screenshots",
+        ),
+        StepSpec(
+            content="Reading the screenshots.",
+            tool_calls=tuple(
+                _tool_call("read_file", {"file_path": path}, f"call-read-screenshot-{page}")
+                for page, path in enumerate(SCREENSHOT_PATHS, start=1)
+            ),
+        ),
+        StepSpec(content="The screenshots are above."),
+    ),
     # Code-mode calls, each labeled with the description the dashboard shows.
     "eval_description": (
         _tool_step(
@@ -1836,6 +1899,9 @@ SCRIPT_RULES: tuple[ScriptRule, ...] = (
     ),
     ScriptRule(
         "many_files", lambda ctx: ctx.human_count <= 1 and "E2E_MANY_FILES" in ctx.first_text
+    ),
+    ScriptRule(
+        "screenshots", lambda ctx: ctx.human_count <= 1 and SCREENSHOTS_MARKER in ctx.first_text
     ),
     ScriptRule("move", lambda ctx: ctx.human_count <= 1 and _is_move_request(ctx.first_text)),
     ScriptRule("followup", lambda ctx: _is_pull_request_fix(ctx.first_text)),

@@ -2,7 +2,7 @@ import asyncio
 import base64
 import contextlib
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -25,6 +25,7 @@ from openswe.dashboard.settings import (
     SettingsUpdate,
     upsert_instance_settings,
 )
+from openswe.database import postgres
 from openswe.dispatch import dispatch_agent_run
 from openswe.input_messages import dynamic_context_hash, person_introduction
 from openswe.message_queue import QueuedMessage
@@ -43,7 +44,10 @@ from openswe.threads.runtimes import RUNTIMES
 from openswe.threads.start_request import RunRefused, SentRun, StartRequest
 from openswe.threads.summary import TRANSCRIPT_VERSION
 from openswe.trace_metadata import RunOrigin
-from openswe.transcript.engine import AppendResult
+from openswe.transcript import attachments as transcript_attachments
+from openswe.transcript.attachments import PendingAttachment
+from openswe.transcript.engine import AppendResult, Command, append
+from openswe.transcript.events import ThreadCreated
 from openswe.transcript.turns import OpenTurn
 from openswe.users import User
 from openswe.users.models import UserIdentity
@@ -1440,8 +1444,10 @@ async def _read_thread_state(
     metadata: dict[str, object] | None = None,
     reader: Principal | None = None,
     session: str | None = None,
+    attachments: Sequence[PendingAttachment] = (),
 ) -> httpx.Response:
-    """Read a thread's state through the dashboard, from a runtime whose Agent Server is faked."""
+    """Read a thread's state through the dashboard, from a runtime whose Agent Server is faked,
+    with ``attachments`` stored in the thread's transcript."""
     if runtime == "mda":
         threads = runtimes._MdaThreads(runtimes.MdaRuntime("http://mda.test"))
         monkeypatch.setattr(
@@ -1470,6 +1476,13 @@ async def _read_thread_state(
         runtime=runtime,
         metadata=metadata or {"source": "dashboard", "github_login": "owner"},
     )
+    if attachments:
+        created = ThreadCreated(
+            title="Screenshots", source="dashboard", owner_login="owner", visibility="public"
+        )
+        await append(thread_id, [Command(command_id="created", event=created, actor_kind="user")])
+        async with postgres.transaction() as conn:
+            await transcript_attachments.write(conn, thread_id, attachments)
     app = FastAPI()
     app.include_router(thread_routes.router, prefix="/dashboard/api")
     if session is None:
@@ -1544,6 +1557,101 @@ async def test_thread_state_reaches_a_client_without_provider_replay_data(
         {"type": "reasoning", "reasoning": "Reading the diff", "extras": {}},
         {"type": "redacted_thinking"},
         answer,
+    ]
+
+
+async def test_thread_state_reaches_a_client_with_links_to_the_images_its_transcript_keeps(
+    monkeypatch,
+) -> None:
+    photo, shot, icon, resized, unstored = (
+        bytes(range(256)) * 24,
+        b"\x89PNG" + bytes(range(256)) * 32,
+        b"\x89PNG" + bytes(100),
+        b"\x89PNG" + bytes(range(256)) * 40,
+        b"\x89PNG" + bytes(range(256)) * 48,
+    )
+
+    def encoded(data: bytes) -> str:
+        return base64.b64encode(data).decode()
+
+    # A person's photo, and a tool's screenshots as MDA's browser and `read_file` return them.
+    human = {
+        "type": "human",
+        "id": "human-1",
+        "content": [
+            {
+                "type": "image",
+                "base64": encoded(photo),
+                "mime_type": "image/jpeg",
+                "file_name": "a.jpg",
+            },
+            {"type": "text", "text": "What's wrong here?"},
+        ],
+    }
+    small = {"type": "image", "url": f"data:image/png;base64,{encoded(icon)}"}
+    changed = {"type": "image", "base64": encoded(resized), "mime_type": "image/png"}
+    missing = {"type": "image", "base64": encoded(unstored), "mime_type": "image/png"}
+    tool = {
+        "type": "tool",
+        "tool_call_id": "shot-1",
+        "content": [
+            {"type": "text", "text": "Screenshot of the page."},
+            small,
+            {"type": "image", "url": f"data:image/png;base64,{encoded(shot)}"},
+            changed,
+            missing,
+        ],
+    }
+    ids = [uuid7() for _ in range(4)]
+    stored = [
+        PendingAttachment(
+            attachment_id=attachment_id,
+            message_id=message_id,
+            position=position,
+            mime_type=mime_type,
+            file_name=None,
+            data=data,
+        )
+        for attachment_id, (message_id, position, mime_type, data) in zip(
+            ids,
+            [
+                ("human-1", 0, "image/jpeg", photo),
+                ("shot-1", 0, "image/png", icon),
+                ("shot-1", 1, "image/png", shot),
+                ("shot-1", 2, "image/png", resized[:-1]),
+            ],
+            strict=True,
+        )
+    ]
+
+    def agent_server(request: httpx.Request | httpx2.Request) -> httpx.Response | httpx2.Response:
+        response = httpx2.Response if isinstance(request, httpx2.Request) else httpx.Response
+        if request.url.path.endswith("/state"):
+            return response(200, json={"values": {"messages": [human, tool]}})
+        return response(200, json=[])
+
+    response = await _read_thread_state(
+        monkeypatch, "mda", agent_server, select=["values.messages"], attachments=stored
+    )
+
+    assert response.status_code == 200
+    links = "/dashboard/api/threads/00000000-0000-4000-8000-0000000000a1/transcript/attachments"
+    [human_read, tool_read] = response.json()["values"]["messages"]
+    assert human_read["content"] == [
+        {
+            "type": "image",
+            "url": f"{links}/{ids[0]}",
+            "mime_type": "image/jpeg",
+            "file_name": "a.jpg",
+        },
+        {"type": "text", "text": "What's wrong here?"},
+    ]
+    assert tool_read["content"] == [
+        {"type": "text", "text": "Screenshot of the page."},
+        small,
+        {"type": "image", "url": f"{links}/{ids[2]}", "mime_type": "image/png"},
+        changed,
+        missing,
     ]
 
 

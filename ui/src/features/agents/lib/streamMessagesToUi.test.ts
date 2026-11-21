@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from "vitest"
 
 import { streamMessagesToUi } from "./streamMessagesToUi"
+import { attachmentUrl } from "./transcript/api"
 import { groupQuietRuns } from "@/features/agents/components/messages/quietRuns"
 
 describe("streamMessagesToUi", () => {
@@ -36,6 +37,37 @@ describe("streamMessagesToUi", () => {
     expect(messages).toHaveLength(1)
     expect(messages[0]?.chunks).toEqual([
       expect.objectContaining({ kind: "text", text: "Recovered answer" }),
+    ])
+  })
+
+  it("shows an image the state read links to from its stored copy, beside inline ones", () => {
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "person-message",
+        content: [
+          {
+            type: "image",
+            url: "/dashboard/api/threads/t-1/transcript/attachments/a-1",
+            mime_type: "image/jpeg",
+            file_name: "a.jpg",
+          },
+          { type: "image", base64: "aW1hZ2U=", mime_type: "image/png" },
+          { type: "image", url: "https://example.com/elsewhere.png" },
+          { type: "text", text: "What's wrong here?" },
+        ],
+      }),
+    ])
+
+    expect(messages[0]?.chunks).toEqual([
+      {
+        kind: "image",
+        url: attachmentUrl("t-1", "a-1"),
+        credentials: "session",
+        mimeType: "image/jpeg",
+        fileName: "a.jpg",
+      },
+      { kind: "image", base64: "aW1hZ2U=", mimeType: "image/png" },
+      { kind: "text", text: "What's wrong here?" },
     ])
   })
 
@@ -305,9 +337,14 @@ describe("streamMessagesToUi", () => {
 
   it("names a result's media blocks and leaves their base64 out of its output", () => {
     const content = [
-      { type: "text", text: "Read 2 files." },
+      { type: "text", text: "Read 3 files." },
       { type: "image", base64: "iVBORw0KGgo", mime_type: "image/png" },
       { type: "file", base64: "A".repeat(4096), mime_type: "application/pdf" },
+      {
+        type: "image",
+        url: "/dashboard/api/threads/t-1/transcript/attachments/a-1",
+        mime_type: "image/png",
+      },
     ]
     const messages = streamMessagesToUi(
       [
@@ -337,8 +374,15 @@ describe("streamMessagesToUi", () => {
 
     expect(messages[0]?.chunks[0]).toMatchObject({
       kind: "tool-execution",
-      output: "Read 2 files.\n[file application/pdf, 3 KB]",
-      images: [{ kind: "image", mimeType: "image/png" }],
+      output: "Read 3 files.\n[file application/pdf, 3 KB]",
+      images: [
+        { kind: "image", mimeType: "image/png" },
+        {
+          kind: "image",
+          url: attachmentUrl("t-1", "a-1"),
+          credentials: "session",
+        },
+      ],
     })
   })
 

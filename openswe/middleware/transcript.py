@@ -54,7 +54,11 @@ from openswe.input_messages import (
     input_message_text,
 )
 from openswe.middleware.trace import OpenSWEMiddleware
-from openswe.transcript.attachments import PendingAttachment, UnsupportedAttachment
+from openswe.transcript.attachments import (
+    EncodedImage,
+    PendingAttachment,
+    UnsupportedAttachment,
+)
 from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (
     TOOL_OUTPUT_PREVIEW_CHARS,
@@ -91,7 +95,6 @@ _HIDDEN_TAGS = frozenset({"nostream", "langsmith:hidden"})
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])\s")
-_DATA_URL = re.compile(r"data:([\w.+-]+/[\w.+-]+);base64,(.*)", re.DOTALL)
 _IMAGE_BLOCK_TYPES = frozenset({"image", "image_url"})
 
 # Namespace of the enclosing ``task`` tool calls; travels into nested subagents.
@@ -453,16 +456,11 @@ def _usage(message: AIMessage) -> MessageUsage | None:
 
 def _image_bytes(block: Mapping[str, object]) -> tuple[str, bytes] | None:
     """``(mime_type, data)`` for a standard base64 image block, inline or as a data URL."""
-    mime_type = block.get("mime_type")
-    encoded = block.get("base64")
-    url = block.get("url")
-    if not isinstance(encoded, str) and isinstance(url, str):
-        if match := _DATA_URL.fullmatch(url):
-            mime_type, encoded = match[1], match[2]
-    if not isinstance(mime_type, str) or not isinstance(encoded, str):
+    image = EncodedImage.of(block)
+    if image is None:
         return None
     try:
-        return mime_type, base64.b64decode(encoded, validate=True)
+        return image.mime_type, base64.b64decode(image.encoded, validate=True)
     except binascii.Error:
         logger.warning("Skipping an undecodable transcript attachment", exc_info=True)
         return None

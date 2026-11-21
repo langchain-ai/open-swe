@@ -10,8 +10,10 @@ import { humanizeToolName } from "./toolNames"
 import type { BaseMessage, ContentBlock } from "@langchain/core/messages"
 import type { AssembledToolCall } from "@langchain/react"
 
+import { dashboardApiUrl } from "@/lib/dashboard-fetch"
+
 import type { StructuredEntity } from "./structuredInputMessages"
-import type { Chunk, ImageChunk, Message, ToolExecutionChunk } from "./types"
+import type { AnyImageChunk, Chunk, Message, ToolExecutionChunk } from "./types"
 
 function senderNote(entity: StructuredEntity | undefined): string | undefined {
   if (entity?.senderType === "bot") return undefined
@@ -190,23 +192,45 @@ function inlineImage(block: Record<string, unknown>): InlineImage {
   return {}
 }
 
-function imageChunks(content: unknown): Array<ImageChunk> {
+/**
+ * Where the dashboard serves an image the state read links to in place of its
+ * bytes: the transcript's copy, behind the thread's own read check.
+ */
+const STORED_IMAGE_PATH =
+  /^\/dashboard\/api(\/threads\/[^/?#]+\/transcript\/attachments\/[^/?#]+)$/
+
+/**
+ * What a content block shows: its inline bytes, or the stored copy it links to,
+ * which loads with the session when shown, as the transcript view's do.
+ */
+function imageChunk(block: Record<string, unknown>): AnyImageChunk | null {
+  const fileName = block.fileName ?? block.file_name
+  const named = typeof fileName === "string" && fileName ? { fileName } : {}
+  const { base64, mimeType } = inlineImage(block)
+  if (base64 && mimeType) return { kind: "image", base64, mimeType, ...named }
+  const path =
+    block.type === "image" && typeof block.url === "string"
+      ? STORED_IMAGE_PATH.exec(block.url)?.[1]
+      : undefined
+  if (!path) return null
+  const storedType = block.mime_type
+  return {
+    kind: "image",
+    url: dashboardApiUrl(path),
+    credentials: "session",
+    ...(typeof storedType === "string" ? { mimeType: storedType } : {}),
+    ...named,
+  }
+}
+
+function imageChunks(content: unknown): Array<AnyImageChunk> {
   if (!Array.isArray(content)) return []
 
-  const chunks: Array<ImageChunk> = []
+  const chunks: Array<AnyImageChunk> = []
   for (const item of content) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue
-    const block = item as Record<string, unknown>
-    const { base64, mimeType } = inlineImage(block)
-    if (base64 && mimeType) {
-      const fileName = block.fileName ?? block.file_name
-      chunks.push({
-        kind: "image",
-        base64,
-        mimeType,
-        ...(typeof fileName === "string" && fileName ? { fileName } : {}),
-      })
-    }
+    const chunk = imageChunk(item as Record<string, unknown>)
+    if (chunk) chunks.push(chunk)
   }
   return chunks
 }
@@ -244,9 +268,8 @@ function toolOutputText(
         if (!item || typeof item !== "object") return []
         const block = item as Record<string, unknown>
         if (typeof block.text === "string") return [block.text]
-        const inline = inlineImage(block)
         // imageChunks shows these.
-        if (inline.base64 && inline.mimeType) return []
+        if (imageChunk(block)) return []
         const mimeType = block.mime_type ?? block.mimeType
         const imageUrl = block.image_url
         const link =

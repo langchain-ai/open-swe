@@ -1,6 +1,13 @@
 /** @vitest-environment jsdom */
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -17,6 +24,7 @@ import type { ReactNode } from "react"
 import { Messages } from "./Messages"
 import { BackgroundEvent } from "@/features/agents/lib/backgroundEvent"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
+import { attachmentUrl } from "@/features/agents/lib/transcript/api"
 import type { TaskEventMetadata } from "@/features/agents/lib/structuredInputMessages"
 import type { Message, ToolExecutionChunk } from "@/features/agents/lib/types"
 
@@ -1494,8 +1502,17 @@ describe("Messages", () => {
     expect(screen.getByText("subagent")).toBeTruthy()
   })
 
-  it("shows a tool result's image on its card outside the folded work", () => {
+  it("shows a tool result's images on its card outside the folded work", async () => {
     const dataUrl = "data:image/png;base64,iVBORw0KGgo="
+    // A screenshot the state read links to, which loads from the transcript's copy.
+    const stored = attachmentUrl("t-1", "a-1")
+    const fetchImage = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(new Blob(["png"], { type: "image/png" })))
+    Object.assign(URL, {
+      createObjectURL: () => "blob:stored-shot",
+      revokeObjectURL: () => {},
+    })
     const messages = streamMessagesToUi([
       new AIMessage({
         id: "browse",
@@ -1512,6 +1529,11 @@ describe("Messages", () => {
         content: [
           { type: "text", text: "Captured the page" },
           { type: "image", url: dataUrl },
+          {
+            type: "image",
+            url: "/dashboard/api/threads/t-1/transcript/attachments/a-1",
+            mime_type: "image/png",
+          },
         ],
       }),
       new AIMessage({ id: "reply", content: "The page is shown above." }),
@@ -1522,10 +1544,16 @@ describe("Messages", () => {
       screen.getByRole("button", { name: "Worked · 1 action" })
     ).toBeTruthy()
     expect(screen.queryByText("README.md")).toBeNull()
-    expect(screen.getByRole("img", { name: "image" }).getAttribute("src")).toBe(
-      dataUrl
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole("img", { name: "image" })
+          .map((image) => image.getAttribute("src"))
+      ).toEqual([dataUrl, "blob:stored-shot"])
     )
+    expect(fetchImage).toHaveBeenCalledWith(stored, { credentials: "include" })
     expect(screen.getByText("Captured the page")).toBeTruthy()
+    fetchImage.mockRestore()
   })
 
   it("keeps workflow approval available alongside an empty-state error", () => {

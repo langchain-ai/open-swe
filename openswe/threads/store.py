@@ -33,9 +33,11 @@ from openswe.threads import index
 from openswe.threads.index import IndexedThread, ThreadStatus
 from openswe.threads.runtimes import RUNTIMES, ChannelThreadError, ChannelWrite, now_ms
 from openswe.threads.start_request import RunRefused, StartRequest
+from openswe.transcript.attachments import InlineImage, ThreadAttachments
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.startup_trace import apm_span
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
+from openswe.utils.timing import phase
 
 logger = logging.getLogger(__name__)
 
@@ -362,9 +364,11 @@ class ThreadStore:
         select: list[str] | None = None,
         timings: dict[str, float] | None = None,
     ) -> dict[str, JsonValue]:
-        """:meth:`state_of` as a client reads it, without what a provider has the model's
-        next call send back verbatim (:data:`_REPLAY_ONLY`): no client reads it, and on a
-        long thread it is megabytes gzip can't shrink. The thread's own state keeps it."""
+        """:meth:`state_of` as a client reads it. What a provider has the model's next call
+        send back verbatim (:data:`_REPLAY_ONLY`) is left out, since no client reads it, and
+        an image the transcript keeps a copy of is a link to that copy, which a client loads
+        when it shows the image. On a long thread each is megabytes gzip can't shrink; the
+        thread's own state keeps both."""
         state = await self.state_of(thread, select=select, timings=timings)
         values = state.get("values")
         messages = values.get("messages") if isinstance(values, dict) else None
@@ -378,6 +382,10 @@ class ThreadStore:
                     block.pop(key, None)
                     if isinstance(extras, dict):
                         extras.pop(key, None)
+        if isinstance(messages, list) and (images := InlineImage.all_in(messages)):
+            with phase(timings if timings is not None else {}, "media_links"):
+                stored = await ThreadAttachments.of(thread.thread_id)
+                stored.link(images)
         return state
 
     async def with_latest_run(self, thread: IndexedThread) -> IndexedThread:
