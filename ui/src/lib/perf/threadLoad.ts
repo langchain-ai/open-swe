@@ -20,6 +20,7 @@
 
 import { useLayoutEffect, useRef } from "react"
 
+import type { JoinRequestObservation } from "@/lib/earlyJoins"
 import { subscribeRequestTimings } from "./fetchTiming"
 import type { RequestTiming } from "./fetchTiming"
 import { perfNow, startSpan } from "./trace"
@@ -115,16 +116,19 @@ class ThreadLoad {
 
   paint(attributes: PaintAttributes): void {
     this.span.mark("paint")
+    const cacheHit = attributes.fromSource && !this.#readAnswered
+    const endedAt = perfNow()
     this.#painted = {
       attributes: {
         messages: attributes.messages,
         chunks: attributes.chunks,
         has_older: attributes.hasOlder,
         thread_source: attributes.threadSource,
-        thread_cache_hit: attributes.fromSource && !this.#readAnswered,
+        thread_cache_hit: cacheHit,
       },
-      endedAt: perfNow(),
+      endedAt,
     }
+    ThreadJoin.of(this.threadId)?.painted(endedAt, cacheHit)
     if (attributes.threadSource === "transcript") return this.end()
     const settle = () => {
       this.#readsSettled = true
@@ -159,6 +163,110 @@ class ThreadLoad {
   }
 }
 
+/**
+ * The `thread_join` span: for an open of a running thread, from the open's start
+ * (shared with `thread_load`) to the first event of the joined run, recording
+ * whether `EarlyJoins` supplied the stream. Kept apart from `thread_load` so
+ * `thread_load` still ends at paint.
+ */
+export class ThreadJoin {
+  static #active: ThreadJoin | null = null
+
+  #span: SpanHandle | null = null
+  #disqualified = false
+  #paintedAt: number | null = null
+  #cacheHit: boolean | null = null
+
+  constructor(
+    readonly threadId: string,
+    readonly startedAt: number,
+    readonly source: "navigation" | "page_load",
+    readonly ui: ThreadLoadUi
+  ) {}
+
+  /** Tracks an open of `threadId`, in place of any earlier one. */
+  static begin(
+    threadId: string,
+    startedAt: number,
+    source: "navigation" | "page_load",
+    ui: ThreadLoadUi
+  ): void {
+    ThreadJoin.#active = new ThreadJoin(threadId, startedAt, source, ui)
+  }
+
+  /** The tracked open of `threadId`, while it can still record its join. */
+  static of(threadId: string): ThreadJoin | null {
+    const join = ThreadJoin.#active
+    return join?.threadId.toLowerCase() === threadId.toLowerCase() &&
+      join.active
+      ? join
+      : null
+  }
+
+  static abandonTracked(reason: string): void {
+    ThreadJoin.#active?.abandon(reason)
+  }
+
+  get active(): boolean {
+    return !this.#disqualified && (!this.#span || !this.#span.ended)
+  }
+
+  painted(at: number, cacheHit: boolean): void {
+    if (this.#paintedAt !== null) return
+    this.#paintedAt = at
+    this.#cacheHit = cacheHit
+    if (this.#span && !this.#span.ended) {
+      this.#span.mark("paint", { thread_cache_hit: cacheHit }, { at })
+    }
+  }
+
+  joined(observation: JoinRequestObservation): void {
+    if (this.#disqualified || this.#span !== null) return
+    if (!observation.ok) {
+      this.#disqualified = true
+      return
+    }
+    const attributes: PerfAttributes = {
+      source: this.source,
+      cold: this.source === "page_load",
+      ui: this.ui,
+      thread_source: "stream",
+      early_join: observation.earlyJoin,
+      early_join_rejected: observation.earlyJoinRejected,
+      join_ttfb_ms: Math.round(observation.openedAt - observation.startedAt),
+    }
+    if (this.#cacheHit !== null) attributes["thread_cache_hit"] = this.#cacheHit
+    const span = startSpan("thread_join", attributes, {
+      startedAt: this.startedAt,
+    })
+    if (this.#paintedAt !== null) {
+      span.mark("paint", undefined, { at: this.#paintedAt })
+    }
+    span.mark("join_start", undefined, { at: observation.startedAt })
+    span.mark("join_open", undefined, { at: observation.openedAt })
+    this.#span = span
+  }
+
+  firstEvent(eventKind: string): void {
+    if (!this.#span || this.#span.ended) return
+    this.#span.mark("first_event")
+    this.#span.end({ event_kind: eventKind })
+    if (ThreadJoin.#active === this) ThreadJoin.#active = null
+  }
+
+  disqualify(): void {
+    if (this.#span !== null) return
+    this.#disqualified = true
+    if (ThreadJoin.#active === this) ThreadJoin.#active = null
+  }
+
+  abandon(reason: string): void {
+    this.#disqualified = true
+    if (this.#span && !this.#span.ended) this.#span.abandon(reason)
+    if (ThreadJoin.#active === this) ThreadJoin.#active = null
+  }
+}
+
 let active: ThreadLoad | null = null
 let navigated = false
 
@@ -180,6 +288,7 @@ function current(threadId: string): SpanHandle | null {
 function abandonThreadLoad(reason: string): void {
   active?.abandon(reason)
   active = null
+  ThreadJoin.abandonTracked(reason)
 }
 
 subscribeRequestTimings((timing: RequestTiming) => {
@@ -188,7 +297,10 @@ subscribeRequestTimings((timing: RequestTiming) => {
 
 // A span held past its paint would otherwise go unsent when the page goes away.
 if (typeof window !== "undefined")
-  window.addEventListener("pagehide", () => active?.end())
+  window.addEventListener("pagehide", () => {
+    active?.end()
+    ThreadJoin.abandonTracked("pagehide")
+  })
 
 function beginThreadLoad(
   threadId: string,
@@ -198,14 +310,16 @@ function beginThreadLoad(
   if (typeof window === "undefined") return
   if (current(threadId)) return
   abandonThreadLoad("superseded")
+  const startedAt = source === "page_load" ? 0 : perfNow()
   active = new ThreadLoad(
     threadId,
     startSpan(
       "thread_load",
       { source, cold: source === "page_load", ui },
-      source === "page_load" ? { startedAt: 0 } : undefined
+      { startedAt }
     )
   )
+  ThreadJoin.begin(threadId, startedAt, source, ui)
 }
 
 /** Router hook: a thread route entered by client navigation starts the clock here. */
@@ -219,7 +333,7 @@ export function onRouterNavigation(
   const from = fromPathname ? threadFromPath(fromPathname) : null
   if (to && to.threadId !== from?.threadId)
     beginThreadLoad(to.threadId, "navigation", to.ui)
-  else if (!to && active) abandonThreadLoad("navigated_away")
+  else if (!to) abandonThreadLoad("navigated_away")
 }
 
 /**

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useChannelEffect, useStream } from "@langchain/react"
 import { useQueryClient } from "@tanstack/react-query"
 
@@ -12,6 +12,7 @@ import { earlyJoins } from "@/lib/earlyJoins"
 import { earlyReads } from "@/lib/earlyReads"
 import { createDashboardClient, dashboardFetch } from "@/lib/langgraph-client"
 import { RunTracker } from "@/lib/perf/streaming"
+import { ThreadJoin } from "@/lib/perf/threadLoad"
 import { MAX_RECONNECT_ATTEMPTS, reconnectDelayMs } from "./connection"
 import { useReconnectNotice } from "./useReconnectNotice"
 import { createRunAcceptanceTracker } from "./runAcceptance"
@@ -40,7 +41,11 @@ export function useAgentThreadStream(threadId: string): AgentThreadStream {
   const queryClient = useQueryClient()
   const [runAcceptance] = useState(() =>
     createRunAcceptanceTracker(
-      earlyJoins.newReader(earlyReads.newReader(dashboardFetch))
+      earlyJoins.newReader(
+        earlyReads.newReader(dashboardFetch),
+        (observation) =>
+          ThreadJoin.of(observation.threadId)?.joined(observation)
+      )
     )
   )
   // Every request of the hook, run starts included, goes through the client's fetch.
@@ -54,7 +59,13 @@ export function useAgentThreadStream(threadId: string): AgentThreadStream {
   const [runTracker] = useState(
     () => new RunTracker({ threadId, threadSource: "stream" })
   )
-  useEffect(() => () => runTracker.dispose(), [runTracker])
+  useEffect(
+    () => () => {
+      runTracker.dispose()
+      ThreadJoin.of(threadId)?.abandon("unmounted")
+    },
+    [runTracker, threadId]
+  )
   const [isOffloading, setIsOffloading] = useState(false)
   const [routed, setRouted] = useState<RoutedModel | null>(null)
 
@@ -77,6 +88,7 @@ export function useAgentThreadStream(threadId: string): AgentThreadStream {
     },
     onCompleted: (info) => {
       runTracker.completed(info.reason)
+      ThreadJoin.of(threadId)?.abandon("completed_without_event")
       setIsOffloading(false)
       void queryClient.invalidateQueries({
         queryKey: agentThreadKeys.detail(threadId),
@@ -85,8 +97,32 @@ export function useAgentThreadStream(threadId: string): AgentThreadStream {
     },
   })
 
+  const isLoadingRef = useRef(stream.isLoading)
+  useEffect(() => {
+    isLoadingRef.current = stream.isLoading
+  }, [stream.isLoading])
+
+  useEffect(() => {
+    const hydration = stream.hydrationPromise
+    if (!hydration) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onSettled = () => {
+      timer = setTimeout(() => {
+        if (!cancelled && !isLoadingRef.current)
+          ThreadJoin.of(threadId)?.disqualify()
+      }, 0)
+    }
+    hydration.then(onSettled, onSettled)
+    return () => {
+      cancelled = true
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [stream.hydrationPromise, threadId])
+
   useChannelEffect(stream, ["custom"], {
     onEvent: (event) => {
+      ThreadJoin.of(threadId)?.firstEvent(event.method)
       if (event.method !== "custom" || event.params.namespace.length) return
       const payload = event.params.data.payload
       if (!isRecord(payload)) return
@@ -104,16 +140,21 @@ export function useAgentThreadStream(threadId: string): AgentThreadStream {
     onError: () => setIsOffloading(false),
   })
 
-  useChannelEffect(stream, ["lifecycle", "messages"], {
-    onEvent: (event) => runTracker.event(event),
+  useChannelEffect(stream, ["lifecycle", "messages", "updates", "values"], {
+    onEvent: (event) => {
+      ThreadJoin.of(threadId)?.firstEvent(event.method)
+      if (event.method === "lifecycle" || event.method === "messages")
+        runTracker.event(event)
+    },
   })
 
   const submit = useCallback<AgentStream["submit"]>(
     (...args) => {
+      ThreadJoin.of(threadId)?.disqualify()
       runTracker.submitted()
       return stream.submit(...args)
     },
-    [runTracker, stream]
+    [runTracker, stream, threadId]
   )
 
   const isLoading = stream.isLoading

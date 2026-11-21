@@ -13,6 +13,7 @@ export type PerfAttributeValue = string | number | boolean | null
 export type PerfAttributes = Record<string, PerfAttributeValue>
 export type PerfSpanName =
   | "thread_load"
+  | "thread_join"
   | "thread_list_load"
   | "thread_list_request"
   | "agent_run"
@@ -44,8 +45,12 @@ export type PerfSink = (span: PerfSpan) => void
 export interface SpanHandle {
   readonly id: string
   readonly ended: boolean
-  /** Record a named step at the current time; a repeated name is ignored. */
-  mark(step: string, attributes?: PerfAttributes): void
+  /** Record a named step at the current time (or `options.at`); a repeated name is ignored. */
+  mark(
+    step: string,
+    attributes?: PerfAttributes,
+    options?: { at?: number }
+  ): void
   has(step: string): boolean
   set(attributes: PerfAttributes): void
   /** Add to a numeric attribute, starting from zero. */
@@ -168,10 +173,10 @@ export function startSpan(
     get ended() {
       return span.status !== "open"
     },
-    mark(step, stepAttributes) {
+    mark(step, stepAttributes, markOptions) {
       if (span.status !== "open" || span.steps.some((s) => s.name === step))
         return
-      const at = perfNow() - startedAt
+      const at = (markOptions?.at ?? perfNow()) - startedAt
       span.steps.push({ name: step, at })
       if (stepAttributes) Object.assign(span.attributes, stepAttributes)
       userTimingMark(`osw:${name}:${step}`, startedAt + at)

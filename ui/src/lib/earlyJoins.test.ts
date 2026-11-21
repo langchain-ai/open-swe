@@ -7,22 +7,33 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { threadRunningJoinUrl } from "@/features/agents/lib/apiWarmup"
 import { useAgentThreadStream } from "@/features/agents/lib/stream/useAgentThreadStream"
+import {
+  onRouterNavigation,
+  resetThreadLoadTracking,
+} from "@/lib/perf/threadLoad"
+import { clearPerfSpans, getPerfSpans } from "@/lib/perf/trace"
 import { earlyJoins } from "./earlyJoins"
 import type { ReactNode } from "react"
 
 const RUN = "01a1f3b3-fa88-7563-b7f6-5907eb5a6983"
 const HEAD = "1f1e4126-cfb3-694b-816c-92a57a805664"
 
-/** An open run stream: its first event, then nothing until it is aborted. */
+/** An open run stream: its metadata, a live message chunk, then nothing until aborted. */
 function openStream(
   signal: AbortSignal | null | undefined,
   headers: HeadersInit
 ) {
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
+      const encode = new TextEncoder()
       controller.enqueue(
-        new TextEncoder().encode(
+        encode.encode(
           `event: metadata\ndata: {"run_id": "${RUN}", "attempt": 1}\n\n`
+        )
+      )
+      controller.enqueue(
+        encode.encode(
+          `event: messages\ndata: [{"type":"AIMessageChunk","id":"ai-1","content":"hi"},{}]\n\n`
         )
       )
       signal?.addEventListener("abort", () => controller.error(signal.reason))
@@ -118,6 +129,8 @@ function mountThreadStream(threadId: string) {
 
 afterEach(() => {
   cleanup()
+  resetThreadLoadTracking()
+  clearPerfSpans()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -128,17 +141,33 @@ describe("EarlyJoins", () => {
       run: "streams the root graph alone",
       v3: false,
       earlyJoin: `cancel_on_disconnect=0&namespace=&checkpoint_id=${HEAD}`,
+      expectedJoin: {
+        status: "ended",
+        attributes: {
+          early_join: true,
+          early_join_rejected: false,
+          event_kind: "messages",
+        },
+      },
     },
     {
       run: "streams v3 frames",
       v3: true,
       earlyJoin: `cancel_on_disconnect=0&checkpoint_id=${HEAD}`,
+      expectedJoin: {
+        status: "open",
+        attributes: {
+          early_join: true,
+          early_join_rejected: false,
+        },
+      },
     },
   ])(
     "hands the join a press started to the page that asks for it, when the run $run",
-    async ({ v3, earlyJoin }) => {
+    async ({ v3, earlyJoin, expectedJoin }) => {
       const threadId = crypto.randomUUID()
       const joined = stubRunningThread(threadId, { earlyJoin, v3 })
+      onRouterNavigation(`/agents/${threadId}`, "/agents")
       earlyJoins.start(threadId, threadRunningJoinUrl(threadId))
 
       const hook = mountThreadStream(threadId)
@@ -147,7 +176,11 @@ describe("EarlyJoins", () => {
         expect(hook.result.current.stream.isLoading).toBe(true)
       )
       await waitFor(() => expect(joined.early).toHaveLength(1))
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await waitFor(() =>
+        expect(
+          getPerfSpans().find((s) => s.name === "thread_join")
+        ).toMatchObject(expectedJoin)
+      )
       expect(joined.page).toEqual([])
       hook.unmount()
       await waitFor(() => expect(joined.early[0]?.aborted).toBe(true))
@@ -160,6 +193,7 @@ describe("EarlyJoins", () => {
       earlyJoin:
         "cancel_on_disconnect=0&namespace=&checkpoint_id=1f1e4126-0000-6000-8000-000000000000",
     })
+    onRouterNavigation(`/agents/${threadId}`, "/agents")
     earlyJoins.start(threadId, threadRunningJoinUrl(threadId))
 
     const hook = mountThreadStream(threadId)
@@ -168,6 +202,15 @@ describe("EarlyJoins", () => {
       expect(joined.page).toEqual([
         `?cancel_on_disconnect=0&namespace=&checkpoint_id=${HEAD}`,
       ])
+    )
+    await waitFor(() =>
+      expect(
+        getPerfSpans().find(
+          (s) => s.name === "thread_join" && s.status === "ended"
+        )
+      ).toMatchObject({
+        attributes: { early_join: false, early_join_rejected: true },
+      })
     )
     expect(joined.early[0]?.aborted).toBe(true)
     hook.unmount()

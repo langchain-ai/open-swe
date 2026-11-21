@@ -12,6 +12,20 @@ interface EarlyJoin {
   abort: AbortController
 }
 
+/** A join request observed by {@link EarlyJoins.newReader}, for perf tracking. */
+export interface JoinRequestObservation {
+  threadId: string
+  /** True when the page took the stream started on pointerdown. */
+  earlyJoin: boolean
+  /** True when an early join existed for the thread but did not match and was closed. */
+  earlyJoinRejected: boolean
+  /** `performance.now()` when the page asked for the join. */
+  startedAt: number
+  /** `performance.now()` when the join response headers were ready. */
+  openedAt: number
+  ok: boolean
+}
+
 /**
  * Joins of running threads' runs, started with a thread's reads on a press on its
  * sidebar row. The stream page joins a running run only once its state read gave
@@ -55,7 +69,10 @@ export class EarlyJoins {
    * `fetcher` for a thread page's stream: its join of a running run takes the early
    * one started for the thread when it asks for the same join.
    */
-  newReader(fetcher: typeof fetch): typeof fetch {
+  newReader(
+    fetcher: typeof fetch,
+    onJoin?: (observation: JoinRequestObservation) => void
+  ): typeof fetch {
     return async (input, init) => {
       const href =
         input instanceof Request
@@ -64,10 +81,24 @@ export class EarlyJoins {
             ? input.href
             : input
       const url = new URL(href, location.href)
-      const [, threadId] = JOIN_PATH.exec(url.pathname) ?? []
-      const join = threadId && this.#joins.get(decodeURIComponent(threadId))
-      if (!join) return fetcher(input, init)
-      this.#joins.delete(decodeURIComponent(threadId))
+      const [, rawThreadId] = JOIN_PATH.exec(url.pathname) ?? []
+      if (!rawThreadId) return fetcher(input, init)
+      const threadId = decodeURIComponent(rawThreadId)
+      const startedAt = performance.now()
+      const join = this.#joins.get(threadId)
+      if (!join) {
+        const response = await fetcher(input, init)
+        onJoin?.({
+          threadId,
+          earlyJoin: false,
+          earlyJoinRejected: false,
+          startedAt,
+          openedAt: performance.now(),
+          ok: response.ok,
+        })
+        return response
+      }
+      this.#joins.delete(threadId)
       const answer = await join.response.catch(() => null)
       if (
         answer?.status === 200 &&
@@ -78,10 +109,27 @@ export class EarlyJoins {
         signal?.addEventListener("abort", () => join.abort.abort(), {
           once: true,
         })
+        onJoin?.({
+          threadId,
+          earlyJoin: true,
+          earlyJoinRejected: false,
+          startedAt,
+          openedAt: performance.now(),
+          ok: true,
+        })
         return answer
       }
       join.abort.abort()
-      return fetcher(input, init)
+      const response = await fetcher(input, init)
+      onJoin?.({
+        threadId,
+        earlyJoin: false,
+        earlyJoinRejected: true,
+        startedAt,
+        openedAt: performance.now(),
+        ok: response.ok,
+      })
+      return response
     }
   }
 

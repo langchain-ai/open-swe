@@ -11,6 +11,7 @@ import {
   threadDetailResolved,
   threadHydrated,
   threadHydrationFailed,
+  ThreadJoin,
   threadTranscriptBuilt,
   threadTranscriptPainted,
 } from "./threadLoad"
@@ -293,5 +294,121 @@ describe("thread load span", () => {
     const [span] = getPerfSpans()
     expect(span?.status).toBe("open")
     expect(span?.steps).toEqual([])
+  })
+
+  it("records a thread_join span from open start to the joined run's first event while thread_load still ends at paint", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "performance"] })
+    onRouterNavigation(`/agents/${THREAD_A}`, "/agents")
+    vi.advanceTimersByTime(100)
+    recordRequestTiming(STATE_READ)
+    recordRequestTiming(STATE_PARSED)
+    threadTranscriptPainted(THREAD_A, STREAM_PAINT)
+    await STREAM_PAINT.hydration
+
+    const joinStartedAt = performance.now()
+    vi.advanceTimersByTime(45)
+    ThreadJoin.of(THREAD_A)?.joined({
+      threadId: THREAD_A,
+      earlyJoin: true,
+      earlyJoinRejected: false,
+      startedAt: joinStartedAt,
+      openedAt: performance.now(),
+      ok: true,
+    })
+    vi.advanceTimersByTime(80)
+    ThreadJoin.of(THREAD_A)?.firstEvent("messages")
+
+    const load = getPerfSpans().find((s) => s.name === "thread_load")
+    const join = getPerfSpans().find((s) => s.name === "thread_join")
+    expect(load).toMatchObject({ status: "ended", duration: 100 })
+    expect(join).toMatchObject({
+      status: "ended",
+      duration: 225,
+      attributes: {
+        source: "navigation",
+        cold: false,
+        ui: "agents",
+        thread_source: "stream",
+        early_join: true,
+        early_join_rejected: false,
+        join_ttfb_ms: 45,
+        thread_cache_hit: false,
+        event_kind: "messages",
+      },
+    })
+    expect(join?.steps).toEqual([
+      { name: "paint", at: 100 },
+      { name: "join_start", at: 100 },
+      { name: "join_open", at: 145 },
+      { name: "first_event", at: 225 },
+    ])
+  })
+
+  it("anchors thread_join to time origin on page loads and records early_join_rejected when the fallback path ran", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "performance"] })
+    vi.advanceTimersByTime(300)
+    ensureThreadLoad(THREAD_A)
+    const joinStartedAt = performance.now()
+    vi.advanceTimersByTime(120)
+    ThreadJoin.of(THREAD_A)?.joined({
+      threadId: THREAD_A,
+      earlyJoin: false,
+      earlyJoinRejected: true,
+      startedAt: joinStartedAt,
+      openedAt: performance.now(),
+      ok: true,
+    })
+    vi.advanceTimersByTime(60)
+    ThreadJoin.of(THREAD_A)?.firstEvent("updates")
+
+    const join = getPerfSpans().find((s) => s.name === "thread_join")
+    expect(join).toMatchObject({
+      status: "ended",
+      startedAt: 0,
+      duration: 480,
+      attributes: {
+        source: "page_load",
+        cold: true,
+        early_join: false,
+        early_join_rejected: true,
+        join_ttfb_ms: 120,
+        event_kind: "updates",
+      },
+    })
+  })
+
+  it("does not emit thread_join for later runs once an open is disqualified, and abandons joins that leave or finish without an event", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "performance"] })
+    onRouterNavigation(`/agents/${THREAD_A}`, "/agents")
+    threadTranscriptPainted(THREAD_A, STREAM_PAINT)
+    await STREAM_PAINT.hydration
+    ThreadJoin.of(THREAD_A)?.disqualify()
+
+    ThreadJoin.of(THREAD_A)?.joined({
+      threadId: THREAD_A,
+      earlyJoin: false,
+      earlyJoinRejected: false,
+      startedAt: performance.now(),
+      openedAt: performance.now() + 10,
+      ok: true,
+    })
+    expect(getPerfSpans().filter((s) => s.name === "thread_join")).toEqual([])
+
+    onRouterNavigation(`/agents/${THREAD_B}`, `/agents/${THREAD_A}`)
+    ThreadJoin.of(THREAD_B)?.joined({
+      threadId: THREAD_B,
+      earlyJoin: false,
+      earlyJoinRejected: false,
+      startedAt: performance.now(),
+      openedAt: performance.now() + 10,
+      ok: true,
+    })
+    ThreadJoin.of(THREAD_B)?.abandon("completed_without_event")
+
+    const [join] = getPerfSpans().filter((s) => s.name === "thread_join")
+    expect(join).toMatchObject({
+      status: "abandoned",
+      attributes: { abandoned_reason: "completed_without_event" },
+    })
   })
 })
