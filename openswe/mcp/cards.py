@@ -74,6 +74,9 @@ class ConsentWait(BaseModel):
     queued before keys were stored holds the login itself."""
     auth_id: str
     until: datetime
+    server_id: str | None = None
+    """The service the link connects, whose tools must list again before the thread
+    resumes; a job queued before this was stored holds none."""
     thread_id: str | None = None
     """The thread whose connect card sent the link, which resumes once the card's
     services work."""
@@ -82,7 +85,9 @@ class ConsentWait(BaseModel):
     """LangSmith reported the consent completed, leaving only the re-list after it."""
 
     @classmethod
-    async def start(cls, login: str, auth_id: str, card: ConnectCard | None = None) -> None:
+    async def start(
+        cls, login: str, auth_id: str, server_id: str, card: ConnectCard | None = None
+    ) -> None:
         if not login.startswith("user:"):
             user = await User.for_login("github", login)
             if user is None:
@@ -92,6 +97,7 @@ class ConsentWait(BaseModel):
             login=login,
             auth_id=auth_id,
             until=datetime.now(UTC) + _CONSENT_DEADLINE,
+            server_id=server_id,
             thread_id=card.thread_id if card else None,
             card_id=card.card_id if card else None,
         )
@@ -126,7 +132,7 @@ class ConsentWait(BaseModel):
                 logger.info("Managed tools consent not completed", extra={"outcome": status})
                 return
         try:
-            await tools.refresh()
+            await tools.refresh(needed=[self.server_id] if self.server_id else [])
         except Exception:
             logger.warning("Managed tools refresh after consent failed", exc_info=True)
             # The resumed run would start with the kit's tools from before the connection.
@@ -145,7 +151,7 @@ async def connect_service(login: str, server_id: str) -> ConsentLink | None:
     """A consent link for one of a person's services outside any thread."""
     link = await PersonalTools(login).connect_link(server_id)
     if link is not None and link.auth_id:
-        await ConsentWait.start(login, link.auth_id)
+        await ConsentWait.start(login, link.auth_id, server_id)
     return link
 
 
@@ -280,7 +286,7 @@ class ConnectCard(BaseModel):
             raise ManagedToolsError("This card does not offer that service")
         link = await self.tools.connect_link(server_id)
         if link is not None and link.auth_id:
-            await ConsentWait.start(self.login, link.auth_id, self)
+            await ConsentWait.start(self.login, link.auth_id, server_id, self)
         return link
 
     async def added(self) -> ManagedServer | None:

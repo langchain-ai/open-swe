@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import importlib
 import json
 from datetime import UTC, datetime, timedelta
@@ -36,6 +37,7 @@ def server(server_id, name, *, connected, kind="oauth", enabled=True):
 
 
 BOT_KIT_ID = "01a1a619-0000-7000-8000-00000000b0c1"
+PEOPLE_KIT_ID = "01a11414-ed0f-79f6-b282-f7c7dc563801"
 PROFILE_ID = "01a1a619-0000-7000-8000-0000000b0700"
 
 
@@ -43,6 +45,7 @@ PROFILE_ID = "01a1a619-0000-7000-8000-0000000b0700"
 def lmt(monkeypatch):
     """LMT as plain data: each caller's server list and the kit's links, with no cache."""
     monkeypatch.delenv("LMT_TENANT_ID", raising=False)
+    monkeypatch.delenv("LMT_KIT_ID", raising=False)
     monkeypatch.setenv("LANGSMITH_API_KEY", "openswe-key")
     monkeypatch.setenv("LMT_BOT_KIT_ID", BOT_KIT_ID)
     monkeypatch.setenv("LMT_BOT_PROFILE_ID", PROFILE_ID)
@@ -63,6 +66,7 @@ def lmt(monkeypatch):
             ],
         },
         bot_kit_links=[],
+        people_kit_links=[],
         listed_as=[],
         bot_listing_status=None,
         kit_headers=[],
@@ -74,6 +78,10 @@ def lmt(monkeypatch):
         return await self._loaders()[listing]()
 
     async def pages(self, path, headers=None):
+        # A person reads the people kit's servers from its connections.
+        if path == f"{managed.KITS_PATH}/{PEOPLE_KIT_ID}/connections":
+            linked = {link["server_id"] for link in state.people_kit_links}
+            return [{"id": server_id, "tool_names": []} for server_id in sorted(linked)]
         assert path == managed.SERVERS_PATH
         caller = getattr(self, "login", "bot")
         profile = (headers or {}).get("X-LangSmith-Profile")
@@ -83,6 +91,7 @@ def lmt(monkeypatch):
         return state.servers.get("bot" if profile else caller, [])
 
     async def request(self, method, path, *, body=None, ok=()):
+        # An admin reads the bot kit's record.
         if (method, path) == ("GET", f"{managed.KITS_PATH}/{BOT_KIT_ID}"):
             state.kit_headers.append(await self.headers())
             return httpx.Response(200, json={"id": BOT_KIT_ID, "tools": state.bot_kit_links})
@@ -306,6 +315,82 @@ async def test_the_built_kit_offers_every_server_and_takes_the_persons_own(monke
         await tools.remove_server(LINEAR_ID)
     await tools.remove_server(added.id)
     assert lmt.posts == [("DELETE", f"{managed.SERVERS_PATH}/{added.id}")]
+
+
+async def test_the_people_kit_loads_its_services_and_each_persons_own_servers(
+    monkeypatch, lmt, remote
+):
+    """With LMT_KIT_ID, a private thread loads only the services an admin put in the
+    people's kit, which cannot link a server someone added for themselves, so each server
+    the owner added and connected loads on its own route, as the owner. One they have not
+    connected is offered to connect instead, and a failed listing of them keeps the kit."""
+    monkeypatch.setenv("LMT_KIT_ID", PEOPLE_KIT_ID)
+    lmt.people_kit_links = [
+        {"server_id": LINEAR_ID, "tool_name": "linear_list_issues"},
+        {"server_id": NOTION_ID, "tool_name": "notion_search"},
+    ]
+    lmt.servers["alice"] += [
+        server("own-docs", "Docs", connected=True) | {"scope": "personal"},
+        server("own-lmt", "LMT", connected=True, kind="none") | {"scope": "personal"},
+        server("own-wiki", "Wiki", connected=False) | {"scope": "personal"},
+    ]
+    private_thread(monkeypatch, "alice")
+    alice = managed.PersonalTools("alice")
+
+    assert [item.name for item in await alice.kit_servers()] == [
+        "Linear",
+        "Notion",
+        "Docs",
+        "LMT",
+        "Wiki",
+    ]
+    assert await alice.connectable() == ["Notion", "Wiki"]
+    tools = await runtime.load_mcp_tools(alice.source())
+
+    # The person's server named like the kit gets its own name rather than replacing it.
+    own_lmt = f"lmt{hashlib.sha256(b'own-lmt').hexdigest()[:8]}"
+    assert sorted(tool.name for tool in tools) == sorted(
+        f"mcp_{connection}_{tool}"
+        for connection in ("lmt", "docs", own_lmt)
+        for tool in ("linear_list_issues", "notion_search")
+    )
+    owner = {"Authorization": "Bearer alice-langsmith-token"}
+    assert sorted(remote) == sorted(
+        (f"https://api.smith.langchain.com{route}", owner)
+        for route in (
+            f"{managed.KITS_PATH}/{PEOPLE_KIT_ID}/mcp",
+            f"{managed.SERVERS_PATH}/own-docs/mcp",
+            f"{managed.SERVERS_PATH}/own-lmt/mcp",
+        )
+    )
+
+    # One of the owner's servers failing to list again never holds up the refresh after a
+    # change to another service; it does when a consent just connected it, as does the
+    # kit failing.
+    listing = SimpleNamespace(refresh=AsyncMock())
+    monkeypatch.setattr(managed.ManagedTools, "_listing", AsyncMock(return_value=listing))
+    failing = {"docs"}
+    relisted: list[str] = []
+
+    async def relist(source, name):
+        relisted.append(name)
+        if name in failing:
+            raise MCPDiscoveryError("expired key")
+
+    monkeypatch.setattr(managed, "refresh_mcp_catalog", relist)
+    await alice.refresh()
+    assert relisted == ["lmt", "docs", own_lmt]
+    with pytest.raises(MCPDiscoveryError):
+        await alice.refresh(needed=["own-docs"])
+    await alice.refresh(needed=["own-lmt"])
+    failing.add("lmt")
+    with pytest.raises(MCPDiscoveryError):
+        await alice.refresh()
+
+    monkeypatch.setattr(
+        managed.ManagedTools, "servers", AsyncMock(side_effect=managed.ManagedToolsError("down"))
+    )
+    assert [item.name for item in await alice.connections()] == ["lmt"]
 
 
 async def test_a_run_names_connectable_services_from_its_owners_cached_list(monkeypatch, lmt):
@@ -1201,7 +1286,7 @@ async def test_a_consent_wait_follows_its_owner_through_a_github_rename(monkeypa
     consent link is open still polls and resumes as them."""
     scheduled = AsyncMock()
     monkeypatch.setattr(cards.queue, "schedule", scheduled)
-    await cards.ConsentWait.start("alice", "a1")
+    await cards.ConsentWait.start("alice", "a1", LINEAR_ID)
     payload = scheduled.await_args.args[1]
     await User.sign_in("github", "1", login="alice-renamed")
     polled_as: list[str] = []

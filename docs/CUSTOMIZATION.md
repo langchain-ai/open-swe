@@ -192,19 +192,20 @@ GitHub operations are handled by `gh` inside the sandbox.
 Robin stores no MCP servers of its own.
 A run gets MCP tools from LangSmith Managed Tools kits:
 
-- A private thread loads its owner's `me` kit, which LangSmith builds from every server the owner can use: the workspace's servers, LangSmith built-ins, and servers the owner added for themselves.
-  It is called with the owner's own LangSmith sign-in.
+- A private thread loads the people's kit (`LMT_KIT_ID`), the workspace servers and LangSmith built-ins an admin picked for people in LangSmith, called with the owner's own LangSmith sign-in.
+  A kit cannot link a server someone added for themselves, so each one the owner connected loads as its own connection, as the owner too.
+  Without `LMT_KIT_ID`, a private thread loads the owner's `me` kit instead, which LangSmith builds from every server the owner can use, their own included.
 - Every other run loads Robin's bot kit (`LMT_BOT_KIT_ID`), called as the LMT profile `LMT_BOT_PROFILE_ID` with Robin's LangSmith key.
 
-The bot kit, the workspace's servers and the bot profile's credentials are managed in LangSmith.
-To give every run another MCP server, such as Datadog, incident.io, Currents, or Linear, add it to the bot kit; a server added to the LangSmith workspace is offered to everyone's private threads.
+The kits, the workspace's servers and the bot profile's credentials are managed in LangSmith.
+To give every run another MCP server, such as Datadog, incident.io, Currents, or Linear, add it to the bot kit; to offer it to everyone's private threads, add it to the people's kit.
 A person adds a server only they use under Settings → Connections, or by asking Robin in a private thread, which registers it in LangSmith once they confirm.
 
 Linear sessions arrive through the MDA deployment's Linear channel, which posts the agent's answer in the session.
 The channel reports a session's failed run in the session.
 Sandbox provisioning uses the deployment's `LANGSMITH_API_KEY` and `LANGSMITH_ENDPOINT`.
 
-MCP tools are named `mcp_<connection>_<tool>`, such as `mcp_lmt_…` for a kit's tools, with a hash suffix when the plain name would be ambiguous, contain other characters, or exceed 64 characters.
+MCP tools are named `mcp_<connection>_<tool>`, such as `mcp_lmt_…` for a kit's tools or `mcp_<server>_…` for a person's own server, with a hash suffix when the plain name would be ambiguous, contain other characters, or exceed 64 characters.
 The backend caches a kit's tool list for ten minutes, and each tool call checks the connection and tool again.
 An unavailable server omits its tools without preventing other servers from loading.
 

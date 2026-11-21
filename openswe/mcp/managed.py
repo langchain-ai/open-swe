@@ -1,11 +1,15 @@
 """LangSmith Managed Tools (LMT): a person's own tools and Robin's bot kit.
 
 Every run loads one MCP connection, ``lmt``, to a kit's route
-(``/v1/managed-tools/kits/{id}/mcp``). A private thread loads the ``me`` kit, which
-LangSmith builds per request from every server the owner can use, their own personal
-servers included, called with the owner's own LangSmith sign-in. It lists the tools of
-services the owner has not connected yet too, and calling one of those asks them to
-connect it; nobody picks a kit, and a person adds a service by registering it. Every
+(``/v1/managed-tools/kits/{id}/mcp``). A private thread loads the people's kit
+``LMT_KIT_ID``, the workspace services an admin picked for people in LangSmith, called
+with the owner's own LangSmith sign-in. It lists the tools of services the owner has not
+connected yet too, and calling one of those asks them to connect it. A workspace kit
+cannot link a server a person registered for themselves, so each such server the owner
+connected loads as a connection of its own, to its route
+(``/v1/managed-tools/servers/{id}/mcp``), as the owner too. Without ``LMT_KIT_ID`` a
+private thread loads the ``me`` kit instead, which LangSmith builds per request from every
+server the owner can use, their own included. Every
 other run loads the bot's kit ``LMT_BOT_KIT_ID``,
 called as the LMT profile ``LMT_BOT_PROFILE_ID`` with Robin's LangSmith key, and loads
 only the tools of services a workspace admin connected for that profile. Two kits let a
@@ -27,6 +31,7 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable
 from datetime import timedelta
 from typing import TYPE_CHECKING, Literal
@@ -169,8 +174,12 @@ class ManagedServer(BaseModel):
 
     @property
     def connection_name(self) -> str:
-        """The MCP connection name, the same whoever's credential the server runs with."""
-        return re.sub(r"[^a-z0-9]+", "-", self.name.lower()).strip("-") or "lmt"
+        """The MCP connection name, the same whoever's credential the server runs with.
+
+        It keeps no separators: code mode calls ``mcp_<connection>_<tool>`` by a camelCase
+        alias that treats "-" and "_" alike, so a separator inside the name could give two
+        servers' tools one alias."""
+        return re.sub(r"[^a-z0-9]+", "", self.name.lower()) or KIT_CONNECTION
 
     @property
     def usable(self) -> bool:
@@ -268,22 +277,19 @@ class _KitServerPage(BaseModel):
     next_cursor: str | None = None
 
 
-class _KitConnection(MCPConnection):
-    """The kit's route, carrying the caller's current credential in memory, never stored."""
+class _LMTConnection(MCPConnection):
+    """An LMT route offering every tool it lists, carrying the caller's current
+    credential in memory, never stored."""
 
-    kit: str
     headers: dict[str, str] = Field(default_factory=dict, repr=False, exclude=True)
-    connected_only: bool = False
-    """Leave out the tools of services the caller has no credential for, which nobody
-    running as the caller could connect."""
-    hidden_builtins: tuple[str, ...] = ()
-    """Keys of LMT built-ins whose tools the kit's runs never load."""
+    server_id: str | None = None
+    """The one LMT server this route calls; None for a kit, which calls several."""
 
     def connection_headers(self) -> dict[str, str]:
         return self.headers
 
     def allows_tool(self, name: str) -> bool:
-        return not any(name.startswith(f"langsmith_{key}_") for key in self.hidden_builtins)
+        return True
 
     @property
     def offers_tools(self) -> bool:
@@ -294,6 +300,20 @@ class _KitConnection(MCPConnection):
         # (a profile, which only a workspace admin connects); MCP transports keep neither.
         if response.status_code in (409, 428):
             raise MCPCredentialMissing(admin_only=response.status_code == 409)
+
+
+class _KitConnection(_LMTConnection):
+    """The kit's route."""
+
+    kit: str
+    connected_only: bool = False
+    """Leave out the tools of services the caller has no credential for, which nobody
+    running as the caller could connect."""
+    hidden_builtins: tuple[str, ...] = ()
+    """Keys of LMT built-ins whose tools the kit's runs never load."""
+
+    def allows_tool(self, name: str) -> bool:
+        return not any(name.startswith(f"langsmith_{key}_") for key in self.hidden_builtins)
 
     async def unusable_tools(self) -> set[str]:
         if not self.connected_only:
@@ -359,6 +379,9 @@ class ManagedTools(ABC):
     hidden_builtins: tuple[str, ...] = ()
     """Keys of LMT built-ins left out of this caller's kit: neither their tools nor an
     offer to connect them."""
+    personal_servers: bool = False
+    """Whether runs also load the servers the caller registered for themselves, which a
+    workspace kit cannot link."""
 
     def _tenant(self) -> dict[str, str]:
         # Without a pin, LangSmith uses the workspace the credential carries.
@@ -421,26 +444,25 @@ class ManagedTools(ABC):
         return self.kit() == ME_KIT
 
     async def _load_kit_servers(self) -> list[str]:
-        """The IDs (or built-in keys) of the servers the kit links tools from."""
+        """The IDs (or built-in keys) of the kit's servers the caller may call. They come
+        from the kit's connections, which apply the caller's own access to each server;
+        the kit's record needs unrestricted MCP access, which an access policy takes away."""
         kit = self.kit()
         if kit is None:
             return []
-        body = (await self._request("GET", f"{KITS_PATH}/{quote(kit, safe='')}")).json()
-        links = body.get("tools") if isinstance(body, dict) else None
+        items = await self._pages(f"{KITS_PATH}/{quote(kit, safe='')}/connections")
         return sorted(
             {
-                source
-                for link in (links if isinstance(links, list) else [])
-                if isinstance(link, dict)
-                and isinstance(
-                    source := link.get("server_id") or link.get("builtin_server_key"), str
-                )
+                server_id
+                for item in items
+                if isinstance(item, dict) and isinstance(server_id := item.get("id"), str)
             }
         )
 
     async def kit_servers(self, *, fresh: bool = False) -> list[ManagedServer]:
-        """The servers whose tools the kit offers, with the caller's state of each;
-        ``fresh`` asks LangSmith now rather than take the cached copy."""
+        """The servers whose tools the caller's runs load, the kit's and their own, with
+        the caller's state of each; ``fresh`` asks LangSmith now rather than take the
+        cached copy."""
         linked: set[str] | None = None
         if not self.built_per_caller:
             cached = await self._cached("kit", fresh=fresh)
@@ -448,8 +470,14 @@ class ManagedTools(ABC):
         return [
             server
             for server in await self.servers(fresh=fresh)
-            if server.id not in self.hidden_builtins and (linked is None or server.id in linked)
+            if server.id not in self.hidden_builtins
+            and (linked is None or server.id in linked or self._loads_own(server))
         ]
+
+    def _loads_own(self, server: ManagedServer) -> bool:
+        """Whether runs load ``server`` on its own route: one the caller registered, which
+        no fixed kit can link."""
+        return self.personal_servers and not self.built_per_caller and server.personal
 
     async def _listing(self, listing: str) -> SealedListing:
         """A listing's cache entry, per caller, encrypted (see :mod:`openswe.mcp.sealed`)."""
@@ -494,14 +522,29 @@ class ManagedTools(ABC):
             raise ManagedToolsError("LangSmith has no such service")
         return found
 
-    async def refresh(self) -> None:
-        """Re-read the listings now, then the kit's tools, so a service that was just
-        connected or disconnected shows in the next run."""
+    async def refresh(self, *, needed: Iterable[str] = ()) -> None:
+        """Re-read the listings now, then each connection's tools, so a service that was
+        just connected or disconnected shows in the next run. The kit failing to list
+        raises, as does one of the caller's own servers in ``needed`` (the one a consent
+        just connected); another of theirs failing keeps its cached tools, listed again
+        once stale, rather than holding up a change to a different service."""
+        needed = set(needed)
         for listing in self._loaders():
             await (await self._listing(listing)).refresh()
         source = self.source()
         for connection in await self.connections():
-            await refresh_mcp_catalog(source, connection.name)
+            try:
+                await refresh_mcp_catalog(source, connection.name)
+            except Exception:
+                if connection.name == KIT_CONNECTION or (
+                    isinstance(connection, _LMTConnection) and connection.server_id in needed
+                ):
+                    raise
+                logger.warning(
+                    "Managed tools could not list a server's tools again",
+                    extra={"mcp_name": connection.name},
+                    exc_info=True,
+                )
 
     async def refresh_quietly(self) -> None:
         """:meth:`refresh` after a change LangSmith already made; a cached listing is read
@@ -514,8 +557,8 @@ class ManagedTools(ABC):
     async def connections(self) -> list[MCPConnection]:
         """Resolved on every lookup, so each tool call carries a fresh credential.
 
-        Failures leave out only the kit: raising would make the runtime drop every
-        tier's MCPs, and only the kit depends on LangSmith.
+        Failures leave out only what depends on LangSmith: raising would make the runtime
+        drop every tier's MCPs. One listing the caller's own servers leaves out only those.
         """
         kit = self.kit()
         if kit is None or not self.configured():
@@ -535,23 +578,54 @@ class ManagedTools(ABC):
         except ManagedToolsError:
             logger.warning("Managed tools skipped", exc_info=True)
             return []
-        return [
-            _KitConnection(
-                name=KIT_CONNECTION,
-                kit=kit,
-                url=f"{langsmith_issuer()}{KITS_PATH}/{quote(kit, safe='')}/mcp",
-                revision=revision,
-                headers=headers,
-                connected_only=self.connected_only,
-                hidden_builtins=self.hidden_builtins,
-            )
-        ]
+        kit_connection = _KitConnection(
+            name=KIT_CONNECTION,
+            kit=kit,
+            url=f"{langsmith_issuer()}{KITS_PATH}/{quote(kit, safe='')}/mcp",
+            revision=revision,
+            headers=headers,
+            connected_only=self.connected_only,
+            hidden_builtins=self.hidden_builtins,
+        )
+        return [kit_connection, *await self._own_connections(headers)]
 
-    async def revision(self, kit: str) -> str:
-        """What the kit's cached tool list is kept under: the kit alone, so a change to its
-        servers never leaves a run with nothing cached. :meth:`refresh` lists it again after
-        a change made here; one made in LangSmith shows once the list goes stale."""
-        return hashlib.sha256(kit.encode()).hexdigest()[:16]
+    async def _own_connections(self, headers: dict[str, str]) -> list[MCPConnection]:
+        """A connection to each server the caller registered and connected, beside a fixed
+        kit. One not connected yet lists no tools; the run offers to connect it instead."""
+        try:
+            servers = [
+                server
+                for server in await self.servers()
+                if self._loads_own(server) and server.usable
+            ]
+        except ManagedToolsError, LangSmithOAuthError:
+            logger.warning("Managed tools left out the caller's own servers", exc_info=True)
+            return []
+        names = Counter(server.connection_name for server in servers)
+        connections: list[MCPConnection] = []
+        for server in servers:
+            name = server.connection_name
+            # Two of the caller's servers, or one and the kit, would otherwise share a name.
+            if name == KIT_CONNECTION or names[name] > 1:
+                name = f"{name}{hashlib.sha256(server.id.encode()).hexdigest()[:8]}"
+            route = f"{SERVERS_PATH}/{quote(server.id, safe='')}/mcp"
+            connections.append(
+                _LMTConnection(
+                    name=name,
+                    server_id=server.id,
+                    url=langsmith_issuer() + route,
+                    revision=await self.revision(route),
+                    headers=headers,
+                )
+            )
+        return connections
+
+    async def revision(self, route: str) -> str:
+        """What a route's cached tool list is kept under: its kit (or server route) alone,
+        so a change to its servers never leaves a run with nothing cached. :meth:`refresh`
+        lists it again after a change made here; one made in LangSmith shows once the list
+        goes stale."""
+        return hashlib.sha256(route.encode()).hexdigest()[:16]
 
     async def connection(self, name: str) -> MCPConnection | None:
         return next((item for item in await self.connections() if item.name == name), None)
@@ -631,12 +705,14 @@ class ManagedTools(ABC):
 class PersonalTools(ManagedTools):
     """LMT as one person, with their own LangSmith sign-in.
 
-    Their private threads load the ``me`` kit, every tool of every server they can use;
-    calling one of a service they have not connected yet asks them to connect it.
+    Their private threads load the people's kit ``LMT_KIT_ID`` and the servers they
+    registered themselves, or the ``me`` kit, every server they can use, without it;
+    calling a tool of a service they have not connected yet asks them to connect it.
     """
 
     scope: MCPScope = "managed"
     hidden_builtins = PERSONAL_HIDDEN_BUILTINS
+    personal_servers = True
 
     def __init__(self, login: str) -> None:
         self.login = login.strip().lower()
@@ -646,7 +722,7 @@ class PersonalTools(ManagedTools):
         return managed_tools_configured()
 
     def kit(self) -> str | None:
-        return ME_KIT
+        return ENV.LMT_KIT_ID.optional() or ME_KIT
 
     async def headers(self) -> dict[str, str]:
         if not langsmith_oauth_configured():
@@ -808,8 +884,9 @@ class BotKitViewer(PersonalTools):
     admin's LangSmith grants.
     """
 
-    # The bot kit as it is, whatever a person's own kit leaves out.
+    # The bot kit as it is, whatever a person's own kit leaves out or adds.
     hidden_builtins = ()
+    personal_servers = False
 
     def __init__(self, login: str) -> None:
         super().__init__(login)
@@ -838,6 +915,25 @@ class BotKitViewer(PersonalTools):
         # As the admin naming the bot's profile, which needs their LangSmith
         # credential-metadata grant; uncached, so a revoked grant applies at once.
         return await self._servers_as_bot_profile()
+
+    async def _load_kit_servers(self) -> list[str]:
+        """The servers the bot kit links, from the kit's record, which the admin may read
+        with ``mcp-servers:read`` alone; its connections would need them to invoke tools."""
+        kit = self.kit()
+        if kit is None:
+            return []
+        body = (await self._request("GET", f"{KITS_PATH}/{quote(kit, safe='')}")).json()
+        links = body.get("tools") if isinstance(body, dict) else None
+        return sorted(
+            {
+                source
+                for link in (links if isinstance(links, list) else [])
+                if isinstance(link, dict)
+                and isinstance(
+                    source := link.get("server_id") or link.get("builtin_server_key"), str
+                )
+            }
+        )
 
     async def _servers_as_bot_profile(self) -> list[ManagedServer]:
         if self.bot.profile is None:
