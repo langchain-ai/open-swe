@@ -109,7 +109,6 @@ def define_sandbox(
     resolve: SandboxResolve | None = None,
     existing_sandbox: str | None = None,
     _openswe_create_fields: dict[str, object] | None = None,
-    _openswe_no_manage_proxy: bool = False,
     **options: object,
 ) -> SandboxDefinition:
     """Declare the managed execution environment for an agent.
@@ -152,17 +151,9 @@ def define_sandbox(
         dumped["proxy_config"] = proxy_config
     if existing_sandbox is not None:
         dumped["existing_sandbox"] = existing_sandbox
-    # Open SWE only; pydantic would copy or reject these, so they skip the model.
-    dumped.update(
-        {
-            key: value
-            for key, value in {
-                "_openswe_create_fields": _openswe_create_fields,
-                "_openswe_no_manage_proxy": _openswe_no_manage_proxy or None,
-            }.items()
-            if value is not None
-        }
-    )
+    # Open SWE only; pydantic would copy or reject it, so it skips the model.
+    if _openswe_create_fields is not None:
+        dumped["_openswe_create_fields"] = _openswe_create_fields
     normalized = normalize_sandbox_options(dumped)
     return SandboxDefinition(normalized, resolve)
 

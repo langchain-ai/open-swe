@@ -530,17 +530,17 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             await self._backend.run.load_tool_specs(run_id())
 
     async def _proxied(self, runtime: Runtime, opened: OpenedSandbox) -> OpenedSandbox:
-        """``opened``, once it has booted with the first proxy config MDA writes there; or why it
+        """``opened``, once it has booted with the run's proxy config written there; or why it
         could not be. An external sandbox keeps its own.
 
         Preparing works in the sandbox here (a review fetches its pull request there, a task
-        worker attaches to its coordinator's), and the backend writes no proxy config, so
-        without this first write those commands have no GitHub credentials.
+        worker attaches to its coordinator's), through the backend's commands, which MDA
+        writes no proxy config before.
         """
         if (
             opened.sandbox_id is None
             or self._boot_sandbox is None
-            or self._backend.run.sandbox.external
+            or self._backend.run.sandbox.proxy_config is None
         ):
             return opened
         async with trace("sandbox.proxy_first_write", run_type="chain"):

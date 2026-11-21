@@ -7,26 +7,88 @@ backend made before MDA owned them becomes MDA's as the next run is planned
 (``BackendSandbox``). The run opens the sandbox and reports its name, and the backend
 binds the thread to it and connects as to any reused sandbox, writing its git identity.
 It reports the sandbox before it prepares, or behind its preparation and first model call
-where preparing reaches no sandbox (``bind_after_prepare``). MDA writes the proxy config
-of every sandbox but an external one, from what the backend hands it (``sandbox_proxy``).
+where preparing reaches no sandbox (``bind_after_prepare``). MDA creates every sandbox but an
+external one with the proxy config the backend works out here, and writes it there before
+its commands: the same on every run, with no credential in it (``SandboxProxyCallback``).
 The backend never creates or replaces a sandbox itself, and neither does MDA: a thread
 whose sandbox LangSmith deleted cannot run again, a review's included.
 """
 
-from collections.abc import Sequence
+import logging
+from collections.abc import Mapping, Sequence
 
-from pydantic import BaseModel
+import httpx2
+from pydantic import BaseModel, Field, JsonValue, ValidationError
 
 from openswe.config import ENV
 from openswe.sandboxes.lifecycle import (
     BackendSandbox,
     SandboxCreateConfig,
+    SandboxCredentialPolicy,
     TaskWorkerSandbox,
 )
-from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
-from openswe.sandboxes.state import SandboxUnreachableError, get_sandbox_metadata
+from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions, LiveSandboxProxy
+from openswe.sandboxes.proxy_callback import SandboxProxyCallback
+from openswe.sandboxes.state import (
+    SandboxDeletedError,
+    SandboxUnreachableError,
+    get_sandbox_metadata,
+)
+from openswe.sandboxes.tool_access import SANDBOX_FEDERATED_RULES_KEY
 from openswe.slack.staged_files import slack_files_pending
 from openswe.tasks.schemas import ThreadMetadata
+from openswe.threads.store import THREADS
+
+logger = logging.getLogger(__name__)
+
+
+class FederatedRules(BaseModel):
+    """The cloud identity rules a sandbox was created with, as its thread records them once
+    read: LangSmith never changes them, and refuses a proxy config without exactly those
+    (HTTP 422). Beside them, the environment the same read set on the sandbox
+    (``LiveSandboxProxy.adopt``), which follows the backend's public origin."""
+
+    sandbox_id: str
+    rules: list[dict[str, JsonValue]]
+    env_vars: dict[str, str] = {}
+
+    @classmethod
+    async def of(
+        cls,
+        thread_id: str,
+        metadata: Mapping[str, object],
+        sandbox_id: str,
+        *,
+        env_vars: Mapping[str, str],
+    ) -> list[dict[str, JsonValue]] | None:
+        """The rules ``thread_id``'s live sandbox ``sandbox_id`` was created with: as recorded
+        in the thread's ``metadata``, or read from the sandbox and recorded; None where nothing
+        can read them, which keeps the base config's.
+
+        The read also sets the sandbox's own environment, which one created before it came
+        from there lacks, so it is made again whenever that environment changes; one it could
+        not set is not recorded, and the next run reads again."""
+        try:
+            recorded = cls.model_validate(metadata.get(SANDBOX_FEDERATED_RULES_KEY))
+        except ValidationError:
+            logger.debug("Could not validate recorded sandbox cloud identity rules", exc_info=True)
+            recorded = None
+        env_vars = dict(env_vars)
+        if (
+            recorded is not None
+            and recorded.sandbox_id == sandbox_id
+            and recorded.env_vars == env_vars
+        ):
+            return recorded.rules
+        adopted = await LiveSandboxProxy.adopt(sandbox_id, env_vars=env_vars)
+        if adopted is None:
+            return None
+        if adopted.env_vars is not None:
+            read = cls(sandbox_id=sandbox_id, rules=adopted.rules, env_vars=adopted.env_vars)
+            await THREADS.update(
+                thread_id, metadata={SANDBOX_FEDERATED_RULES_KEY: read.model_dump(mode="json")}
+            )
+        return adopted.rules
 
 
 class ManagedSandbox(BaseModel):
@@ -42,6 +104,12 @@ class ManagedSandbox(BaseModel):
     bind_after_prepare: bool = False
     # Externally created LangSmith sandbox (evals): adopted without setup, proxy writes, or replacement.
     external: bool = False
+    # The sandbox's proxy config, which MDA creates it with and writes before its commands;
+    # None, for an external sandbox, leaves its own alone.
+    proxy_config: dict[str, JsonValue] | None = None
+    # Its commands' environment (``SandboxProxyCallback.env_vars``), set in its own run config;
+    # sent apart from ``create``, whose shape a run's execution profile pins.
+    env_vars: dict[str, str] = Field(default_factory=dict, exclude=True)
 
     @classmethod
     async def for_thread(
@@ -94,13 +162,48 @@ class ManagedSandbox(BaseModel):
         sandbox_metadata = await cls._owned_by_mda(sandbox_thread, host_metadata)
         sandbox_id = sandbox_metadata.get("sandbox_id")
         config = await SandboxCreateConfig.for_thread(sandbox_metadata, thread_id=sandbox_thread)
+        env_vars = SandboxProxyCallback.env_vars(
+            github=await SandboxCredentialPolicy.reaches_github(sandbox_thread, sandbox_metadata)
+        )
+        if not isinstance(sandbox_id, str):
+            # MDA creates it with this config, the workspace's cloud identity rules in it.
+            return cls(
+                create=config.langsmith_options(),
+                thread_id=owner,
+                bind_after_prepare=bind_after_prepare,
+                proxy_config=SandboxProxyCallback.proxy_config(config.proxy_config),
+                env_vars=env_vars,
+            )
+        try:
+            federated = await FederatedRules.of(
+                sandbox_thread, sandbox_metadata, sandbox_id, env_vars=env_vars
+            )
+        except Exception as exc:
+            if isinstance(exc, httpx2.HTTPStatusError) and exc.response.status_code == 404:
+                raise SandboxDeletedError(
+                    sandbox_thread,
+                    sandbox_id,
+                    "LangSmith can't find this thread's sandbox",
+                    reason="LangSmith answered 404 for the sandbox",
+                ) from exc
+            # LangSmith refuses a proxy config without the exact cloud identity rules the
+            # sandbox was created with (HTTP 422), so the run can't be given one: it ends here.
+            raise SandboxUnreachableError(
+                sandbox_thread,
+                sandbox_id,
+                "could not read its cloud identity rules",
+                reason="LangSmith did not return the sandbox's cloud identity rules",
+            ) from exc
+        proxy_config = SandboxProxyCallback.proxy_config(
+            config.proxy_config, federated_rules=federated
+        )
         return cls(
-            create=await config.recreation_options()
-            if isinstance(sandbox_id, str)
-            else config.langsmith_options(),
+            create=await config.recreation_options(),
             thread_id=owner,
-            sandbox_id=sandbox_id if isinstance(sandbox_id, str) else None,
+            sandbox_id=sandbox_id,
             bind_after_prepare=bind_after_prepare,
+            proxy_config=proxy_config,
+            env_vars=env_vars,
         )
 
     @staticmethod

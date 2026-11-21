@@ -2965,10 +2965,6 @@ class _LazyManagedSandboxBackend(ManagedSandboxBackend):
     async def _sync_sandbox_proxy_config(
         self, run_sandbox: _RunSandbox, backend: SandboxBackendProtocol
     ) -> None:
-        from managed_deepagents.sandbox import manages_proxy  # noqa: PLC0415
-
-        if not manages_proxy(run_sandbox.sandbox.options):
-            return
         config = self._config()
         name, keeps_proxy = _peek_backend_sandbox(
             _thread_scope_key(config, run_sandbox.selection), backend

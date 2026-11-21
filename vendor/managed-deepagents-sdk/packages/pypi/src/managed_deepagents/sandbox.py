@@ -130,10 +130,7 @@ class SandboxDefinition:
     )
 
     #: Options that shape how MDA resolves the sandbox rather than the create request.
-    RESOLUTION_OPTION_KEYS: ClassVar[tuple[str, ...]] = (
-        "_openswe_create_fields",
-        "_openswe_no_manage_proxy",
-    )
+    RESOLUTION_OPTION_KEYS: ClassVar[tuple[str, ...]] = ("_openswe_create_fields",)
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         resolve = ", resolve=..." if self.resolve is not None else ""
@@ -178,10 +175,6 @@ def normalize_sandbox_options(options: dict[str, object]) -> dict[str, object]:
 
     validate_and_collect_sandbox_proxy_config_references(normalized.get("proxy_config"))
     _validate_create_fields(normalized.get("_openswe_create_fields"))
-    if normalized.get("_openswe_no_manage_proxy") and normalized.get("proxy_config") is not None:
-        raise TypeError(
-            "proxy_config needs MDA to manage the proxy. Remove _openswe_no_manage_proxy."
-        )
     existing = normalized.get("existing_sandbox")
     if existing is not None and (not isinstance(existing, str) or not existing.strip()):
         raise TypeError("existing_sandbox must be a non-empty sandbox name.")
@@ -217,11 +210,6 @@ def declared_create_fields(options: Mapping[str, object]) -> dict[str, object]:
     """Create-request fields sent as-is, beyond the ones the SDK models."""
     fields = options.get("_openswe_create_fields")
     return dict(fields) if isinstance(fields, dict) else {}
-
-
-def manages_proxy(options: Mapping[str, object]) -> bool:
-    """Whether MDA sets the sandbox's proxy config before each command."""
-    return options.get("_openswe_no_manage_proxy") is not True
 
 
 def _validate_create_fields(fields: object) -> None:

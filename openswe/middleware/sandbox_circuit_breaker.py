@@ -34,8 +34,9 @@ def sandbox_unreachable_message(
     that it stopped responding, and it may come back. ``handed_to_mda`` is for a
     sandbox Open SWE set aside (deleted, or a reviewer's that stopped answering), where
     the thread's next run starts in a fresh one and "will not start a replacement"
-    would be untrue. ``deleted`` is for one LangSmith confirmed deleted: nothing replaces
-    it, so retriggering the thread can never succeed.
+    would be untrue. ``deleted`` is for one LangSmith reports not found: deleted, or in a
+    workspace Robin's LangSmith key can't see, which LangSmith answers the same way. Nothing
+    replaces it, so retriggering the thread can never succeed.
     """
     identifiers = [
         part
@@ -48,9 +49,10 @@ def sandbox_unreachable_message(
     which = f" ({', '.join(identifiers)})" if identifiers else ""
     if deleted:
         return warning(
-            f"This thread's sandbox{which} was deleted, so its files and anything not pushed "
-            "are gone. Robin keeps one sandbox per thread and does not replace it: start a "
-            "new thread to keep working."
+            f"LangSmith can't find this thread's sandbox{which}: it was deleted, or Robin's "
+            "LangSmith workspace can't see it. If it was deleted, its files and anything not "
+            "pushed are gone. Robin keeps one sandbox per thread and does not replace it: "
+            "start a new thread to keep working."
         )
     if reason:
         return warning(

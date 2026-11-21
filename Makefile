@@ -54,11 +54,12 @@ dev-ui:
 web:
 	pnpm run dev
 
-# Public URL for GitHub and Slack webhooks while developing (docs/DEVELOPMENT.md, step 3).
-# ngrok's free plan includes one static domain: NGROK_DOMAIN=<name>.ngrok-free.dev. A pasted
-# https:// URL with a trailing slash also works. The policy file exposes only /webhooks/*;
-# langgraph dev has no auth, so the rest of the API stays local.
-# Another tunnel is fine only if it enforces the same /webhooks/* allowlist (or a filtering proxy does).
+# Public URL for GitHub and Slack webhooks and LangSmith's sandbox proxy callback while
+# developing (docs/DEVELOPMENT.md, step 3). ngrok's free plan includes one static domain:
+# NGROK_DOMAIN=<name>.ngrok-free.dev. A pasted https:// URL with a trailing slash also works.
+# The policy file exposes only routes that check their own credentials; langgraph dev has no
+# auth, so the rest of the API stays local. Another tunnel is fine only if it enforces the
+# same allowlist (or a filtering proxy does).
 tunnel:
 	@test -n "$(NGROK_DOMAIN)" || { echo 'Set NGROK_DOMAIN=<your-domain>.ngrok-free.dev (claim it under Domains at https://dashboard.ngrok.com)' >&2; exit 1; }
 	$(eval DOMAIN := $(shell DOMAIN="$(NGROK_DOMAIN)"; DOMAIN="$${DOMAIN#https://}"; DOMAIN="$${DOMAIN#http://}"; echo "$${DOMAIN%/}"))
@@ -166,7 +167,7 @@ help:
 	@echo 'postgres                     - start the local PostgreSQL container on 127.0.0.1:5433'
 	@echo 'migration m="..."            - create the next database migration'
 	@echo 'web                          - run the dashboard web server'
-	@echo 'tunnel                       - ngrok tunnel to :2024 on NGROK_DOMAIN, webhooks only (any other tunnel works too)'
+	@echo 'tunnel                       - ngrok tunnel to :2024 on NGROK_DOMAIN, webhooks and sandbox callbacks only'
 	@echo 'run                          - run the FastAPI app alone on :8000'
 	@echo 'swagger                      - regenerate swagger.json from the backend routes'
 	@echo 'desktop                      - run the Electron desktop app (backend must be running)'

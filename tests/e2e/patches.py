@@ -307,11 +307,11 @@ def apply() -> None:
     if not sandbox_service.REAL:
         langsmith_integration.create_langsmith_sandbox = _stand_in_sandbox
         langsmith_integration.configure_sandbox_proxy = _configure_no_proxy
-        # The config handed to MDA keeps the cloud identity rules read from the live
-        # sandbox; the stand-in was created with none.
-        langsmith_integration.__dict__["_federated_proxy_rules"] = _no_federated_rules
-        # The token a sandbox's GitHub proxy carries is minted from the App, like the
-        # other App tokens stubbed above; the stand-in has no proxy to carry it.
+        # The config the backend plans for MDA keeps the cloud identity rules read from
+        # the live sandbox, and the same read sets its environment; the stand-in has neither.
+        langsmith_integration.LiveSandboxProxy.live = _no_live_sandbox
+        # The token the proxy callback hands a sandbox's GitHub requests is minted from the
+        # App, like the other App tokens stubbed above; the stand-in never calls back.
         sandbox_lifecycle.__dict__["sandbox_token"] = _sandbox_github_access
 
     # A refresh boots its own builder to run the scripts in: a stand-in sandbox, of
@@ -475,8 +475,8 @@ async def _configure_no_proxy(*_args: object, **_kwargs: object) -> None:
     return None
 
 
-async def _no_federated_rules(*_args: object, **_kwargs: object) -> list[object]:
-    return []
+async def _no_live_sandbox(*_args: object, **_kwargs: object) -> dict[str, object]:
+    return {}
 
 
 async def _sandbox_github_access(*_args: object, **_kwargs: object) -> object:

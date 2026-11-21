@@ -1,14 +1,17 @@
-"""The thread's sandbox's proxy config, which gives commands in the sandbox their credentials.
+"""How commands in the thread's sandbox get GitHub's credentials through its proxy.
 
-The proxy config is written whole, so one side writes all of it: MDA, on every sandbox
-but an external one, before each command, as the backend hands it over
-(``SANDBOX_PROXY``): GitHub's rules, with a token the backend minted for the run's scope,
-and the rest the backend keeps on the sandbox, such as its tool channel's capability,
-which names the sandbox. MDA asks for it again before the token expires.
+The sandbox's proxy config holds no credential (``runtime_api.catalog.SandboxSpec``):
+LangSmith asks the backend's proxy callback for the headers of a request to a GitHub host
+as it goes out, and the backend answers with a token for the sandbox's thread
+(``GITHUB_PROXY_RULES`` say how each host takes it).
+
+``SANDBOX_PROXY`` is deprecated: MDA deployments from before the catalog carried the
+config ask for it here and write what the backend hands over, which is that same config.
 """
 
 import base64
 from datetime import datetime
+from fnmatch import fnmatchcase
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
@@ -30,6 +33,10 @@ class GitHubProxyRule(BaseModel):
     scheme: Literal["bearer", "basic"]
     env_vars: dict[str, str] = {}
 
+    def matches(self, host: str) -> bool:
+        """Whether a request to ``host`` takes this rule's header."""
+        return any(fnmatchcase(host.lower(), pattern) for pattern in self.hosts)
+
     def authorization(self, token: str) -> str:
         if self.scheme == "bearer":
             return f"Bearer {token}"
@@ -50,23 +57,22 @@ GITHUB_PROXY_RULES: Final = (
 
 
 class SandboxProxyRequest(RunRequest):
-    # The sandbox MDA opened for the run, which the capability in the answer names.
+    # The sandbox MDA opened for the run.
     sandbox_id: str
-    # GitHub refused the token the last answer carried: mint another, not a cached one.
+    # Ignored: the config carries no token to mint anew.
     force_refresh: bool = False
 
 
 class SandboxProxy(BaseModel):
-    """The sandbox's whole proxy config, which MDA writes as the backend hands it over."""
+    """The sandbox's whole proxy config, which an older MDA writes as the backend hands it
+    over."""
 
-    # Its rules carry a GitHub token and a capability for the sandbox, so it is never logged.
     config: dict[str, JsonValue] = Field(default_factory=dict, repr=False)
-    # When the GitHub token in ``config`` expires, so MDA asks again before then; None
-    # where it carries none.
+    # Always None: the config carries no token, so MDA never asks again for a fresh one.
     expires_at: datetime | None = None
 
 
-# Only reads the thread and signs the same capability again, so it is safe to send again.
+# Only reads the thread and its sandbox, so it is safe to send again.
 SANDBOX_PROXY = Endpoint(
     "sandbox_proxy",
     SandboxProxyRequest,

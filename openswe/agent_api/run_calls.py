@@ -179,7 +179,8 @@ from openswe.middleware.transcript import TranscriptMiddleware, queue_run_notice
 from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
-from openswe.sandboxes.lifecycle import mda_proxy_config, take_stale_boot
+from openswe.sandboxes.lifecycle import take_stale_boot
+from openswe.sandboxes.proxy_callback import SandboxProxyCallback
 from openswe.sandboxes.state import SandboxUnreachableError
 from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
@@ -729,23 +730,18 @@ class TokenRun:
         )
         return credential
 
-    async def sandbox_proxy(self, request: SandboxProxyRequest) -> SandboxProxy:
-        """The proxy config MDA writes on the run's sandbox, with a GitHub token of the run's
-        scope: a task worker's, its coordinator's own."""
+    async def sandbox_proxy(self, _request: SandboxProxyRequest) -> SandboxProxy:
+        """Deprecated: the proxy config an MDA deployment from before ``SandboxSpec.proxy_config``
+        writes on the run's sandbox, which is that same config."""
         managed = await self._sandbox.managed()
         if managed.external:
-            # An external sandbox keeps the proxy config its harness gave it, and no capability.
+            # An external sandbox keeps the proxy config its harness gave it.
             raise RefusedCallError("This thread's external sandbox keeps its own proxy config")
-        github_scope = None
-        if RunConfig.from_config(self.config).github_linked:
-            github_scope = (None, None) if managed.thread_id else await self._sandbox.github_scope()
-        config, expires_at = await mda_proxy_config(
-            managed.thread_id or self.run.thread_id,
-            request.sandbox_id,
-            github_scope=github_scope,
-            force_refresh=request.force_refresh,
+        if managed.proxy_config is None:
+            raise RuntimeError("Could not read the sandbox's cloud identity rules")
+        return SandboxProxy(
+            config=SandboxProxyCallback.legacy_config(managed.proxy_config, managed.env_vars)
         )
-        return SandboxProxy(config=config, expires_at=expires_at)
 
     async def reply_on_behalf(self, request: ReplyOnBehalf) -> Done:
         """Post the model's final answer for it, after it ignored the reply tool."""

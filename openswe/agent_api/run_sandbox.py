@@ -7,8 +7,6 @@ from langchain_core.runnables import RunnableConfig
 from runtime_api.catalog import SandboxSpec
 from runtime_api.sandbox_setup import GitIdentity
 
-from openswe.github.app import PermissionMap
-from openswe.github.sandbox_access import READ_ONLY_REVIEW_PERMISSIONS
 from openswe.middleware.sandbox_circuit_breaker import post_sandbox_unreachable_notification
 from openswe.run_config import RunConfig
 from openswe.sandboxes import lifecycle
@@ -28,8 +26,8 @@ logger = logging.getLogger(__name__)
 class RunSandbox:
     """The sandbox of the thread the run ``config`` names.
 
-    A run that ``reviews`` a pull request reaches only its repository, read-only, and its
-    own notice tells the pull request when the sandbox is gone.
+    A run that ``reviews`` a pull request reaches only its repository, and its own notice
+    tells the pull request when the sandbox is gone.
     """
 
     def __init__(self, config: RunnableConfig, *, reviews: bool) -> None:
@@ -37,20 +35,20 @@ class RunSandbox:
         self.reviews = reviews
         self._cfg = RunConfig.from_config(config)
 
-    def _github_scope(self) -> tuple[list[str] | None, PermissionMap | None]:
-        """How the run narrows its sandbox's GitHub token beyond its thread's own scope."""
+    def _repositories(self) -> list[str] | None:
+        """The repositories a review reaches, its pull request's, which a task worker's
+        coordinator's sandbox must not exceed; None for a run with its thread's whole scope."""
         if not self.reviews:
-            return None, None
-        return [self._cfg.repo.full_name] if self._cfg.repo else [], READ_ONLY_REVIEW_PERMISSIONS
+            return None
+        return [self._cfg.repo.full_name] if self._cfg.repo else []
 
     async def managed(self) -> ManagedSandbox:
         """The sandbox as MDA creates it."""
         if self._cfg.thread_id is None:
             raise ValueError("This run has no thread")
-        repositories, _permissions = self._github_scope()
         return await ManagedSandbox.for_thread(
             self._cfg.thread_id,
-            github_repositories=repositories,
+            github_repositories=self._repositories(),
             # A review's preparation works in the sandbox: its checkout and its diff.
             prepare_reaches_sandbox=self.reviews,
         )
@@ -60,17 +58,28 @@ class RunSandbox:
 
         Who commits is read alongside the sandbox, not after it: the two read the thread
         and its owner independently, each in transactions of its own. An MDA deployment from
-        before MDA wrote every sandbox's proxy config reads ``writes_proxy``.
+        before ``SandboxSpec.proxy_config`` reads ``writes_proxy``.
         """
         git_identity = asyncio.ensure_future(self.git_identity())
         try:
             sandbox = await self.managed()
-        except BaseException:
+        except BaseException as exc:
             await self._drop(git_identity)
+            if isinstance(exc, SandboxUnreachableError):
+                # The run can't be given a sandbox; it ends once the person knows why.
+                await self.tell_gone(
+                    sandbox_id=exc.sandbox_id,
+                    reason=exc.reason,
+                    deleted=isinstance(exc, SandboxDeletedError),
+                )
             raise
+        dumped = sandbox.model_dump(mode="json")
         return SandboxSpec.model_validate(
             {
-                **sandbox.model_dump(mode="json"),
+                **dumped,
+                # Not in the create options a run's execution profile records, whose digest
+                # pins their shape.
+                "create": {**dumped["create"], "env_vars": sandbox.env_vars},
                 "git_identity": await git_identity,
                 "writes_proxy": not sandbox.external,
             }
@@ -128,21 +137,6 @@ class RunSandbox:
             backend = sandbox.current
             if isinstance(backend, TimeoutLangSmithSandbox):
                 await backend.ensure_git_identity()
-
-    async def github_scope(self) -> tuple[list[str] | None, PermissionMap | None]:
-        """How the run narrows its sandbox's GitHub token beyond its thread's own scope, as
-        the token in its proxy config is minted.
-
-        A review thread's own scope already names its pull request's repository.
-        """
-        if self._cfg.thread_id is None:
-            raise ValueError("This run has no thread")
-        repositories, permissions = self._github_scope()
-        if self.reviews and self._cfg.repo is None:
-            metadata = await lifecycle.get_sandbox_metadata(self._cfg.thread_id)
-            if metadata.get("kind") in {"reviewer", "reviewer-shadow", "review-scout"}:
-                repositories = None
-        return repositories, permissions
 
     async def tell_gone(
         self,

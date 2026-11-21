@@ -359,7 +359,7 @@ async def _create_sandbox_with_retry(
     raise RuntimeError("unreachable sandbox retry state")
 
 
-async def _patch_proxy_config(
+async def _patch_sandbox(
     client: httpx2.AsyncClient,
     url: str,
     payload: dict[str, Any],
@@ -372,55 +372,29 @@ async def _patch_proxy_config(
 
     await retry_transient_sandbox_errors(
         patch,
-        description=f"GitHub proxy config for sandbox {sandbox_name}",
+        description=f"update of sandbox {sandbox_name}",
         max_elapsed=PROXY_CONFIG_RETRY_WINDOW_SECONDS,
         retryable=_is_retryable_proxy_config_error,
         retry_after=_proxy_config_retry_after,
     )
 
 
-async def _federated_proxy_rules(
-    client: httpx2.AsyncClient, url: str, api: SandboxAPI, sandbox_name: str
-) -> list[dict[str, JsonValue]]:
-    async def get() -> dict[str, JsonValue]:
-        response = await client.get(url, headers=api.headers())
-        api.raise_for_status(response)
-        return _json_object.validate_python(response.json())
-
-    sandbox = await retry_transient_sandbox_errors(
-        get,
-        description=f"proxy config of sandbox {sandbox_name}",
-        max_elapsed=PROXY_CONFIG_RETRY_WINDOW_SECONDS,
-        retryable=_is_retryable_proxy_config_error,
-        retry_after=_proxy_config_retry_after,
-    )
-    current = sandbox.get("proxy_config")
-    rules = current.get("rules") if isinstance(current, dict) else None
-    return [
-        rule
-        for rule in (rules if isinstance(rules, list) else [])
-        if isinstance(rule, dict) and federated_cloud(rule)
-    ]
-
-
-async def sandbox_proxy_config(
-    sandbox_name: str,
+def sandbox_proxy_config(
     github_token: str | None,
     *,
     base_proxy_config: Mapping[str, object] | None = None,
-    thread_id: str | None = None,
     federated_rules: Sequence[dict[str, JsonValue]] | None = None,
 ) -> dict[str, JsonValue]:
-    """The sandbox's proxy config: GitHub's rules with ``github_token``, none without one, the
-    thread's tool channel, and the custom settings of ``base_proxy_config``.
+    """The sandbox's proxy config: GitHub's rules with ``github_token``, none without one, and
+    the custom settings of ``base_proxy_config``.
 
     ``federated_rules`` are the cloud identity rules read from the live sandbox, which replace
     any in ``base_proxy_config``; without them, the base config's are kept."""
-    from openswe.sandboxes.tool_access import TOOLS_RULE, tool_proxy_rule
+    from openswe.sandboxes.tool_access import TOOLS_RULE
 
     proxy_config = dict(base_proxy_config or {})
     custom_rules = proxy_config.get("rules")
-    # Written afresh below, or credentials saved by built-in integrations since removed.
+    # Written afresh, or credentials saved by built-in integrations since removed.
     replaced = {
         *(rule.name for rule in GITHUB_PROXY_RULES),
         TOOLS_RULE,
@@ -433,7 +407,6 @@ async def sandbox_proxy_config(
         for rule in (custom_rules if isinstance(custom_rules, list) else [])
         if not isinstance(rule, dict) or rule.get("name") not in replaced
     ]
-    tools_rule = await tool_proxy_rule(thread_id, sandbox_name) if thread_id else None
     if federated_rules is not None:
         # Federation is fixed at creation, including its absence on older sandboxes, and
         # LangSmith allows one rule per cloud.
@@ -447,12 +420,16 @@ async def sandbox_proxy_config(
             ),
             *federated_rules,
         ]
-    proxy_config["rules"] = [
-        *_github_proxy_rules(github_token),
-        *([tools_rule] if tools_rule else []),
-        *preserved_rules,
-    ]
+    proxy_config["rules"] = [*_github_proxy_rules(github_token), *preserved_rules]
     return _json_object.validate_python(proxy_config)
+
+
+class AdoptedSandbox(BaseModel):
+    """A live sandbox as adopting it left it: the cloud identity rules it was created with,
+    and the environment its commands find, None where adopting could not set it."""
+
+    rules: list[dict[str, JsonValue]]
+    env_vars: dict[str, str] | None
 
 
 class LiveSandboxProxy:
@@ -468,30 +445,80 @@ class LiveSandboxProxy:
         self.url = f"{api.endpoint}/boxes/{name}"
 
     @classmethod
-    async def config_for(
-        cls,
-        name: str,
-        github_token: str | None,
-        *,
-        base_proxy_config: Mapping[str, object] | None = None,
-        thread_id: str | None = None,
-    ) -> dict[str, JsonValue]:
-        """The config to write on live sandbox ``name``, with its own cloud identity rules.
+    async def adopt(cls, name: str, *, env_vars: Mapping[str, str]) -> AdoptedSandbox | None:
+        """Live sandbox ``name``'s cloud identity rules, with its own environment set to hold
+        ``env_vars``; None without a LangSmith API key, which nothing could read them with.
 
-        Without a LangSmith API key nothing can read the sandbox, and the base config's are
-        kept."""
+        A sandbox created before its commands' environment came from its own run config has
+        it from its old proxy config's rules, which the config MDA writes no longer carries.
+        Reading the rules raises when it fails, while the host suspends an idle sandbox
+        included; a failed environment write leaves the commands without it until the next
+        adoption sets it.
+        """
         api = SandboxAPI.from_env()
         if not api.api_key:
-            return await sandbox_proxy_config(
-                name, github_token, base_proxy_config=base_proxy_config, thread_id=thread_id
-            )
+            return None
         live = cls(api, name)
         async with httpx2.AsyncClient(
             transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
         ) as client:
-            return await live.config(
-                client, github_token, base_proxy_config=base_proxy_config, thread_id=thread_id
-            )
+            sandbox = await live.live(client)
+            rules = cls.federated_rules_in(sandbox)
+            try:
+                await live.set_env(client, sandbox.get("run_config"), env_vars)
+            except Exception:
+                logger.warning(
+                    "Could not set the sandbox's environment",
+                    exc_info=True,
+                    extra={"sandbox_id": name},
+                )
+                return AdoptedSandbox(rules=rules, env_vars=None)
+            return AdoptedSandbox(rules=rules, env_vars=dict(env_vars))
+
+    async def live(self, client: httpx2.AsyncClient) -> dict[str, JsonValue]:
+        """This sandbox as LangSmith answers for it now, retried for as long as the host takes
+        to suspend an idle sandbox."""
+
+        async def get() -> dict[str, JsonValue]:
+            response = await client.get(self.url, headers=self.api.headers())
+            self.api.raise_for_status(response)
+            return _json_object.validate_python(response.json())
+
+        return await retry_transient_sandbox_errors(
+            get,
+            description=f"proxy config of sandbox {self.name}",
+            max_elapsed=PROXY_CONFIG_RETRY_WINDOW_SECONDS,
+            retryable=_is_retryable_proxy_config_error,
+            retry_after=_proxy_config_retry_after,
+        )
+
+    @staticmethod
+    def federated_rules_in(sandbox: Mapping[str, JsonValue]) -> list[dict[str, JsonValue]]:
+        """The cloud identity rules in live sandbox ``sandbox``'s proxy config."""
+        current = sandbox.get("proxy_config")
+        rules = current.get("rules") if isinstance(current, dict) else None
+        return [
+            rule
+            for rule in (rules if isinstance(rules, list) else [])
+            if isinstance(rule, dict) and federated_cloud(rule)
+        ]
+
+    async def set_env(
+        self, client: httpx2.AsyncClient, run_config: JsonValue, env_vars: Mapping[str, str]
+    ) -> None:
+        """Have this sandbox's own environment hold ``env_vars``, over its ``run_config``.
+
+        LangSmith replaces a sandbox's whole run config on an update, but merges its
+        environment key by key, so the rest of it is kept, and pushes the change to a running
+        sandbox."""
+        current = run_config if isinstance(run_config, dict) else {}
+        held = current.get("env_vars")
+        held = held if isinstance(held, dict) else {}
+        if all(held.get(name) == value for name, value in env_vars.items()):
+            return
+        wanted = {**held, **env_vars}
+        updated = {**current, "env_vars": wanted}
+        await _patch_sandbox(client, self.url, {"run_config": updated}, self.api, self.name)
 
     async def config(
         self,
@@ -499,21 +526,16 @@ class LiveSandboxProxy:
         github_token: str | None,
         *,
         base_proxy_config: Mapping[str, object] | None = None,
-        thread_id: str | None = None,
     ) -> dict[str, JsonValue]:
         """``sandbox_proxy_config`` for this sandbox, its cloud identity rules read from it."""
-        return await sandbox_proxy_config(
-            self.name,
+        return sandbox_proxy_config(
             github_token,
             base_proxy_config=base_proxy_config,
-            thread_id=thread_id,
-            federated_rules=await _federated_proxy_rules(client, self.url, self.api, self.name),
+            federated_rules=self.federated_rules_in(await self.live(client)),
         )
 
     async def write(self, client: httpx2.AsyncClient, proxy_config: dict[str, JsonValue]) -> None:
-        await _patch_proxy_config(
-            client, self.url, {"proxy_config": proxy_config}, self.api, self.name
-        )
+        await _patch_sandbox(client, self.url, {"proxy_config": proxy_config}, self.api, self.name)
 
 
 async def configure_sandbox_proxy(
@@ -521,9 +543,9 @@ async def configure_sandbox_proxy(
     github_token: str | None,
     *,
     base_proxy_config: dict[str, Any] | None = None,
-    thread_id: str | None = None,
 ) -> None:
-    """Inject GitHub and thread-tool credentials while preserving custom proxy settings."""
+    """Inject GitHub credentials while preserving custom proxy settings, on a sandbox no
+    thread works in, such as an image build's."""
     api = SandboxAPI.from_env()
     if not api.api_key:
         logger.warning("No LangSmith API key found, skipping sandbox proxy configuration")
@@ -532,9 +554,7 @@ async def configure_sandbox_proxy(
     async with httpx2.AsyncClient(
         transport=pooled_transport(), timeout=PROXY_CONFIG_TIMEOUT_SECONDS
     ) as client:
-        proxy_config = await live.config(
-            client, github_token, base_proxy_config=base_proxy_config, thread_id=thread_id
-        )
+        proxy_config = await live.config(client, github_token, base_proxy_config=base_proxy_config)
         await live.write(client, proxy_config)
     logger.info("Configured sandbox proxy", extra={"sandbox_id": sandbox_name})
 

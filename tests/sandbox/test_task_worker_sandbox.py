@@ -76,8 +76,12 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     owner_type: str,
 ) -> None:
     from openswe.execution import SANDBOX_EXECUTION, ExecutionProfile
-    from openswe.github.sandbox_access import SandboxGitHubAccess
-    from openswe.sandboxes.providers.langsmith import LangSmithCreateOptions
+    from openswe.sandboxes.managed import ManagedSandbox
+    from openswe.sandboxes.providers.langsmith import (
+        AdoptedSandbox,
+        LangSmithCreateOptions,
+        LiveSandboxProxy,
+    )
 
     if owner_type == "system":
         for metadata in shared_sandbox.values():
@@ -107,16 +111,21 @@ async def test_worker_attaches_to_replaced_host_without_guest_proxy_identity(
     assert shared_sandbox["worker"]["sandbox_id"] == host_sandbox_id
     connect.assert_awaited_once_with(host_sandbox_id)
     shared_sandbox["worker"]["sandbox_base_proxy_config"] = {"rules": ["injected"]}
-    render = AsyncMock(return_value={})
+    shared_sandbox["coordinator"]["sandbox_owner"] = "mda"
     monkeypatch.setattr(
-        lifecycle, "sandbox_token", AsyncMock(return_value=SandboxGitHubAccess("token"))
+        "openswe.sandboxes.managed.get_sandbox_metadata", lifecycle.get_sandbox_metadata
     )
-    monkeypatch.setattr(lifecycle.LiveSandboxProxy, "config_for", render)
-    await lifecycle.mda_proxy_config("worker", host_sandbox_id)
-    assert render.await_args.kwargs["base_proxy_config"] == proxy_config
+    monkeypatch.setattr(
+        LiveSandboxProxy, "adopt", AsyncMock(return_value=AdoptedSandbox(rules=[], env_vars={}))
+    )
+    managed = await ManagedSandbox.for_thread("worker")
+    assert managed.thread_id == "coordinator"
+    assert managed.sandbox_id == host_sandbox_id
+    assert managed.proxy_config is not None
+    assert managed.proxy_config["rules"] == proxy_config["rules"]
     shared_sandbox["worker"]["sandbox_host_thread_id"] = "another-coordinator"
     with pytest.raises(PermissionError, match="does not match"):
-        await lifecycle.mda_proxy_config("worker", host_sandbox_id)
+        await ManagedSandbox.for_thread("worker")
     if owner_type == "system":
         assert all("owner_user_id" not in metadata for metadata in shared_sandbox.values())
     else:

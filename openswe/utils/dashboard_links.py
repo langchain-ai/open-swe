@@ -41,7 +41,20 @@ def public_dashboard_api_base_url() -> str | None:
 
     None in local development, where nothing outside this machine can reach it.
     """
-    base = dashboard_api_base_url()
+    return _public_https(dashboard_api_base_url())
+
+
+def sandbox_api_base_url() -> str | None:
+    """The public HTTPS origin a sandbox reaches the backend's ``/dashboard/api/*`` through:
+    ``SANDBOX_PUBLIC_BASE_URL``, a tunnel's in local development, or else the dashboard's
+    own; None where there is none."""
+    explicit = ENV.SANDBOX_PUBLIC_BASE_URL.optional()
+    if explicit:
+        return _public_https(explicit.rstrip("/"))
+    return public_dashboard_api_base_url()
+
+
+def _public_https(base: str) -> str | None:
     parsed = urlsplit(base)
     if (
         parsed.scheme != "https"

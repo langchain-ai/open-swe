@@ -110,6 +110,9 @@ class SandboxCreate(BaseModel):
     delete_after_stop_seconds: int
     # Create-request fields the SDK does not model, such as ``preserve_memory_on_stop``.
     extra_fields: dict[str, JsonValue] = {}
+    # The environment of every command in the sandbox, set in its own run config. None of it
+    # is a credential.
+    env_vars: dict[str, str] = {}
 
 
 class SandboxSpec(BaseModel):
@@ -117,9 +120,15 @@ class SandboxSpec(BaseModel):
 
     create: SandboxCreate
     sandbox_id: str | None = None
-    # Deprecated: MDA writes the proxy config of every sandbox but an external one
-    # (``runtime_api.sandbox_proxy``). Sent for MDA deployments from before that, which
-    # leave a sandbox without it to the backend; remove once every deployment writes it.
+    # The sandbox's whole proxy config, which MDA creates it with and writes before its
+    # commands. It is the same on every run, so it holds no credential: commands get
+    # GitHub's and the tool channel's from the backend's proxy callback, which LangSmith
+    # asks as they go out. None leaves the sandbox's own alone, as an external one keeps
+    # its harness's.
+    proxy_config: dict[str, JsonValue] | None = None
+    # Deprecated: MDA deployments from before ``proxy_config`` read this and write the
+    # proxy config the backend hands over (``runtime_api.sandbox_proxy``); remove once
+    # every deployment reads ``proxy_config``.
     writes_proxy: bool = False
     # Whether the run may prepare before its sandbox is open and report the sandbox afterwards
     # (``runtime_api.loop.BIND_SANDBOX``), so its first model call waits for neither: nothing

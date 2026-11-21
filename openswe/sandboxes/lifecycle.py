@@ -1,7 +1,8 @@
 """Connecting to the sandbox bound to a thread.
 
 Managed Deep Agents creates and replaces every thread's sandbox, and writes its proxy
-config; the backend never creates one, and hands MDA that config (``mda_proxy_config``).
+config; the backend never creates one, and works that config out as it plans each run
+(``ManagedSandbox``).
 This module connects to the sandbox a thread is bound to, writes its git identity, and
 hands MDA a sandbox the backend made before MDA owned them (``BackendSandbox``): MDA adopts
 it, or starts the thread in a fresh one where it is gone. The registry lives in ``state``.
@@ -12,7 +13,6 @@ import logging
 import shlex
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -33,7 +33,6 @@ from openswe.sandboxes.configuration import SandboxResources
 from openswe.sandboxes.paths import declared_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith import (
     LangSmithCreateOptions,
-    LiveSandboxProxy,
     get_sandbox_proxy_config,
 )
 from openswe.sandboxes.providers.registry import SandboxGoneError, connect_existing_sandbox
@@ -58,7 +57,6 @@ from openswe.threads.index import ThreadSearch
 from openswe.threads.store import THREADS
 from openswe.utils.json_types import JsonObject
 from openswe.utils.startup_trace import aphase
-from openswe.utils.time import parse_iso
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +81,35 @@ class SandboxCredentialPolicy:
         owner = await self.metadata.owner()
         subject = self.metadata.owner_subject(owner)
         return not subject.startswith("user:") and bool(owner.github_login)
+
+    @classmethod
+    async def proxy_token(
+        cls, thread_id: str, metadata: Mapping[str, object]
+    ) -> SandboxGitHubAccess:
+        """The GitHub token requests from ``thread_id``'s sandbox carry: scoped to the thread's
+        own repositories, a review's to its pull request's and read-only; none where the
+        thread may not use GitHub.
+
+        It is the sandbox's owner's whatever run is going on there: a task worker's run in
+        its coordinator's sandbox, or a run whose sender has no linked GitHub account, gets
+        the coordinator's, the thread's own scope.
+        """
+        if not await cls(ThreadMetadata.model_validate(metadata)).allows_github():
+            return SandboxGitHubAccess()
+        repositories, permissions = await _thread_proxy_scope(thread_id, metadata)
+        if repositories == []:
+            return SandboxGitHubAccess()
+        return await _proxy_token(thread_id, repositories, permissions)
+
+    @classmethod
+    async def reaches_github(cls, thread_id: str, metadata: Mapping[str, object]) -> bool:
+        """Whether requests from ``thread_id``'s sandbox to GitHub carry a token
+        (``proxy_token``): the thread may use GitHub, and its scope names some repository or
+        the whole installation. Worked out without minting one."""
+        if not await cls(ThreadMetadata.model_validate(metadata)).allows_github():
+            return False
+        repositories, _permissions = await _thread_proxy_scope(thread_id, metadata)
+        return repositories != []
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,9 +252,6 @@ async def _proxy_token(
 
 
 _STALE_BOOTS: dict[str, ExecutionProfile] = {}
-# The least a token the backend hands MDA for a sandbox's proxy has left: more than the
-# 15 minutes before expiry when MDA asks for a fresh one.
-_MDA_TOKEN_MIN_LIFE: Final = timedelta(minutes=25)
 
 
 def take_stale_boot(thread_id: str) -> ExecutionProfile | None:
@@ -433,47 +457,6 @@ class TaskWorkerSandbox:
         return published
 
 
-async def mda_proxy_config(
-    thread_id: str,
-    sandbox_id: str,
-    *,
-    github_scope: tuple[Sequence[str] | None, PermissionMap | None] | None = None,
-    force_refresh: bool = False,
-) -> tuple[dict[str, JsonValue], datetime | None]:
-    """The proxy config MDA writes on ``thread_id``'s sandbox ``sandbox_id``, and when its
-    GitHub token expires: what the backend would write there itself.
-
-    With ``github_scope``, the repositories and permissions a run narrows its token to, it
-    carries GitHub's rules, with a token minted for that scope within the thread's own, when
-    the thread may use GitHub; without it, none. The token lasts past MDA's next ask.
-    ``force_refresh`` mints it anew, as after GitHub refused the last one.
-    """
-    metadata = await get_sandbox_metadata(thread_id)
-    config = await SandboxCreateConfig.for_thread(metadata, thread_id=thread_id)
-    base_proxy_config = config.proxy_config or {}
-    token: str | None = None
-    expires_at: datetime | None = None
-    if (
-        github_scope is not None
-        and await SandboxCredentialPolicy(ThreadMetadata.model_validate(metadata)).allows_github()
-    ):
-        repositories, permissions = await _thread_proxy_scope(thread_id, metadata, *github_scope)
-        access = await _proxy_token(
-            thread_id, repositories, permissions, force_refresh=force_refresh
-        )
-        expires_at = parse_iso(access.expires_at)
-        if expires_at is not None and expires_at - datetime.now(UTC) < _MDA_TOKEN_MIN_LIFE:
-            access = await _proxy_token(thread_id, repositories, permissions, force_refresh=True)
-            expires_at = parse_iso(access.expires_at)
-        token = access.token
-    # As the backend writes it itself: the sandbox's own cloud identity rules, never ones from
-    # the thread's current create options that it wasn't created with.
-    proxy_config = await LiveSandboxProxy.config_for(
-        sandbox_id, token, base_proxy_config=base_proxy_config, thread_id=thread_id
-    )
-    return proxy_config, expires_at if token else None
-
-
 async def _thread_proxy_scope(
     thread_id: str,
     metadata: Mapping[str, object],
@@ -528,7 +511,7 @@ async def ensure_sandbox_for_thread(
 
     The git identity is written on every connection: reused sandboxes can lose their
     global config, and Vercel rejects commits whose email cannot resolve to a GitHub
-    account. MDA writes the proxy config (``mda_proxy_config``).
+    account. MDA writes the proxy config (``ManagedSandbox``).
     """
     async with aphase(thread_id, "sandbox.thread_metadata"):
         sandbox_metadata = await get_sandbox_metadata(thread_id)

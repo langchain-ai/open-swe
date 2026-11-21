@@ -1,10 +1,16 @@
-# ngrok traffic policy for a local Open SWE backend: only the webhook endpoints are public.
-# Under `langgraph dev` the LangGraph API (threads, runs, assistants, store) has no authentication,
-# so everything but the signature-checked webhooks must stay on localhost. `make tunnel` passes
-# this file to `ngrok http 2024`; any other tunnel needs an equivalent allowlist.
+# ngrok traffic policy for a local Robin backend: only the routes that check their own
+# credentials are public. Under `langgraph dev` the LangGraph API (threads, runs, assistants,
+# store) has no authentication, so everything else must stay on localhost. `make tunnel`
+# passes this file to `ngrok http 2024`; any other tunnel needs an equivalent allowlist.
+#
+# - /webhooks/*: GitHub and Slack deliveries, checked by their signatures.
+# - /dashboard/api/sandbox-proxy-callback: LangSmith's sandbox proxy asking for a request's
+#   credentials, checked by LangSmith's signature.
+# - /dashboard/api/sandbox-tools/*: a sandbox's tool channel, checked by the capability the
+#   proxy injects.
 on_http_request:
   - expressions:
-      - "!req.url.path.startsWith('/webhooks/')"
+      - "!req.url.path.startsWith('/webhooks/') && req.url.path != '/dashboard/api/sandbox-proxy-callback' && !req.url.path.startsWith('/dashboard/api/sandbox-tools/')"
     actions:
       - type: custom-response
         config:

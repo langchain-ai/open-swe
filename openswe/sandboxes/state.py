@@ -56,8 +56,9 @@ class SandboxUnreachableError(RuntimeError):
 
 
 class SandboxDeletedError(SandboxUnreachableError):
-    """LangSmith confirmed the thread's sandbox is deleted: nothing replaces it, so the thread
-    can never run again, and a new thread is the way on."""
+    """LangSmith can't find the thread's sandbox: deleted, or in a workspace Robin's key can't
+    see, which it answers the same way. Nothing replaces it, so the thread can never run
+    again, and a new thread is the way on."""
 
 
 class SandboxHandedOverError(SandboxUnreachableError):

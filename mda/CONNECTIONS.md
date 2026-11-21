@@ -56,7 +56,7 @@ uv run --project mda --locked mda connections list --project mda --json \
   | jq -e --arg s "mda/github-app/$DEPLOYMENT_ID" 'any(.[]; .slug == $s)'
 ```
 
-Sandboxes' GitHub tokens never come from this connection: the backend mints them and hands them to MDA with the sandbox's proxy config (`sandbox_proxy`).
+Sandboxes' GitHub tokens never come from this connection: the backend mints them and hands them to the sandbox's LangSmith proxy through its proxy callback.
 
 ## 3. `open-swe-github-<env>`: each person's GitHub, for the PRs they open
 

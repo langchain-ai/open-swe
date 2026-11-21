@@ -36,7 +36,7 @@ Use a name of your own (GitHub App names are unique), and give it a distinct men
 ## 3. Tunnel for webhooks
 
 Always run an ngrok tunnel when starting Robin locally.
-GitHub and Slack need a public HTTPS hostname that stays the same across restarts.
+GitHub and Slack need a public HTTPS hostname that stays the same across restarts, and so does LangSmith's sandbox proxy, which asks the backend for a sandbox's GitHub credentials as its commands call GitHub.
 Reuse an existing tunnel and its exact configured domain, forwarding to the active backend (normally localhost:2024).
 If no tunnel is running, recover the domain from configuration or prior local runtime notes in the primary checkout before starting one; an automatically assigned hostname will not match existing webhook settings.
 
@@ -52,12 +52,13 @@ For a first-time setup, the free ngrok plan gives you a static domain:
    make tunnel NGROK_DOMAIN=<name>.ngrok-free.dev   # or export NGROK_DOMAIN once in your shell
    ```
 
-`make tunnel` runs `ngrok http 2024` on that domain with [`examples/ngrok/webhooks-only.yml`](../examples/ngrok/webhooks-only.yml) as its traffic policy, so only `/webhooks/*` is reachable from the internet.
+`make tunnel` runs `ngrok http 2024` on that domain with [`examples/ngrok/webhooks-only.yml`](../examples/ngrok/webhooks-only.yml) as its traffic policy, so only routes that check their own credentials are reachable from the internet: `/webhooks/*` (signed by GitHub and Slack), `/dashboard/api/sandbox-proxy-callback` (signed by LangSmith) and `/dashboard/api/sandbox-tools/*` (a sandbox's capability).
 That restriction is not optional.
 Under `langgraph dev` the LangGraph API itself (`/threads`, `/runs`, `/assistants`, `/store`, …) has no authentication at all: the dashboard API checks its session cookie and the webhook endpoints check their signatures, but anyone who can reach port 2024 can read and create threads and runs.
 A tunnel that forwards the whole port publishes exactly that.
 Everything except the webhooks stays on `http://localhost:2024`, where you keep opening the dashboard.
 Check the policy once the backend is up (step 6): `curl https://<name>.ngrok-free.dev/webhooks/slack` answers `{"status":"ok", …}` from the backend, while `/ok` gets ngrok's own 404.
+Without the tunnel and `SANDBOX_PUBLIC_BASE_URL` (step 5), sandboxes get no proxy callback: their commands reach GitHub without credentials, and there is no tool channel.
 
 Preserve the existing webhook traffic policy.
 For local Slack OAuth, also preserve the callback relay: requests to `/dashboard/api/slack/callback` on the ngrok domain must redirect to `http://localhost:2024/dashboard/api/slack/callback` with the complete query string intact.
@@ -98,6 +99,7 @@ SLACK_SIGNING_SECRET=""         # Basic Information → App Credentials
 SLACK_BOT_USER_ID=""            # the bot's member id (bot profile → ⋮ → Copy member ID)
 SLACK_BOT_USERNAME=""           # the bot's handle, e.g. robin_you
 SLACK_PUBLIC_BASE_URL="https://<name>.ngrok-free.dev"  # your existing domain from step 3; used by Slack OAuth and the admin manifest
+SANDBOX_PUBLIC_BASE_URL="https://<name>.ngrok-free.dev"  # the same domain; LangSmith's sandbox proxy calls back there for GitHub credentials
 
 TOKEN_ENCRYPTION_KEY=""         # openssl rand -base64 32  (encrypts stored GitHub and Slack tokens)
 DASHBOARD_JWT_SECRET=""         # openssl rand -hex 32     (signs the session cookie and OAuth state)
@@ -113,7 +115,7 @@ Every Robin thread runs its model loop on Managed Deep Agents, from the project 
 Locally that is `make dev-mda` on port 2025, which reads its own `mda/.env`: set `OPEN_SWE_BACKEND_URL=http://localhost:2024` there, plus `LANGSMITH_API_KEY` and the same model key as above ([mda/README.md](../mda/README.md#run-locally)).
 
 `LANGGRAPH_URL` defaults to `http://localhost:2024`, and `DASHBOARD_BASE_URL` / `DASHBOARD_API_BASE_URL` default to it, so none of the three is needed locally.
-Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` to the tunnel.
+Keep them on localhost when setting `SLACK_PUBLIC_BASE_URL` and `SANDBOX_PUBLIC_BASE_URL` to the tunnel.
 Model calls require a [LangSmith Gateway](INSTALLATION.md#4-model-providers-and-api-keys) credential (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) with `gateway:invoke`.
 Direct provider keys are not used.
 How the running model is chosen is covered in the same section.

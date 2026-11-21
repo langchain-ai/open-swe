@@ -350,6 +350,12 @@ ENV.var(
     "the dashboard (bundled build or DASHBOARD_DEV_SERVER_URL).",
 )
 ENV.var(
+    "SANDBOX_PUBLIC_BASE_URL",
+    "Public HTTPS URL sandboxes reach the backend through, for its proxy callback and tool "
+    "channel; defaults to DASHBOARD_API_BASE_URL. Use the ngrok URL when the backend runs on "
+    "localhost.",
+)
+ENV.var(
     "DASHBOARD_API_BASE_URL",
     "Public URL browsers use for /dashboard/api/* and OAuth callbacks; defaults to LANGGRAPH_URL.",
 )

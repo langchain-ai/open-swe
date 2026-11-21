@@ -2,7 +2,6 @@
 
 import json
 from copy import deepcopy
-from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,12 +9,10 @@ import httpx2
 import pytest
 from pydantic import JsonValue
 
-from openswe.github.sandbox_access import SandboxGitHubAccess
 from openswe.sandboxes.providers.langsmith import (
     PROXY_CONFIG_RETRY_WINDOW_SECONDS,
     configure_sandbox_proxy,
 )
-from openswe.sandboxes.tool_access import SANDBOX_PROXY_CONFIG_METADATA_KEY
 
 
 def _mock_async_client(mock_client_cls: MagicMock, inner: MagicMock) -> None:
@@ -85,13 +82,9 @@ class TestConfigureSandboxProxy:
             assert isinstance(settings, dict)
             settings["subject_scope"] = "tag:00000000-0000-0000-0000-000000000003"
         static_cloud_rule = {"name": "static-aws", "type": "aws", "aws": {"region": "us-east-1"}}
-        tools_rule = {"name": "open-swe-thread-tools", "headers": [{"value": "fresh-tools"}]}
         with (
             patch("openswe.sandboxes.providers.langsmith.httpx2.AsyncClient") as mock_client_cls,
             patch.dict("os.environ", {"LANGSMITH_API_KEY": "ls-api-key"}),
-            patch(
-                "openswe.sandboxes.tool_access.tool_proxy_rule", AsyncMock(return_value=tools_rule)
-            ),
         ):
             mock_client = MagicMock()
             mock_response = MagicMock()
@@ -108,7 +101,6 @@ class TestConfigureSandboxProxy:
             await configure_sandbox_proxy(
                 "sandbox-abc123",
                 "token",
-                thread_id="thread-123",
                 base_proxy_config={
                     "rules": [
                         custom_rule,
@@ -124,7 +116,6 @@ class TestConfigureSandboxProxy:
         proxy_config = mock_client.patch.call_args.kwargs["json"]["proxy_config"]
         assert proxy_config["enabled"] is True
         assert proxy_config["rules"][2:] == [
-            tools_rule,
             custom_rule,
             *([static_cloud_rule] if existing_identity == "absent" else []),
             *existing_rules,
@@ -247,187 +238,197 @@ class TestSandboxReuse:
 
 
 _TAG = "00000000-0000-0000-0000-000000000001"
-# The cloud identity rule of another sandbox configuration.
+# The cloud identity rule a sandbox was created with.
 _AWS_RULE = {
     "name": "aws",
     "type": "aws",
     "aws": {"role_arn": "arn:aws:iam::123456789012:role/ReadOnly", "subject_scope": f"tag:{_TAG}"},
 }
-# The egress rule of the workspace the thread's sandbox was last bound in.
-_RECORDED_RULE = {"name": "mine-egress", "match_hosts": ["internal.mine.invalid"]}
-
-
-class TestMdaProxyConfig:
-    @pytest.mark.parametrize(
-        ("metadata", "expected"),
-        [
-            (
-                {
-                    "sandbox_id": "sandbox-abc",
-                    SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [_RECORDED_RULE]},
-                    "sandbox_create_options": {
-                        "extra_fields": {"proxy_config": {"rules": [_AWS_RULE]}}
-                    },
-                },
-                [],
-            ),
-            (
-                {
-                    "sandbox_id": "sandbox-abc",
-                    SANDBOX_PROXY_CONFIG_METADATA_KEY: {"rules": [_RECORDED_RULE]},
-                },
-                [],
-            ),
-        ],
-    )
-    async def test_public_metadata_cannot_grant_cloud_authority(
-        self, metadata: dict[str, object], expected: list[dict[str, object]]
-    ) -> None:
-        """Thread metadata cannot select a different cloud identity."""
-        from openswe.sandboxes.lifecycle import mda_proxy_config
-
-        tools_rule = {"name": "open-swe-thread-tools", "match_hosts": ["backend.invalid"]}
-        with (
-            patch(
-                "openswe.sandboxes.lifecycle.get_sandbox_metadata",
-                new_callable=AsyncMock,
-                return_value=metadata,
-            ),
-            patch(
-                "openswe.sandboxes.tool_access.tool_proxy_rule",
-                new_callable=AsyncMock,
-                return_value=tools_rule,
-            ),
-        ):
-            config, expires_at = await mda_proxy_config("thread-123", "sandbox-abc")
-
-        assert config["rules"] == [tools_rule, *expected]
-        assert expires_at is None
-
-    @pytest.mark.parametrize("fresh", [True, False])
-    async def test_the_config_carries_a_token_of_the_runs_scope(self, fresh: bool) -> None:
-        """The config MDA writes carries GitHub's rules with a token minted for the run's
-        scope, as the backend's own write would, lasting past MDA's next ask."""
-        from openswe.sandboxes import lifecycle
-
-        now = datetime.now(UTC)
-        stale = SandboxGitHubAccess("stale-token", (now + timedelta(minutes=10)).isoformat())
-        minted = SandboxGitHubAccess("fresh-token", (now + timedelta(minutes=60)).isoformat())
-        mint = AsyncMock(side_effect=[minted] if fresh else [stale, minted])
-        with (
-            patch.object(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={})),
-            patch.object(
-                lifecycle.SandboxCredentialPolicy, "allows_github", AsyncMock(return_value=True)
-            ),
-            patch.object(
-                lifecycle, "thread_token_repositories", AsyncMock(return_value=["acme/api"])
-            ),
-            patch.object(lifecycle, "sandbox_token", mint),
-            patch(
-                "openswe.sandboxes.tool_access.tool_proxy_rule",
-                AsyncMock(return_value={"name": "open-swe-thread-tools"}),
-            ),
-        ):
-            config, expires_at = await lifecycle.mda_proxy_config(
-                "thread-123", "sandbox-abc", github_scope=(["acme/api"], {"contents": "read"})
-            )
-
-        rules = config["rules"]
-        assert isinstance(rules, list)
-        assert {rule["name"] for rule in rules if isinstance(rule, dict)} >= {
-            "github",
-            "github-api",
-        }
-        assert "fresh-token" in json.dumps(rules) and "stale-token" not in json.dumps(rules)
-        assert expires_at is not None and expires_at - now > timedelta(minutes=50)
-        assert mint.await_args_list[0].kwargs["repositories"] == ["acme/api"]
-        assert mint.await_args_list[0].kwargs["permissions"] == {"contents": "read"}
-        assert mint.await_args_list[-1].kwargs["force_refresh"] is (not fresh)
-
-    async def test_a_thread_that_may_not_use_github_gets_no_token_in_the_config(self) -> None:
-        from openswe.sandboxes import lifecycle
-
-        mint = AsyncMock(side_effect=AssertionError("no token for this thread"))
-        with (
-            patch.object(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={})),
-            patch.object(
-                lifecycle.SandboxCredentialPolicy, "allows_github", AsyncMock(return_value=False)
-            ),
-            patch.object(lifecycle, "sandbox_token", mint),
-            patch(
-                "openswe.sandboxes.tool_access.tool_proxy_rule",
-                AsyncMock(return_value={"name": "open-swe-thread-tools"}),
-            ),
-        ):
-            config, expires_at = await lifecycle.mda_proxy_config(
-                "thread-123", "sandbox-abc", github_scope=(None, None)
-            )
-
-        assert config["rules"] == [{"name": "open-swe-thread-tools"}]
-        assert expires_at is None
-
-
 # The cloud identity rule the workspace's sandboxes are created with today.
 _CURRENT_AWS_RULE = {
     "name": "aws",
     "type": "aws",
     "aws": {"role_arn": "arn:aws:iam::123456789012:role/Current", "subject_scope": f"tag:{_TAG}"},
 }
+# An egress rule of the workspace.
+_EGRESS_RULE = {"name": "mine-egress", "match_hosts": ["internal.mine.invalid"]}
 
 
-@pytest.mark.parametrize("live_rules", [[], [_AWS_RULE]], ids=["created-without", "created-with"])
-async def test_mda_gets_the_cloud_identity_rules_its_sandbox_was_created_with(
-    live_rules: list[dict[str, object]],
+@pytest.mark.parametrize("public", [True, False], ids=["public-origin", "local"])
+@pytest.mark.parametrize("live_rules", [None, [], [_AWS_RULE]], ids=["new", "without", "with"])
+def test_a_sandboxs_proxy_config_holds_no_credential_and_keeps_its_cloud_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    public: bool,
+    live_rules: list[dict[str, JsonValue]] | None,
 ) -> None:
     """LangSmith fixes a sandbox's cloud identity rules when it is created and refuses a write
-    that changes them (HTTP 422), so the config MDA writes carries the live sandbox's, as the
-    backend's own write does, never the ones the thread's create options name today."""
-    from openswe.sandboxes import lifecycle
-    from openswe.sandboxes.providers import langsmith
-    from openswe.sandboxes.providers.langsmith_api import SandboxAPI
+    that changes them (HTTP 422), so an existing sandbox's config carries the ones read from
+    it, never the ones the workspace names today; a new one is created with the workspace's.
+    GitHub's and the tool channel's credentials come from the callback, never the config."""
+    from openswe.sandboxes.proxy_callback import SandboxProxyCallback
+    from openswe.sandboxes.tool_access import PROXY_CALLBACK_PATH
 
-    create = MagicMock(proxy_config={"rules": [_CURRENT_AWS_RULE, _RECORDED_RULE]})
-    read = AsyncMock(return_value=live_rules)
-    with (
-        patch.object(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={})),
-        patch.object(lifecycle.SandboxCreateConfig, "for_thread", AsyncMock(return_value=create)),
-        patch.object(
-            langsmith.SandboxAPI, "from_env", return_value=SandboxAPI("https://ls.invalid", "key")
-        ),
-        patch.object(langsmith, "_federated_proxy_rules", read),
-        patch(
-            "openswe.sandboxes.tool_access.tool_proxy_rule",
-            AsyncMock(return_value={"name": "open-swe-thread-tools"}),
-        ),
-    ):
-        config, _ = await lifecycle.mda_proxy_config("thread-123", "sandbox-abc")
-
-    assert read.await_args.args[-1] == "sandbox-abc"
-    assert config["rules"] == [{"name": "open-swe-thread-tools"}, _RECORDED_RULE, *live_rules]
-
-
-async def test_a_refused_token_is_minted_anew_for_mda() -> None:
-    """After GitHub refused the token MDA wrote, the next one bypasses the backend's cache."""
-    from openswe.sandboxes import lifecycle
-
-    minted = SandboxGitHubAccess(
-        "fresh-token", (datetime.now(UTC) + timedelta(minutes=60)).isoformat()
+    monkeypatch.setenv(
+        "DASHBOARD_API_BASE_URL", "https://robin.invalid" if public else "http://localhost:2024"
     )
-    mint = AsyncMock(return_value=minted)
-    with (
-        patch.object(lifecycle, "get_sandbox_metadata", AsyncMock(return_value={})),
-        patch.object(
-            lifecycle.SandboxCredentialPolicy, "allows_github", AsyncMock(return_value=True)
-        ),
-        patch.object(lifecycle, "thread_token_repositories", AsyncMock(return_value=None)),
-        patch.object(lifecycle, "sandbox_token", mint),
-        patch(
-            "openswe.sandboxes.tool_access.tool_proxy_rule",
-            AsyncMock(return_value={"name": "open-swe-thread-tools"}),
-        ),
-    ):
-        await lifecycle.mda_proxy_config(
-            "thread-123", "sandbox-abc", github_scope=(None, None), force_refresh=True
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "secret")
+    base = {
+        "rules": [
+            _CURRENT_AWS_RULE,
+            _EGRESS_RULE,
+            {"name": "github", "headers": [{"value": "stale"}]},
+            {"name": "open-swe-thread-tools", "headers": [{"value": "stale"}]},
+        ]
+    }
+
+    config = SandboxProxyCallback.proxy_config(base, federated_rules=live_rules)
+
+    rules = config["rules"]
+    assert isinstance(rules, list)
+    assert rules == (
+        [_CURRENT_AWS_RULE, _EGRESS_RULE] if live_rules is None else [_EGRESS_RULE, *live_rules]
+    )
+    assert "stale" not in json.dumps(config)
+    if not public:
+        assert "callbacks" not in config and SandboxProxyCallback.env_vars(github=True) == {}
+        return
+    assert config["callbacks"] == [
+        {
+            "match_hosts": ["api.github.com", "github.com", "*.github.com", "robin.invalid"],
+            "url": f"https://robin.invalid{PROXY_CALLBACK_PATH}",
+            "ttl_seconds": 300,
+        }
+    ]
+    assert SandboxProxyCallback.env_vars(github=True) == {
+        "GH_TOKEN": "proxy-injected",
+        "OPEN_SWE_TOOLS_URL": "https://robin.invalid/dashboard/api/sandbox-tools",
+    }
+    # Without a token to replace it, the placeholder is empty, which gh reads as none.
+    assert SandboxProxyCallback.env_vars(github=False) == {
+        "GH_TOKEN": "",
+        "OPEN_SWE_TOOLS_URL": "https://robin.invalid/dashboard/api/sandbox-tools",
+    }
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    ["none", "this-sandbox", "another-sandbox", "other-env", "before-env", "env-refused"],
+)
+async def test_a_sandboxs_cloud_identity_is_read_once_and_recorded_on_its_thread(
+    monkeypatch: pytest.MonkeyPatch, recorded: str
+) -> None:
+    """The rules are read once per sandbox, and again whenever the environment adopting it
+    sets there changes, as when the backend's tunnel moves; an environment LangSmith did not
+    take is not recorded, so the next run sets it again."""
+    from openswe.sandboxes import managed
+    from openswe.sandboxes.managed import FederatedRules
+    from openswe.sandboxes.providers.langsmith import AdoptedSandbox
+    from openswe.sandboxes.tool_access import SANDBOX_FEDERATED_RULES_KEY
+
+    env = {"GH_TOKEN": "proxy-injected", "OPEN_SWE_TOOLS_URL": "https://new.invalid/tools"}
+    metadata: dict[str, object] = {}
+    if recorded not in {"none", "env-refused"}:
+        record: dict[str, object] = {
+            "sandbox_id": "sandbox-old" if recorded == "another-sandbox" else "sandbox-abc",
+            "rules": [_CURRENT_AWS_RULE],
+        }
+        if recorded != "before-env":
+            record["env_vars"] = (
+                {**env, "OPEN_SWE_TOOLS_URL": "https://old.invalid/tools"}
+                if recorded == "other-env"
+                else env
+            )
+        metadata[SANDBOX_FEDERATED_RULES_KEY] = record
+    read = AsyncMock(
+        return_value=AdoptedSandbox(
+            rules=[_AWS_RULE], env_vars=None if recorded == "env-refused" else env
+        )
+    )
+    update = AsyncMock()
+    monkeypatch.setattr(managed.LiveSandboxProxy, "adopt", read)
+    monkeypatch.setattr(managed.THREADS, "update", update)
+
+    rules = await FederatedRules.of("thread-123", metadata, "sandbox-abc", env_vars=env)
+
+    if recorded == "this-sandbox":
+        assert rules == [_CURRENT_AWS_RULE]
+        read.assert_not_awaited()
+        update.assert_not_awaited()
+        return
+    assert rules == [_AWS_RULE]
+    assert read.await_args is not None and read.await_args.args == ("sandbox-abc",)
+    assert read.await_args.kwargs["env_vars"] == env
+    if recorded == "env-refused":
+        update.assert_not_awaited()
+    else:
+        update.assert_awaited_once_with(
+            "thread-123",
+            metadata={
+                SANDBOX_FEDERATED_RULES_KEY: {
+                    "sandbox_id": "sandbox-abc",
+                    "rules": [_AWS_RULE],
+                    "env_vars": env,
+                }
+            },
         )
 
-    assert mint.await_args_list[0].kwargs["force_refresh"] is True
+
+@pytest.mark.parametrize("env", ["stale", "held", "refused", "no-github"])
+async def test_adopting_a_sandbox_sets_its_environment_once_keeping_its_run_config(
+    monkeypatch: pytest.MonkeyPatch, env: str
+) -> None:
+    """A sandbox created before its commands' environment came from its own run config gets
+    it in the one read of its cloud identity rules. LangSmith replaces the whole run config on
+    an update, so the rest of it is kept; one that already holds it is not written, and one
+    that lost its token gets an empty placeholder, since LangSmith keeps a key an update
+    leaves out. One LangSmith refuses still gives the rules, which are what the run needs."""
+    from openswe.sandboxes.providers import langsmith
+
+    env_vars = {
+        "GH_TOKEN": "" if env == "no-github" else "proxy-injected",
+        "OPEN_SWE_TOOLS_URL": "https://robin.invalid/tools",
+    }
+    held = (
+        env_vars
+        if env == "held"
+        else {"GH_TOKEN": "proxy-injected", "OPEN_SWE_TOOLS_URL": "https://robin.invalid/tools"}
+        if env == "no-github"
+        else {"GH_TOKEN": "stale"}
+    )
+    run_config: dict[str, object] = {
+        "user": "agent",
+        "work_dir": "/workspace",
+        "env_vars": {"LANG": "C.UTF-8", **held},
+    }
+    live = {"proxy_config": {"rules": [_EGRESS_RULE, _AWS_RULE]}, "run_config": run_config}
+    patched: list[dict[str, object]] = []
+
+    async def write(_client: object, url: str, payload: dict[str, object], *_args: object) -> None:
+        assert url.endswith("/boxes/sandbox-abc")
+        patched.append(payload)
+        if env == "refused":
+            request = httpx2.Request("PATCH", url)
+            raise httpx2.HTTPStatusError(
+                "422", request=request, response=httpx2.Response(422, request=request)
+            )
+
+    monkeypatch.setenv("LANGSMITH_API_KEY", "key")
+    monkeypatch.setattr(langsmith.LiveSandboxProxy, "live", AsyncMock(return_value=live))
+    monkeypatch.setattr(langsmith, "_patch_sandbox", write)
+
+    adopted = await langsmith.LiveSandboxProxy.adopt("sandbox-abc", env_vars=env_vars)
+
+    assert adopted is not None and adopted.rules == [_AWS_RULE]
+    assert adopted.env_vars == (None if env == "refused" else env_vars)
+    if env == "held":
+        assert patched == []
+    else:
+        assert patched == [
+            {
+                "run_config": {
+                    "user": "agent",
+                    "work_dir": "/workspace",
+                    "env_vars": {"LANG": "C.UTF-8", **env_vars},
+                }
+            }
+        ]

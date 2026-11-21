@@ -369,6 +369,7 @@ class TestLangSmithSandboxCredentials:
 
         from openswe.sandboxes import lifecycle
         from openswe.sandboxes.managed import ManagedSandbox
+        from openswe.sandboxes.providers.langsmith import AdoptedSandbox, LiveSandboxProxy
         from openswe.users.models import User, UserIdentity
 
         owner = User(
@@ -396,7 +397,6 @@ class TestLangSmithSandboxCredentials:
             "owner_user_id": str(owner.id),
             "owner_login": f"user:{owner.id}",
         }
-        tools_rule = {"name": "open-swe-thread-tools"}
         backend = MagicMock(id="sandbox-ls")
         mint = AsyncMock(side_effect=AssertionError("GitHub token minting is forbidden"))
         scope = AsyncMock(side_effect=AssertionError("GitHub scope lookup is forbidden"))
@@ -414,23 +414,22 @@ class TestLangSmithSandboxCredentials:
             "openswe.execution_images.EXECUTION_IMAGES.maybe_start_update", AsyncMock()
         )
         monkeypatch.setattr("openswe.threads.store.THREADS.update", AsyncMock())
-        monkeypatch.setattr(
-            "openswe.sandboxes.tool_access.tool_proxy_rule", AsyncMock(return_value=tools_rule)
-        )
+        adopted = AdoptedSandbox(rules=[cloud_rule], env_vars={})
+        monkeypatch.setattr(LiveSandboxProxy, "adopt", AsyncMock(return_value=adopted))
 
         managed = await ManagedSandbox.for_thread("ls-thread")
         assert managed.create.snapshot_id == "snap-1"
+        # MDA creates it with the workspace's cloud identity, and no GitHub credentials.
+        assert managed.proxy_config is not None
+        assert managed.proxy_config["rules"] == [cloud_rule]
         await lifecycle.bind_mda_sandbox("ls-thread", "sandbox-ls")
         metadata.update(
             sandbox_id="sandbox-ls", sandbox_owner="mda", sandbox_base_proxy_config=base_config
         )
         await lifecycle.ensure_sandbox_for_thread("ls-thread")
-        # MDA writes it as the backend hands it over, with no GitHub rules.
-        config, expires_at = await lifecycle.mda_proxy_config(
-            "ls-thread", "sandbox-ls", github_scope=(None, None)
-        )
-        assert config["rules"] == [tools_rule, cloud_rule]
-        assert expires_at is None
+        replanned = await ManagedSandbox.for_thread("ls-thread")
+        assert replanned.proxy_config is not None
+        assert replanned.proxy_config["rules"] == [cloud_rule]
         mint.assert_not_awaited()
         scope.assert_not_awaited()
 

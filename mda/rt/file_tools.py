@@ -45,7 +45,6 @@ from runtime_api.operations import CHECK_SHELL, ShellCheck
 from rt.auto_review import PATH_ARGUMENTS
 from rt.backend import OpenSweBackend, RunLocal
 from rt.git_evidence import OBSERVED_TOOLS, turn_git
-from rt.managed_sandbox import SandboxProxyWriter
 from rt.memory_policy import MemoryPolicy
 from rt.middleware import reported
 from rt.prompts import prompt
@@ -74,20 +73,6 @@ _EXECUTE_GRACE_SECONDS: Final = 30
 _FOREGROUND_SECONDS: Final = 600
 # A sandbox call rejected before it started cannot have run, so it is sent again.
 _TRANSIENT_BACKOFF_SECONDS: Final = (0.5, 1.0, 2.0)
-# What git, the GitHub CLI and the REST API print when GitHub refuses the token the
-# sandbox's proxy sends.
-_GITHUB_COMMAND: Final = re.compile(r"(?:^|[\s;&|()])(?:git|gh|curl)(?:\s|$)")
-_GITHUB_REFUSED: Final = re.compile(
-    r"^fatal: could not read Username for 'https://github\.com'"
-    r"|^fatal: Authentication failed for 'https://github\.com/"
-    r"|^(?:gh: )?HTTP 401: Bad credentials"
-    r"|^\s*\{\s*\"message\":\s*\"Bad credentials\"",
-    re.MULTILINE,
-)
-_GITHUB_REAUTHORIZED: Final = (
-    "GitHub refused the sandbox's credentials, so the sandbox has been given a fresh "
-    "GitHub token. Run the GitHub step again."
-)
 
 Handler = Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]]
 
@@ -216,12 +201,7 @@ class FileToolsMiddleware(AgentMiddleware):
         else:
             run = partial(
                 self._observed,
-                handler=partial(
-                    self._reauthorized,
-                    handler=partial(
-                        _retried, handler=partial(self._within_deadline, handler=handler)
-                    ),
-                ),
+                handler=partial(_retried, handler=partial(self._within_deadline, handler=handler)),
             )
         # Any call may reach memory, a search from ``/`` included, so each meets its policy.
         run = partial(self._in_memory, handler=run)
@@ -376,35 +356,6 @@ class FileToolsMiddleware(AgentMiddleware):
             if check is not None:
                 checked = partial(check.awrap_tool_call, handler=checked)
         return await checked(request)
-
-    async def _reauthorized(
-        self, request: ToolCallRequest, handler: Handler
-    ) -> ToolMessage | Command:
-        """``handler``; when GitHub refused the sandbox's token, MDA writes a fresh one there
-        and the result says so.
-
-        The command is not run again: it may have done other things before GitHub refused it.
-        """
-        result = await handler(request)
-        writer = SandboxProxyWriter.of(request.runtime)
-        if (
-            request.tool_call["name"] != "execute"
-            or writer is None
-            or not isinstance(result, ToolMessage)
-            or not _GITHUB_COMMAND.search(str(request.tool_call["args"].get("command", "")))
-            or "github.com" not in (str(request.tool_call["args"].get("command", "")) + result.text)
-            or not _GITHUB_REFUSED.search(result.text)
-        ):
-            return result
-        try:
-            fresh = await writer.rewrite_fresh(request.runtime)
-        except Exception:
-            logger.warning("Could not refresh the sandbox's GitHub token", exc_info=True)
-            return result
-        if not fresh:
-            return result
-        logger.info("Refreshed the sandbox's GitHub token after GitHub refused it")
-        return result.model_copy(update={"content": f"{result.text}\n\n{_GITHUB_REAUTHORIZED}"})
 
     async def _within_deadline(
         self, request: ToolCallRequest, handler: Handler
