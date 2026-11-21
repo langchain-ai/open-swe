@@ -371,7 +371,7 @@ function AddServerDialog({ onClose }: { onClose: () => void }) {
 }
 
 /** The person's own LangSmith Managed Tools services, connected or connectable. */
-export function ManagedToolsSection() {
+export function ManagedToolsSection({ query = "" }: { query?: string }) {
   const view = useQuery(managedToolsQuery)
   const popup = useConnectPopup(MANAGED_TOOLS_KEY, (serverId) =>
     api.connectManagedTool(serverId)
@@ -420,9 +420,12 @@ export function ManagedToolsSection() {
     )
   }
 
-  const sorted = [...view.data.servers].sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
-  )
+  const search = query.trim().toLowerCase()
+  const sorted = view.data.servers
+    .filter((server) => server.name.toLowerCase().includes(search))
+    .sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+    )
   const catalog = sorted.filter((server) => !server.personal)
   const custom = sorted.filter((server) => server.personal)
   const groups = [
@@ -493,7 +496,7 @@ export function ManagedToolsSection() {
             </Card>
           ) : (
             <Text as="p" role="status" variant="sm" color="secondary">
-              {empty}
+              {search ? "No matching connections." : empty}
             </Text>
           )}
         </section>

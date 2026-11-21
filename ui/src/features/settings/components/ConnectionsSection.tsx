@@ -176,11 +176,23 @@ export function SignInWithLangSmithButton({
   )
 }
 
-export function ConnectionsSection({ user }: { user: SessionUser }) {
+export function ConnectionsSection({
+  user,
+  query = "",
+}: {
+  user: SessionUser
+  query?: string
+}) {
+  const search = query.trim().toLowerCase()
+  const github = "github".includes(search)
+  const slack = "slack".includes(search)
   return (
     <SettingsSection title="Accounts">
-      <GitHubRow user={user} />
-      <SlackRow user={user} />
+      {github && <GitHubRow user={user} />}
+      {slack && <SlackRow user={user} />}
+      {!github && !slack && (
+        <SettingsRow label="No matching accounts." control={null} />
+      )}
     </SettingsSection>
   )
 }
