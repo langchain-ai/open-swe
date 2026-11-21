@@ -182,7 +182,6 @@ ENV.var(
     "LangSmith dataset for reviewer finding outcomes.",
     default="openswe-reviewer-outcomes",
 )
-ENV.var("EVAL_LANGSMITH_PROJECT", "LangSmith project reviewer evals trace into.")
 ENV.var(
     "LANGGRAPH_URL",
     "URL of the LangGraph server the FastAPI side calls to create and stream runs.",

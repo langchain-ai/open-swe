@@ -33,24 +33,6 @@ _ADD_FINDING_TOOL_NAMES = frozenset({"add_finding"})
 _THREAD_IDS: set[str] = set()
 _THREAD_IDS_LOCK = threading.Lock()
 
-_COMPLETED = 0
-_COMPLETED_LOCK = threading.Lock()
-
-
-def _record_completed() -> None:
-    global _COMPLETED
-    with _COMPLETED_LOCK:
-        _COMPLETED += 1
-
-
-def get_completed_count() -> int:
-    """Number of examples that have finished so far in this process.
-
-    Read by ``status_reporter`` to publish progress to the dashboard.
-    """
-    with _COMPLETED_LOCK:
-        return _COMPLETED
-
 
 def _record_thread_id(thread_id: str) -> None:
     with _THREAD_IDS_LOCK:
@@ -187,7 +169,6 @@ async def review_pr(inputs: dict[str, Any]) -> dict[str, Any]:
             len(comments),
             thread_id,
         )
-        _record_completed()
         return {
             "thread_id": thread_id,
             "pr_url": pr_url,

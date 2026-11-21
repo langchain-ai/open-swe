@@ -21,7 +21,6 @@ import { Route as MySettingsRouteImport } from './routes/my-settings'
 import { Route as ReviewRouteImport } from './routes/review'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as AdminAuditLogsRouteImport } from './routes/admin_.audit-logs'
-import { Route as AdminEvalsRouteImport } from './routes/admin_.evals'
 import { Route as AdminEventLogRouteImport } from './routes/admin_.event-log'
 import { Route as AdminIncidentsRouteImport } from './routes/admin_.incidents'
 import { Route as AdminIntegrationsRouteImport } from './routes/admin_.integrations'
@@ -113,11 +112,6 @@ const UsageRoute = UsageRouteImport.update({
 const AdminAuditLogsRoute = AdminAuditLogsRouteImport.update({
   id: '/admin_/audit-logs',
   path: '/admin/audit-logs',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AdminEvalsRoute = AdminEvalsRouteImport.update({
-  id: '/admin_/evals',
-  path: '/admin/evals',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminEventLogRoute = AdminEventLogRouteImport.update({
@@ -296,7 +290,6 @@ export interface FileRoutesByFullPath {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
-  '/admin/evals': typeof AdminEvalsRoute
   '/admin/event-log': typeof AdminEventLogRoute
   '/admin/incidents': typeof AdminIncidentsRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
@@ -341,7 +334,6 @@ export interface FileRoutesByTo {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/admin/audit-logs': typeof AdminAuditLogsRoute
-  '/admin/evals': typeof AdminEvalsRoute
   '/admin/event-log': typeof AdminEventLogRoute
   '/admin/incidents': typeof AdminIncidentsRoute
   '/admin/integrations': typeof AdminIntegrationsRoute
@@ -389,7 +381,6 @@ export interface FileRoutesById {
   '/review': typeof ReviewRoute
   '/usage': typeof UsageRoute
   '/admin_/audit-logs': typeof AdminAuditLogsRoute
-  '/admin_/evals': typeof AdminEvalsRoute
   '/admin_/event-log': typeof AdminEventLogRoute
   '/admin_/incidents': typeof AdminIncidentsRoute
   '/admin_/integrations': typeof AdminIntegrationsRoute
@@ -438,7 +429,6 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/admin/audit-logs'
-    | '/admin/evals'
     | '/admin/event-log'
     | '/admin/incidents'
     | '/admin/integrations'
@@ -483,7 +473,6 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/admin/audit-logs'
-    | '/admin/evals'
     | '/admin/event-log'
     | '/admin/incidents'
     | '/admin/integrations'
@@ -530,7 +519,6 @@ export interface FileRouteTypes {
     | '/review'
     | '/usage'
     | '/admin_/audit-logs'
-    | '/admin_/evals'
     | '/admin_/event-log'
     | '/admin_/incidents'
     | '/admin_/integrations'
@@ -578,7 +566,6 @@ export interface RootRouteChildren {
   ReviewRoute: typeof ReviewRoute
   UsageRoute: typeof UsageRoute
   AdminAuditLogsRoute: typeof AdminAuditLogsRoute
-  AdminEvalsRoute: typeof AdminEvalsRoute
   AdminEventLogRoute: typeof AdminEventLogRoute
   AdminIncidentsRoute: typeof AdminIncidentsRoute
   AdminIntegrationsRoute: typeof AdminIntegrationsRoute
@@ -682,13 +669,6 @@ declare module '@tanstack/react-router' {
       path: '/admin/audit-logs'
       fullPath: '/admin/audit-logs'
       preLoaderRoute: typeof AdminAuditLogsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/admin_/evals': {
-      id: '/admin_/evals'
-      path: '/admin/evals'
-      fullPath: '/admin/evals'
-      preLoaderRoute: typeof AdminEvalsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin_/event-log': {
@@ -980,7 +960,6 @@ const rootRouteChildren: RootRouteChildren = {
   ReviewRoute: ReviewRoute,
   UsageRoute: UsageRoute,
   AdminAuditLogsRoute: AdminAuditLogsRoute,
-  AdminEvalsRoute: AdminEvalsRoute,
   AdminEventLogRoute: AdminEventLogRoute,
   AdminIncidentsRoute: AdminIncidentsRoute,
   AdminIntegrationsRoute: AdminIntegrationsRoute,
@@ -1002,12 +981,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}

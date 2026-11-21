@@ -13,7 +13,6 @@ evals/reviewer/
 ├── costs.py              # per-PR / per-run LLM cost from the reviewer's traces
 ├── judge.py              # claude-opus-4-5 pairwise match evaluator + aggregate
 ├── target.py             # invokes the reviewer graph over langgraph_sdk
-├── status_reporter.py    # reports live progress to the dashboard
 └── run_eval.py           # client.aevaluate entrypoint
 ```
 
@@ -55,20 +54,9 @@ Smoke-test with 3 PRs first:
 uv run python -m evals.reviewer.run_eval --limit 3
 ```
 
-### From the dashboard (recommended for full runs)
-
-Admins start a run from **Evals** in the sidebar (`/admin/evals`): set the dataset, run name, reviewer model and effort, concurrency, limit, score mode and severity threshold, then **Start eval**.
-The deployment boots a LangSmith sandbox at its own commit, runs `run_eval` there against itself, and the sandbox stops itself when the eval finishes.
-The deployment's LangSmith keys are injected by the sandbox proxy; they never enter the sandbox.
-
-Progress, the log tail and the LangSmith experiment link stream to the same page.
-The full log is at `/root/reviewer-eval.log` in the sandbox named on the page.
-Stop that sandbox to cancel; the dashboard flips the run to `failed` within ~60s.
-
 ### Tracing project
 
 Eval traces are routed to the **`open-swe-evals`** LangSmith project (set via `langsmith_project` in `config.toml`, default `open-swe-evals`) so they stay out of the deployment's production tracing project.
-The admin-triggered run forces the same project via the `LANGSMITH_PROJECT` env var; override the default with `EVAL_LANGSMITH_PROJECT`.
 
 The runner reads benchmark settings from `evals/reviewer/config.toml`.
 Set the deployment URL there (or leave it blank to use `LANGGRAPH_URL` / local dev).

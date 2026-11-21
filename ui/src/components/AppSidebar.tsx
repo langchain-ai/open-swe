@@ -9,7 +9,6 @@ import {
 } from "@langchain/macaw-components/icons"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { ChartBarIcon } from "@phosphor-icons/react/dist/ssr/ChartBar"
-import { ChartBarHorizontalIcon } from "@phosphor-icons/react/dist/ssr/ChartBarHorizontal"
 import { FileTextIcon } from "@phosphor-icons/react/dist/ssr/FileText"
 import { FlaskIcon } from "@phosphor-icons/react/dist/ssr/Flask"
 import { GitBranchIcon } from "@phosphor-icons/react/dist/ssr/GitBranch"
@@ -114,7 +113,6 @@ const NAV: Array<NavGroup> = [
       },
       { to: "/admin/event-log", label: "Event Log", icon: ListBulletsIcon },
       { to: "/admin/users", label: "Users", icon: UsersIcon },
-      { to: "/admin/evals", label: "Evals", icon: ChartBarHorizontalIcon },
     ],
   },
   {

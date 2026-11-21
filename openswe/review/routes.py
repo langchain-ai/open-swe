@@ -2,17 +2,15 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Self
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import AliasGenerator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasGenerator, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP, filter_repo_models_for_user
-from openswe.dashboard.oauth import session_user_id
-from openswe.dashboard.options import model_supports_effort
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.github.http import GitHubClient, RepoClient
 from openswe.github.pull_request_key import PullRequestKey
@@ -30,14 +28,6 @@ from openswe.review.chat import (
     get_review_chat,
 )
 from openswe.review.enabled_repos import list_enabled_review_repos, set_review_repo_enabled
-from openswe.review.eval_jobs import (
-    ReviewerEvalStatus,
-    ScoreMode,
-    Severity,
-    get_reviewer_eval_status,
-    resolve_eval_config,
-    start_reviewer_eval,
-)
 from openswe.review.labels import LabelChange, PullRequestLabels
 from openswe.review.reviews import (
     PendingReview,
@@ -69,7 +59,6 @@ from openswe.review.styles import (
 from openswe.review_scout.launch import RepositoryNotAllowed
 from openswe.threads.handlers import mark_review_session_viewed
 from openswe.ui_invalidations.topics import Topic
-from openswe.users.records import user_id_for_login
 from openswe.walkthrough.record import Walkthrough
 
 router = APIRouter(tags=["review"])
@@ -97,48 +86,6 @@ async def api_set_enabled_review_repo(
 ) -> dict[str, list[str]]:
     repos = await set_review_repo_enabled(update.full_name, update.enabled)
     return {"repos": repos}
-
-
-@router.get("/admin/evals/reviewer")
-async def admin_get_reviewer_eval(
-    _admin: dict[str, Any] = ADMIN_DEP,
-) -> ReviewerEvalStatus:
-    """Status of the latest reviewer eval."""
-    return await get_reviewer_eval_status()
-
-
-class ReviewerEvalStart(BaseModel):
-    dataset_name: str = Field(min_length=1, max_length=200)
-    experiment_prefix: str = Field(min_length=1, max_length=200)
-    max_concurrency: int = Field(ge=1, le=50)
-    model_id: str
-    reasoning_effort: str
-    score_mode: ScoreMode
-    severity_threshold: Severity
-    limit: int | None = Field(default=None, ge=1)
-
-    @model_validator(mode="after")
-    def _check_model_effort(self) -> Self:
-        if not model_supports_effort(self.model_id, self.reasoning_effort):
-            raise ValueError(f"{self.model_id} does not support effort {self.reasoning_effort}")
-        return self
-
-
-@router.post("/admin/evals/reviewer")
-@audit_endpoint
-async def admin_start_reviewer_eval(
-    body: ReviewerEvalStart,
-    session: dict[str, Any] = ADMIN_DEP,
-) -> ReviewerEvalStatus:
-    """Launch the reviewer eval in a LangSmith sandbox with the given run config."""
-    config = resolve_eval_config()
-    config.update(body.model_dump(exclude={"limit"}))
-    try:
-        return await start_reviewer_eval(
-            config, body.limit, session_user_id(session) or user_id_for_login(session["sub"])
-        )
-    except RuntimeError as exc:
-        raise HTTPException(409, str(exc)) from exc
 
 
 @router.get("/review-styles")

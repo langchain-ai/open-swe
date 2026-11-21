@@ -6,11 +6,8 @@ Usage:
 
 import argparse
 import asyncio
-import contextlib
 import logging
 import os
-import sys
-import threading
 import tomllib
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -23,14 +20,11 @@ from langsmith.schemas import Example
 
 from evals.reviewer.costs import print_summary, record_experiment_costs
 from evals.reviewer.judge import aggregate_pr, judge_match
-from evals.reviewer.status_reporter import StatusReporter, is_enabled
 from evals.reviewer.target import (
     drain_thread_ids,
-    get_completed_count,
     get_langgraph_url,
     review_pr,
 )
-from openswe.review.eval_report import EXPERIMENT_URL_RE, LOG_TAIL_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -203,74 +197,6 @@ def _apply_langsmith_project(project: str | None) -> None:
     os.environ.setdefault("LANGSMITH_TRACING", "true")
 
 
-class _TailCapture:
-    """Thread-safe rolling tail of eval output + the last LangSmith experiment URL."""
-
-    def __init__(self) -> None:
-        self._buf = ""
-        self._url: str | None = None
-        self._lock = threading.Lock()
-
-    def append(self, text: str) -> None:
-        if not text:
-            return
-        with self._lock:
-            self._buf = (self._buf + text)[-LOG_TAIL_CHARS:]
-            found = EXPERIMENT_URL_RE.findall(self._buf)
-            if found:
-                self._url = found[-1]
-
-    def tail(self) -> str | None:
-        with self._lock:
-            return self._buf or None
-
-    def url(self) -> str | None:
-        with self._lock:
-            return self._url
-
-
-class _BufferingHandler(logging.Handler):
-    """Mirror log records into a ``_TailCapture`` so the reporter can publish them."""
-
-    def __init__(self, capture: _TailCapture) -> None:
-        super().__init__()
-        self._capture = capture
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            self._capture.append(self.format(record) + "\n")
-        except Exception:
-            pass
-
-
-class _TeeStream:
-    """Write to the original stream and mirror into the capture (for ``print``ed output)."""
-
-    def __init__(self, original: Any, capture: _TailCapture) -> None:
-        self._original = original
-        self._capture = capture
-
-    def write(self, text: str) -> int:
-        self._capture.append(text)
-        return self._original.write(text)
-
-    def flush(self) -> None:
-        self._original.flush()
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._original, name)
-
-
-def _resolve_total(dataset_name: str, data: str | list[Example]) -> int | None:
-    if isinstance(data, list):
-        return len(data)
-    try:
-        return Client().read_dataset(dataset_name=dataset_name).example_count
-    except Exception:
-        logger.warning("Could not resolve dataset example count for progress", exc_info=True)
-        return None
-
-
 async def _cleanup_threads(thread_ids: Iterable[str]) -> None:
     """Delete LangGraph threads created during the eval.
 
@@ -371,28 +297,6 @@ async def main() -> None:
     else:
         data = dataset_name
 
-    reporter: StatusReporter | None = None
-    heartbeat: asyncio.Task[None] | None = None
-    log_handler: logging.Handler | None = None
-    original_stdout = sys.stdout
-    if is_enabled():
-        capture = _TailCapture()
-        log_handler = _BufferingHandler(capture)
-        log_handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-        )
-        logging.getLogger().addHandler(log_handler)
-        sys.stdout = _TeeStream(original_stdout, capture)
-        reporter = StatusReporter(
-            total=_resolve_total(dataset_name, data),
-            completed_getter=get_completed_count,
-            tail_getter=capture.tail,
-            experiment_url_getter=capture.url,
-        )
-        await reporter.start()
-        heartbeat = reporter.run_heartbeat()
-
-    eval_error: BaseException | None = None
     try:
         results = await aevaluate(
             review_pr,
@@ -404,21 +308,7 @@ async def main() -> None:
             num_repetitions=1,
         )
         await _record_costs(results.experiment_name, reviewer_project)
-    except BaseException as exc:
-        eval_error = exc
-        raise
     finally:
-        if reporter is not None:
-            if heartbeat is not None:
-                heartbeat.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await heartbeat
-            status = "failed" if eval_error is not None else "completed"
-            error = None if eval_error is None else f"{type(eval_error).__name__}: {eval_error}"
-            await reporter.finish(status=status, error=error)
-        if log_handler is not None:
-            logging.getLogger().removeHandler(log_handler)
-        sys.stdout = original_stdout
         if not args.no_cleanup:
             thread_ids = drain_thread_ids()
             if thread_ids:

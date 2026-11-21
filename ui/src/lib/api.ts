@@ -1361,54 +1361,6 @@ export function reviewChatApiBase(
   return path
 }
 
-export type ReviewerEvalScoreMode = "all_findings" | "surfaced_findings"
-export type ReviewerEvalSeverity = "low" | "medium" | "high" | "critical"
-
-export interface ReviewerEvalConfig {
-  dataset_name: string
-  experiment_prefix: string
-  max_concurrency: number
-  langsmith_project: string
-  langgraph_url: string
-  assistant_id: string
-  model_id: string
-  reasoning_effort: string
-  score_mode: ReviewerEvalScoreMode
-  severity_threshold: ReviewerEvalSeverity
-}
-
-export interface ReviewerEvalStartRequest {
-  dataset_name: string
-  experiment_prefix: string
-  max_concurrency: number
-  model_id: string
-  reasoning_effort: string
-  score_mode: ReviewerEvalScoreMode
-  severity_threshold: ReviewerEvalSeverity
-  limit: number | null
-}
-
-export interface ReviewerEvalProgress {
-  completed: number
-  total: number | null
-}
-
-export interface ReviewerEvalStatus {
-  status: "idle" | "starting" | "running" | "completed" | "failed"
-  run_name?: string
-  langsmith_project: string
-  limit: number | null
-  config_snapshot?: ReviewerEvalConfig
-  started_at: string | null
-  finished_at: string | null
-  created_by: string | null
-  experiment_url: string | null
-  error: string | null
-  log_tail: string | null
-  progress?: ReviewerEvalProgress | null
-  worker_id?: string | null
-}
-
 export interface HumanReviewRequestResult {
   success: boolean
   error: string
@@ -2036,12 +1988,6 @@ export const api = {
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
       { method: "POST", body: JSON.stringify(comment) }
     ),
-  getReviewerEval: () => request<ReviewerEvalStatus>("/admin/evals/reviewer"),
-  startReviewerEval: (body: ReviewerEvalStartRequest) =>
-    request<ReviewerEvalStatus>("/admin/evals/reviewer", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   traceFlightSeason: (signal?: AbortSignal) =>
     request<TraceFlightSeason>("/trace-flight/season", { signal }),
