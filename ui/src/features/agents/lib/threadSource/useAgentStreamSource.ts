@@ -1,5 +1,9 @@
 import { useCallback, useMemo, useState } from "react"
 import { useSubmissionQueue } from "@langchain/react"
+import {
+  isSilentRun,
+  isWake,
+} from "@/features/agents/components/messages/quietRuns"
 
 import { latestContextUsage } from "@/features/agents/lib/contextUsage"
 import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
@@ -19,7 +23,9 @@ import { useSession } from "@/lib/session"
 import { useCancelRun } from "./useCancelRun"
 import type { StreamThreadSource, ThreadRunInput } from "./types"
 
-/** Turns a long thread paints at first and per "Load earlier", as the transcript view pages them. */
+/** Turns a long thread paints on first open, kept small so it mounts fast. */
+const INITIAL_TURN_WINDOW = 12
+/** Turns revealed per "Load earlier", as the transcript view pages them. */
 const TURN_PAGE_SIZE = 40
 
 /** The SDK stream, behind the source interface. */
@@ -132,21 +138,44 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
       ? [index]
       : []
   )
+  // A window counts rows, not turns. Back-to-back quiet turns (a wake-up and a
+  // run that said nothing) fold into one row, so a stretch of them counts
+  // once. Otherwise a monitor's wake-ups could fill the window and the thread
+  // would open on one fold.
+  const newestTurnsStart = (count: number, before: number) => {
+    let rows = 0
+    let end = before
+    let newerQuiet = false
+    for (const start of turnStarts
+      .filter((index) => index < before)
+      .reverse()) {
+      const quiet = messages
+        .slice(start, end)
+        .every((message) => isWake(message) || isSilentRun(message))
+      if (!(quiet && newerQuiet)) {
+        if (rows === count) return end
+        rows++
+      }
+      newerQuiet = quiet
+      end = start
+    }
+    return 0
+  }
   const pinned =
     firstRow === undefined
       ? -1
       : firstRow === null
         ? 0
         : messages.findIndex((message) => message.id === firstRow)
-  const shownFrom = pinned >= 0 ? pinned : (turnStarts.at(-TURN_PAGE_SIZE) ?? 0)
+  const shownFrom =
+    pinned >= 0
+      ? pinned
+      : newestTurnsStart(INITIAL_TURN_WINDOW, messages.length)
   const showFrom = (index: number) =>
     setFirstRow(index > 0 ? (messages[index]?.id ?? null) : null)
   if (pinned < 0 && !stream.isThreadLoading && messages.length > 0)
     showFrom(shownFrom)
-  const loadOlder = () =>
-    showFrom(
-      turnStarts.filter((index) => index < shownFrom).at(-TURN_PAGE_SIZE) ?? 0
-    )
+  const loadOlder = () => showFrom(newestTurnsStart(TURN_PAGE_SIZE, shownFrom))
   const loadAllOlder = useCallback(() => setFirstRow(null), [])
 
   return {

@@ -43,7 +43,7 @@ const WAKE_SENDERS = new Set([
   "system:goal",
 ])
 
-function isWake(message: Message): boolean {
+export function isWake(message: Message): boolean {
   return (
     message.structuredSenderKind === "system" &&
     !message.taskEvent &&

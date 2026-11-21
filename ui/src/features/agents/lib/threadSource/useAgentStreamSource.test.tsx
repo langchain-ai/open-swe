@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { AIMessage, HumanMessage } from "@langchain/core/messages"
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages"
 import type { BaseMessage } from "@langchain/core/messages"
 import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
@@ -157,19 +157,61 @@ function renderWindow() {
   return { ...hook, shown }
 }
 
-it("shows the newest 40 turns, grows as turns arrive, and reveals 40 older at a time", () => {
+it("shows the newest 12 turns, grows as turns arrive, and reveals 40 older at a time", () => {
   stream.messages = turns(90)
   const { result, rerender, shown } = renderWindow()
-  expect(shown()).toEqual(["a-ask-50", "a-answer-89", true])
+  expect(shown()).toEqual(["a-ask-78", "a-answer-89", true])
 
   stream.messages = turns(91)
   rerender()
-  expect(shown()).toEqual(["a-ask-50", "a-answer-90", true])
+  expect(shown()).toEqual(["a-ask-78", "a-answer-90", true])
 
   act(() => result.current.loadOlder())
-  expect(shown()).toEqual(["a-ask-10", "a-answer-90", true])
+  expect(shown()).toEqual(["a-ask-38", "a-answer-90", true])
   act(() => result.current.loadOlder())
   expect(shown()).toEqual(["a-ask-0", "a-answer-90", false])
+})
+
+it("leaves threads of 12 turns or fewer without an older page", () => {
+  stream.messages = turns(12)
+  const { shown } = renderWindow()
+  expect(shown()).toEqual(["a-ask-0", "a-answer-11", false])
+})
+
+const quietTurns = (count: number, thread = "q") =>
+  Array.from({ length: count }, (_, turn) => [
+    new HumanMessage({
+      id: `${thread}-wake-${turn}`,
+      content:
+        '<input-message sender="system:monitor" kind="system">Check CI</input-message>',
+    }),
+    new AIMessage({
+      id: `${thread}-check-${turn}`,
+      content: "",
+      tool_calls: [{ id: `${thread}-call-${turn}`, name: "execute", args: {} }],
+    }),
+    new ToolMessage({
+      tool_call_id: `${thread}-call-${turn}`,
+      content: "pending",
+    }),
+  ]).flat()
+
+it("counts a stretch of a monitor's quiet runs as one row, so it never fills the window", () => {
+  stream.messages = [...turns(20), ...quietTurns(30)]
+  const { result, shown } = renderWindow()
+  expect(shown()).toEqual(["a-ask-9", "q-check-29", true])
+
+  act(() => result.current.loadOlder())
+  expect(shown()).toEqual(["a-ask-0", "q-check-29", false])
+})
+
+it("counts a quiet run between replies as a row of its own", () => {
+  stream.messages = Array.from({ length: 12 }, (_, turn) => [
+    ...turns(1, `t${turn}`),
+    ...quietTurns(1, `q${turn}`),
+  ]).flat()
+  const { shown } = renderWindow()
+  expect(shown()).toEqual(["t6-ask-0", "q11-check-0", true])
 })
 
 it("shows every turn at once when asked, as find does", () => {
