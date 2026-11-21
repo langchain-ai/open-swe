@@ -1696,10 +1696,7 @@ def _gate_sync_subagents(
     from managed_deepagents._credential_gate import (  # noqa: PLC0415
         create_credential_gate_middleware,
     )
-    from managed_deepagents._tool_errors import (  # noqa: PLC0415
-        create_tool_error_middleware,
-        handles_tool_errors,
-    )
+    from managed_deepagents._tool_errors import create_tool_error_middleware  # noqa: PLC0415
     from managed_deepagents._tool_gateway.cards import tool_gateway_prompts  # noqa: PLC0415
 
     subagents = params.get("subagents")
@@ -1727,11 +1724,15 @@ def _gate_sync_subagents(
         # As on the lead, prompts run inside the gate.
         gate_and_prompts = [] if gate is None else [gate, *tool_gateway_prompts(selected or ())]
         middleware = list(cast("Iterable[object]", spec.get("middleware") or ()))
-        tool_errors = [] if handles_tool_errors(middleware) else [create_tool_error_middleware()]
         gated.append(
             {
                 **spec,
-                "middleware": [*tool_errors, *gate_and_prompts, *managed, *middleware],
+                "middleware": [
+                    create_tool_error_middleware(),
+                    *gate_and_prompts,
+                    *managed,
+                    *middleware,
+                ],
             }
         )
     return gated
@@ -2403,17 +2404,12 @@ def _append_no_sandbox_execute_middleware(
 
 
 def _prepend_tool_error_middleware(merged: dict[str, object]) -> None:
-    from managed_deepagents._tool_errors import (  # noqa: PLC0415
-        create_tool_error_middleware,
-        handles_tool_errors,
-    )
+    from managed_deepagents._tool_errors import create_tool_error_middleware  # noqa: PLC0415
 
     middleware_value = merged.get("middleware")
     existing = (
         list(cast("Iterable[object]", middleware_value)) if middleware_value is not None else []
     )
-    if handles_tool_errors(existing):
-        return
     merged["middleware"] = [create_tool_error_middleware(), *existing]
 
 

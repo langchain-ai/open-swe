@@ -193,6 +193,7 @@ if TYPE_CHECKING:
         ManagedServerRuntime,
         ManagedToolRuntime,
     )
+    from managed_deepagents._run_ending import RunEndingError
     from managed_deepagents._runtime_schedules import (
         RuntimeSchedules,
         ScheduleNotFoundError,
@@ -386,6 +387,7 @@ _EXPORTS: dict[str, str] = {
     "ResolveUserRequest": "managed_deepagents._channels.resolve_user",
     "ResolveUserResult": "managed_deepagents._channels.resolve_user",
     "RuntimeChannel": "managed_deepagents._channels.runtime",
+    "RunEndingError": "managed_deepagents._run_ending",
     "RuntimeSchedules": "managed_deepagents._runtime_schedules",
     "SandboxDefinition": "managed_deepagents.sandbox",
     "SandboxMissingError": "managed_deepagents.sandbox",
@@ -624,6 +626,7 @@ __all__ = [
     "ResolveUserEndpointRequest",
     "ResolveUserRequest",
     "ResolveUserResult",
+    "RunEndingError",
     "RuntimeChannel",
     "RuntimeSchedules",
     "SandboxDefinition",

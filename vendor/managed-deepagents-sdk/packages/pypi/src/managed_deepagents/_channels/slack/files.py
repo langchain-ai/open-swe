@@ -15,6 +15,7 @@ from langsmith import trace
 from managed_deepagents._channels.binding import resolve_channel_binding
 from managed_deepagents._channels.slack.api import SlackApiError, slack_api, slack_bot_token
 from managed_deepagents._channels.slack.events import slack_bot_user_id
+from managed_deepagents._run_ending import RunEndingError
 
 if TYPE_CHECKING:
     from deepagents.backends.protocol import BackendProtocol
@@ -74,8 +75,8 @@ class SlackError(ValueError):
     """A Slack error safe to show to the model."""
 
 
-class SlackConnectionError(RuntimeError):
-    """The required managed Slack connection could not be resolved."""
+class SlackConnectionError(RunEndingError):
+    """The required managed Slack connection could not be resolved; it ends the run."""
 
 
 def can_upload_files(runtime: ManagedDeepAgentRuntime) -> bool:

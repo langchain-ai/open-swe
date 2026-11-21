@@ -573,6 +573,39 @@ fields and your declared context type.
 `ManagedDeepAgentRuntime` is an alias for the tool type. MDA adds `server_info`,
 `channel`, `backend`, and `schedules`; channel and backend are optional.
 
+## Tool errors
+
+MDA returns an error raised by a tool to the model as that tool's result, so the
+model can act on it, and the run continues. Raise a `RunEndingError` subclass to
+end the run instead, from a tool or from your own middleware's tool-call hook.
+Use it for errors no later call can get past, such as a sandbox that stopped
+answering. To end the run on an error you don't own, raise yours `from` it:
+
+```python
+from langchain.agents.middleware import AgentMiddleware
+from langsmith.sandbox import SandboxConnectionError
+
+from managed_deepagents import RunEndingError
+
+
+class SandboxGoneError(RunEndingError):
+    pass
+
+
+class SandboxErrors(AgentMiddleware):
+    async def awrap_tool_call(self, request, handler):
+        try:
+            return await handler(request)
+        except SandboxConnectionError as exc:
+            raise SandboxGoneError(str(exc)) from exc
+```
+
+MDA's own errors that end the run are subclasses too: a person who has not
+connected an account the tool needs (`CredentialAuthorizationRequiredError`)
+ends the run, so they can connect it. So `isinstance(error, RunEndingError)`
+tells your middleware whether MDA ends the run on an error. Errors in a sync subagent's tools work the same way: one it
+can act on goes to the subagent's model, and a `RunEndingError` ends the whole run.
+
 ## Slack channels
 
 `channels.slack(...)` receives Slack messages through Trigger Server. Each

@@ -1,4 +1,4 @@
-"""Return recoverable subagent failures without replaying the delegated task."""
+"""Return a failed subagent task to the parent's model without replaying the delegated task."""
 
 import json
 import logging
@@ -6,22 +6,23 @@ from collections.abc import Awaitable, Callable
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import ToolMessage
-from langgraph.errors import GraphBubbleUp
+from langgraph.errors import GraphBubbleUp, NodeCancelledError
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+from managed_deepagents import RunEndingError
 
-from rt.model_calls import RETRYABLE_STATUS_CODES, is_transient
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
 
-_RETURN_TO_MODEL_CODES = frozenset({"invalid_prompt", "context_length_exceeded"})
-_RETURN_TO_MODEL_STATUS_CODES = frozenset({400, 422})
-_OTHER_SDK_TRANSIENT_NAMES = frozenset({"APIConnectionError", "APITimeoutError"})
-
 
 class TaskErrorMiddleware(AgentMiddleware):
-    """Let the parent handle failed tasks; only model calls may retry automatically."""
+    """Let the parent's model handle a failed task, with what the provider said where the
+    subagent's model call failed; only model calls may retry automatically.
+
+    A failure that ends the run (``RunEndingError``, such as a sandbox that stopped
+    answering), a pause and a cancellation go up unchanged.
+    """
 
     trace_policy = MIDDLEWARE_TRACE_POLICY
 
@@ -46,21 +47,6 @@ class TaskErrorMiddleware(AgentMiddleware):
                 out[key] = value
         return out
 
-    @staticmethod
-    def _recoverable(exc: Exception, error: dict[str, object]) -> bool:
-        if is_transient(exc) or type(exc).__name__ in _OTHER_SDK_TRANSIENT_NAMES:
-            return True
-        status = error.get("status_code")
-        if isinstance(status, int) and (status in RETRYABLE_STATUS_CODES or status >= 500):
-            return True
-        code = error.get("code")
-        return code in _RETURN_TO_MODEL_CODES or (
-            code is None
-            and error.get("type") == "invalid_request_error"
-            and isinstance(status, int)
-            and status in _RETURN_TO_MODEL_STATUS_CODES
-        )
-
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
@@ -70,12 +56,10 @@ class TaskErrorMiddleware(AgentMiddleware):
             return await handler(request)
         try:
             return await handler(request)
-        except GraphBubbleUp:
+        except GraphBubbleUp, NodeCancelledError, RunEndingError:
             raise
         except Exception as exc:
             error = self._error_fields(exc)
-            if not self._recoverable(exc, error):
-                raise
             logger.warning(
                 "Subagent task failed without replay",
                 extra={"error_type": type(exc).__name__, "status_code": error.get("status_code")},

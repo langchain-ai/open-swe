@@ -15,9 +15,11 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.errors import GraphBubbleUp, GraphInterrupt, NodeCancelledError
 from langgraph.prebuilt.tool_node import ToolCallRequest
+from managed_deepagents import CredentialAuthorizationRequiredError
 from rt.model_calls import ModelCallTimeoutError
 from rt.model_retries import ModelRetriesMiddleware
 from rt.task_errors import TaskErrorMiddleware
+from rt.tools import SandboxGoneError
 
 
 class _ProviderError(Exception):
@@ -42,6 +44,8 @@ class _ProviderError(Exception):
         _ProviderError(529),
         httpx2.ConnectError("connection failed"),
         ModelCallTimeoutError("timed out"),
+        _ProviderError(401),
+        RuntimeError("unexpected"),
     ],
 )
 async def test_failed_task_returns_an_error_the_parent_can_handle(
@@ -177,8 +181,8 @@ async def test_exhausted_model_retries_do_not_repeat_subagent_side_effects(
 @pytest.mark.parametrize(
     "name,error",
     [
-        ("task", RuntimeError("unexpected")),
-        ("task", _ProviderError(401)),
+        ("task", SandboxGoneError("the thread's sandbox did not answer")),
+        ("task", CredentialAuthorizationRequiredError(["notion"])),
         ("task", GraphBubbleUp("pause")),
         ("task", GraphInterrupt()),
         ("task", NodeCancelledError("child")),
@@ -186,7 +190,7 @@ async def test_exhausted_model_retries_do_not_repeat_subagent_side_effects(
         ("other", _ProviderError(503)),
     ],
 )
-async def test_task_boundary_propagates_unexpected_errors_and_control_flow(
+async def test_task_boundary_propagates_run_ending_errors_and_control_flow(
     name: str, error: BaseException
 ) -> None:
     request = ToolCallRequest(

@@ -566,13 +566,15 @@ async def test_a_sandbox_that_never_boots_is_reported_to_preparing_and_ends_the_
         agent, "_DEFAULT_MODEL", _calling(ToolCall(name="execute", args={"command": "ls"}, id="c"))
     )
 
-    with pytest.raises(ResourceCreationError):
+    # It ends the run rather than reaching the model as the tool call's error.
+    with pytest.raises(SandboxUnavailableError) as ended:
         await _run(
             InMemoryStore(),
             "thread-1",
             _context("agent", "token-1", _catalog("web_search", "g1", snapshot="a")),
         )
 
+    assert isinstance(ended.value.__cause__, ResourceCreationError)
     assert prepared == [(None, reason)]
 
 

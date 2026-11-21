@@ -55,7 +55,7 @@ from langsmith.sandbox import (
     SandboxConnectionError,
     SandboxNotReadyError,
 )
-from managed_deepagents import ManagedServerRuntime, define_sandbox
+from managed_deepagents import ManagedServerRuntime, RunEndingError, define_sandbox
 from managed_deepagents._sandbox_proxy import ProxyConfigRefusedError  # noqa: PLC2701
 from managed_deepagents.sandbox import SandboxDefinition
 from pydantic import JsonValue
@@ -65,6 +65,7 @@ from runtime_api.loop import SANDBOX_UNREACHABLE, SandboxGone
 from rt.backend import BackendCallError, Run, RunContext, current_run
 from rt.sandbox_binding import SandboxBinding
 from rt.sandbox_setup import SandboxUnavailableError
+from rt.tool_errors import SandboxUnreachableError, sandbox_unreachable
 from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
@@ -320,6 +321,15 @@ async def _opening(backend: object, *, wait: bool) -> OpenedSandbox:
     return OpenedSandbox(sandbox_id=sandbox_id)
 
 
+def _unbooted(exc: Exception) -> RunEndingError:
+    """What a sandbox that could not boot for a tool call ends the run with, named so the
+    backend's failure reply gives the person why: one that stopped answering keeps its
+    ``sandbox_unreachable`` reason."""
+    if sandbox_unreachable(exc):
+        return SandboxUnreachableError(str(exc))
+    return SandboxUnavailableError(str(exc))
+
+
 class ManagedSandboxMiddleware(AgentMiddleware):
     """Hold every tool call until the thread is bound to the sandbox the run opened and the
     sandbox has booted."""
@@ -347,5 +357,11 @@ class ManagedSandboxMiddleware(AgentMiddleware):
         # is bound to. A sandbox that cannot boot ends the run here.
         if (planned := _planned(request.runtime)) is not None:
             await self._bound(planned[0])
-            await OpenedSandbox.open(getattr(request.runtime, "backend", None))
+            try:
+                await OpenedSandbox.open(getattr(request.runtime, "backend", None))
+            except GraphBubbleUp, RunEndingError:
+                raise
+            except Exception as exc:
+                # The run ends, rather than the error reaching the model as the call's.
+                raise _unbooted(exc) from exc
         return await handler(request)

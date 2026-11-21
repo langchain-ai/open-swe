@@ -28,6 +28,7 @@ from managed_deepagents import (
     ConnectionNotFoundError,
     CredentialAuthorizationRequiredError,
     CredentialStoreError,
+    RunEndingError,
     connections,
 )
 from pydantic import JsonValue, TypeAdapter
@@ -81,7 +82,7 @@ _json_object = TypeAdapter(dict[str, JsonValue])
 _json_content = TypeAdapter(str | list[JsonValue])
 
 
-class SandboxGoneError(RuntimeError):
+class SandboxGoneError(RunEndingError):
     """The thread's sandbox did not answer an operation; the person has been told, and the run ends."""
 
 

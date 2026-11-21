@@ -23,6 +23,7 @@ from langsmith.sandbox import (
     SandboxRetryableConnectionError,
     SandboxServerReloadError,
 )
+from managed_deepagents import RunEndingError
 from runtime_api.loop import SANDBOX_UNREACHABLE, SandboxGone
 
 from rt.backend import OpenSweBackend
@@ -34,6 +35,14 @@ logger = logging.getLogger(__name__)
 
 _SANDBOX_ID: Final = re.compile(r"\bsb-[A-Za-z0-9-]+\b")
 _SLOW_CALL_SECONDS: Final = 5
+
+
+class SandboxUnreachableError(RunEndingError):
+    """The thread's sandbox stopped answering; the person has been told, and the run ends.
+
+    Its cause is the sandbox client's error. The backend's failure reply reads its name as
+    ``sandbox_unreachable``.
+    """
 
 
 class ToolErrorMiddleware(AgentMiddleware):
@@ -69,14 +78,16 @@ class ToolErrorMiddleware(AgentMiddleware):
                 },
             )
         except Exception as exc:
-            if not _sandbox_unreachable(exc):
+            if not sandbox_unreachable(exc):
                 logger.exception("Tool call failed", extra={"tool_name": request.tool_call["name"]})
                 return _error(request, {"error": str(exc), "error_type": type(exc).__name__})
             # Every later call would meet the same dead sandbox, so the run ends here once
             # the person knows.
             logger.exception("The thread's sandbox stopped answering")
             self._report_unreachable(request, exc)
-            raise
+            if isinstance(exc, RunEndingError):
+                raise
+            raise SandboxUnreachableError(str(exc)) from exc
         finally:
             seconds = monotonic() - started
             if seconds > _SLOW_CALL_SECONDS:
@@ -99,7 +110,7 @@ class ToolErrorMiddleware(AgentMiddleware):
         self._backend.outbox.notify(SANDBOX_UNREACHABLE, gone)
 
 
-def _sandbox_unreachable(exc: Exception) -> bool:
+def sandbox_unreachable(exc: Exception) -> bool:
     """Whether the sandbox itself did not answer, or never booted, as opposed to a call that
     failed in it.
 

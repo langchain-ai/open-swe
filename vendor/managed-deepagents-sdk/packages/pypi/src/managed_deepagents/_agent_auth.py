@@ -20,6 +20,7 @@ from managed_deepagents._agent_auth_http import (
     missing_workspace_connection_error,
     request_agent_auth_json,
 )
+from managed_deepagents._run_ending import RunEndingError
 
 #: How a missing workspace is named in errors: deployments get it as
 #: ``LANGSMITH_TENANT_ID``, everything else should set ``LANGSMITH_WORKSPACE_ID``.
@@ -96,7 +97,9 @@ class WorkspaceConnection:
     owner_policy: str
 
 
-class CredentialAuthorizationRequiredError(RuntimeError):
+class CredentialAuthorizationRequiredError(RunEndingError):
+    """The person has not connected an account a tool needs; it ends the run, so they can."""
+
     def __init__(self, slugs: list[str]) -> None:
         super().__init__(
             f"the caller has not connected: {', '.join(slugs)}. "

@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from typing import Final, Protocol
 
 from deepagents.backends.protocol import SandboxBackendProtocol
+from managed_deepagents import RunEndingError
 from runtime_api.sandbox_setup import WORK_DIR, GitIdentity
 
 from rt.backend import Run, RunLocal
@@ -31,8 +32,9 @@ class Boot(Protocol):
     def error(self) -> str | None: ...
 
 
-class SandboxUnavailableError(RuntimeError):
-    """The thread's sandbox could not boot; its message is why."""
+class SandboxUnavailableError(RunEndingError):
+    """The thread's sandbox could not boot; its message is why. It ends the run, once the
+    person has been told."""
 
 
 class SandboxSetup:
