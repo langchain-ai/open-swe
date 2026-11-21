@@ -5,6 +5,9 @@ import { initializeDatadogRum } from "./lib/datadog"
 import { installDatadogPerfSink } from "./lib/perf/datadogSink"
 import { productAnalytics } from "./lib/analytics"
 import { exposePerfGlobal } from "./lib/perf/trace"
+import { importRecovery } from "./lib/importRecovery"
+
+importRecovery.install()
 
 // This bundle's own identity, stamped by the build; never the backend's.
 window.__OPEN_SWE_BUNDLE__ = {

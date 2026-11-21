@@ -2,6 +2,8 @@ import { Button } from "@langchain/macaw-components/Button"
 import { ErrorState } from "@langchain/macaw-components/ErrorState"
 import { useEffect, useState } from "react"
 
+import { importRecovery } from "@/lib/importRecovery"
+
 export function LoadError({
   error,
   title = "Something went wrong",
@@ -21,6 +23,7 @@ export function LoadError({
     .join("\n")
 
   useEffect(() => {
+    importRecovery.recover(error)
     console.error("UI load failed", { context, error })
   }, [context, error])
 
