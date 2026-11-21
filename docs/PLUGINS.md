@@ -368,6 +368,13 @@ An app can have pull request reviews do work for it, such as screenshotting a fr
   A save keeps its document only once every file is attached.
   A PNG is kept as a lossless WebP, under the name the review gave it, whenever that is smaller and changes no pixel, so take a file's type from its Blob, not its name.
   When the pull request closes, merged or not, Robin deletes what reviews saved under its `pulls/<number>/` in these collections, with the files; a document a person created or changed stays, as does anything in the app's other collections.
+- `path`, optional, identifies an authenticated result page in this app, for example `"/{repository}/{number}"`.
+  It must start with `/`; only `{repository}` (owner/repo) and `{number}` substitutions are supported.
+  External URLs, protocol-relative paths, queries, fragments, percent encoding, backslashes, control characters and dot traversal are rejected.
+  After a successful `save_app_document`, the host returns its configured dashboard app URL, never an attachment bearer link.
+  The existing review publisher can include that page after the current run explicitly records a complete outcome for its saved document at the current head.
+  It does not publish a link for pending, failed, missing or stale results; repeat publication checks existing review receipts before posting.
+  The page still requires an installation, repository sharing and GitHub access.
 - `browser` gives the review the thread's LangSmith browser.
   The browser never reaches the review's sandbox, and signs in only to the domains an instance admin lists under **Defaults → Review browser**, with the one MCP tool named there; sessions install only on LangSmith sites.
 - `paths`, optional, at most 64 glob patterns, limits the step to pull requests that change a matching file: `**` spans folders, and a pattern starting with `!` excludes what it matches, whatever else matches it.
@@ -383,9 +390,11 @@ Under **Preview checks** there, or with `manage_review_apps`, the admin names th
 Name a check that is skipped when no preview is built, so pull requests without one start nothing.
 When one of them passes for an open pull request whose head is still that commit, in a private repository Robin reviews automatically, and the review works for an app whose step browses, Robin runs its review again to do only the apps' review steps against the preview.
 A preview can deploy before Robin has reviewed the pull request, or while it's a draft, so Robin looks again every five minutes for an hour.
+An explicitly blocked temporary prerequisite can request `retryable: true` when recording its outcome; it uses this existing three-run budget, without another webhook.
+Missing access, failed deployments and unsupported previews should remain terminal blocked outcomes.
 Each named check starts one such run per commit, so a pull request with several previews gets a run once each is up; when another reviewer run on the pull request cancels one, Robin starts it again, up to three times, and closing the pull request cancels it.
-That run reviews no code and can't change the review's findings or reply on the pull request.
-A problem its apps' work turns up that it can point at in the diff, such as a visual bug, it records and publishes as a comment of those findings alone; the code review's verdict, Robin's approval and the Robin Review check stay as the review left them.
+That run reviews no code and can't edit the code review's existing findings.
+A problem its apps' work turns up that it can point at in the diff, such as a visual bug, it records and publishes as a comment of those findings, optionally alongside verified links to completed saved app results; a clean capture can publish its result link without inventing a finding; the code review's verdict, Robin's approval and the Robin Review check stay as the review left them.
 
 ### GitHub
 

@@ -22,7 +22,7 @@ import logging
 import re
 from collections.abc import Collection, Sequence
 from html import escape
-from typing import Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 import httpx2
 from pydantic import BaseModel, Field, model_validator
@@ -49,6 +49,9 @@ from openswe.review.findings import (
 )
 from openswe.run_config import ReviewDestination
 from openswe.utils.dashboard_links import dashboard_thread_url
+
+if TYPE_CHECKING:
+    from openswe.review_apps.apps import ReviewAppResult
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +409,8 @@ def render_review_body(
     dry_run: bool = False,
     approval_errors: Sequence[str] = (),
     config_errors: Sequence[str] = (),
+    app_results: Sequence[ReviewAppResult] = (),
+    apps_only: bool = False,
 ) -> str:
     """Compose the top-level review body.
 
@@ -426,6 +431,8 @@ def render_review_body(
         issue_word = "issue" if surfaced_count == 1 else "issues"
         headline = f"**Robin Review** found {surfaced_count} potential {issue_word}."
 
+    if apps_only and surfaced_count == 0 and not out_of_diff_findings:
+        headline = "**Robin app review completed.**"
     parts = [headline]
     if config_errors:
         parts.append(
@@ -466,6 +473,11 @@ def render_review_body(
                 else "This assessment does not approve or merge the PR."
             )
             + "\n\n</details>"
+        )
+    if app_results:
+        parts.append(
+            "App review results (repository access required):\n\n"
+            + "\n\n".join(result.render() for result in app_results)
         )
     links = []
     if ui_url:

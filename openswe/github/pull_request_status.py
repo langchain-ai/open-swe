@@ -1526,6 +1526,28 @@ class PullRequestClient:
             cursor = page.cursor
         raise ValueError("PR reviews exceed admission pagination limit")
 
+    async def published_app_results(self, head_sha: str, markers: set[str]) -> frozenset[str]:
+        pull = await self.pull()
+        head = pull.get("head")
+        if pull.get("state") != "open" or not isinstance(head, dict) or head.get("sha") != head_sha:
+            raise ValueError("App results no longer match an open pull request's head")
+        bodies: list[str] = []
+        for page in range(1, 3):
+            reviews = await self.repo.get(
+                f"pulls/{self.number}/reviews", params={"per_page": "100", "page": str(page)}
+            )
+            if not isinstance(reviews, list) or len(reviews) > 100:
+                raise ValueError("GitHub answered without a page of reviews")
+            for review in reviews:
+                if not isinstance(review, dict) or not isinstance(review.get("body"), str):
+                    raise ValueError("GitHub answered without a review body")
+                bodies.append(review["body"])
+            if len(reviews) < 100:
+                return frozenset(
+                    marker for marker in markers if any(marker in body for body in bodies)
+                )
+        raise ValueError("Cannot verify app publication within the PR review pagination budget")
+
     async def reviews(self) -> list[dict[str, Any]]:
         return await self.repo.pages(f"pulls/{self.number}/reviews")
 

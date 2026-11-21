@@ -25,6 +25,7 @@ import { useEffect } from "react"
 
 import {
   CAPTURES,
+  CaptureAttempt,
   captureKey,
   capturePrefix,
   type CaptureKey,
@@ -32,6 +33,7 @@ import {
   type ScenarioShots,
   StoredCapture,
 } from "./capture"
+import { runOverview } from "./coverage"
 import { InboxSnapshot } from "./inboxSnapshot"
 import { Limiter } from "./limiter"
 import { Pins, type Pin, type PinKey } from "./pins"
@@ -366,7 +368,17 @@ export class DesignQa {
   }
 
   async unpin(pr: PullRequestRef): Promise<void> {
-    await this.pinStore().delete(Pins.key(repositoryOf(pr), pr.number))
+    try {
+      await this.pinStore().delete(Pins.key(repositoryOf(pr), pr.number))
+    } catch (error) {
+      if (
+        error instanceof HostError &&
+        error.status === 404 &&
+        error.message === "document not found"
+      )
+        return
+      throw error
+    }
   }
 
   /** The person's own inbox preferences, kept private to them. */
@@ -387,14 +399,26 @@ export class DesignQa {
     })
   }
 
-  /**
-   * Whether the review skipped Design QA's work on pull request `number` and
-   * nothing was ever captured for it, as for a change with no frontend files.
-   */
-  static skipped(found: RepositoryCaptures | undefined, number: number) {
+  static hidden(found: RepositoryCaptures | undefined, number: number) {
+    const outcome = found?.outcomes.get(number)
+    const run = found?.runs.get(number)
+    const current =
+      outcome &&
+      (!run || Date.parse(outcome.created_at) > Date.parse(run.created_at))
+        ? outcome
+        : null
+    if (current?.status === "skipped") return true
+    if (run?.status === "complete" && runOverview(run).paired > 0) return false
+    if (current)
+      return (
+        current.status === "failed" ||
+        (current.status === "blocked" &&
+          !new CaptureAttempt(current).previewPending)
+      )
     return (
-      found?.outcomes.get(number)?.status === "skipped" &&
-      !found.runs.has(number)
+      run?.status === "failed" ||
+      run?.status === "complete" ||
+      (run?.status === "blocked" && !CaptureAttempt.isPreviewPending(run.error))
     )
   }
 
@@ -421,8 +445,7 @@ export class DesignQa {
 
   /**
    * A card: the pull request as GitHub has it now once `current` is read, with
-   * its latest capture. A closed one drops out, unless `pinned`: a pin stays
-   * until it's unpinned.
+   * its latest capture. Closed pull requests are eligible only when pinned.
    */
   static item(
     pull: PullRequestSummary,
@@ -430,6 +453,7 @@ export class DesignQa {
     current: PullRequest | null | undefined,
     pinned: boolean
   ): InboxItem | null {
+    if (DesignQa.hidden(found, pull.number)) return null
     if (current && current.state !== "open" && !pinned) return null
     return {
       repository: pull.repository,

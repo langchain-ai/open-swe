@@ -114,6 +114,19 @@ def test_a_review_step_writes_only_app_written_collections_and_stays_in_its_bloc
     review = {"instructions": "Capture.", "writes": ["captures"], "browser": True}
     manifest = PluginManifest.model_validate(_manifest(review, {"captures": {"write": "app"}}))
     assert manifest.review is not None and manifest.review.browser
+    for path in (
+        "//evil.test",
+        "/../outside",
+        "/a/./b",
+        "/%2e%2e",
+        "/a\\b",
+        "/{unknown}",
+        "/a?b",
+        "/a#b",
+        "/a\nb",
+    ):
+        with pytest.raises(ValidationError, match="local path"):
+            ReviewStep(instructions="Capture.", path=path)
 
     with pytest.raises(ValidationError, match="app-written"):
         PluginManifest.model_validate(_manifest(review, {}))
@@ -1100,6 +1113,31 @@ async def test_a_commit_gets_a_bounded_number_of_preview_runs(
 
 
 @pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
+@pytest.mark.parametrize("retryable", [True, False])
+async def test_a_temporary_block_uses_only_the_existing_preview_retry_budget(
+    monkeypatch: pytest.MonkeyPatch, retryable: bool
+) -> None:
+    preview = _Preview(monkeypatch)
+    await PreviewReady.run(_check_passed())
+    count = PreviewReady.MOST_RUNS if retryable else 1
+    for _ in range(count):
+        await preview.work()
+        preview.settle("success", recorded=False)
+        for app, run_id in tuple(preview.outcomes):
+            if run_id == preview.runs[0]["run_id"]:
+                await ReviewOutcomes(app, "acme/widgets", 7).finish(
+                    run_id,
+                    _HEAD,
+                    "blocked",
+                    "Preview pending: deployment propagation.",
+                    retryable=retryable,
+                )
+    await preview.drain()
+    assert preview.dispatch.await_count == count
+    assert all(outcome.status == "blocked" for outcome in preview.outcomes.values())
+
+
+@pytest.mark.usefixtures("no_local_threads", "memory_event_claims")
 async def test_success_without_a_saved_result_is_failed_and_retried(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1250,6 +1288,7 @@ async def _reviewing(
             "instructions": "Capture.",
             "writes": ["captures"] if writes is None else writes,
             "browser": True,
+            "path": "/{repository}/{number}",
         }
     )
     pinned = {"app": str(release.app), "release": str(release.id)}
@@ -1313,6 +1352,7 @@ async def test_regular_review_completion_settles_unfinished_saved_work(
 async def test_a_review_saves_a_document_and_its_files_to_an_app(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://robin.example")
     before = _png((40, 30))
     app = await _reviewing(monkeypatch, {"/workspace/shots/home-before.png": before})
 
@@ -1325,6 +1365,10 @@ async def test_a_review_saves_a_document_and_its_files_to_an_app(
     )
 
     assert result["success"] is True, result
+    assert result["url"] == "https://robin.example/agents/plugins/design-qa/acme/widgets/7"
+    apps = await ReviewApps.of(_review(run_id="capture-run"))
+    assert apps is not None
+    assert not await apps.results("capture-run", _HEAD)
     key = str(result["key"])
     # Read as the app reads it: its repository-shared captures, by key.
     documents = PluginDocuments(app)
@@ -1337,7 +1381,12 @@ async def test_a_review_saves_a_document_and_its_files_to_an_app(
     outcomes = ReviewOutcomes(app, "acme/widgets", 7)
     await outcomes.finish("capture-run", _HEAD, "complete", "")
     assert await outcomes.settled("capture-run", _HEAD, _PREVIEW_CHECK)
+    results = await apps.results("capture-run", _HEAD)
+    assert len(results) == 1 and results[0].url == result["url"]
+    assert not await apps.results("capture-run", "c" * 40)
+    assert not await apps.results("another-run", _HEAD)
     await documents.delete("captures", scope, key)
+    assert not await apps.results("capture-run", _HEAD)
     assert not await outcomes.settled("capture-run", _HEAD, _PREVIEW_CHECK)
     outcome = await outcomes.get("capture-run")
     assert outcome is not None and outcome.status == "failed"

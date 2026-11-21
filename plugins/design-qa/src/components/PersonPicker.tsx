@@ -45,9 +45,8 @@ export function PersonPicker({
         filterOptions={(options) => options}
         emptyText={found.isFetching ? "Searching…" : "No one matches"}
         value={value}
-        inputValue={text}
         onInputChange={setText}
-        displaySelectedValueWhenInputEmpty
+        clearValueOnInputClear
         getOptionLabel={label}
         getOptionValue={login}
         renderOption={(person) => <PersonOption person={person} />}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  CaptureAttempt,
   type FrontendReviewRun,
   StoredCapture,
   UNFINISHED_AFTER_MS,
@@ -256,5 +257,86 @@ describe("StoredCapture.read assessment", () => {
     expect(report?.risk).toBeNull()
     expect(report?.design_system).toBeNull()
     expect(report?.missed).toEqual([])
+  })
+})
+
+describe("CaptureAttempt", () => {
+  const attempt = (status: "blocked" | "failed" | "skipped", reason: string) =>
+    new CaptureAttempt(
+      {
+        id: "attempt",
+        head_sha: "b",
+        created_at: "2026-11-09T10:00:00Z",
+        status,
+        reason,
+      },
+      Date.parse("2026-11-09T10:10:00Z")
+    )
+
+  it("keeps known deploying previews distinct from actual blockers and failures", () => {
+    expect(
+      attempt("blocked", "Preview pending: deployment is building.")
+        .previewPending
+    ).toBe(true)
+    expect(
+      attempt("blocked", "The preview is still building.").previewPending
+    ).toBe(true)
+    expect(
+      attempt("blocked", "The preview is not deployed yet.").previewPending
+    ).toBe(true)
+    expect(attempt("blocked", "Preview build failed.").previewPending).toBe(
+      false
+    )
+    expect(
+      attempt(
+        "blocked",
+        "The preview is still building but authentication failed."
+      ).previewPending
+    ).toBe(false)
+    expect(attempt("blocked", "Sign-in required.").label).toBe(
+      "Capture blocked"
+    )
+    expect(
+      attempt("failed", "Preview pending: screenshot save failed.").label
+    ).toBe("Capture failed")
+  })
+
+  it("restores manual recovery when an old preview wait may have expired", () => {
+    const pending = attempt(
+      "blocked",
+      "Preview pending: deployment is building."
+    )
+    const expired = new CaptureAttempt(
+      pending.outcome,
+      Date.parse("2026-11-09T12:00:00Z")
+    )
+    expect(expired.previewPending).toBe(false)
+    expect(expired.label).toBe("Preview status needs refresh")
+  })
+
+  it("hides only confirmed nonvisual skips and treats legacy missing evidence as unavailable", () => {
+    expect(
+      attempt(
+        "skipped",
+        "The pull request changes no file this app reviews, so Robin skipped it."
+      ).nonvisual
+    ).toBe(true)
+    expect(
+      attempt("skipped", "No visual changes: internal refactor only.").nonvisual
+    ).toBe(true)
+    expect(
+      attempt("skipped", "No frontend files have a preview available.")
+        .nonvisual
+    ).toBe(false)
+    expect(
+      attempt("skipped", "Changed frontend has no preview.").unavailable
+    ).toBe(true)
+    expect(attempt("skipped", "No base comparison configured.").label).toBe(
+      "Comparison unavailable"
+    )
+    expect(
+      attempt("blocked", "Comparison unavailable: configure a base.")
+        .unavailable
+    ).toBe(false)
   })
 })

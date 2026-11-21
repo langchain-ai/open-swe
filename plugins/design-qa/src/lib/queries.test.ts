@@ -1,4 +1,8 @@
-import { HostError, type PluginHost } from "@openswe/plugin-sdk"
+import {
+  HostError,
+  type PluginHost,
+  type PullRequestSummary,
+} from "@openswe/plugin-sdk"
 import { describe, expect, it } from "vitest"
 
 import { Limiter } from "./limiter"
@@ -15,6 +19,12 @@ function host(documents: Record<string, Record<string, object>>): PluginHost {
   return {
     storage: {
       collection: (collection: string) => ({
+        delete: async (name: string) => {
+          const stored = documents[collection]
+          if (!stored || !(name in stored))
+            throw new HostError("document not found", 404)
+          delete stored[name]
+        },
         query: async ({
           prefix,
           startAfter,
@@ -66,6 +76,86 @@ describe("DesignQa", () => {
     expect(runs.has(8)).toBe(false)
   })
 
+  it("keeps newer capture attempts and saved evidence visible, but omits skipped and unsuccessful cards, including pins", async () => {
+    const created = new Date(Date.now() - 60_000).toISOString()
+    const requested = new Date().toISOString()
+    const qa = DesignQa.of(
+      host({
+        captures: {
+          [key(11, 1)]: {
+            status: "failed",
+            error: "Browser unavailable",
+            created_at: created,
+          },
+          [key(12, 1)]: { status: "complete", created_at: created },
+          [key(15, 1)]: { status: "failed", created_at: requested },
+          [key(16, 1)]: {
+            status: "running",
+            created_at: requested,
+            updated_at: requested,
+          },
+          [key(17, 1)]: {
+            status: "complete",
+            created_at: created,
+            report: {
+              scenarios: [{ before_url: "base.png", after_url: "pr.png" }],
+            },
+          },
+          [key(14, 1)]: {
+            status: "complete",
+            report: {
+              scenarios: [{ before_url: "base.png", after_url: "pr.png" }],
+            },
+          },
+        },
+        review_outcomes: Object.fromEntries(
+          [
+            [7, "failed", "Browser unavailable", requested],
+            [9, "skipped", "No visual changes", requested],
+            [10, "blocked", "Browser unavailable", requested],
+            [11, "queued", "Capture requested", requested],
+            [12, "blocked", "Preview pending: preview is deploying", requested],
+            [13, "queued", "Capture requested", requested],
+            [14, "failed", "Browser unavailable", requested],
+            [15, "queued", "Capture requested", created],
+            [16, "skipped", "No visual changes", created],
+            [17, "skipped", "No visual changes", requested],
+          ].map(([number, status, reason, createdAt]) => [
+            `pulls/${number}/attempt`,
+            {
+              id: `attempt-${number}`,
+              status,
+              reason,
+              head_sha: "head",
+              created_at: createdAt,
+            },
+          ])
+        ),
+      })
+    )
+    const found = await qa.repositoryCaptures(REPOSITORY)
+    const pull: PullRequestSummary = {
+      repository: REPOSITORY,
+      number: 7,
+      title: "Update navigation",
+      url: "https://github.com/acme/web/pull/7",
+      draft: false,
+      author: "alice",
+      createdAt: null,
+      updatedAt: null,
+    }
+    for (const pinned of [false, true]) {
+      const items = [7, 9, 10, 11, 12, 13, 14, 15, 16, 17].flatMap((number) => {
+        const item = DesignQa.item({ ...pull, number }, found, null, pinned)
+        return item ? [item] : []
+      })
+      expect(items.map((item) => item.pull.number)).toEqual([
+        11, 12, 13, 14, 16,
+      ])
+      expect(items[3]?.run?.report?.scenarios[0]?.before_url).toBe("base.png")
+    }
+  })
+
   it("reads every pin without a key prefix", async () => {
     const qa = DesignQa.of(
       host({
@@ -81,6 +171,47 @@ describe("DesignQa", () => {
     )
 
     expect((await qa.pins()).map(({ number }) => number)).toEqual([7])
+  })
+
+  it("unpins the normalized key and treats an already removed pin as unpinned", async () => {
+    const qa = DesignQa.of(
+      host({
+        pins: {
+          "acme/web/7": {
+            repository: "acme/web",
+            number: 7,
+            title: "Fix",
+            pinnedAt: "2026-11-19T10:00:00Z",
+          },
+        },
+      })
+    )
+    const pr = { owner: "Acme", repo: "Web", number: 7 }
+
+    await qa.unpin(pr)
+    expect(await qa.pins()).toEqual([])
+    await expect(qa.unpin(pr)).resolves.toBeUndefined()
+  })
+
+  it.each([
+    new HostError("installation not found", 404),
+    new HostError("document not found", 403),
+    new HostError("Storage unavailable", 503),
+    new Error("Network unavailable"),
+  ])("does not hide an unpin failure: %s", async (error) => {
+    const qa = DesignQa.of({
+      storage: {
+        collection: () => ({
+          delete: async () => {
+            throw error
+          },
+        }),
+      },
+    } as unknown as PluginHost)
+
+    await expect(
+      qa.unpin({ owner: "acme", repo: "web", number: 7 })
+    ).rejects.toBe(error)
   })
 
   it("reads hundreds of pull requests a few at a time, and lets a rate limit be retried", async () => {

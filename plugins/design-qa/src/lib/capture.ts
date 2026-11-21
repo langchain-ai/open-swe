@@ -1,4 +1,9 @@
-import type { JsonObject, JsonValue, StoredDocument } from "@openswe/plugin-sdk"
+import type {
+  JsonObject,
+  JsonValue,
+  ReviewOutcome,
+  StoredDocument,
+} from "@openswe/plugin-sdk"
 
 /**
  * Design QA's captures, as it keeps them in its own storage: one document per
@@ -156,6 +161,65 @@ export interface FrontendReviewRun {
 
 /** How long a capture may stay unfinished before it reads as interrupted. */
 export const UNFINISHED_AFTER_MS = 15 * 60 * 1000
+
+export class CaptureAttempt {
+  constructor(
+    readonly outcome: ReviewOutcome | null,
+    readonly now = Date.now()
+  ) {}
+
+  get previewPending(): boolean {
+    return (
+      this.outcome?.status === "blocked" &&
+      this.now - Date.parse(this.outcome.created_at) < 90 * 60_000 &&
+      CaptureAttempt.isPreviewPending(this.outcome.reason)
+    )
+  }
+
+  get nonvisual(): boolean {
+    return (
+      this.outcome?.status === "skipped" &&
+      /^(?:No visual changes:|The pull request changes no file this app reviews)|\b(?:no frontend files|no visual changes|nothing visible)\b/i.test(
+        this.outcome.reason
+      ) &&
+      !/\b(?:preview|base|unavailable|missing|cannot|could not)\b/i.test(
+        this.outcome.reason
+      )
+    )
+  }
+
+  get unavailable(): boolean {
+    return this.outcome?.status === "skipped" && !this.nonvisual
+  }
+
+  get label(): string {
+    if (this.previewPending) return "Preview pending"
+    if (
+      this.outcome?.status === "blocked" &&
+      CaptureAttempt.isPreviewPending(this.outcome.reason)
+    )
+      return "Preview status needs refresh"
+    if (this.nonvisual) return "No visual changes"
+    if (this.unavailable) return "Comparison unavailable"
+    if (this.outcome?.status === "queued") return "Capture queued"
+    if (this.outcome?.status === "blocked") return "Capture blocked"
+    if (this.outcome?.status === "failed") return "Capture failed"
+    return "Captured"
+  }
+
+  static isPreviewPending(reason: string | null | undefined): boolean {
+    return Boolean(
+      reason &&
+      !/\b(?:failed|cancelled|timed out|authentication|sign-in)\b/i.test(
+        reason
+      ) &&
+      (/^Preview pending:/i.test(reason) ||
+        /\bpreview\b.{0,40}\b(?:is deploying|is building|not deployed yet|isn't deployed yet|still deploying|still building)\b/i.test(
+          reason
+        ))
+    )
+  }
+}
 
 type Json = JsonValue | undefined
 

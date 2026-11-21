@@ -15,6 +15,7 @@ Save its data with `save_app_document` and `app: "{{ app.id }}"`, into {{ app.st
 Finish every app's work with `record_app_review_outcome`, using `app: "{{ app.id }}"`.
 {% if app.step.writes %}
 Use `complete` only after saving its finished result.
+If saving returns a `url`, keep that authenticated app link; `publish_review` includes verified completed results without exposing their attachments.
 {% else %}
 Use `complete` with a reason summarizing the work performed; this app does not save documents.
 {% endif %}

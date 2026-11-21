@@ -905,6 +905,7 @@ class _GitHubPull(BaseModel):
 
     number: int
     title: str | None = None
+    body: str | None = None
     html_url: str | None = None
     state: str | None = None
     draft: bool | None = None
@@ -921,6 +922,7 @@ class _GitHubPull(BaseModel):
 class PullRequestModel(BaseModel):
     number: int
     title: str
+    body: str | None = None
     url: str
     state: str
     merged: bool
@@ -945,6 +947,7 @@ class PullRequestModel(BaseModel):
         return cls(
             number=pull.number,
             title=pull.title or "",
+            body=pull.body,
             url=pull.html_url or "",
             state=pull.state or "open",
             merged=bool(pull.merged),

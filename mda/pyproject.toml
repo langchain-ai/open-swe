@@ -20,9 +20,9 @@ dependencies = [
     "jinja2>=3.1.6",
     # The vendored SDK's browser installs its extension from this package, so this
     # matches managed_deepagents.browser.STAGEHAND_VERSION.
-    "stagehand==4.3.0",
+    "stagehand==4.4.0",
     # The browser's tools; matches the pin `mda` injects into browser builds.
-    "stagehand-middleware==0.1.0",
+    "stagehand-middleware==0.1.2",
     "mcp>=2.2.0",
     # fetch_url, which MDA runs itself; its results match the backend's only at
     # the versions it runs.

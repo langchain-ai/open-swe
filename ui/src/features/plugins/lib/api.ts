@@ -256,6 +256,7 @@ interface DocumentWire {
 interface PullRequestWire {
   number: number
   title: string
+  body?: string | null
   url: string
   state: string
   merged: boolean
@@ -274,6 +275,7 @@ interface PullRequestWire {
 const pullRequest = (wire: PullRequestWire): PullRequest => ({
   number: wire.number,
   title: wire.title,
+  body: wire.body,
   url: wire.url,
   state: wire.state,
   merged: wire.merged,

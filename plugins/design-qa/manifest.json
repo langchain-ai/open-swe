@@ -22,6 +22,7 @@
       "captures"
     ],
     "browser": true,
+    "path": "/{repository}/{number}",
     "paths": [
       "**/*.tsx",
       "**/*.jsx",

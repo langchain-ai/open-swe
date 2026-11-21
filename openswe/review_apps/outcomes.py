@@ -22,6 +22,7 @@ class ReviewOutcome(BaseModel):
     head_sha: str
     status: OutcomeStatus
     reason: str = ""
+    retryable: bool = False
     check: str = ""
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     collection: str | None = None
@@ -118,7 +119,10 @@ class ReviewOutcomes:
         reason: str,
         *,
         requires_result: bool = True,
+        retryable: bool = False,
     ) -> None:
+        if retryable and status != "blocked":
+            raise ValueError("Only a blocked review can request a bounded retry")
         previous = await self.get(run_id)
         if (
             status == "complete"
@@ -135,14 +139,18 @@ class ReviewOutcomes:
         if status == "complete" and not requires_result and not reason.strip():
             raise ValueError("A read-only review needs a summary of its completed work")
         outcome = previous or ReviewOutcome(id=run_id, head_sha=head_sha, status=status)
-        await self.put(outcome.model_copy(update={"status": status, "reason": reason.strip()}))
+        await self.put(
+            outcome.model_copy(
+                update={"status": status, "reason": reason.strip(), "retryable": retryable}
+            )
+        )
 
     async def settled(self, run_id: str, head_sha: str, check: str) -> bool:
         """A stopped run is done only if this app recorded an outcome for this commit."""
         outcome = await self.get(run_id)
         if outcome is not None and outcome.head_sha == head_sha:
             if outcome.status in ("blocked", "skipped"):
-                return bool(outcome.reason.strip())
+                return bool(outcome.reason.strip()) and not outcome.retryable
             if outcome.status == "complete":
                 read_only = (
                     not outcome.collection and not outcome.document_key and bool(outcome.reason)

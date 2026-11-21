@@ -13,5 +13,6 @@ A check that passes only once this pull request's preview is deployed just passe
 This run is only for the apps this review works for: do each app's review step against the preview, as its instructions say.
 Don't review the code: this commit's review is done.
 If the apps' work shows a problem you can point at in the diff, such as a visual bug in a screenshot, record it with `add_finding`, then call `publish_review` once: it posts only the findings this run added.
+After recording a completed saved app result, call `publish_review` once even without findings: it includes only verified result links not already published.
 Otherwise publish nothing.
 If no app's instructions apply to this pull request, stop.

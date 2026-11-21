@@ -1,4 +1,6 @@
 import { Button } from "@langchain/macaw-components/Button"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import type { ReviewOutcome } from "@openswe/plugin-sdk"
 import { usePluginHost } from "@openswe/plugin-sdk/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -6,6 +8,7 @@ import { useEffect, useState } from "react"
 
 import { repositoryOf, type PullRequestRef } from "../lib/pullRequest"
 import { Usage } from "../lib/usage"
+import { CaptureAttempt, type FrontendReviewRun } from "../lib/capture"
 import {
   errorMessage,
   keys,
@@ -22,6 +25,7 @@ export function CaptureAction({
   pr,
   outcome,
   hasCapture,
+  run,
   disabled = false,
   currentHeadSha,
   showOutcome = true,
@@ -29,6 +33,7 @@ export function CaptureAction({
   pr: PullRequestRef
   outcome: ReviewOutcome | null
   hasCapture: boolean
+  run?: FrontendReviewRun | null
   disabled?: boolean
   currentHeadSha?: string
   showOutcome?: boolean
@@ -37,10 +42,15 @@ export function CaptureAction({
   const client = useQueryClient()
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    if (outcome?.status !== "queued") return
+    if (
+      outcome?.status !== "queued" &&
+      outcome?.status !== "blocked" &&
+      run?.status !== "blocked"
+    )
+      return
     const timer = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(timer)
-  }, [outcome?.status])
+  }, [outcome?.status, run?.status])
   const repository = repositoryOf(pr)
   const update = (next: ReviewOutcome) => {
     client.setQueryData<PullRequestRuns>(
@@ -102,40 +112,68 @@ export function CaptureAction({
     now - Date.parse(outcome.created_at) > 90 * 60_000
   )
   const queued = outcome?.status === "queued" && !earlierCommit && !stalled
-  const labels = {
-    queued: "Capture queued",
-    blocked: "Capture blocked",
-    failed: "Capture failed",
-    skipped: "Capture skipped",
+  const attempt = new CaptureAttempt(outcome, now)
+  const currentRun = run && (!currentHeadSha || run.head_sha === currentHeadSha)
+  const previewPending =
+    (!earlierCommit &&
+      attempt.previewPending &&
+      (!currentRun ||
+        !outcome ||
+        Date.parse(run.created_at) < Date.parse(outcome.created_at))) ||
+    Boolean(
+      currentRun &&
+      run.status === "blocked" &&
+      now - Date.parse(run.created_at) < 90 * 60_000 &&
+      (!outcome ||
+        Date.parse(run.created_at) >= Date.parse(outcome.created_at)) &&
+      CaptureAttempt.isPreviewPending(run.error)
+    )
+  const capturing =
+    currentRun && (run.status === "pending" || run.status === "running")
+  const request = () => {
+    Usage.record(host, "capture_requested")
+    capture.mutate()
   }
   return (
     <div className="flex flex-col items-start gap-space-2">
       {showOutcome && outcome && outcome.status !== "complete" && (
         <p role="status" className="text-xs text-secondary">
-          {stalled
-            ? "Capture has not reported an outcome"
-            : labels[outcome.status]}
+          {stalled ? "Capture has not reported an outcome" : attempt.label}
           {earlierCommit ? " (earlier commit)" : ""}
           {outcome.reason ? `: ${outcome.reason}` : ""}
         </p>
       )}
-      <Button
-        size="sm"
-        color="secondary"
-        variant="outlined"
-        loading={capture.isPending}
-        disabled={disabled || queued}
-        onClick={() => {
-          Usage.record(host, "capture_requested")
-          capture.mutate()
-        }}
-      >
-        {queued
-          ? "Capture queued"
-          : hasCapture || outcome
-            ? "Retry capture"
-            : "Capture"}
-      </Button>
+      {previewPending || capturing || queued ? (
+        <p role="status" className="text-xs text-secondary">
+          {previewPending
+            ? "Waiting for the preview to finish deploying."
+            : capturing
+              ? "Capturing screenshots…"
+              : "Capture queued"}
+        </p>
+      ) : hasCapture || outcome ? (
+        <IconButton
+          size="sm"
+          color="secondary"
+          variant="outlined"
+          icon={ArrowClockwiseIcon}
+          label="Retry capture"
+          loading={capture.isPending}
+          disabled={disabled}
+          onClick={request}
+        />
+      ) : (
+        <Button
+          size="sm"
+          color="secondary"
+          variant="outlined"
+          loading={capture.isPending}
+          disabled={disabled}
+          onClick={request}
+        >
+          Capture
+        </Button>
+      )}
       {capture.isError && (
         <p role="alert" className="text-xs text-error-secondary">
           {errorMessage(capture.error)}

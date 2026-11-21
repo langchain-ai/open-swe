@@ -17,6 +17,13 @@ Default PR screenshots to dark mode.
 Do not request or capture both light and dark mode unless the change affects theme-specific behavior or appearance, or the user explicitly requests both.
 
 For PR comparison screenshots:
+- Before opening the PR, organize evidence by named scenario and visible state, not an unlabelled screenshot gallery.
+  For each scenario give its real route and query (or Storybook story id), viewport, theme, replay steps, and matched Base/PR pair.
+  Use separate scenarios for materially different tab, menu, loading, empty, error, or disabled states; identify what remains unverified.
+- When Design QA has a real saved comparison for this PR and head, include its authenticated app page link beside the evidence.
+  Use the actual app URL returned by the capture tools or verified in the dashboard, never a guessed deployment or fabricated capture link.
+  A Design QA link does not grant access: preserve the app's repository-sharing and GitHub checks, and never copy private app attachments into public bearer links just to make a PR image load.
+  If capture is pending, unavailable, or not configured, state that explicitly instead of presenting a link as completed evidence.
 - Capture before/after from the real running app, signed in as needed, showing the exact element the user reported, with matching viewport, theme, and data.
   Use a synthetic fixture only when the real app cannot run in the sandbox; then say so in the PR and your reply, and never present it as before/after proof of the fix.
 - Compare the pair before publishing: the reported element must visibly change.

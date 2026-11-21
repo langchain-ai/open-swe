@@ -11,11 +11,13 @@ none of them, so a docs change never starts a frontend capture.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import posixpath
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from html import escape
 from io import BytesIO
 from typing import ClassVar, Self
 from uuid import UUID, uuid7
@@ -44,6 +46,7 @@ from openswe.plugins.records import (
 )
 from openswe.run_config import RunConfig
 from openswe.sandboxes.state import get_sandbox_backend
+from openswe.utils.dashboard_links import dashboard_base_url
 from openswe.utils.json_types import JsonObject
 
 # Where a review's browser saves the screenshots run code takes, in the run's sandbox.
@@ -171,6 +174,15 @@ class ReviewApp:
         manifest = release.manifest
         return cls(release.app, release.id, manifest.name, manifest.display_name, step)
 
+    def result_url(self, repository: str, number: int) -> str | None:
+        base = dashboard_base_url()
+        if not base or self.step.path is None:
+            return None
+        repository = normalize_repo_full_name(repository).lower()
+        path = self.step.path.replace("{repository}", repository).replace("{number}", str(number))
+        ReviewStep.checked_result_path(path)
+        return f"{base}/agents/plugins/{self.name}{path}"
+
     @staticmethod
     async def describe(pinned: Mapping[UUID, UUID]) -> list[JsonObject]:
         """Each app as an admin reads it: the review step of the release they approved, and
@@ -201,6 +213,28 @@ class ReviewApp:
                 }
             )
         return described
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewAppResult:
+    app: ReviewApp
+    repository: str
+    number: int
+    head_sha: str
+    collection: str
+    key: str
+
+    @property
+    def url(self) -> str | None:
+        return self.app.result_url(self.repository, self.number)
+
+    @property
+    def marker(self) -> str:
+        identity = f"{self.app.id}:{self.repository}:{self.collection}:{self.key}:{self.head_sha}"
+        return f"<!-- robin-app-result:{hashlib.sha256(identity.encode()).hexdigest()} -->"
+
+    def render(self) -> str:
+        return f'<a href="{escape(self.url or "", quote=True)}">{escape(self.app.display_name)}</a>\n{self.marker}'
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,6 +316,37 @@ class ReviewApps:
             for key in ("filename", "previous_filename")
             if isinstance(path := file.get(key), str) and path
         ]
+
+    async def results(self, run_id: str, head_sha: str) -> tuple[ReviewAppResult, ...]:
+        from openswe.review_apps.outcomes import ReviewOutcomes
+
+        results: list[ReviewAppResult] = []
+        for app in self.apps:
+            if app.result_url(self.repository, self.number) is None:
+                continue
+            outcomes = ReviewOutcomes(app.id, self.repository, self.number)
+            outcome = await outcomes.get(run_id)
+            if (
+                outcome is not None
+                and outcome.head_sha == head_sha
+                and outcome.status == "complete"
+                and outcome.collection is not None
+                and outcome.collection in app.step.writes
+                and outcome.document_key is not None
+                and outcome.document_key.startswith(f"pulls/{self.number}/")
+                and await outcomes.has_result(outcome)
+            ):
+                results.append(
+                    ReviewAppResult(
+                        app,
+                        self.repository,
+                        self.number,
+                        head_sha,
+                        outcome.collection,
+                        outcome.document_key,
+                    )
+                )
+        return tuple(results)
 
     @property
     def browses(self) -> bool:

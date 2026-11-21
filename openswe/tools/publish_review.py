@@ -74,6 +74,7 @@ from openswe.review.publish import (
 )
 from openswe.review.reconcile import reconcile_findings_with_review_threads
 from openswe.review.shadow import ReviewShadow
+from openswe.review_apps.apps import ReviewAppResult, ReviewApps
 from openswe.run_config import RunConfig
 from openswe.slack.client import post_slack_thread_reply
 from openswe.utils.dashboard_links import dashboard_review_url
@@ -154,6 +155,12 @@ async def publish_review(
         return {"success": False, "error": "No GitHub token available"}
 
     try:
+        try:
+            apps = await ReviewApps.of(cfg) if cfg.run_id else None
+            app_results = await apps.results(cfg.run_id, head_sha) if apps and cfg.run_id else ()
+        except Exception:
+            logger.warning("Could not load saved app results", exc_info=True)
+            app_results = ()
         result = await _publish_review_async(
             owner=cfg.repo.owner,
             repo=cfg.repo.name,
@@ -168,6 +175,7 @@ async def publish_review(
             state=state,
             assessment=assessment,
             apps_only=apps_only,
+            app_results=app_results,
         )
         events = ReviewEvents.from_config(cfg)
         if events is not None:
@@ -328,10 +336,9 @@ async def _publish_review_async(
     assessment: ReviewAssessment | None = None,
     base_sha: str = "",
     apps_only: bool = False,
+    app_results: tuple[ReviewAppResult, ...] = (),
 ) -> dict[str, Any]:
-    """Post the review. ``apps_only``, for a run on a newly deployed preview, posts only the
-    findings that run added, as a comment, and changes nothing else: the code review's
-    verdict, approvals, check and recorded commit stay its own."""
+    """Publish findings and verified app results without changing the code verdict for apps-only runs."""
     thread_id = get_thread_id_from_runtime()
     dry_run = True
     policy: object = None
@@ -378,6 +385,21 @@ async def _publish_review_async(
         live_base_sha = metadata.get("review_base_sha")
         base_sha = live_base_sha if isinstance(live_base_sha, str) else ""
     head_sha = reviewed_head_sha
+    app_results = tuple(result for result in app_results if result.head_sha == head_sha)
+    if app_results:
+        try:
+            async with GitHubClient.connect(token=token) as github:
+                repository = github.repo(owner, repo)
+                pull = repository.pull_request(pr_number)
+                published = await pull.published_app_results(
+                    head_sha, {result.marker for result in app_results}
+                )
+                app_results = tuple(
+                    result for result in app_results if result.marker not in published
+                )
+        except httpx2.HTTPError, ValueError:
+            logger.warning("Could not verify app result publication", exc_info=True)
+            app_results = ()
     review_trace_url = await _resolve_review_trace_url(thread_id, trace_link_config_override)
     review_ui_url = dashboard_review_url(owner, repo, pr_number)
     findings = await _backfill_findings_from_pr_threads(
@@ -425,7 +447,7 @@ async def _publish_review_async(
         inline_comments.append(payload)
         eligible_with_payload.append((finding, payload))
 
-    if apps_only and not inline_comments:
+    if apps_only and not inline_comments and not app_results:
         return {
             "success": True,
             "review_id": None,
@@ -446,6 +468,7 @@ async def _publish_review_async(
     if (
         assessment is None
         and not inline_comments
+        and not app_results
         and not approval_errors
         and not config_errors
         and await _open_swe_already_reviewed(
@@ -532,6 +555,8 @@ async def _publish_review_async(
             dry_run=dry_run,
             approval_errors=approval_errors,
             config_errors=config_errors,
+            app_results=app_results,
+            apps_only=apps_only,
         )
 
         review_response = await post_pull_request_review(
@@ -580,6 +605,8 @@ async def _publish_review_async(
                 additional_findings_count=additional_findings_count,
                 approval_errors=approval_errors,
                 config_errors=config_errors,
+                app_results=app_results,
+                apps_only=apps_only,
             )
             retry_response = await post_pull_request_review(
                 owner=owner,

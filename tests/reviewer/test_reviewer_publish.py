@@ -2,11 +2,14 @@
 
 from collections.abc import Callable, Iterator
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from uuid import uuid4
 
 import pytest
 
 from openswe.dashboard.settings import Settings
+from openswe.github.http import GitHubClient, RepoClient
+from openswe.plugins.manifest import ReviewStep
 from openswe.review.approval_withdrawal import ApprovalWithdrawal
 from openswe.review.assessment_feedback import PublishedAssessment
 from openswe.review.findings import Finding, new_finding
@@ -15,6 +18,7 @@ from openswe.review.publish import (
     post_pull_request_review,
     render_inline_comment_body,
 )
+from openswe.review_apps.apps import ReviewApp, ReviewAppResult
 
 
 def _assessment(head_sha: str = "a" * 40) -> ReviewAssessment:
@@ -237,9 +241,23 @@ async def test_a_run_for_a_deployed_preview_ranks_only_the_findings_it_added() -
     assert result["expected_finding_ids"] == ["f_visual"]
 
 
-async def test_a_run_for_a_deployed_preview_comments_its_findings_and_changes_nothing_else() -> (
-    None
-):
+@pytest.mark.parametrize(
+    "capture",
+    [
+        "findings",
+        "complete",
+        "lost-response",
+        "published",
+        "paged-published",
+        "missing",
+        "stale",
+        "unknown",
+        "unknown-with-findings",
+    ],
+)
+async def test_a_run_for_a_deployed_preview_comments_its_findings_and_changes_nothing_else(
+    monkeypatch: pytest.MonkeyPatch, capture: str
+) -> None:
     from openswe.tools.publish_review import _publish_review_async
 
     head = "a" * 40
@@ -247,7 +265,39 @@ async def test_a_run_for_a_deployed_preview_comments_its_findings_and_changes_no
         _f(id="f_review", sha=head, file="a.py", start_line=1, end_line=1),
         _f(id="f_visual", sha=head, file="b.py", start_line=2, end_line=2),
     ]
-    post_review = AsyncMock(return_value={"id": 99})
+    monkeypatch.setenv("DASHBOARD_BASE_URL", "https://robin.example")
+    app = ReviewApp(
+        uuid4(),
+        uuid4(),
+        "design-qa",
+        "Design QA",
+        ReviewStep(instructions="Capture.", path="/{repository}/{number}"),
+    )
+    saved = ReviewAppResult(
+        app, "o/r", 7, head if capture != "stale" else "b" * 40, "captures", "pulls/7/capture"
+    )
+    reviews = AsyncMock(return_value=[{"body": saved.render()}] if capture == "published" else [])
+    if capture in ("unknown", "unknown-with-findings"):
+        reviews.return_value = [{"body": "Other review"}] * 100
+    if capture == "paged-published":
+        reviews.side_effect = [[{"body": "Older review"}] * 100, [{"body": saved.render()}]]
+    repository = RepoClient(Mock(), "o", "r")
+    monkeypatch.setattr(RepoClient, "get", reviews)
+    monkeypatch.setattr(
+        "openswe.github.pull_request_status.PullRequestClient.pull",
+        AsyncMock(return_value={"state": "open", "head": {"sha": head}}),
+    )
+    github = MagicMock()
+    github.__aenter__.return_value = Mock(spec=GitHubClient)
+    github.__aenter__.return_value.repo.return_value = repository
+    monkeypatch.setattr(GitHubClient, "connect", Mock(return_value=github))
+    if capture not in ("findings", "unknown-with-findings"):
+        findings = findings[:1]
+    post_review = AsyncMock(
+        return_value={"_error": "Timeout after sending review"}
+        if capture == "lost-response"
+        else {"id": 99}
+    )
     with (
         patch("openswe.run_config.get_config", return_value={"configurable": {"thread_id": "tid"}}),
         patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
@@ -278,6 +328,7 @@ async def test_a_run_for_a_deployed_preview_comments_its_findings_and_changes_no
             is_re_review=True,
             assessment=_assessment(head),
             apps_only=True,
+            app_results=(saved,) if capture not in ("findings", "missing") else (),
             state={
                 "review_approval_policy": "Docs only",
                 # The code review's to act on, not the preview run's.
@@ -286,14 +337,87 @@ async def test_a_run_for_a_deployed_preview_comments_its_findings_and_changes_no
             },
         )
 
-    assert result["review_id"] == 99
+    for untouched in (withdrawn, approval, settled, linked, recorded):
+        untouched.assert_not_awaited()
+    assert reviews.await_count <= 2
+    if capture not in ("findings", "unknown-with-findings", "complete", "lost-response"):
+        post_review.assert_not_awaited()
+        assert result["success"] is True
+        return
+    if capture == "lost-response":
+        assert result["success"] is False
+    else:
+        assert result["review_id"] == 99
     assert post_review.await_args is not None
     kwargs = post_review.await_args.kwargs
     assert kwargs["event"] == "COMMENT"
-    assert [comment["path"] for comment in kwargs["inline_comments"]] == ["b.py"]
+    assert [comment["path"] for comment in kwargs["inline_comments"]] == (
+        ["b.py"] if capture in ("findings", "unknown-with-findings") else []
+    )
+    if capture in ("complete", "lost-response"):
+        assert saved.url in kwargs["body"] and saved.marker in kwargs["body"]
+        assert "reviewed this PR" not in kwargs["body"]
+        reviews.return_value = [{"body": kwargs["body"]}]
+        with (
+            patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
+            patch(
+                "openswe.tools.publish_review.list_findings_async", AsyncMock(return_value=findings)
+            ),
+            patch("openswe.tools.publish_review.post_pull_request_review", post_review),
+        ):
+            retry = await _publish_review_async(
+                owner="o",
+                repo="r",
+                pr_number=7,
+                head_sha=head,
+                token="t",
+                severity_threshold="medium",
+                is_re_review=True,
+                apps_only=True,
+                app_results=(saved,),
+                state={"review_earlier_finding_ids": ["f_review"]},
+            )
+        assert retry["skipped_empty_re_review"] is True
+        assert post_review.await_count == 1
     # The code review's verdict, approvals, check and recorded commit stay its own.
     for untouched in (withdrawn, approval, settled, linked, recorded):
         untouched.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure", ["discovery", "results"])
+async def test_app_result_loading_failure_does_not_block_code_review(failure: str) -> None:
+    from openswe.tools.publish_review import publish_review
+
+    apps = Mock()
+    apps.results = AsyncMock(side_effect=RuntimeError("App store unavailable"))
+    with (
+        patch(
+            "openswe.tools.publish_review.get_config",
+            return_value=_eval_config(reviewer_eval=False, run_id=str(uuid4())),
+        ),
+        patch("openswe.tools.publish_review._record_ranking", AsyncMock(return_value=None)),
+        patch(
+            "openswe.tools.publish_review.resolve_thread_github_token", AsyncMock(return_value="t")
+        ),
+        patch(
+            "openswe.tools.publish_review.ReviewApps.of",
+            AsyncMock(
+                return_value=apps,
+                side_effect=RuntimeError("App discovery unavailable")
+                if failure == "discovery"
+                else None,
+            ),
+        ),
+        patch("openswe.tools.publish_review.ReviewEvents.from_config", return_value=None),
+        patch(
+            "openswe.tools.publish_review._publish_review_async",
+            AsyncMock(return_value={"success": True}),
+        ) as published,
+    ):
+        result = await publish_review(ranking=[])
+
+    assert result["success"] is True
+    assert published.await_args.kwargs["app_results"] == ()
 
 
 async def test_publish_review_refuses_when_called_alongside_other_tools() -> None:
@@ -382,7 +506,10 @@ async def test_post_pull_request_review_non_dict_body_surfaces_status_and_excerp
 
 
 @pytest.mark.asyncio
-async def test_publish_review_skips_findings_already_published() -> None:
+@pytest.mark.parametrize("app_history_unavailable", [False, True])
+async def test_publish_review_skips_findings_already_published(
+    app_history_unavailable: bool,
+) -> None:
     """Re-runs must not re-post findings that already carry a review comment id."""
     from openswe.tools.publish_review import _publish_review_async
 
@@ -395,8 +522,22 @@ async def test_publish_review_skips_findings_already_published() -> None:
     post_review = AsyncMock(return_value={"id": 999})
     fetch_comments = AsyncMock(return_value=[])
     set_metadata = AsyncMock()
+    saved = ReviewAppResult(
+        ReviewApp(uuid4(), uuid4(), "design-qa", "Design QA", ReviewStep(instructions="Capture.")),
+        "o/r",
+        7,
+        "sha",
+        "captures",
+        "pulls/7/capture",
+    )
+    github = MagicMock()
+    github.__aenter__.return_value = Mock(spec=GitHubClient)
+    github.__aenter__.return_value.repo.return_value.pull_request.return_value.published_app_results = AsyncMock(
+        side_effect=ValueError("PR review pagination budget exceeded")
+    )
 
     with (
+        patch.object(GitHubClient, "connect", return_value=github),
         patch("openswe.tools.publish_review.get_thread_id_from_runtime", return_value="tid"),
         patch("openswe.tools.publish_review.list_findings_async", list_async),
         patch("openswe.tools.publish_review.post_pull_request_review", post_review),
@@ -420,9 +561,13 @@ async def test_publish_review_skips_findings_already_published() -> None:
             token="t",
             severity_threshold="medium",
             is_re_review=False,
+            app_results=(saved,) if app_history_unavailable else (),
         )
 
     assert result["success"] is True
+    assert any(
+        call.kwargs.get("last_reviewed_sha") == "sha" for call in set_metadata.await_args_list
+    )
     assert result["surfaced_count"] == 1
     assert post_review.await_args is not None
     posted = post_review.await_args.kwargs["inline_comments"]

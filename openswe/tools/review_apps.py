@@ -77,13 +77,17 @@ async def save_app_document(
             )
     except (ValueError, ValidationError) as exc:
         return {"success": False, "error": str(exc)}
-    return {"success": True, "key": stored}
+    result: dict[str, JsonValue] = {"success": True, "key": stored}
+    if url := apps.app(app).result_url(apps.repository, apps.number):
+        result["url"] = url
+    return result
 
 
 async def record_app_review_outcome(
     app: str,
     status: Literal["complete", "blocked", "failed", "skipped"],
     reason: str = "",
+    retryable: bool = False,
 ) -> dict[str, JsonValue]:
     """Record the outcome of this run's work for an app."""
     cfg = RunConfig.from_runtime()
@@ -93,7 +97,12 @@ async def record_app_review_outcome(
             raise ValueError("This run has no app review to finish")
         approved = apps.app(app)
         await ReviewOutcomes(approved.id, apps.repository, apps.number).finish(
-            cfg.run_id, cfg.head_sha, status, reason, requires_result=bool(approved.step.writes)
+            cfg.run_id,
+            cfg.head_sha,
+            status,
+            reason,
+            requires_result=bool(approved.step.writes),
+            retryable=retryable,
         )
     except ValueError as exc:
         return {"success": False, "error": str(exc)}

@@ -163,6 +163,7 @@ export interface Commit {
 export interface PullRequest {
   number: number
   title: string
+  body?: string | null
   url: string
   state: string
   merged: boolean

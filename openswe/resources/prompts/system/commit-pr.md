@@ -19,7 +19,9 @@ Steps, in order:
    Run the repo's lint/format commands and fix errors before submitting (Python: `make format` then `make lint`; JS/TS with `package.json`: discover the repository-selected package manager from `AGENTS.md`, `packageManager`, and the lockfile, then use it to run the declared format/lint scripts; Go: find the commands from `Makefile`/`go.mod`/CI).
    Then review your diff for correctness and unintended changes.
 
-2. **Push & open/update the PR.**
+1. **Push & open/update the PR.**
+   For UI changes, prepare screenshot evidence by scenario and visible state before writing the description: real route/story, replay steps, matching viewport/theme, and Base/PR pairs.
+   Reference the actual saved Design QA comparison when available, keeping its authenticated access controls; say what is pending or unavailable rather than inventing evidence.
    Commit locally and `git push origin <branch>`.
    - **Open a new PR** with the `open_pull_request` tool (pass `owner`, `repo`, `head`=your branch, `base`, `title`, `body`; push BEFORE calling it) — NOT `gh pr create` — so it's attributed to the thread's owner.
    - **Update an existing PR** (edit body, etc.; never mark a draft ready) with `gh pr edit`.
@@ -34,7 +36,7 @@ Steps, in order:
    For public repos, don't manually include private conversation content or PR/issue references; the automatic Slack backlink is allowed.
    Keep commit messages concise and focused on the "why".
 
-3. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary, the PR link when one exists, and a diffstat showing files changed, insertions, and deletions.
+1. **Notify the source** right after pushing (and PR open/update) succeeds, with a brief summary, the PR link when one exists, and a diffstat showing files changed, insertions, and deletions.
    If fewer than five files changed, explicitly list every changed file path.
    Use the response path in Source Context.
    Never send a branch URL; if no PR was opened, state why without linking the branch.

@@ -3,18 +3,24 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Card } from "@langchain/macaw-components/Card"
 import { Link } from "@langchain/macaw-components/Link"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
+import { Text } from "@langchain/macaw-components/Text"
 import { cn } from "@langchain/macaw-components/utils/cn"
 import { StatusBadge } from "@langchain/macaw-components/StatusBadge"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { useHostContext, usePluginHost } from "@openswe/plugin-sdk/react"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
+import { ArrowBendDownRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowBendDownRight"
+import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
+import { CaretUpIcon } from "@phosphor-icons/react/dist/ssr/CaretUp"
 import { MoonIcon } from "@phosphor-icons/react/dist/ssr/Moon"
 import { SunIcon } from "@phosphor-icons/react/dist/ssr/Sun"
 import { useRef, useState, type Ref } from "react"
 
 import { Assessment } from "../lib/assessment"
 import {
+  CaptureAttempt,
   StoredCapture,
+  type DesignSystemFinding,
   type DesignSystemReview,
   type FrontendAnnotation,
   type FrontendReviewRun,
@@ -46,11 +52,13 @@ export function ReportView({
   pr,
   run,
   currentHeadSha,
+  description,
   onAsk,
 }: {
   pr: PullRequestRef
   run: FrontendReviewRun
   currentHeadSha?: string | null
+  description?: string | null
   /** The person asked the agent about `scenario`, in the theme of `shots`. */
   onAsk: (scenario: FrontendScenario, shots: ScenarioShots) => void
 }) {
@@ -59,9 +67,11 @@ export function ReportView({
   const scenarios = report?.scenarios ?? []
   const media = { repository: repositoryOf(pr), pull: pr.number, run: run.id }
   const sections = useRef(new Map<string, HTMLElement>())
+  const [expanded, setExpanded] = useState(false)
   const [selection, setSelection] = useState<{
     scenarioId: string
-    note: FrontendAnnotation
+    note?: FrontendAnnotation
+    finding?: DesignSystemFinding
   } | null>(null)
   const notes = scenarios.flatMap((scenario) =>
     scenario.annotations.map((note) => ({ note, scenario }))
@@ -77,41 +87,62 @@ export function ReportView({
     reviewed && report.design_system
       ? Assessment.designSystem(report.design_system)
       : null
-  const show = (scenarioId: string) =>
-    sections.current
-      .get(scenarioId)
-      ?.scrollIntoView({ block: "start", behavior: "smooth" })
+  const show = (scenarioId: string) => {
+    const section = sections.current.get(scenarioId)
+    section?.focus({ preventScroll: true })
+    section?.scrollIntoView({ block: "start" })
+  }
   return (
     <div className="flex flex-col gap-space-5">
       {currentHeadSha && currentHeadSha !== run.head_sha && (
         <p role="status" className="text-sm text-warning-secondary">
-          New PR changes have not been reviewed · saved{" "}
+          New PR changes have not been reviewed. Saved{" "}
           {run.head_sha.slice(0, 7)}, current {currentHeadSha.slice(0, 7)}.
         </p>
       )}
       {report && (
         <Card
-          aria-label="Recap"
+          aria-label="PR Description"
           className="flex flex-col gap-space-3 p-space-4"
         >
           <div className="flex flex-wrap items-center gap-space-2">
-            <h3 className="text-sm font-semibold">Recap</h3>
+            <Button
+              size="sm"
+              color="secondary"
+              variant="plain"
+              aria-expanded={expanded}
+              rightDecorator={expanded ? CaretUpIcon : CaretDownIcon}
+              onClick={() => setExpanded(!expanded)}
+            >
+              PR Description
+            </Button>
             {risk && (
-              <Tooltip title={report.risk?.reason || undefined}>
-                <span
-                  tabIndex={report.risk?.reason ? 0 : undefined}
-                  className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                >
-                  <StatusBadge variant={risk.tone} size="sm">
-                    {risk.label}
-                  </StatusBadge>
-                </span>
-              </Tooltip>
+              <Button
+                size="sm"
+                color="secondary"
+                variant="plain"
+                aria-label={`Risk ${report.risk?.score}/5: show assessment`}
+                aria-expanded={expanded}
+                onClick={() => setExpanded(true)}
+              >
+                <StatusBadge variant={risk.tone} size="sm">
+                  {`Risk ${report.risk?.score}/5`}
+                </StatusBadge>
+              </Button>
             )}
             {designSystem && (
-              <StatusBadge variant={designSystem.tone} size="sm">
-                {designSystem.label}
-              </StatusBadge>
+              <Button
+                size="sm"
+                color="secondary"
+                variant="plain"
+                aria-label={`${designSystem.label}: show findings`}
+                aria-expanded={expanded}
+                onClick={() => setExpanded(true)}
+              >
+                <StatusBadge variant={designSystem.tone} size="sm">
+                  {designSystem.label}
+                </StatusBadge>
+              </Button>
             )}
             {report.ai_review_status !== "complete" && (
               <Badge color="secondary" size="xs">
@@ -123,27 +154,96 @@ export function ReportView({
               </Badge>
             )}
           </div>
-          {reviewed && notes.length > 0 && (
-            <div className="flex flex-wrap gap-space-2">
-              {notes.slice(0, 3).map(({ note, scenario }, index) => (
+          {report.summary && (
+            <Text as="p" variant="sm" className="whitespace-pre-wrap">
+              {report.summary}
+            </Text>
+          )}
+          {scenarios.length > 0 && (
+            <nav
+              aria-label="Jump to scenario"
+              className="flex flex-wrap gap-space-2"
+            >
+              {scenarios.map((scenario) => (
                 <Button
-                  key={`${scenario.id}:${index}`}
+                  key={scenario.id}
                   size="sm"
                   color="secondary"
                   variant="plain"
-                  aria-label={`Inspect ${note.title}`}
-                  aria-pressed={
-                    selection?.scenarioId === scenario.id &&
-                    selection.note === note
-                  }
+                  rightDecorator={ArrowBendDownRightIcon}
+                  aria-label={`Jump to ${scenario.title}`}
                   onClick={() => {
-                    setSelection({ scenarioId: scenario.id, note })
+                    setSelection({
+                      scenarioId: scenario.id,
+                      note: scenario.annotations[0],
+                    })
                     show(scenario.id)
                   }}
                 >
-                  {note.title} ↗
+                  {scenario.title}
                 </Button>
               ))}
+            </nav>
+          )}
+          {expanded && (
+            <div className="flex flex-col gap-space-3">
+              <Text
+                as="p"
+                variant="sm"
+                className="break-words whitespace-pre-wrap"
+              >
+                {description?.trim() || "No description provided."}
+              </Text>
+              {report.risk?.reason && (
+                <Text as="p" variant="sm" color="secondary">
+                  {report.risk.reason}
+                </Text>
+              )}
+              {reviewed &&
+                report.design_system &&
+                report.design_system.findings.length > 0 && (
+                  <DesignSystemFindings
+                    review={report.design_system}
+                    scenarios={scenarios}
+                    onShow={(scenarioId, finding) => {
+                      const scenario = scenarios.find(
+                        ({ id }) => id === scenarioId
+                      )
+                      setSelection({
+                        scenarioId,
+                        finding,
+                        note: scenario?.annotations.find(
+                          (note) => note.title === finding.title
+                        ),
+                      })
+                      show(scenarioId)
+                    }}
+                  />
+                )}
+              {reviewed && notes.length > 0 && (
+                <div className="flex flex-wrap gap-space-2">
+                  {notes.map(({ note, scenario }, index) => (
+                    <Button
+                      key={`${scenario.id}:${index}`}
+                      size="sm"
+                      color="secondary"
+                      variant="outlined"
+                      rightDecorator={ArrowBendDownRightIcon}
+                      aria-label={`Highlight ${note.title} on screenshots`}
+                      aria-pressed={
+                        selection?.scenarioId === scenario.id &&
+                        selection.note === note
+                      }
+                      onClick={() => {
+                        setSelection({ scenarioId: scenario.id, note })
+                        show(scenario.id)
+                      }}
+                    >
+                      {note.title}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {report.assessment_error && (
@@ -162,15 +262,6 @@ export function ReportView({
           )}
         </Card>
       )}
-      {reviewed &&
-        report.design_system &&
-        report.design_system.findings.length > 0 && (
-          <DesignSystemFindings
-            review={report.design_system}
-            scenarios={scenarios}
-            onShow={show}
-          />
-        )}
       {report && report.missed.length > 0 && (
         <MissedSurfaces missed={report.missed} />
       )}
@@ -182,10 +273,11 @@ export function ReportView({
               : run.status === "running"
                 ? "Capturing screenshots…"
                 : run.status === "blocked"
-                  ? "Capture blocked"
+                  ? CaptureAttempt.isPreviewPending(run.error)
+                    ? "Preview pending"
+                    : "Capture blocked"
                   : "Capture failed"}
           </h3>
-          {/* A review says why: a preview or base that won't load, or a sign-in it couldn't do. */}
           {run.error && <p className="text-sm text-secondary">{run.error}</p>}
         </Card>
       )}
@@ -206,19 +298,27 @@ export function ReportView({
           annotation={
             selection?.scenarioId === scenario.id ? selection.note : undefined
           }
+          finding={
+            selection?.scenarioId === scenario.id
+              ? selection.finding
+              : undefined
+          }
           onClearAnnotation={() => setSelection(null)}
           onAsk={onAsk}
         />
       ))}
       <details className="text-xs text-secondary">
         <summary className="w-fit cursor-pointer">
-          Capture details · {scenarios.length} states ·{" "}
-          {report?.build_verification === "verified"
-            ? "Build verified"
-            : "Build unverified"}
+          Capture details ({scenarios.length} states)
         </summary>
         <div className="mt-space-3 flex flex-col gap-space-2">
           <p>Status: {STATUS_LABELS[run.status]}</p>
+          <p>
+            Build:{" "}
+            {report?.build_verification === "verified"
+              ? "Verified"
+              : "Unverified"}
+          </p>
           <p>
             Coverage: {routes}/{run.paths.length} routes captured
           </p>
@@ -237,10 +337,10 @@ export function ReportView({
                   : "Not run"}
           </p>
           <p>
-            Base {run.base_sha.slice(0, 12)} · {run.base_url}
+            Base {run.base_sha.slice(0, 12)}: {run.base_url}
           </p>
           <p>
-            PR {run.head_sha.slice(0, 12)} · {run.head_url}
+            PR {run.head_sha.slice(0, 12)}: {run.head_url}
           </p>
           {report?.build_verification !== "verified" && (
             <p>Preview builds have not been verified against these commits.</p>
@@ -270,6 +370,7 @@ function ScenarioCard({
   designSystem,
   currentHeadSha,
   annotation,
+  finding,
   onClearAnnotation,
   onAsk,
 }: {
@@ -283,6 +384,7 @@ function ScenarioCard({
   designSystem: DesignSystemReview | null
   currentHeadSha: string | null | undefined
   annotation: FrontendAnnotation | undefined
+  finding: DesignSystemFinding | undefined
   onClearAnnotation: () => void
   onAsk: (scenario: FrontendScenario, shots: ScenarioShots) => void
 }) {
@@ -296,7 +398,8 @@ function ScenarioCard({
     <section
       aria-label={scenario.title}
       ref={ref}
-      className="scroll-mt-space-4 min-w-0 overflow-hidden rounded-lg border border-default bg-surface-level-2"
+      tabIndex={-1}
+      className="scroll-mt-space-4 min-w-0 overflow-hidden rounded-lg border border-default bg-surface-level-2 outline-none focus-visible:ring-2 focus-visible:ring-focus"
     >
       <div className="flex flex-wrap items-center justify-between gap-space-3 px-space-4 py-space-3">
         <div className="min-w-0">
@@ -367,6 +470,31 @@ function ScenarioCard({
           ))}
         </div>
       ) : null}
+      {finding && (
+        <div
+          role="status"
+          className="flex flex-col gap-space-1 border-t border-default px-space-4 py-space-3"
+        >
+          <Text as="p" variant="sm" weight="semibold">
+            {finding.title}
+          </Text>
+          {finding.body && (
+            <Text as="p" variant="sm">
+              {finding.body}
+            </Text>
+          )}
+          {finding.location && (
+            <Text as="p" variant="xs" className="font-mono break-words">
+              {finding.location}
+            </Text>
+          )}
+          {finding.rule && (
+            <Text as="p" variant="xs" color="secondary">
+              {finding.rule}
+            </Text>
+          )}
+        </div>
+      )}
       <EvidenceViewer
         media={media}
         scenario={scenario}
@@ -375,7 +503,10 @@ function ScenarioCard({
         onClearAnnotation={onClearAnnotation}
       />
       {scenario.actions.length || scenario.annotations.length ? (
-        <details className="border-t border-default px-space-4 py-space-2 text-xs text-secondary">
+        <details
+          open={Boolean(annotation || finding)}
+          className="border-t border-default px-space-4 py-space-2 text-xs text-secondary"
+        >
           <summary className="w-fit cursor-pointer">
             {scenario.interaction ? "Interaction & notes" : "Review notes"}
           </summary>
@@ -388,7 +519,7 @@ function ScenarioCard({
           ) : null}
           {scenario.annotations.map((note, noteIndex) => (
             <p key={noteIndex} className="mt-space-2">
-              <span className="font-medium text-primary">{note.title}</span> ·{" "}
+              <span className="font-medium text-primary">{note.title}:</span>{" "}
               {note.body}
             </p>
           ))}
@@ -438,7 +569,7 @@ function DesignSystemFindings({
 }: {
   review: DesignSystemReview
   scenarios: readonly FrontendScenario[]
-  onShow: (scenarioId: string) => void
+  onShow: (scenarioId: string, finding: DesignSystemFinding) => void
 }) {
   const ordered = [...review.findings].sort(
     (a, b) => Number(b.severity === "error") - Number(a.severity === "error")
@@ -479,7 +610,7 @@ function DesignSystemFindings({
                 className="min-w-0 truncate font-mono text-xs text-tertiary"
                 title={finding.location}
               >
-                {finding.location.split("/").at(-1)}
+                {finding.location}
               </span>
             )}
             {scenario && (
@@ -488,11 +619,22 @@ function DesignSystemFindings({
                 color="secondary"
                 variant="plain"
                 className="ml-auto"
-                aria-label={`Show ${scenario.title}`}
-                onClick={() => onShow(scenario.id)}
+                rightDecorator={ArrowBendDownRightIcon}
+                aria-label={`Show ${finding.title} in ${scenario.title}`}
+                onClick={() => onShow(scenario.id, finding)}
               >
-                Show
+                {scenario.title}
               </Button>
+            )}
+            {finding.body && (
+              <Text as="p" variant="sm" color="secondary" className="w-full">
+                {finding.body}
+              </Text>
+            )}
+            {finding.rule && (
+              <Text as="p" variant="xs" color="secondary" className="w-full">
+                {finding.rule}
+              </Text>
             )}
           </div>
         )
@@ -509,7 +651,7 @@ function MissedSurfaces({ missed }: { missed: readonly MissedSurface[] }) {
       className="flex flex-col divide-y divide-default p-0"
     >
       <h3 className="px-space-4 py-space-2 text-sm font-semibold">
-        Not captured · {missed.length}
+        Not captured ({missed.length})
       </h3>
       {missed.map((surface, index) => (
         <div

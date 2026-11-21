@@ -10,6 +10,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useEffectEvent, useState } from "react"
 
 import { SideSheet } from "@/components/SideSheet"
+import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { RightPanelShell } from "@/features/agents/components/panel/RightPanelShell"
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "@/features/agents/components/panel/rightPanelLayout"
 import type { ComposerDraft, ImageChunk } from "@/features/agents/lib/types"
@@ -24,6 +25,7 @@ import { PluginIcon } from "@/features/plugins/lib/icons"
 import { pageTitle } from "@/lib/pageTitle"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { usePlugin } from "@/features/plugins/lib/queries"
+import { cn } from "@/lib/utils"
 
 /**
  * One installed plugin's page. `active` is whether it is the page on screen: a
@@ -101,6 +103,9 @@ function InstalledPluginPage({
   onPath: (path: string) => void
 }) {
   const navigate = useNavigate()
+  const sidebarCollapsed = useSidebarCollapsed()
+  const isDesktop =
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const onScreen = useEffectEvent(() => active)
   const [title, setTitle] = useState<string | null>(null)
   useEffect(() => {
@@ -127,7 +132,16 @@ function InstalledPluginPage({
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="max-md:pl-space-12 flex h-11 shrink-0 items-center gap-space-2 border-b border-muted px-space-4 text-xs">
+      <header
+        className={cn(
+          "flex h-11 shrink-0 items-center gap-space-2 border-b border-muted px-space-4 text-xs",
+          sidebarCollapsed
+            ? isDesktop
+              ? "pl-32 [.desktop-fullscreen_&]:pl-space-8 [.version-mismatch_&]:pl-space-8"
+              : "pl-space-8"
+            : "max-md:pl-space-8"
+        )}
+      >
         <PluginIcon
           icon={plugin.manifest.sidebar.icon}
           size={14}

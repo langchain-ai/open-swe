@@ -104,7 +104,22 @@ class ReviewStep(BaseModel):
     instructions: str = Field(min_length=1, max_length=16_000)
     writes: list[CollectionName] = Field(default_factory=list, max_length=8)
     browser: bool = False
+    path: str | None = Field(default=None, min_length=1, max_length=512)
     paths: list[ReviewPath] = Field(default_factory=list, max_length=64)
+
+    @field_validator("path")
+    @classmethod
+    def checked_result_path(cls, path: str | None) -> str | None:
+        if path is None:
+            return None
+        literal = path.replace("{repository}", "repository").replace("{number}", "1")
+        if (
+            not re.fullmatch(r"/[A-Za-z0-9_./-]*", literal)
+            or "//" in literal
+            or any(part in (".", "..") for part in literal.split("/"))
+        ):
+            raise ValueError("review.path must be a local path with only {repository} and {number}")
+        return path
 
     @field_validator("paths")
     @classmethod

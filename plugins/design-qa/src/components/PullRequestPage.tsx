@@ -1,4 +1,6 @@
+import { Accordion, AccordionItem } from "@langchain/macaw-components/Accordion"
 import { Button } from "@langchain/macaw-components/Button"
+import { Text } from "@langchain/macaw-components/Text"
 import { Card } from "@langchain/macaw-components/Card"
 import { Link } from "@langchain/macaw-components/Link"
 import { Select } from "@langchain/macaw-components/Select"
@@ -123,11 +125,10 @@ export function PullRequestPage({
             <div className="flex min-w-0 flex-wrap items-center gap-x-space-2 gap-y-space-1 text-xs text-secondary">
               <span>
                 {label}
-                {current?.draft ? " · Draft" : ""}
+                {current?.draft ? " (Draft)" : ""}
               </span>
               {author && (
                 <>
-                  <span aria-hidden="true">·</span>
                   <Author
                     login={author}
                     person={people.get(author.toLowerCase())}
@@ -150,6 +151,16 @@ export function PullRequestPage({
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-space-3">
+            {run?.head_url && (
+              <Button
+                size="md"
+                color="primary"
+                rightDecorator={ArrowSquareOutIcon}
+                onClick={() => void host.nav.openExternal(run.head_url)}
+              >
+                Open preview
+              </Button>
+            )}
             <PinButton pr={pr} title={title} />
             <Link
               as={
@@ -159,6 +170,7 @@ export function PullRequestPage({
                 />
               }
               variant="sm"
+              className="gap-space-2"
               leftDecorator={RobinIcon}
               rightDecorator={ArrowSquareOutIcon}
               aria-label="Open Robin PR view in a new tab"
@@ -171,6 +183,7 @@ export function PullRequestPage({
               target="_blank"
               rel="noreferrer"
               variant="sm"
+              className="gap-space-2"
               leftDecorator={GithubLogoIcon}
               rightDecorator={ArrowSquareOutIcon}
               aria-label="Open on GitHub in a new tab"
@@ -182,6 +195,24 @@ export function PullRequestPage({
           </div>
         </div>
       </header>
+      {current && !run?.report && (
+        <Accordion>
+          <AccordionItem
+            key={github}
+            title="PR Description"
+            defaultExpanded={false}
+            contents={
+              <Text
+                as="p"
+                variant="sm"
+                className="break-words whitespace-pre-wrap"
+              >
+                {current.body?.trim() || "No description provided."}
+              </Text>
+            }
+          />
+        </Accordion>
+      )}
       {isForbidden(runs.error) || isForbidden(detail.error) ? (
         <ShareRepositories repository={repositoryOf(pr)} />
       ) : runs.isError ? (
@@ -201,6 +232,7 @@ export function PullRequestPage({
               outcome={runs.data.outcome}
               currentHeadSha={current?.headSha}
               hasCapture={runs.data.runs.length > 0}
+              run={runs.data.runs[0]}
               disabled={current?.state !== "open"}
             />
           )}
@@ -236,6 +268,7 @@ export function PullRequestPage({
               pr={pr}
               run={run}
               currentHeadSha={current?.headSha}
+              description={current?.body}
               onAsk={(scenario, shots) =>
                 setAsked({
                   run: run.id,
@@ -253,7 +286,7 @@ export function PullRequestPage({
 
 const runOption = (run: FrontendReviewRun) => ({
   value: run.id,
-  label: `${new Date(run.created_at).toLocaleString()} · ${run.status} · ${run.head_sha.slice(0, 7)}`,
+  label: `${new Date(run.created_at).toLocaleString()} (${run.status}, ${run.head_sha.slice(0, 7)})`,
 })
 
 /**

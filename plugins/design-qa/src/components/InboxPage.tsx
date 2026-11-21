@@ -6,7 +6,6 @@ import { Input } from "@langchain/macaw-components/Input"
 import { Select } from "@langchain/macaw-components/Select"
 import { Skeleton } from "@langchain/macaw-components/Skeleton"
 import { StatusBadge } from "@langchain/macaw-components/StatusBadge"
-import { Switch } from "@langchain/macaw-components/Switch"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { cn } from "@langchain/macaw-components/utils/cn"
 import type { Person, ReviewOutcome } from "@openswe/plugin-sdk"
@@ -21,6 +20,7 @@ import { Fragment, useState } from "react"
 
 import { Assessment } from "../lib/assessment"
 import {
+  CaptureAttempt,
   StoredCapture,
   type FrontendReviewRun,
   type FrontendScenario,
@@ -139,11 +139,7 @@ export function InboxPage() {
               Share repositories
             </Button>
           </div>
-          <PullRequests
-            key={`${current.scope}:${current.person ?? ""}`}
-            route={current}
-            shared={shared}
-          />
+          <PullRequests key={current.scope} route={current} shared={shared} />
         </>
       )}
     </main>
@@ -162,7 +158,7 @@ const DESCRIPTIONS: Record<InboxScope, string> = {
     "Open PRs with a GitHub review request for you or a team you belong to, in the repositories you shared. Comment mentions are not included.",
   mine: "Your open PRs and their capture status, in the repositories you shared.",
   pinned:
-    "PRs you pinned stay here until you unpin them. Only you see your pins.",
+    "Your pins are private. PRs with skipped or unsuccessful captures are left out.",
   people:
     "Anyone's open PRs and their capture status, in the repositories you shared. Search by name or GitHub handle.",
 }
@@ -199,7 +195,6 @@ function PullRequests({
   const search = useInboxSearch(scope, person)
   const choosing = scope === "people" && !person
   const [text, setText] = useState("")
-  const [showSkipped, setShowSkipped] = useState(false)
   const { preferences, change } = useInboxPreferences()
   const record = useUsage()
   const { pageSize, sort } = preferences
@@ -209,17 +204,13 @@ function PullRequests({
     ({ repository }) => scope !== "pinned" || readable.has(repository)
   )
   const captures = useRepositoryCaptures(shared)
-  // A pin is kept on purpose, even of a PR Design QA skipped.
-  const skipped =
-    scope === "pinned"
-      ? []
-      : pulls.filter(({ repository, number }) =>
-          DesignQa.skipped(captures.byRepository.get(repository), number)
-        )
+  const hidden = pulls.filter(({ repository, number }) =>
+    DesignQa.hidden(captures.byRepository.get(repository), number)
+  )
   const filter = text.trim().toLowerCase()
   const matching = pulls.filter(
     (pull) =>
-      (showSkipped || !skipped.includes(pull)) &&
+      !hidden.includes(pull) &&
       `${pull.repository} #${pull.number} ${pull.title}`
         .toLowerCase()
         .includes(filter)
@@ -313,17 +304,6 @@ function PullRequests({
                 ? "Loading pull requests…"
                 : `${matching.length}${search.more ? "+" : ""} PR${matching.length === 1 && !search.more ? "" : "s"}${filter ? " match" : ""}${search.more ? " · loading more…" : ""}`}
             </span>
-            {skipped.length > 0 && (
-              <Switch
-                size="sm"
-                checked={showSkipped}
-                onChange={(next) => {
-                  setShowSkipped(next)
-                  if (route.index !== 0) turnTo(0)
-                }}
-                label={`Show ${skipped.length} skipped`}
-              />
-            )}
             <Button
               size="sm"
               color="secondary"
@@ -389,15 +369,15 @@ function PullRequests({
           <h2 className="text-sm font-medium text-primary">
             {filter
               ? "No PRs match your filter"
-              : skipped.length > 0 && !showSkipped
+              : hidden.length > 0
                 ? "Nothing to check in Design QA"
                 : EMPTY[scope].title}
           </h2>
           <p className="max-w-sm text-sm text-secondary">
             {filter
               ? "Try a different title, repository, or PR number."
-              : skipped.length > 0 && !showSkipped
-                ? `Design QA skipped ${skipped.length === 1 ? "the 1 open PR" : `all ${skipped.length} open PRs`} here, such as changes with no frontend files.`
+              : hidden.length > 0
+                ? "PRs with skipped or unsuccessful captures are left out. Open a PR above to request a new capture."
                 : EMPTY[scope].body}
           </p>
         </Card>
@@ -499,16 +479,22 @@ function cardStatuses(
   stale: boolean
 ): Status[] {
   const attempt =
-    (outcome?.status === "blocked" || outcome?.status === "failed") &&
+    outcome &&
+    outcome.status !== "complete" &&
     (!run || Date.parse(outcome.created_at) > Date.parse(run.created_at))
       ? outcome
       : null
   const statuses: Status[] = attempt
     ? [
         {
-          label:
-            attempt.status === "blocked" ? "Capture blocked" : "Capture failed",
-          color: attempt.status === "blocked" ? "warning" : "error",
+          label: new CaptureAttempt(attempt).label,
+          color: new CaptureAttempt(attempt).previewPending
+            ? "primary"
+            : attempt.status === "failed"
+              ? "error"
+              : attempt.status === "blocked"
+                ? "warning"
+                : "secondary",
           reason: attempt.reason,
         },
       ]
@@ -527,8 +513,17 @@ function cardStatuses(
       : [
           {
             label:
-              run.status === "blocked" ? "Capture blocked" : "Capture failed",
-            color: run.status === "blocked" ? "warning" : "error",
+              run.status === "blocked"
+                ? CaptureAttempt.isPreviewPending(run.error)
+                  ? "Preview pending"
+                  : "Capture blocked"
+                : "Capture failed",
+            color:
+              run.status === "failed"
+                ? "error"
+                : CaptureAttempt.isPreviewPending(run.error)
+                  ? "primary"
+                  : "warning",
             reason: run.error ?? undefined,
           },
         ]
@@ -618,7 +613,7 @@ function PullRequestCard({
               ))}
               {risk && (
                 <StatusBadge variant={risk.tone} size="sm">
-                  {risk.label}
+                  {`Risk ${report?.risk?.score}/5`}
                 </StatusBadge>
               )}
               {designSystem && (
@@ -650,6 +645,7 @@ function PullRequestCard({
           outcome={item.outcome}
           currentHeadSha={"headSha" in pr ? pr.headSha : undefined}
           hasCapture={Boolean(run)}
+          run={run}
           disabled={closed !== null}
           showOutcome={false}
         />

@@ -4,13 +4,18 @@ Design QA saves before/after screenshots of a pull request's frontend and checks
 
 Always record one with `record_app_review_outcome`:
 
-- `skipped`: nothing to capture.
-  The diff changes nothing visible, or the changed frontend has no preview, or the review guidelines name no base for it.
-- `blocked`: something fixable.
-  The preview is deploying, failed or doesn't serve the head commit, a sign-in failed, or the guidelines name no base at all.
-  When no preview is up yet, as on a just-opened pull request, say only that it isn't deployed yet.
-- `failed`: a capture or save error.
-- `complete`: only after saving at least one matched pair.
+- `skipped`: genuinely no visual changes after tracing the diff to rendered surfaces.
+  Start the reason with `No visual changes:` and explain what makes the change nonvisual.
+  A shared component, tab, token, style, or layout change is not nonvisual just because it has no page of its own.
+- `blocked`: a visual change cannot be compared yet.
+  For a preview known to be building or deploying, start the reason with `Preview pending:`; name the check and current head when known.
+  Set `retryable: true` only when a known build/deployment or preview propagation is temporary; preview follow-up runs retry at most three times.
+  Do not call a failed deployment pending or retry sign-in/permission failures automatically.
+  When a preview is not deployed yet, say so, not that capture failed.
+  For no supported preview or comparison base, start with `Comparison unavailable:` and identify the missing prerequisite; this is not evidence of no visual changes.
+  For sign-in, permissions, failed builds, or other gates, give the concrete blocker and remedy.
+- `failed`: an attempted capture or save failed; preserve the actual error.
+- `complete`: only after saving at least one matched pair from the running UI.
 
 ## Steps
 
@@ -33,6 +38,10 @@ Always record one with `record_app_review_outcome`:
    Before opening a browser, work out from the code everywhere the diff shows up; never settle for the pages you happen to find by clicking around.
    - For each changed component, hook, style, token or asset, find what imports it (`rg`), then what imports those, up to the routes, layouts and shared chrome (app header, top bar, sidebar, navigation, page shells) that render it.
      Read the router for each route's real path.
+   - For shared libraries such as Macaw Tabs, inspect the changed component's source and stories, package exports, and consuming apps.
+     Use an actual running consumer or the repository's Storybook preview, with the exact story id and query.
+     A library file without an app route still has a visual surface.
+   - If the deployed app does not include the changed package version, it cannot prove the library change; use the PR's actual Storybook/build or record the comparison as unavailable.
    - Note what gates each place: feature flags, permissions, plan or settings, data (a non-empty list, several data planes), viewport and route handles.
    - Add the places the PR's title and description say it targets; they come first.
    - List each distinct placement once, as `coverage.surfaces`: a component in the app header counts once, shot on the home page, not once per route.
@@ -45,6 +54,8 @@ Always record one with `record_app_review_outcome`:
    Shoot every surface on the map, the PR's targets first, then shared chrome, then the rest, up to fifteen; list any beyond that in `coverage.missed`.
    The save takes at most 72 files: four per surface shot in both themes, two per recording.
    For each, reach the same state on both sides at one viewport, such as 1440×900, and run `return await shoot('<id>-before')` (`-after` on the preview) to save `/workspace/design-qa/<id>-before.png`, never a full page.
+   Never fabricate screenshot evidence with hand-written HTML, recreated components, or painted mock images.
+   If no real app or Storybook can run, record the blocker rather than substituting a mock.
    Shoot each dark too (`<id>-before-dark`, `-after-dark`) via `page.emulateMedia({ colorScheme: 'dark' })` or else the app's theme toggle, then switch back.
    Skip dark if a side lacks it, noting so in `layout_warnings`.
 1. **Record.**
@@ -76,7 +87,10 @@ Always record one with `record_app_review_outcome`:
   `rule` cites the design system, `location` is the diff's `file:line`, and `scenario` is an `id`.
   Empty `sources` means the repository has no design system, so check against the surrounding UI.
 - `annotations`: at most three areas of the light after screenshot, with `severity` `error`, `warning` or `info`.
+- Group evidence by scenario: each scenario must name the exact route and query (or Storybook iframe path and story id), the visible state, replay steps, and its actual base/PR screenshots.
+  Use separate scenarios for materially different tab, menu, empty, error, or disabled states; do not dump unrelated screenshots into one scenario.
 - `path` is the real browser path and query; for a modal, the parent route with the steps in `actions`.
+  Name missing evidence in `coverage.missed`, never as proof of no visual changes.
 - `auth_mode` is `dummy` if you signed in; names use letters, digits, `.`, `_`, `-`; ids are unique; `width` and `height` are the viewport; add `layout_warnings` when the sides can't match.
 
 ## Steady screenshots
@@ -130,4 +144,7 @@ return await page.evaluate(async () => {
 If the marks hide what the diff changed, clear them and keep the last take.
 Reload and shoot again before noting a difference timing could explain.
 
-Mention the capture in your review only for a visual problem or design system violation, saying Design QA has the details.
+After saving, check `success` and keep the returned authenticated app `url`; never construct a screenshot bearer link for GitHub.
+Record `complete`, then call `publish_review` once, even with no findings, so the existing review publication includes the verified Design QA result link.
+If the capture shows a visual problem or design system violation, add its finding before publishing.
+A link preserves the destination's installation, repository-sharing and GitHub access checks; it does not make screenshots public.
