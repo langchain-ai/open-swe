@@ -14,7 +14,7 @@ import { parsePullRequestSelection } from "@/features/reviews/search"
 import { reviewChatQuery } from "@/features/reviews/lib/reviewKeys"
 import { AppLoading } from "@/components/AppLoading"
 import { RequireLogin } from "@/lib/auth-redirect"
-import { useSession } from "@/lib/session"
+import { useSession, useSessionPending } from "@/lib/session"
 import { rememberAppLocation } from "@/lib/appLocation"
 import { pageTitle } from "@/lib/pageTitle"
 
@@ -25,6 +25,7 @@ export const Route = createFileRoute("/agents")({
 
 function AgentsLayout() {
   const session = useSession()
+  const sessionPending = useSessionPending()
   const threadMatch = useMatch({
     from: "/agents/$threadId",
     shouldThrow: false,
@@ -51,7 +52,7 @@ function AgentsLayout() {
     rememberAppLocation(location.href)
   }, [location.href])
 
-  if (session.isLoading) {
+  if (sessionPending) {
     return <AppLoading />
   }
 

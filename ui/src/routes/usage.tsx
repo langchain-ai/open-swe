@@ -51,7 +51,7 @@ import {
   metricAvailability,
   type MetricAvailability,
 } from "@/lib/usage-diagnostics"
-import { useSession } from "@/lib/session"
+import { useSession, useSessionPending } from "@/lib/session"
 import { cn, INHERITED_LINK } from "@/lib/utils"
 
 const HELP_TRIGGER_CLASS =
@@ -108,6 +108,7 @@ const PERIOD_ITEMS = (
 
 function UsagePage() {
   const session = useSession()
+  const sessionPending = useSessionPending()
   const period =
     (Route.useSearch().period as UsageLeaderboardPeriod | undefined) ?? "7d"
   const navigate = Route.useNavigate()
@@ -120,7 +121,7 @@ function UsagePage() {
     ? period
     : "7d"
 
-  if (session.isLoading) {
+  if (sessionPending) {
     return (
       <main className="p-space-6">
         <Skeleton className="h-64 w-full" />

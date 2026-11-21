@@ -20,7 +20,7 @@ import { api } from "@/lib/api"
 import { pageTitle } from "@/lib/pageTitle"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { useOptions } from "@/lib/profile"
-import { useSession } from "@/lib/session"
+import { useSession, useSessionPending } from "@/lib/session"
 
 export const Route = createFileRoute("/admin_/evals")({
   component: ReviewerEvalPage,
@@ -29,8 +29,9 @@ export const Route = createFileRoute("/admin_/evals")({
 
 function ReviewerEvalPage() {
   const session = useSession()
+  const sessionPending = useSessionPending()
 
-  if (session.isLoading) {
+  if (sessionPending) {
     return (
       <main className="p-space-6">
         <Skeleton className="h-64 w-full" />

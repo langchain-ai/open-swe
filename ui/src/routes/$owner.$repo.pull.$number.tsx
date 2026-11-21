@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef } from "react"
 
 import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
-import { useSession } from "@/lib/session"
+import { useSession, useSessionPending } from "@/lib/session"
 
 export const Route = createFileRoute("/$owner/$repo/pull/$number")({
   component: PullRequestReviewLinkPage,
@@ -21,6 +21,7 @@ function PullRequestReviewLinkPage() {
   const { owner, repo, number } = Route.useParams()
   const prNumber = Number(number)
   const session = useSession()
+  const sessionPending = useSessionPending()
   const stableReviewPath = `/agents/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${prNumber}`
   const githubPrUrl = useMemo(
     () => `https://github.com/${owner}/${repo}/pull/${number}`,
@@ -58,7 +59,7 @@ function PullRequestReviewLinkPage() {
     triggerReviewMutate,
   ])
 
-  if (session.isLoading) {
+  if (sessionPending) {
     return (
       <main className="flex min-h-svh items-center justify-center p-space-5">
         <Skeleton className="h-52 w-full max-w-lg" />

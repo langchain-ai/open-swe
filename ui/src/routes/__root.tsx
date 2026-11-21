@@ -16,6 +16,7 @@ import appCss from "../styles.css?url"
 import type { QueryClient } from "@tanstack/react-query"
 import { AppCommandProvider } from "@/lib/appCommands"
 import { resolveSessionOnServer } from "@/lib/session-ssr"
+import { sessionQueryOptions } from "@/lib/session"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { Text } from "@langchain/macaw-components/Text"
 import { Toaster } from "@/components/Toaster"
@@ -102,7 +103,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
   const selectedPullRequest = useRouterState({
     select: (s) => s.location.search.pr,
   })
-  const warmupScript = apiWarmupScript(selectedPullRequest)
+  const warmupScript = apiWarmupScript(
+    selectedPullRequest,
+    queryClient.getQueryData(sessionQueryOptions.queryKey) === undefined
+  )
   return (
     <html lang="en" suppressHydrationWarning>
       <head>

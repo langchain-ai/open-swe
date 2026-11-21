@@ -1,4 +1,5 @@
 import { queryOptions, useQuery } from "@tanstack/react-query"
+import { useHydrated } from "@tanstack/react-router"
 import { ApiError, api } from "./api"
 import type { SessionUser } from "./api"
 
@@ -18,6 +19,17 @@ export const sessionQueryOptions = queryOptions<SessionUser | null>({
 
 export function useSession() {
   return useQuery(sessionQueryOptions)
+}
+
+/**
+ * Whether a page that requires a session must still wait for it. The server
+ * renders every such page waiting, since it never asks the backend
+ * (`resolveSessionOnServer`), so hydration waits too, whatever the browser
+ * has resolved meanwhile.
+ */
+export function useSessionPending(): boolean {
+  const { isLoading } = useSession()
+  return !useHydrated() || isLoading
 }
 
 /**

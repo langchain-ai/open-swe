@@ -12,7 +12,7 @@ import type { ReactNode } from "react"
 import type { SessionUser } from "@/lib/api"
 import { AppSidebar } from "@/components/AppSidebar"
 import { RequireLogin } from "@/lib/auth-redirect"
-import { useSession } from "@/lib/session"
+import { useSession, useSessionPending } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
 interface AppShellProps {
@@ -99,7 +99,8 @@ export function SettingsPage({
   ...props
 }: SettingsPageProps) {
   const session = useSession()
-  if (session.isLoading) {
+  const sessionPending = useSessionPending()
+  if (sessionPending) {
     return (
       <main
         role="status"

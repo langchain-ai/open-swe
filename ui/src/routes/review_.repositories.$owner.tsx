@@ -15,7 +15,7 @@ import { api } from "@/lib/api"
 import { RequireLogin } from "@/lib/auth-redirect"
 import { pageTitle } from "@/lib/pageTitle"
 import { useRepos } from "@/lib/profile"
-import { useSession } from "@/lib/session"
+import { useSession, useSessionPending } from "@/lib/session"
 
 const PAGE_SIZE = 20
 const autoReviewMutationKey = ["setAutoReviewRepo"]
@@ -31,6 +31,7 @@ export const Route = createFileRoute("/review_/repositories/$owner")({
 
 function RepositoriesOwnerPage() {
   const session = useSession()
+  const sessionPending = useSessionPending()
   const { owner } = Route.useParams()
   const qc = useQueryClient()
 
@@ -108,7 +109,7 @@ function RepositoriesOwnerPage() {
   const pageEnd = Math.min(pageStart + PAGE_SIZE, filteredRepos.length)
   const pageRepos = filteredRepos.slice(pageStart, pageEnd)
 
-  if (session.isLoading) {
+  if (sessionPending) {
     return (
       <main className="p-space-5">
         <Skeleton className="h-64 w-full" />

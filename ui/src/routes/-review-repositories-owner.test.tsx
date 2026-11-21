@@ -30,6 +30,7 @@ vi.mock("@/lib/session", () => ({
     data: { login: "me", is_admin: true },
     isLoading: false,
   }),
+  useSessionPending: () => false,
 }))
 vi.mock("@/lib/profile", () => ({
   useRepos: () => ({

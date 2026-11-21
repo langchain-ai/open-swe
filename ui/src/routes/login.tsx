@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useHydrated } from "@tanstack/react-router"
 import { useEffect, useMemo } from "react"
 
 import { Button } from "@langchain/macaw-components/Button"
@@ -29,6 +29,7 @@ export const Route = createFileRoute("/login")({
 })
 function Login() {
   const session = useSession()
+  const hydrated = useHydrated()
   const search = Route.useSearch()
   const redirectParam = search.redirect
   const intendedPath = useMemo(
@@ -42,7 +43,9 @@ function Login() {
     () => (session.data ? consumeAuthRedirect(redirectParam) : null),
     [redirectParam, session.data]
   )
-  if (session.isLoading) {
+  // The server knows only that a visitor with no session cookie is signed out,
+  // so a session the browser resolved before hydrating waits until it has.
+  if (session.isLoading || (!hydrated && session.data !== null)) {
     return (
       <main className="flex min-h-svh items-center justify-center bg-surface-level-1 p-space-5">
         <Skeleton className="h-40 w-80" />

@@ -34,9 +34,13 @@ function setReadyState(value: DocumentReadyState) {
 
 function run(
   pathname: string,
-  { pullRequest, desktop }: { pullRequest?: unknown; desktop?: boolean } = {}
+  {
+    pullRequest,
+    desktop,
+    readsSession,
+  }: { pullRequest?: unknown; desktop?: boolean; readsSession?: boolean } = {}
 ) {
-  const script = apiWarmupScript(pullRequest)
+  const script = apiWarmupScript(pullRequest, readsSession)
   if (desktop) {
     new Function("location", script)(new URL(`${DESKTOP_ORIGIN}${pathname}`))
     return
@@ -251,13 +255,13 @@ describe("apiWarmupScript", () => {
     expect(window.fetch).toBe(original)
   })
 
-  it("warms the session in the desktop app, and hands it to that request", async () => {
+  it("warms the session where the page reads it, and hands it to that request", async () => {
     const own = stubFetch()
     await api.me()
 
     setReadyState("loading")
     const network = stubFetch()
-    run(`/agents/${THREAD_ID}`, { desktop: true })
+    run(`/agents/${THREAD_ID}`, { desktop: true, readsSession: true })
     const warmed = network.mock.calls.filter(
       ([input]) => String(input) === `${DESKTOP_ORIGIN}${SESSION_PATH}`
     )
@@ -271,21 +275,23 @@ describe("apiWarmupScript", () => {
     expect(sent).toEqual(ownSent)
   })
 
-  it("warms no session on a page the server rendered, which already has it", () => {
+  it("warms the session a server render left to the page, and none it settled", () => {
     setReadyState("loading")
     const network = stubFetch()
 
     run(`/agents/${THREAD_ID}`)
-    run("/agents")
-
+    run("/login")
     expect(requestsTo(network, SESSION_PATH)).toHaveLength(0)
+
+    run("/agents", { readsSession: true })
+    expect(requestsTo(network, SESSION_PATH)).toHaveLength(1)
   })
 
   it("warms the desktop app's reads at its own origin, whatever API origin the build names", async () => {
     vi.stubEnv("VITE_DASHBOARD_API_BASE_URL", "https://backend.example")
     setReadyState("loading")
     const network = stubFetch()
-    run(`/agents/${THREAD_ID}`, { desktop: true })
+    run(`/agents/${THREAD_ID}`, { desktop: true, readsSession: true })
     const warmed = network.mock.calls.map(([input]) => String(input))
     expect(warmed).toContain(`${DESKTOP_ORIGIN}${SESSION_PATH}`)
     expect(warmed).toContain(`${DESKTOP_ORIGIN}${SUMMARY_PATH}`)

@@ -24,9 +24,8 @@ interface WarmupConfig {
   /** The reviews page's reads for the pull request its `pr` parameter names. */
   review: Array<string>
   sidebar: string
-  /** The session read, warmed only in the desktop app: a server render already has it. */
+  /** The session read, or empty where the page already holds the session. */
   session: string
-  desktopProtocols: string[]
   prefsKey: string
   streamPreferenceKey: string
   streamPreferenceDefault: boolean
@@ -65,7 +64,7 @@ function warmApiRequests(
   const review = reviewsRoute.test(route) ? config.review : []
 
   const targets: Array<{ url: string; dashboard: boolean }> = []
-  if (config.desktopProtocols.includes(location.protocol)) {
+  if (config.session) {
     targets.push({ url: api + config.session, dashboard: true })
   }
   for (const path of review) targets.push({ url: api + path, dashboard: true })
@@ -302,9 +301,14 @@ export function threadRunningJoinUrl(threadId: string): string {
  * Nothing can be requested until the bundle boots, which is most of the delay
  * before a transcript, the sidebar or an open pull request can paint.
  * `selectedPullRequest` is the reviews page's `pr` search parameter as the
- * router parsed it, before any route validated it.
+ * router parsed it, before any route validated it. `readsSession` is whether
+ * the page still has to read the session: everywhere but a server render that
+ * already settled it.
  */
-export function apiWarmupScript(selectedPullRequest?: unknown): string {
+export function apiWarmupScript(
+  selectedPullRequest?: unknown,
+  readsSession = false
+): string {
   const review = parsePullRequestSelection(selectedPullRequest)
   // The open pull request's detail and diff, and its chat, whose thread the
   // chat panel waits for before it reads anything else.
@@ -320,8 +324,7 @@ export function apiWarmupScript(selectedPullRequest?: unknown): string {
       ? [reviewPath, `${reviewPath}/diff`, `${reviewPath}/chat`]
       : [],
     sidebar: "/threads/page",
-    session: "/me",
-    desktopProtocols: ["robin:", "open-swe:"],
+    session: readsSession ? "/me" : "",
     prefsKey: SIDEBAR_PREFS_STORAGE_KEY,
     streamPreferenceKey: STREAM_PREFERENCE_STORAGE_KEY,
     streamPreferenceDefault: STREAM_PREFERENCE_DEFAULT,
