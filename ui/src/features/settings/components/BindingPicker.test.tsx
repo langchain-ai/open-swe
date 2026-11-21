@@ -5,13 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 
 import { BindingPicker, type PickerItem } from "./BindingPicker"
-import { useSlackChannelDirectory } from "@/lib/slack-channels"
-import { RepositoryPicker, SlackChannelPicker } from "./RoutingBindingPickers"
-
-vi.mock("@/lib/slack-channels", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/slack-channels")>()),
-  useSlackChannelDirectory: vi.fn(),
-}))
+import { RepositoryPicker } from "./RoutingBindingPickers"
 
 vi.mock("@/lib/profile", () => ({
   useRepos: () => ({
@@ -76,71 +70,6 @@ function renderPicker(
 }
 
 describe("BindingPicker", () => {
-  it("requires Slack membership for new selections and keeps old bindings removable", async () => {
-    const channels = [
-      { id: "CJOINED01", name: "engineering", is_member: true },
-      { id: "CABSENT01", name: "design", is_member: false },
-    ].map((channel) => ({
-      ...channel,
-      is_private: false,
-      is_ext_shared: false,
-      num_members: 10,
-    }))
-    const directory = {
-      data: { channels, refreshing: false },
-      isLoading: false,
-      isError: false,
-      error: null,
-      refresh: vi.fn(),
-      isRefreshing: false,
-    }
-    vi.mocked(useSlackChannelDirectory).mockReturnValue(directory)
-    const onChange = vi.fn()
-    const props = {
-      selected: ["CABSENT01"],
-      onChange,
-    }
-    const { rerender } = render(<SlackChannelPicker {...props} />, {
-      wrapper: TooltipProvider,
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
-    const absent = await screen.findByRole<HTMLButtonElement>("checkbox", {
-      name: "#design",
-    })
-    expect(absent.disabled).toBe(false)
-    fireEvent.click(absent)
-    expect(
-      screen.getByRole<HTMLButtonElement>("checkbox", { name: "#design" })
-        .disabled
-    ).toBe(true)
-    expect(screen.queryByRole("switch")).toBeNull()
-    expect(screen.queryByLabelText("Slack channel ID")).toBeNull()
-    fireEvent.click(screen.getByRole("checkbox", { name: "#engineering" }))
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save and start listening" })
-    )
-    expect(onChange).toHaveBeenCalledWith(["CJOINED01"])
-
-    vi.mocked(useSlackChannelDirectory).mockReturnValue({
-      ...directory,
-      data: {
-        ...directory.data,
-        channels: channels.map((channel) => ({ ...channel, is_member: true })),
-      },
-    })
-    rerender(<SlackChannelPicker {...props} selected={["CJOINED01"]} />)
-    fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
-    const joined = await screen.findByRole<HTMLButtonElement>("checkbox", {
-      name: "#design",
-    })
-    expect(joined.disabled).toBe(false)
-    fireEvent.click(joined)
-    fireEvent.click(
-      screen.getByRole("button", { name: "Save and start listening" })
-    )
-    expect(onChange).toHaveBeenLastCalledWith(["CJOINED01", "CABSENT01"])
-  })
-
   it("filters repositories alongside search without losing selections", async () => {
     const onChange = vi.fn()
     render(
@@ -258,27 +187,4 @@ describe("BindingPicker", () => {
     expect(await screen.findByRole("checkbox", { name: "C0OLD" })).toBeTruthy()
     expect(screen.getByText("Selected · 2")).toBeTruthy()
   })
-})
-
-it("keeps unresolved Slack bindings removable without displaying raw channel IDs", async () => {
-  vi.mocked(useSlackChannelDirectory).mockReturnValue({
-    data: undefined,
-    isLoading: true,
-    isError: false,
-    error: null,
-    refresh: vi.fn(),
-    isRefreshing: false,
-  })
-  const onChange = vi.fn()
-  render(
-    <SlackChannelPicker selected={["CUNRESOLVED"]} onChange={onChange} />,
-    { wrapper: TooltipProvider }
-  )
-  fireEvent.click(screen.getByRole("button", { name: "Choose channels" }))
-  fireEvent.click(
-    await screen.findByRole("checkbox", { name: "Slack channel 1" })
-  )
-  expect(screen.queryByText("CUNRESOLVED")).toBeNull()
-  fireEvent.click(screen.getByRole("button", { name: "Save 0 channels" }))
-  expect(onChange).toHaveBeenCalledWith([])
 })

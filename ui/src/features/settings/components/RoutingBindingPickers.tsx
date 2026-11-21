@@ -1,19 +1,8 @@
 import { FolderIcon } from "@phosphor-icons/react/dist/ssr/Folder"
 import { LockSimpleIcon } from "@phosphor-icons/react/dist/ssr/LockSimple"
 
-import {
-  RefreshSlackChannels,
-  SlackChannelIcon,
-} from "@/components/SlackChannelCombobox"
 import { RepositoryLabels } from "@/lib/repo"
 import { useRepos } from "@/lib/profile"
-import {
-  rankSlackChannels,
-  slackChannelLabel,
-  rememberSlackChannels,
-  useRecentSlackChannels,
-  useSlackChannelDirectory,
-} from "@/lib/slack-channels"
 import { BindingPicker, type PickerItem } from "./BindingPicker"
 
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
@@ -88,84 +77,6 @@ export function RepositoryPicker({
         repos.isError
           ? "Could not load the installation's repositories; add them by name."
           : null
-      }
-      disabled={disabled}
-    />
-  )
-}
-
-export function SlackChannelPicker({
-  selected,
-  onChange,
-  disabled,
-}: BindingPickerProps) {
-  const directory = useSlackChannelDirectory(true)
-  const recent = useRecentSlackChannels()
-  const items: Array<PickerItem> = rankSlackChannels(
-    directory.data?.channels ?? [],
-    "",
-    recent
-  ).map((channel) => ({
-    id: channel.id,
-    label: `#${channel.name}`,
-    meta: [
-      channel.is_private
-        ? "private"
-        : channel.is_ext_shared
-          ? "shared"
-          : "public",
-      channel.num_members === null ? null : `${channel.num_members} members`,
-      recent.includes(channel.id) ? "recently used" : null,
-    ]
-      .filter((part): part is string => part !== null)
-      .join(" · "),
-    icon: <SlackChannelIcon channel={channel} />,
-    disabled: !channel.is_member || channel.is_ext_shared,
-    warning: channel.is_ext_shared
-      ? "Listening requires an internal channel."
-      : channel.is_member
-        ? undefined
-        : "Invite Robin to this channel, then refresh to select it.",
-  }))
-  for (const id of selected) {
-    if (!items.some((item) => item.id === id))
-      items.push({ id, label: slackChannelLabel(directory.data, id, selected) })
-  }
-  return (
-    <BindingPicker
-      triggerLabel="Choose channels"
-      additionsLabel="Save and start listening"
-      title="Slack channels"
-      description="Robin can respond without an @mention in these channels. Customize each channel’s instructions after adding it."
-      noun="channel"
-      pluralNoun="channels"
-      items={items}
-      selected={selected}
-      onChange={(next) => {
-        rememberSlackChannels(next.filter((id) => !selected.includes(id)))
-        onChange(next)
-      }}
-      searchPlaceholder="Search channels"
-      actions={
-        <RefreshSlackChannels
-          refresh={directory.refresh}
-          isRefreshing={directory.isLoading || directory.isRefreshing}
-        />
-      }
-      loading={directory.isLoading}
-      loadError={
-        directory.isError
-          ? `Could not load channels from Slack${
-              directory.error instanceof Error
-                ? ` (${directory.error.message})`
-                : ""
-            }; refresh to try again.`
-          : null
-      }
-      notice={
-        directory.data?.refreshing
-          ? "Refreshing channels from Slack. New ones appear when it finishes."
-          : "Missing a channel? Invite Robin in Slack, then refresh this list."
       }
       disabled={disabled}
     />

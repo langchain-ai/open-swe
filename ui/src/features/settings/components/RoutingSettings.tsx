@@ -1,20 +1,21 @@
-import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@langchain/macaw-components/Button"
-import { Link as MacawLink } from "@langchain/macaw-components/Link"
-import { Textarea } from "@langchain/macaw-components/Textarea"
+import { Banner } from "@langchain/macaw-components/Banner"
+import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { Switch } from "@langchain/macaw-components/Switch"
 
 import { SettingsPanel, SettingsSection } from "@/components/AppShell"
 import { api, type RoutingSettings as RoutingData } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
+import { HashIcon } from "@phosphor-icons/react/dist/ssr/Hash"
+import { RefreshSlackChannels } from "@/components/SlackChannelCombobox"
 import {
-  slackChannelHref,
   slackChannelLabel,
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
-import { cn, INHERITED_LINK } from "@/lib/utils"
-import { RepositoryPicker, SlackChannelPicker } from "./RoutingBindingPickers"
+import { RepositoryPicker } from "./RoutingBindingPickers"
+import { AddListeningChannel } from "./AddListeningChannel"
+import { ListeningChannelRow } from "./ListeningChannelRow"
 
 type RoutingChange =
   | { kind: "repository"; repo: string; allowed: boolean | null }
@@ -87,6 +88,21 @@ export function RoutingSettings() {
   const channels = routing.data?.slack_channels ?? []
   const channelIds = channels.map((row) => row.channel_id)
   const disabled = save.isPending || !routing.data
+  const channelById = new Map(
+    (directory.data?.channels ?? []).map((channel) => [channel.id, channel])
+  )
+  const attentionFor = (id: string): string | null => {
+    if (!directory.data) return null
+    const channel = channelById.get(id)
+    if (!channel)
+      return "Robin can’t find this channel. It may have been archived, or Robin was removed from a private channel."
+    if (channel.is_ext_shared)
+      return "This channel is shared outside the workspace, so Robin won’t listen here."
+    if (!channel.is_member)
+      return "Robin isn’t in this channel anymore. Invite Robin in Slack, then refresh channels."
+    return null
+  }
+  const attentionCount = channelIds.filter((id) => attentionFor(id)).length
 
   if (!routing.data)
     return (
@@ -122,11 +138,12 @@ export function RoutingSettings() {
         description="Bind repositories for inbound GitHub and Linear routing. Binding is not an access grant or a preload setting. Can start threads lets a GitHub Actions workflow create ownerless threads with its own OIDC-issued token."
       >
         <SettingsPanel>
-          {save.error && (
-            <p role="alert" className="text-sm text-error-secondary">
-              {save.error.message}
-            </p>
-          )}
+          {save.error &&
+            save.variables?.some((change) => change.kind === "repository") && (
+              <p role="alert" className="text-sm text-error-secondary">
+                {save.error.message}
+              </p>
+            )}
           {repositories.length === 0 ? (
             <p className="text-sm text-secondary">No bound repositories.</p>
           ) : (
@@ -187,15 +204,54 @@ export function RoutingSettings() {
       </SettingsSection>
       <SettingsSection
         title="Slack channels"
-        description="Listen to internal channels Robin has joined and respond without an @mention. Set instructions for when to respond, what to do, and who owns the channel."
+        description="Robin reads these channels and can reply without an @mention, following each channel’s instructions."
       >
-        <SettingsPanel>
+        <div className="p-space-4">
+          <div className="flex items-start justify-between gap-space-4">
+            <div className="flex flex-col gap-space-1">
+              <h3 className="text-sm font-medium text-primary">
+                Listening channels
+              </h3>
+              <p className="text-xs/relaxed text-secondary">
+                {channels.length === 0
+                  ? "Not listening anywhere yet."
+                  : [
+                      `${channels.length} ${channels.length === 1 ? "channel" : "channels"}`,
+                      attentionCount
+                        ? `${attentionCount} ${attentionCount === 1 ? "needs" : "need"} attention`
+                        : null,
+                    ]
+                      .filter((part): part is string => part !== null)
+                      .join(" · ")}
+              </p>
+            </div>
+            <AddListeningChannel
+              selected={channelIds}
+              disabled={disabled}
+              error={save.error?.message}
+              onSave={(id, prompt, onSuccess) =>
+                save.mutate([{ kind: "channel", id, prompt }], { onSuccess })
+              }
+            />
+          </div>
+          {save.error &&
+            save.variables?.some(
+              (change) => change.kind === "channel" && change.prompt === null
+            ) && (
+              <div role="alert" className="mt-space-3">
+                <Banner intent="error">{save.error.message}</Banner>
+              </div>
+            )}
           {channels.length === 0 ? (
-            <p className="text-sm text-secondary">
-              Robin isn’t listening to any channels.
-            </p>
+            <EmptyState
+              size="sm"
+              icon={HashIcon}
+              title="Robin isn’t listening to any channels."
+              description="Pick a channel and a template like Ask or Kitchen. Robin will reply there without an @mention."
+              className="mt-space-4 rounded-lg border border-dashed border-default"
+            />
           ) : (
-            <ul className="divide-y divide-default">
+            <ul className="mt-space-4 divide-y divide-default rounded-lg border border-default">
               {channels.map((row) => {
                 const label = slackChannelLabel(
                   directory.data,
@@ -203,132 +259,49 @@ export function RoutingSettings() {
                   channelIds
                 )
                 return (
-                  <li
+                  <ListeningChannelRow
                     key={row.channel_id}
-                    className="flex flex-col gap-space-2 py-space-3"
-                  >
-                    <MacawLink
-                      variant="xs"
-                      href={slackChannelHref(row.channel_id)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={cn(
-                        INHERITED_LINK,
-                        "min-w-0 truncate text-primary [&>span]:truncate"
-                      )}
-                    >
-                      {label}
-                    </MacawLink>
-                    <ChannelPromptEditor
-                      label={label}
-                      prompt={row.prompt}
-                      disabled={disabled}
-                      onSave={(prompt, onSuccess) =>
-                        save.mutate(
-                          [{ kind: "channel", id: row.channel_id, prompt }],
-                          { onSuccess }
-                        )
-                      }
-                    />
-                  </li>
+                    id={row.channel_id}
+                    label={label}
+                    prompt={row.prompt}
+                    channel={channelById.get(row.channel_id)}
+                    attention={attentionFor(row.channel_id)}
+                    disabled={disabled}
+                    error={
+                      save.variables?.some(
+                        (change) =>
+                          change.kind === "channel" &&
+                          change.id === row.channel_id &&
+                          change.prompt !== null
+                      )
+                        ? save.error?.message
+                        : undefined
+                    }
+                    onSave={(prompt, onSuccess) =>
+                      save.mutate(
+                        [{ kind: "channel", id: row.channel_id, prompt }],
+                        { onSuccess }
+                      )
+                    }
+                    onRemove={() =>
+                      save.mutate([
+                        { kind: "channel", id: row.channel_id, prompt: null },
+                      ])
+                    }
+                  />
                 )
               })}
             </ul>
           )}
-          <SlackChannelPicker
-            selected={channelIds}
-            disabled={disabled}
-            onChange={(next) => {
-              const desired = new Set(next)
-              const known = new Set(channelIds)
-              const changes: RoutingChange[] = [
-                ...channelIds
-                  .filter((id) => !desired.has(id))
-                  .map((id) => ({
-                    kind: "channel" as const,
-                    id,
-                    prompt: null,
-                  })),
-                ...next
-                  .filter((id) => !known.has(id))
-                  .map((id) => ({
-                    kind: "channel" as const,
-                    id,
-                    prompt: "",
-                  })),
-              ]
-              if (changes.length) save.mutate(changes)
-            }}
-          />
-        </SettingsPanel>
+          <div className="mt-space-3 flex flex-col items-start gap-space-2 text-xs text-secondary sm:flex-row sm:items-center sm:justify-between sm:gap-space-3">
+            <span>Only internal channels Robin has joined can be added.</span>
+            <RefreshSlackChannels
+              refresh={directory.refresh}
+              isRefreshing={directory.isLoading || directory.isRefreshing}
+            />
+          </div>
+        </div>
       </SettingsSection>
     </>
-  )
-}
-
-function ChannelPromptEditor({
-  label,
-  prompt,
-  disabled,
-  onSave,
-}: {
-  label: string
-  prompt: string
-  disabled: boolean
-  onSave: (prompt: string, onSuccess: () => void) => void
-}) {
-  const [draft, setDraft] = useState<string | null>(null)
-  return draft === null ? (
-    <div className="flex flex-col items-start gap-space-2">
-      <p className="line-clamp-2 text-sm whitespace-pre-line text-secondary">
-        {prompt ||
-          "Respond when helpful and follow the conversation naturally."}
-      </p>
-      <Button
-        size="xs"
-        color="secondary"
-        variant="outlined"
-        aria-label={`Edit instructions for ${label}`}
-        disabled={disabled}
-        onClick={() => setDraft(prompt)}
-      >
-        Edit instructions
-      </Button>
-    </div>
-  ) : (
-    <div className="flex flex-col gap-space-2">
-      <Textarea
-        label="Channel Instructions"
-        aria-label={`Instructions for ${label}`}
-        size="md"
-        rows={6}
-        maxLength={32000}
-        autoFocus
-        value={draft}
-        onChange={setDraft}
-        disabled={disabled}
-        placeholder="e.g. Investigate bug reports and suggest next steps. Ask before opening a PR. The channel DRI is @name."
-        hintText="Describe when Robin should respond, how it should help, and who to involve. Leave blank for general assistance."
-      />
-      <div className="flex flex-wrap items-center gap-space-2">
-        <Button
-          size="xs"
-          color="primary"
-          disabled={disabled || draft.trim() === prompt}
-          onClick={() => onSave(draft.trim(), () => setDraft(null))}
-        >
-          Save instructions
-        </Button>
-        <Button
-          size="xs"
-          color="secondary"
-          variant="outlined"
-          disabled={disabled}
-          onClick={() => setDraft(null)}
-        >
-          Cancel
-        </Button>
-      </div>
-    </div>
   )
 }
