@@ -3,7 +3,7 @@ default_install_hook_types:
 default_stages:
   - pre-commit
 
-exclude: ^(vendor/|openwiki/)
+exclude: ^vendor/
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit

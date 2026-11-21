@@ -28,7 +28,7 @@ def test_a_review_follows_its_kinds_rules_whatever_its_catalog_says(graph: Graph
 
 
 def test_the_agent_keeps_its_catalogs_loop_and_guards_its_shell() -> None:
-    rules = LoopRules(task_coordination=True)
+    rules = LoopRules(client_tools=True)
 
     planned = _run("agent", Catalog(loop=rules, model_call_limit=7)).planned
 

@@ -1,18 +1,12 @@
-"""A run stops at a client tool call and resumes on the client's result."""
-
-from typing import cast
-from unittest.mock import MagicMock
+"""A client tool call is answered pending until the client's result replaces it."""
 
 import pytest
-from langchain.agents.middleware.types import AgentState
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from runtime_api.operations import OperationResult, RunOperation
 
 from openswe.agent_api.run_calls import TokenRun
 from openswe.agent_api.run_kinds import RunKind
 from openswe.agent_api.tokens import RemoteRun
 from openswe.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
-from openswe.middleware.client_tools import ClientToolsMiddleware
 from openswe.middleware.plugin_chat import PluginChatTools
 from openswe.run_config import PluginChatConfig
 from openswe.threads.runs import _plugin_context
@@ -23,7 +17,7 @@ class _Parts(RunKind):
     assistant_id = "agent"
 
 
-async def test_a_client_call_is_answered_pending_and_the_run_stops_until_the_client_does(
+async def test_a_client_call_is_answered_pending_until_the_client_answers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("REMOTE_RUNTIME_TOKEN_SECRET", "test-signing-key-0123456789abcdef")
@@ -32,7 +26,6 @@ async def test_a_client_call_is_answered_pending_and_the_run_stops_until_the_cli
         name="exec_command",
         parameters={"type": "object", "properties": {"cmd": {"type": "string"}}},
     )
-    client = ClientToolsMiddleware([spec])
     run = RemoteRun(
         thread_id="thread-1",
         assistant_id="agent",
@@ -52,32 +45,6 @@ async def test_a_client_call_is_answered_pending_and_the_run_stops_until_the_cli
     # The client's real result arrives with the next run under this id, replacing it.
     assert pending.message_id == ClientToolSpec.result_message_id("call-1")
     assert pending.artifact == {PENDING_ARTIFACT_KEY: True}
-    waiting = cast(
-        AgentState,
-        {
-            "messages": [
-                HumanMessage("list files"),
-                AIMessage("", tool_calls=[{"name": "exec_command", "args": {}, "id": "call-1"}]),
-                ToolMessage(
-                    content=str(pending.content),
-                    tool_call_id="call-1",
-                    artifact=pending.artifact,
-                    id=pending.message_id,
-                ),
-            ]
-        },
-    )
-    assert await client.abefore_model(waiting, MagicMock()) == {"jump_to": "end"}
-    answered = cast(
-        AgentState,
-        {
-            "messages": [
-                *waiting["messages"][:2],
-                ToolMessage(content="a.py\nb.py", tool_call_id="call-1", id=pending.message_id),
-            ]
-        },
-    )
-    assert await client.abefore_model(answered, MagicMock()) is None
 
 
 def test_a_plugins_own_words_reach_the_agent_only_in_the_conversation() -> None:

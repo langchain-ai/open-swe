@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -12,12 +11,6 @@ from openswe.database import analytics as database
 def capture_config(monkeypatch):
     monkeypatch.setenv("POSTGRES_URI", "postgresql://localhost/analytics_test")
     monkeypatch.setattr(database, "_WORKSPACE_ID", uuid4())
-
-
-async def test_capture_preserves_cancellation(monkeypatch, capture_config):
-    monkeypatch.setattr(emitter, "enqueue", AsyncMock(side_effect=asyncio.CancelledError))
-    with pytest.raises(asyncio.CancelledError):
-        await emitter.run_terminal(run_key="run", thread_key="thread", status="success")
 
 
 async def test_run_started_records_configured_but_not_effective_attribution(

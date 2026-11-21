@@ -410,13 +410,6 @@ class User(Base):
         return await cls._merge_preferences(login, patch, keep_existing=False)
 
     @classmethod
-    async def default_preferences(
-        cls, login: str, patch: UserPreferencesPatch
-    ) -> UserPreferences | None:
-        """Like :meth:`update_preferences`, but a value the person already chose wins."""
-        return await cls._merge_preferences(login, patch, keep_existing=True)
-
-    @classmethod
     async def _merge_preferences(
         cls, login: str, patch: UserPreferencesPatch, *, keep_existing: bool
     ) -> UserPreferences | None:

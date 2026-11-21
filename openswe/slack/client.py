@@ -7,7 +7,7 @@ import hmac
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Collection, Iterable, Mapping
+from collections.abc import AsyncIterator, Collection, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -17,7 +17,6 @@ from urllib.parse import urlparse
 import httpx2
 from pydantic import BaseModel, ConfigDict, ValidationError
 from runtime_api.slack import SlackNotice
-from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from openswe import event_claims
@@ -832,26 +831,6 @@ async def post_slack_thread_reply_with_ts(
     )
 
 
-async def update_slack_thread_reply(
-    channel_id: str,
-    thread_ts: str,
-    message_ts: str,
-    text: str,
-    *,
-    blocks: list[dict[str, Any]] | None = None,
-    usage: RunUsageSummary | None = None,
-    agent_thread_id: str | None = None,
-) -> None:
-    """Turn an existing thread message into a reply, dressed as a new one would be."""
-    dashboard_url = _slack_thread_dashboard_url(channel_id, thread_ts, agent_thread_id)
-    await update_slack_message(
-        channel_id,
-        message_ts,
-        append_slack_web_link_footer(text, dashboard_url, usage),
-        blocks=_with_slack_web_link_context_block(text, blocks, dashboard_url, usage),
-    )
-
-
 async def post_slack_ephemeral_reply(
     channel_id: str,
     user_id: str,
@@ -1248,66 +1227,6 @@ async def post_slack_ephemeral_message(
 
 
 SLACK_USER_ID_RE = re.compile(r"^[UW][A-Z0-9_]+$")
-
-
-def slack_user_ids(values: Iterable[str]) -> list[str]:
-    """The Slack user ids in `values`, de-duplicated, mentions unwrapped."""
-    ids: list[str] = []
-    for value in values:
-        candidate = value.strip().removeprefix("<@").removesuffix(">").split("|")[0].strip()
-        candidate = candidate.upper()
-        if SLACK_USER_ID_RE.fullmatch(candidate) and candidate not in ids:
-            ids.append(candidate)
-    return ids
-
-
-async def invite_to_slack_channel(channel_id: str, user_ids: Iterable[str]) -> list[str]:
-    """Invite people, preserving successful invitees on partial failures."""
-    users = slack_user_ids(user_ids)
-    if not users:
-        raise SlackRequestError("no_users")
-    if not channel_id:
-        raise SlackRequestError("missing_channel_id")
-    try:
-        async with SlackClient.bot() as client:
-            response = await client.conversations_invite(
-                channel=channel_id, users=users, force=True
-            )
-        data = response.data
-    except SlackApiError as exc:
-        if getattr(exc.response, "status_code", None) == 200 and isinstance(
-            exc.response.data, dict
-        ):
-            data = exc.response.data
-        else:
-            raise SlackRequestError(f"{', '.join(users)}: {slack_error(exc)}") from exc
-    except SLACK_REQUEST_ERRORS as exc:
-        raise SlackRequestError(f"{', '.join(users)}: {slack_error(exc)}") from exc
-    if not isinstance(data, dict):
-        raise SlackRequestError(f"{', '.join(users)}: invalid_response")
-
-    # Someone already in the channel is in the channel, which is what was asked.
-    failures = {
-        str(entry.get("user") or ""): str(entry.get("error") or "failed")
-        for entry in data.get("errors") or []
-        if isinstance(entry, dict)
-        and not entry.get("ok")
-        and entry.get("user")
-        and entry.get("error") != "already_in_channel"
-    }
-    top_error = str(data.get("error") or "")
-    if not data.get("ok") and top_error and top_error != "already_in_channel":
-        logger.info(
-            "Could not invite users to Slack channel",
-            extra={"slack_users": users, "slack_channel": channel_id, "slack_error": top_error},
-        )
-        raise SlackRequestError(f"{', '.join(users)}: {top_error}")
-    invited = [user for user in users if user not in failures]
-    if failures:
-        raise SlackRequestError(
-            ", ".join(f"{user} ({reason})" for user, reason in failures.items()), invited=invited
-        )
-    return invited
 
 
 async def _post_slack_callback(
@@ -1888,33 +1807,6 @@ async def post_slack_trace_reply(
         agent_thread_id=thread_id,
     )
     return message_ts
-
-
-async def update_slack_trace_reply_for_web_handoff(
-    channel_id: str, message_ts: str, thread_id: str
-) -> bool:
-    """Update the initial Slack trace reply after a dashboard handoff."""
-    trace_url = await get_langsmith_trace_url(thread_id)
-    dashboard_url = dashboard_thread_url(thread_id)
-    try:
-        await update_slack_message(
-            channel_id,
-            message_ts,
-            _format_trace_reply(trace_url, dashboard_url, moved_to_web=True),
-            unfurl_links=False,
-            unfurl_media=False,
-        )
-    except SlackRequestError as exc:
-        logger.warning(
-            "Failed to update Slack trace reply for web handoff",
-            extra={
-                "slack_channel": channel_id,
-                "slack_message_ts": message_ts,
-                "slack_error": exc.code,
-            },
-        )
-        return False
-    return True
 
 
 SLACK_DETACHED_AT_KEY = "slack_thread_detached_at"

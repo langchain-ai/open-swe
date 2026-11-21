@@ -42,7 +42,7 @@ from openswe.dispatch import COMPLETION_WEBHOOK_URL
 from openswe.execution import ExecutionProfile
 from openswe.prompts import common_prompt, prompt
 from openswe.run_config import RunConfig
-from openswe.sandboxes.tool_runtime import EXCLUDED_TOOLS, ModelChoice, ToolSurface
+from openswe.sandboxes.tool_runtime import ModelChoice, ToolSurface
 from openswe.server import (
     DEEP_AGENT_TOOL_NAMES,
     call_seconds,
@@ -174,10 +174,7 @@ class RunCatalog:
 
     def _excluded(self) -> frozenset[str]:
         return (
-            frozenset(
-                ((self.surface.excluded | EXCLUDED_TOOLS) - _MDA_TOOLS)
-                | self._unoffered_delegation_tools()
-            )
+            frozenset((self.surface.excluded - _MDA_TOOLS) | self._unoffered_delegation_tools())
             - self.surface.disabled()
         )
 

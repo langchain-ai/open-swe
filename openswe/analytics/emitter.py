@@ -19,10 +19,7 @@ from openswe.analytics.events import (
     PRRunLinkedPayload,
     PRStatePayload,
     ReviewPublishedPayload,
-    RunCanceledPayload,
-    RunCompletedPayload,
     RunCostRecordedPayload,
-    RunFailedPayload,
     RunStartedPayload,
     StrictPayload,
     TaskAcceptedPayload,
@@ -135,53 +132,6 @@ async def run_started(
         user_id=user_id or opaque_person("github", immutable_person_key),
         repository_id=opaque_id("repository", repository_key),
         model_id=model_id,
-    )
-
-
-@fail_soft
-async def run_terminal(
-    *,
-    run_key: str,
-    thread_key: str,
-    status: str,
-    input_tokens: int | None = None,
-    output_tokens: int | None = None,
-    total_tokens: int | None = None,
-    failure_code: str | None = None,
-    producer_suffix: str = "terminal",
-) -> None:
-    if status == "success":
-        name = EventName.RUN_COMPLETED
-        payload: StrictPayload = RunCompletedPayload(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-        )
-    elif status in {"interrupted", "canceled"}:
-        name = EventName.RUN_CANCELED
-        payload = RunCanceledPayload(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-            cancellation_source="superseded" if status == "interrupted" else "user",
-        )
-    else:
-        name = EventName.RUN_FAILED
-        payload = RunFailedPayload(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-            failure_class="timeout" if status == "timeout" else "error",
-            failure_code=failure_code,
-        )
-    await emit(
-        name,
-        f"run:{run_key}:{producer_suffix}:{name.value}",
-        payload,
-        run_id=opaque_id("run", run_key),
-        preparation_run_id=opaque_id("preparation_run", run_key),
-        thread_id=opaque_id("thread", thread_key),
-        task_id=opaque_id("task", thread_key),
     )
 
 

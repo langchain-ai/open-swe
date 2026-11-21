@@ -190,14 +190,12 @@ async def test_a_saved_choice_no_longer_offered_falls_back_to_the_runs_model(
 
 @pytest.mark.parametrize("previous_route", ["fast", "default"])
 async def test_explicit_auto_selection_has_the_run_classify_the_route_again(
-    handoff: Handoff, monkeypatch: pytest.MonkeyPatch, previous_route: SelectedRoute
+    handoff: Handoff, previous_route: SelectedRoute
 ) -> None:
     handoff.middleware._config["configurable"].update(
         source="dashboard", model_selection="auto", model_selection_changed=True
     )
     handoff.middleware._requested_models = None
-    classify = AsyncMock(side_effect=AssertionError("The run classifies its route itself"))
-    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
     state = {
         "messages": [HumanMessage(content="Fix the typo")],
         "model_route": previous_route,
@@ -212,12 +210,8 @@ async def test_explicit_auto_selection_has_the_run_classify_the_route_again(
     assert prepared["selected_model_id"] == "openai:gpt-6.1-sol"
 
 
-async def test_preparing_a_turn_never_classifies_its_route(
-    handoff: Handoff, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_preparing_a_turn_never_classifies_its_route(handoff: Handoff) -> None:
     handoff.middleware._requested_models = None
-    classify = AsyncMock(side_effect=AssertionError("The run classifies its route itself"))
-    monkeypatch.setattr("openswe.middleware.model_selection._select_jev_route", classify)
 
     prepared = await handoff.prepare({"messages": [HumanMessage(content="Fix the typo")]})
 

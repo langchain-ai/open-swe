@@ -4,7 +4,6 @@ import asyncio
 import functools
 import re
 from collections.abc import Awaitable, Callable
-from time import time_ns
 from typing import Literal, TypedDict, cast
 
 from fastapi import APIRouter, HTTPException
@@ -95,16 +94,6 @@ _THREAD_CONFLICT = (
     "which agent thread to use."
 )
 _OPTION_ACTION_ID = "open_swe_option_select"
-
-
-def _synthetic_slack_ts() -> str:
-    timestamp = time_ns()
-    return f"{timestamp // 1_000_000_000}.{timestamp % 1_000_000_000:09d}"
-
-
-def _bounded_payload_text(label: str, payload: JsonObject) -> str:
-    serialized = common.json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    return f"{label}\n```json\n{serialized[:8000]}\n```"
 
 
 def _verify_signature(request: common.Request, body: bytes, what: str) -> None:

@@ -8,22 +8,7 @@ import {
   isHotkeySuppressed,
   isTypingContext,
   isTypingSafeShortcut,
-  shouldIgnoreHotkey,
 } from "./hotkeys"
-
-function eventWithTarget(
-  target: Element,
-  init: KeyboardEventInit = {}
-): KeyboardEvent {
-  const event = new KeyboardEvent("keydown", {
-    bubbles: true,
-    cancelable: true,
-    key: "k",
-    ...init,
-  })
-  Object.defineProperty(event, "target", { value: target })
-  return event
-}
 
 describe("keyboard shortcut utilities", () => {
   it("resolves mod to the platform modifier", () => {
@@ -97,28 +82,13 @@ describe("keyboard shortcut utilities", () => {
     expect(isTypingContext(document.createElement("button"))).toBe(false)
   })
 
-  it("suppresses app shortcuts while typing or inside an ignored region", () => {
-    const input = document.createElement("input")
+  it("suppresses app shortcuts inside an ignored region", () => {
     const ignored = document.createElement("div")
     ignored.dataset.hotkeys = "ignore"
     const child = document.createElement("button")
     ignored.append(child)
 
-    expect(shouldIgnoreHotkey(eventWithTarget(input))).toBe(true)
     expect(isHotkeySuppressed(child)).toBe(true)
-    expect(shouldIgnoreHotkey(eventWithTarget(child))).toBe(true)
-  })
-
-  it("ignores composition, repeats, and previously handled events", () => {
-    const target = document.createElement("button")
-    const composing = eventWithTarget(target, { isComposing: true })
-    const repeated = eventWithTarget(target, { repeat: true })
-    const prevented = eventWithTarget(target)
-    prevented.preventDefault()
-
-    expect(shouldIgnoreHotkey(composing)).toBe(true)
-    expect(shouldIgnoreHotkey(repeated)).toBe(true)
-    expect(shouldIgnoreHotkey(prevented)).toBe(true)
   })
 
   it("classifies modifier combos as typing-safe for hotkey exemption", () => {

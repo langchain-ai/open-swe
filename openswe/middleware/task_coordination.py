@@ -1,17 +1,8 @@
 from typing import Self
-from uuid import uuid4
 
-from langchain.agents.middleware import AgentState
-from langgraph.runtime import Runtime
 from runtime_api.catalog import TaskContext as LoopTaskContext
-from runtime_api.provenance import Provenance
 
-from openswe.input_messages import (
-    RunMessage,
-    dynamic_context_hash,
-    run_context,
-    visible_dynamic_context_hashes,
-)
+from openswe.input_messages import run_context
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
 from openswe.tasks.store import TaskContext, TaskDelegation, TaskMembership
@@ -69,24 +60,3 @@ class TaskCoordinationMiddleware(OpenSWEMiddleware):
             title=self.context.task.title,
             coordinator_thread_id=self.context.task.coordinator_thread_id,
         )
-
-    async def abefore_model(
-        self, state: AgentState, runtime: Runtime
-    ) -> dict[str, list[RunMessage]] | None:
-        if self.context is None:
-            self.context = await TaskMembership.delegation_for_thread(self.thread_id)
-        visible = visible_dynamic_context_hashes(state)
-        added: list[RunMessage] = [
-            {
-                "role": "user",
-                "id": f"{prefix}{uuid4()}",
-                "content": content,
-                "additional_kwargs": Provenance.harness("task_context").stamp(),
-            }
-            for prefix, content in (
-                ("task-role:", self.instructions),
-                ("task-context:", self.context_message()),
-            )
-            if content is not None and dynamic_context_hash(content) not in visible
-        ]
-        return {"messages": added} if added else None

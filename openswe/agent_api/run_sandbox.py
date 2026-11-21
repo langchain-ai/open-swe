@@ -57,8 +57,7 @@ class RunSandbox:
         """The sandbox MDA creates for the run, with who commits there.
 
         Who commits is read alongside the sandbox, not after it: the two read the thread
-        and its owner independently, each in transactions of its own. An MDA deployment from
-        before ``SandboxSpec.proxy_config`` reads ``writes_proxy``.
+        and its owner independently, each in transactions of its own.
         """
         git_identity = asyncio.ensure_future(self.git_identity())
         try:
@@ -81,7 +80,6 @@ class RunSandbox:
                 # pins their shape.
                 "create": {**dumped["create"], "env_vars": sandbox.env_vars},
                 "git_identity": await git_identity,
-                "writes_proxy": not sandbox.external,
             }
         )
 

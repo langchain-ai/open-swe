@@ -5,7 +5,6 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from openswe.input_messages import FieldValue, FieldValues, InputMessageContext
 
-DASHBOARD_HANDOFF_SENDER_ID = "system:dashboard-handoff"
 DASHBOARD_HANDOFF_BODY = (
     "This follow-up was sent from Web. The conversation has moved to Web, so answer in "
     "the dashboard stream with a normal assistant message. Do not call slack_reply "

@@ -239,54 +239,6 @@ def test_a_tools_parameters_are_worked_out_once_while_it_lives() -> None:
     assert key not in tool_runtime._parameters_of
 
 
-async def test_the_named_calls_around_a_model_call_never_plan_the_run(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from unittest.mock import AsyncMock, MagicMock
-
-    from langchain_core.messages import messages_to_dict
-    from runtime_api.catalog import TaskContext
-    from runtime_api.models import provider_model_kwargs
-
-    from openswe.middleware.model_selection import RouteSelection
-    from openswe.middleware.task_coordination import TaskCoordinationMiddleware
-
-    parts = _NeverPlanned()
-    monkeypatch.setattr(
-        parts, "credentials", AsyncMock(side_effect=AssertionError("No GitHub credentials needed"))
-    )
-    run = RUN.model_copy(update={"assistant_id": "agent"})
-
-    chosen = await TokenRun.answer(
-        parts,
-        run,
-        "model_choice",
-        {"run_id": "run-1", "model_id": "anthropic:claude-opus-5-5", "effort": "high"},
-    )
-
-    assert isinstance(chosen, dict)
-    assert chosen["model_id"] == "anthropic:claude-opus-5-5"
-    assert chosen["kwargs"] == provider_model_kwargs(
-        "anthropic:claude-opus-5-5", "high", max_tokens=64_000
-    )
-    # Deprecated: an MDA deployment from before classifying routes and reading the task's
-    # context from its catalog still asks, and is answered.
-    monkeypatch.setattr(
-        "openswe.middleware.model_selection._select_jev_route",
-        AsyncMock(return_value=RouteSelection("fast")),
-    )
-    monkeypatch.setattr(
-        TaskCoordinationMiddleware,
-        "for_thread",
-        AsyncMock(return_value=MagicMock(task_context=MagicMock(return_value=TaskContext()))),
-    )
-    asked = messages_to_dict([_said("Fix the login", "human-1")])
-    route = await TokenRun.answer(parts, run, "route_model", {"run_id": "run-1", "humans": asked})
-    context = await TokenRun.answer(parts, run, "task_context", {"run_id": "run-1"})
-    assert route == {"route": "fast", "persist": True}
-    assert context == {"instructions": None, "message": None}
-
-
 async def test_an_agent_turn_is_prepared_from_its_token_and_its_start_recorded_off_its_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1238,9 +1190,9 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
     scope: Scope = {
         "type": "http",
         "method": "POST",
-        "path": "/agent-api/route_model",
+        "path": "/agent-api/gateway_credential",
         "headers": [],
-        "path_params": {"endpoint": "route_model"},
+        "path_params": {"endpoint": "gateway_credential"},
         "state": {"remote_run": RUN},
     }
 
@@ -1257,7 +1209,7 @@ async def test_hook_failure_log_names_the_mda_run(monkeypatch: pytest.MonkeyPatc
         server.logger.removeHandler(handler)
 
     assert len(lines) == 1
-    assert all(value in lines[0] for value in ("mda-run-1", "thread-1", "route_model"))
+    assert all(value in lines[0] for value in ("mda-run-1", "thread-1", "gateway_credential"))
 
 
 # A LangSmith Managed Tools server disambiguated by its UUID: no JavaScript identifier.
@@ -1344,11 +1296,11 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
                     "manage_thread",
                     "slack_reply",
                     "message_task_thread",
-                    "load_integration_tools",
+                    "excluded_tool",
                 )
             ]
             surface.code_mode = True
-            surface.excluded = frozenset({"grep", "glob"})
+            surface.excluded = frozenset({"grep", "glob", "excluded_tool"})
             surface.delegates = True
             surface.model_call_limit = 20
             surface.subagents = [SurfaceSubagent("general-purpose", "helper", "instructions")]
@@ -1390,7 +1342,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert _UUID_NAMED not in catalog["code_only"]
     assert "eval" not in names
     excluded = catalog["excluded"]
-    assert isinstance(excluded, list) and "load_integration_tools" in excluded
+    assert isinstance(excluded, list) and "excluded_tool" in excluded
     # A coordinator launches async workers; their task tools track them, not deepagents'.
     assert "start_async_task" not in excluded
     assert {"check_async_task", "update_async_task", "cancel_async_task"} <= set(excluded)
@@ -1469,9 +1421,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
         await TokenRun.answer(parts, started_run, "resolve_tool", {"name": _UUID_NAMED})
     )
     assert uuid_resolved.tool is not None and RUN.granted(_UUID_NAMED, uuid_resolved.tool.grant)
-    unknown = await TokenRun.answer(
-        parts, started_run, "resolve_tool", {"name": "load_integration_tools"}
-    )
+    unknown = await TokenRun.answer(parts, started_run, "resolve_tool", {"name": "excluded_tool"})
     # What the graph excludes is never found, so the run cannot call it either.
     assert ResolvedTool.model_validate(unknown).tool is None
 
@@ -1487,7 +1437,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     assert [ToolIndex.match(tool) for tool in index.search("mcp search")] == found.matches
     resolved = index.resolve("mcpSearch")
     assert resolved is not None and resolved.name == "mcp_search"
-    assert index.resolve("load_integration_tools") is None
+    assert index.resolve("excluded_tool") is None
 
 
 @pytest.mark.usefixtures("registry_db")
@@ -1695,7 +1645,7 @@ async def _call_status(
     served: list[tuple[str, str]] = []
 
     async def graph(run: RemoteRun, called: str, body: object) -> dict[str, object]:
-        if called not in {"prepare", "route_model", "run_ended"}:
+        if called not in {"prepare", "gateway_credential", "run_ended"}:
             raise UnknownEndpointError(called)
         served.append((called, run.thread_id))
         return {}
@@ -1757,8 +1707,8 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
     scope: Scope = {
         "type": "http",
         "method": "POST",
-        "path": "/agent-api/route_model",
-        "path_params": {"endpoint": "route_model"},
+        "path": "/agent-api/gateway_credential",
+        "path_params": {"endpoint": "gateway_credential"},
         "headers": [
             (b"authorization", f"Bearer {token}".encode()),
             (b"langsmith-trace", headers["langsmith-trace"].encode()),
@@ -1779,7 +1729,7 @@ async def test_a_call_nests_under_the_runtime_span_that_made_it(
         for run in client.create_run.call_args_list
         if run.kwargs["parent_run_id"] is None or run.kwargs["parent_run_id"] == caller.id
     ]
-    assert hook["name"] == "route_model"
+    assert hook["name"] == "gateway_credential"
     assert hook["parent_run_id"] == caller.id
     assert hook["trace_id"] == caller.trace_id
     assert hook["session_name"] == "turns"
@@ -1799,7 +1749,7 @@ async def test_a_worker_grant_only_adopts_a_run_token(
     for endpoint in (
         "catalog",
         "prepare",
-        "route_model",
+        "gateway_credential",
         "operation",
         "run_ended",
         "launch_worker",

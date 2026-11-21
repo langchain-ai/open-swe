@@ -8,7 +8,7 @@ to the thread's runtimes. Runs, checkpoints and streams stay with the runtime.
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime, timedelta
-from typing import Final, Literal, Self, get_args
+from typing import Final, Literal, Self
 from uuid import uuid7
 
 from langgraph_sdk.schema import ThreadSelectField
@@ -31,7 +31,6 @@ SelectField = Literal[
     "thread_id", "created_at", "updated_at", "metadata", "status", "values", "interrupts", "config"
 ]
 
-THREAD_STATUSES: Final[frozenset[str]] = frozenset(get_args(ThreadStatus))
 # When someone last stopped the thread, in epoch milliseconds.
 STOPPED_AT_KEY: Final = "stopped_at_ms"
 # What the index keeps of an Agent Server thread; its values are its whole conversation.

@@ -7,7 +7,6 @@ import {
   AUTH_REDIRECT_STORAGE_KEY,
   DEFAULT_AUTH_REDIRECT,
   authRedirectPathFromLocation,
-  authRedirectUrl,
   consumeAuthRedirect,
   currentAuthRedirectPath,
   getRememberedAuthRedirect,
@@ -50,9 +49,6 @@ describe("auth redirect helpers", () => {
   it("builds login targets from relative same-origin paths", () => {
     const path = rememberAuthRedirect("/agents/thread-1/plan?from=slack#review")
 
-    expect(authRedirectUrl(path)).toBe(
-      `${window.location.origin}/agents/thread-1/plan?from=slack#review`
-    )
     expect(loginUrl(path)).toContain(encodeURIComponent(path))
   })
 

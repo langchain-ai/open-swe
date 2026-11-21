@@ -476,9 +476,9 @@ async def test_external_sandbox_skips_credentials_and_proxy(monkeypatch) -> None
     managed = await ManagedSandbox.for_thread("thread-ext")
     assert managed.sandbox_id == "tb-task-1"
     assert managed.external is True
-    # Nothing writes an attached sandbox's proxy, an MDA deployment that reads the flag included.
+    # Nothing writes an attached sandbox's proxy.
     spec = await RunSandbox({"configurable": {"thread_id": "thread-ext"}}, reviews=False).spec()
-    assert not spec.writes_proxy
+    assert spec.proxy_config is None
     assert not await SandboxCredentialPolicy(
         ThreadMetadata.model_validate(metadata)
     ).allows_github()

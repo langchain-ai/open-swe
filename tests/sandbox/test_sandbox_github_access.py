@@ -12,10 +12,8 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse
 
 from openswe.agent_api.hosted import run_kinds
-from openswe.agent_api.run_calls import TokenRun
 from openswe.agent_api.run_sandbox import RunSandbox
 from openswe.agent_api.runs import run_config
-from openswe.agent_api.server import RefusedCallError
 from openswe.agent_api.tokens import RemoteRun
 from openswe.dashboard.execution_defaults import ExecutionDefaults
 from openswe.github import app, sandbox_access
@@ -24,7 +22,7 @@ from openswe.github.repositories import Repository
 from openswe.sandboxes import lifecycle
 from openswe.sandboxes.image_build import SnapshotBuild
 from openswe.sandboxes.providers.langsmith import LangSmithProvider
-from openswe.sandboxes.proxy_callback import CallingSandbox, SandboxProxyCallback
+from openswe.sandboxes.proxy_callback import CallingSandbox
 from tests.support.github_sdk import mock_github_sdk
 
 
@@ -236,14 +234,13 @@ async def test_a_sandbox_without_a_github_scope_gets_no_token_placeholder(
 
 
 @pytest.mark.parametrize("kind", ["reviewer", "review-scout", "agent"])
-async def test_the_proxy_config_mda_writes_carries_no_credential(
+async def test_the_proxy_config_mda_creates_the_sandbox_with_carries_no_credential(
     monkeypatch: pytest.MonkeyPatch,
     github: list[dict[str, object]],
     kind: str,
 ) -> None:
-    """The backend names the sandbox's proxy config as it plans the run, and an MDA deployment
-    that still asks for it gets the same: it carries the proxy callback, never a token, and
-    the backend writes none of it."""
+    """The backend names the sandbox's proxy config as it plans the run: it carries the proxy
+    callback, never a token, and the backend writes none of it."""
     metadata = AsyncMock(return_value={"sandbox_owner": "mda"})
     monkeypatch.setattr(lifecycle, "get_sandbox_metadata", metadata)
     monkeypatch.setattr("openswe.sandboxes.managed.get_sandbox_metadata", metadata)
@@ -256,26 +253,10 @@ async def test_the_proxy_config_mda_writes_carries_no_credential(
     )
 
     spec = await RunSandbox(run_config(run), reviews=parts.reviews).spec()
-    answer = await TokenRun.answer(
-        parts, run, "sandbox_proxy", {"run_id": "run", "sandbox_id": "sandbox"}
-    )
 
-    # MDA creates the sandbox with its commands' environment in its own run config; an MDA
-    # deployment from before that, and before ``proxy_config``, writes what ``sandbox_proxy``
-    # answers, which carries the environment on a rule no request matches.
+    # MDA creates the sandbox with its commands' environment in its own run config.
     assert spec.create.env_vars["GH_TOKEN"] == "proxy-injected"
-    assert spec.writes_proxy
     assert spec.proxy_config is not None
-    assert isinstance(answer, dict) and answer["expires_at"] is None
-    legacy = answer["config"]
-    assert legacy == SandboxProxyCallback.legacy_config(spec.proxy_config, spec.create.env_vars)
-    assert isinstance(legacy, dict) and isinstance(legacy["rules"], list)
-    assert {
-        name: value
-        for rule in legacy["rules"]
-        if isinstance(rule, dict)
-        for name, value in (rule.get("env_vars") or {}).items()
-    } == spec.create.env_vars
     assert "repos:" not in json.dumps(spec.proxy_config)
     callbacks = spec.proxy_config["callbacks"]
     assert isinstance(callbacks, list) and isinstance(callbacks[0], dict)
@@ -343,10 +324,6 @@ async def test_an_external_sandbox_gets_no_proxy_config(
     spec = await RunSandbox(run_config(run), reviews=parts.reviews).spec()
 
     assert spec.proxy_config is None
-    with pytest.raises(RefusedCallError):
-        await TokenRun.answer(
-            parts, run, "sandbox_proxy", {"run_id": "run", "sandbox_id": "sandbox"}
-        )
 
 
 async def test_restricted_app_token_never_falls_back_to_a_developer_credential(

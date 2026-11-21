@@ -4,20 +4,13 @@ The sandbox's proxy config holds no credential (``runtime_api.catalog.SandboxSpe
 LangSmith asks the backend's proxy callback for the headers of a request to a GitHub host
 as it goes out, and the backend answers with a token for the sandbox's thread
 (``GITHUB_PROXY_RULES`` say how each host takes it).
-
-``SANDBOX_PROXY`` is deprecated: MDA deployments from before the catalog carried the
-config ask for it here and write what the backend hands over, which is that same config.
 """
 
 import base64
-from datetime import datetime
 from fnmatch import fnmatchcase
 from typing import Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
-
-from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
-from runtime_api.operations import RunRequest
+from pydantic import BaseModel, ConfigDict
 
 # The user git sends with a GitHub token over HTTPS.
 GIT_TOKEN_USERNAME: Final = "x-access-token"
@@ -53,30 +46,4 @@ GITHUB_PROXY_RULES: Final = (
         env_vars={"GH_TOKEN": "proxy-injected"},
     ),
     GitHubProxyRule(name="github", hosts=("github.com", "*.github.com"), scheme="basic"),
-)
-
-
-class SandboxProxyRequest(RunRequest):
-    # The sandbox MDA opened for the run.
-    sandbox_id: str
-    # Ignored: the config carries no token to mint anew.
-    force_refresh: bool = False
-
-
-class SandboxProxy(BaseModel):
-    """The sandbox's whole proxy config, which an older MDA writes as the backend hands it
-    over."""
-
-    config: dict[str, JsonValue] = Field(default_factory=dict, repr=False)
-    # Always None: the config carries no token, so MDA never asks again for a fresh one.
-    expires_at: datetime | None = None
-
-
-# Only reads the thread and its sandbox, so it is safe to send again.
-SANDBOX_PROXY = Endpoint(
-    "sandbox_proxy",
-    SandboxProxyRequest,
-    SandboxProxy,
-    seconds=LOOP_CALL_SECONDS,
-    delivery="idempotent",
 )

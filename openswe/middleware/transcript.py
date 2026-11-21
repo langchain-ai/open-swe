@@ -1,15 +1,14 @@
 """Write agent activity into the append-only transcript event log.
 
-One middleware instance serves every run of a graph, so per-run state lives in a
-module-level registry keyed by ``thread_id:run_id``. A ``ContextVar`` cannot
-hold it: LangGraph runs each node in its own copied context, so a value set in
-``abefore_agent`` is invisible to the model node. The subagent *namespace* is
-the exception — it only travels downward into a nested graph invoked from
-inside the tool coroutine, which a ``ContextVar`` does correctly.
+MDA runs the agent and reports what happened to it; these hooks turn each report
+into transcript events. One middleware instance serves every run, so per-run
+state lives in a module-level registry keyed by ``thread_id:run_id``. The
+subagent *namespace* a report is filed under is a ``ContextVar`` set around it
+(``within_namespace``).
 
 Transcript writes are observability: every failure is logged and swallowed so a
 transcript problem can never fail a run. Events are queued and written by one
-background writer per run, so the model stream never waits on Postgres.
+background writer per run, so a report never waits on Postgres.
 """
 
 import asyncio
@@ -17,19 +16,15 @@ import base64
 import binascii
 import contextlib
 import logging
-import re
-import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextvars import ContextVar
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 from uuid import UUID
 
 from langchain.agents.middleware.types import AgentState, ModelRequest, ModelResponse
-from langchain_core.callbacks import AsyncCallbackHandler
-from langchain_core.callbacks.manager import AsyncCallbackManager, CallbackManager
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -39,9 +34,7 @@ from langchain_core.messages import (
     get_notification_metadata,
 )
 from langgraph.config import get_config
-from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
 from langgraph.runtime import Runtime
-from langgraph.types import Command as GraphCommand
 from langgraph_sdk import get_client
 from pydantic import JsonValue
 from pydantic_core import PydanticSerializationError, to_jsonable_python
@@ -63,7 +56,6 @@ from openswe.transcript.engine import Command, append
 from openswe.transcript.events import (
     TOOL_OUTPUT_PREVIEW_CHARS,
     JsonObject,
-    MessageAppended,
     MessageAttachment,
     MessageCompleted,
     MessageSender,
@@ -83,21 +75,12 @@ from openswe.transcript.turns import recorded_message_ids, run_turn, superseded_
 
 logger = logging.getLogger(__name__)
 
-PARAGRAPH_FLUSH_SECONDS = 0.4
-HARD_FLUSH_CHARS = 24_000
 TOOL_OUTPUT_CAP_BYTES = 256 * 1024
 ERROR_TEXT_CAP = 2_000
 _WRITER_BATCH = 32
-# Model calls a middleware makes for its own bookkeeping (routing classifier,
-# conversation offloading) are tagged out of the user-facing stream. Their
-# tokens must not become transcript fragments.
-_HIDDEN_TAGS = frozenset({"nostream", "langsmith:hidden"})
-
-_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-_LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])\s")
 _IMAGE_BLOCK_TYPES = frozenset({"image", "image_url"})
 
-# Namespace of the enclosing ``task`` tool calls; travels into nested subagents.
+# Namespace of the enclosing ``task`` tool calls, for a report from inside a subagent.
 _namespace: ContextVar[tuple[str, ...]] = ContextVar("transcript_namespace", default=())
 
 
@@ -116,88 +99,15 @@ def within_namespace(namespace: Sequence[str]) -> Iterator[None]:
         _namespace.reset(token)
 
 
-def paragraph_boundary(text: str) -> int:
-    """The largest safe markdown flush offset in ``text`` (0 when there is none).
-
-    Safe boundaries are the end of a blank line, the end of a closing code
-    fence, and the start of a list item; offsets inside an open fence never
-    qualify. The trailing partial line is never flushed, but a boundary in
-    front of it is one once it has declared itself a list item.
-    """
-    best = 0
-    offset = 0
-    in_fence = False
-    fence = ""
-    lines = text.split("\n")
-    for line in lines[:-1]:
-        length = len(line) + 1
-        match = _FENCE.match(line)
-        if in_fence:
-            if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence):
-                in_fence = False
-                fence = ""
-                best = offset + length
-        elif match:
-            in_fence = True
-            fence = match.group(1)
-        elif not line.strip():
-            best = offset + length
-        elif offset and _LIST_ITEM.match(line):
-            best = offset
-        offset += length
-    if offset and not in_fence and _LIST_ITEM.match(lines[-1]):
-        best = offset
-    return best
-
-
-@dataclass
-class ParagraphBuffer:
-    """Paragraph-mode delta batching for one stream of one message."""
-
-    last_flush: float
-    pending: str = ""
-
-    def add(self, fragment: str) -> None:
-        self.pending += fragment
-
-    def take(self, now: float, *, final: bool = False) -> str | None:
-        """The next fragment to emit, or ``None`` while it should keep buffering."""
-        if not self.pending:
-            return None
-        if final:
-            return self._cut(len(self.pending), now)
-        if len(self.pending) >= HARD_FLUSH_CHARS:
-            return self._cut(paragraph_boundary(self.pending) or len(self.pending), now)
-        if now - self.last_flush < PARAGRAPH_FLUSH_SECONDS:
-            return None
-        boundary = paragraph_boundary(self.pending)
-        if not boundary:
-            return None
-        return self._cut(boundary, now)
-
-    def _cut(self, index: int, now: float) -> str:
-        fragment, self.pending = self.pending[:index], self.pending[index:]
-        self.last_flush = now
-        return fragment
-
-
-@dataclass
-class MessageBuffers:
-    text: ParagraphBuffer
-    reasoning: ParagraphBuffer
-
-
 @dataclass
 class RunState:
-    """Everything one transcribed run needs, shared across its node tasks."""
+    """Everything one transcribed run needs, shared across its reports."""
 
     thread_id: str
     run_id: str
     turn_id: UUID
     enabled: bool
     seen_human_ids: set[str] = field(default_factory=set)
-    buffers: dict[str, MessageBuffers] = field(default_factory=dict)
-    message_alias: dict[str, str] = field(default_factory=dict)
     offloading_notice: JsonObject | None = None
     queue: asyncio.Queue[Command] | None = None
     writer: asyncio.Task[None] | None = None
@@ -227,9 +137,7 @@ class RunState:
                         type="tool.started",
                         turn_id=self.turn_id,
                         tool_call_id=tool_call_id,
-                        message_id=None
-                        if message_id is None
-                        else self.message_alias.get(message_id, message_id),
+                        message_id=message_id,
                         name=name,
                         input=_json_object(tool_call.get("args")),
                         namespace=namespace,
@@ -282,20 +190,15 @@ class RunState:
                 extra={"transcript_tool_call_id": tool_call_id},
             )
 
-    def complete_tool_result(
-        self, tool_call_id: str, namespace: list[str], result: ToolMessage | GraphCommand[Any]
-    ) -> None:
+    def complete_tool_result(self, namespace: list[str], result: ToolMessage) -> None:
         """Record a tool's result: its status, its text, and the images it returned."""
-        message = _result_message(result, tool_call_id)
-        if message is None:
-            self.complete_tool(tool_call_id, namespace, "completed", "", False)
-            return
-        attachments, pending = _image_attachments(message, tool_call_id, keep_remote=False)
+        tool_call_id = result.tool_call_id
+        attachments, pending = _image_attachments(result, tool_call_id, keep_remote=False)
         self.complete_tool(
             tool_call_id,
             namespace,
-            "error" if message.status == "error" else "completed",
-            *_tool_output(message.content),
+            "error" if result.status == "error" else "completed",
+            *_tool_output(result.content),
             attachments=attachments,
             pending=pending,
         )
@@ -369,8 +272,7 @@ def _lookup_state() -> RunState:
 
 
 def _reasoning_text(message: BaseMessage) -> str:
-    """Concatenated reasoning. Never stripped: a streaming chunk's leading space
-    is part of the delta."""
+    """Concatenated reasoning, from standard and Anthropic thinking blocks."""
     try:
         blocks = message.content_blocks
     except Exception:
@@ -548,190 +450,6 @@ def _tool_output(content: object) -> tuple[str, bool]:
     if len(encoded) <= TOOL_OUTPUT_CAP_BYTES:
         return text, False
     return encoded[:TOOL_OUTPUT_CAP_BYTES].decode("utf-8", "ignore"), True
-
-
-class _DeltaHandler(AsyncCallbackHandler):
-    """Feeds the streaming deltas of one model call into one message's buffers.
-
-    Chunk ids are deliberately ignored: a provider need not name its message
-    the same way in every chunk (the OpenAI Responses stream alternates between
-    the real ``resp_...`` id and LangChain's ``lc_run--<run_id>`` placeholder),
-    so keying the buffers on the chunk would split one reply across several
-    transcript messages. One id is minted per model call instead, and
-    ``message.completed`` reuses it.
-    """
-
-    run_inline = True
-
-    def __init__(self, state: RunState, namespace: list[str], message_id: str) -> None:
-        self._state = state
-        self._namespace = namespace
-        self.message_id = message_id
-        self._protocol: Literal["v1", "v2"] | None = None
-        self.streamed = False
-
-    async def on_llm_new_token(
-        self,
-        token: object,
-        *,
-        chunk: object = None,
-        run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: list[str] | None = None,
-        **kwargs: object,
-    ) -> None:
-        if self._skip("v1", tags):
-            return
-        message = getattr(chunk, "message", chunk)
-        if not isinstance(message, BaseMessage):
-            self._feed(token if isinstance(token, str) else "", "")
-            return
-        text = _message_text(message) or (token if isinstance(token, str) else "")
-        self._feed(text, _reasoning_text(message))
-
-    async def on_stream_event(
-        self,
-        event: Mapping[str, object],
-        *,
-        run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: list[str] | None = None,
-        **kwargs: object,
-    ) -> None:
-        if self._skip("v2", tags) or event.get("event") != "content-block-delta":
-            return
-        delta = event.get("delta")
-        if not isinstance(delta, Mapping):
-            return
-        text = delta.get("text")
-        reasoning = delta.get("reasoning")
-        self._feed(
-            text if isinstance(text, str) else "",
-            reasoning if isinstance(reasoning, str) else "",
-        )
-
-    def _skip(self, protocol: Literal["v1", "v2"], tags: list[str] | None) -> bool:
-        """Drop hidden model calls, and whichever streaming protocol did not win."""
-        if _HIDDEN_TAGS & set(tags or ()):
-            return True
-        if self._protocol is None:
-            self._protocol = protocol
-        return self._protocol != protocol
-
-    def _feed(self, text: str, reasoning: str) -> None:
-        if not text and not reasoning:
-            return
-        self.streamed = True
-        try:
-            buffers = _buffers(self._state, self.message_id)
-            if text:
-                buffers.text.add(text)
-            if reasoning:
-                buffers.reasoning.add(reasoning)
-            _flush_message(self._state, self.message_id, self._namespace)
-        except Exception:
-            logger.warning(
-                "Transcript delta capture failed",
-                exc_info=True,
-                extra={"transcript_message_id": self.message_id},
-            )
-
-
-class _NestedToolHandler(AsyncCallbackHandler):
-    """Records the tools a tool call runs itself, such as those code calls from ``eval``.
-
-    Those calls never pass through the tools node, so ``awrap_tool_call`` cannot
-    see them; their tool callbacks are the only place they surface. They are
-    recorded under the call that ran them, which the reader shows them inside.
-    """
-
-    run_inline = True
-
-    def __init__(self, state: RunState, namespace: list[str]) -> None:
-        self._state = state
-        self._namespace = namespace
-        self._calls: dict[UUID, str] = {}
-
-    async def on_tool_start(
-        self,
-        serialized: dict[str, object],
-        input_str: str,
-        *,
-        run_id: UUID,
-        inputs: dict[str, object] | None = None,
-        **kwargs: object,
-    ) -> None:
-        given = kwargs.get("tool_call_id")
-        tool_call_id = given if isinstance(given, str) and given else str(run_id)
-        name = serialized.get("name") if serialized else None
-        args = {k: v for k, v in (inputs or {}).items() if not isinstance(v, ToolRuntime)}
-        self._calls[run_id] = tool_call_id
-        self._state.start_tool(
-            ToolCall(name=name if isinstance(name, str) else "tool", args=args, id=tool_call_id),
-            tool_call_id,
-            None,
-            self._namespace,
-        )
-
-    async def on_tool_end(self, output: object, *, run_id: UUID, **kwargs: object) -> None:
-        tool_call_id = self._calls.pop(run_id, None)
-        if tool_call_id is None:
-            return
-        if isinstance(output, ToolMessage):
-            self._state.complete_tool_result(tool_call_id, self._namespace, output)
-            return
-        self._state.complete_tool(tool_call_id, self._namespace, "completed", *_tool_output(output))
-
-    async def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: object) -> None:
-        tool_call_id = self._calls.pop(run_id, None)
-        if tool_call_id is not None:
-            self._state.complete_tool(
-                tool_call_id,
-                self._namespace,
-                "error",
-                *_tool_output(f"{type(error).__name__}: {error}"),
-            )
-
-
-def _buffers(state: RunState, message_id: str) -> MessageBuffers:
-    buffers = state.buffers.get(message_id)
-    if buffers is None:
-        now = time.monotonic()
-        buffers = MessageBuffers(
-            text=ParagraphBuffer(last_flush=now), reasoning=ParagraphBuffer(last_flush=now)
-        )
-        state.buffers[message_id] = buffers
-    return buffers
-
-
-def _flush_message(
-    state: RunState, message_id: str, namespace: list[str], *, final: bool = False
-) -> None:
-    buffers = state.buffers.get(message_id)
-    if buffers is None:
-        return
-    now = time.monotonic()
-    text = buffers.text.take(now, final=final)
-    reasoning = buffers.reasoning.take(now, final=final)
-    if text is None and reasoning is None:
-        return
-    event = MessageAppended(
-        type="message.appended",
-        turn_id=state.turn_id,
-        message_id=message_id,
-        namespace=list(namespace),
-        text=text,
-        reasoning=reasoning,
-    )
-    state.enqueue(
-        Command(
-            command_id=str(uuid.uuid7()),
-            event=event,
-            actor_kind="agent",
-            run_id=state.run_id,
-            turn_id=state.turn_id,
-        )
-    )
 
 
 async def _writer_loop(state: RunState) -> None:
@@ -1044,13 +762,9 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         except Exception:
             logger.warning("Transcript pre-model bookkeeping failed", exc_info=True)
 
-        stream_message_id = str(uuid.uuid7())
-        sniffer = _DeltaHandler(state, namespace, stream_message_id)
-        manager = _attach(sniffer)
         try:
             response = await handler(request)
         except BaseException as exc:
-            _detach(manager, sniffer)
             # A subagent's model error surfaces to the parent as a failed
             # ``task`` tool call, which keeps running; only the root settles
             # the turn. A cancellation never reaches ``aafter_agent`` at all,
@@ -1061,9 +775,8 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                 else:
                     await self._fail_turn(state, exc)
             raise
-        _detach(manager, sniffer)
         try:
-            self._complete_messages(state, namespace, response, sniffer)
+            self._complete_messages(state, namespace, response)
         except Exception:
             logger.warning("Transcript message completion failed", exc_info=True)
         return response
@@ -1138,28 +851,15 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         )
 
     def _complete_messages(
-        self,
-        state: RunState,
-        namespace: list[str],
-        response: ModelResponse,
-        sniffer: _DeltaHandler,
+        self, state: RunState, namespace: list[str], response: ModelResponse
     ) -> None:
-        """Replace the streamed accumulation with the model's canonical output.
-
-        The reply keeps the id its fragments used, and the graph's own id is
-        aliased to it so a tool call it issued still points at the same row.
-        """
-        ai_messages = [message for message in response.result if isinstance(message, AIMessage)]
-        streamed_id = sniffer.message_id if sniffer.streamed else None
-        for index, message in enumerate(ai_messages):
-            final_id = message.id if isinstance(message.id, str) and message.id else None
-            message_id = streamed_id if index == 0 and streamed_id else final_id
-            if message_id is None:
+        """Record each reply the model gave, under its own id."""
+        for message in response.result:
+            if not isinstance(message, AIMessage):
                 continue
-            if final_id is not None and final_id != message_id:
-                state.message_alias[final_id] = message_id
-            _flush_message(state, message_id, namespace, final=True)
-            state.buffers.pop(message_id, None)
+            message_id = message.id
+            if not isinstance(message_id, str) or not message_id:
+                continue
             state.enqueue(
                 Command(
                     command_id=f"message:{message_id}:completed",
@@ -1179,54 +879,6 @@ class TranscriptMiddleware(OpenSWEMiddleware):
                     turn_id=state.turn_id,
                 )
             )
-        if streamed_id is not None and not ai_messages:
-            _flush_message(state, streamed_id, namespace, final=True)
-        state.buffers.pop(sniffer.message_id, None)
-
-    async def awrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | GraphCommand[Any]]],
-    ) -> ToolMessage | GraphCommand[Any]:
-        state = _lookup_state()
-        tool_call = request.tool_call
-        tool_call_id = tool_call.get("id")
-        if not state.enabled or not isinstance(tool_call_id, str) or not tool_call_id:
-            return await handler(request)
-
-        namespace = current_namespace()
-        messages = request.state.get("messages") if isinstance(request.state, Mapping) else None
-        state.start_tool(
-            tool_call, tool_call_id, _issuing_message_id(messages, tool_call_id), namespace
-        )
-        token = _namespace.set((*_namespace.get(), tool_call_id))
-        try:
-            result = await handler(
-                _observing_nested_tools(request, state, [*namespace, tool_call_id])
-            )
-        except asyncio.CancelledError:
-            # A stopped tool never finished, and it did not fail either: leaving
-            # it open is what keeps the reader showing the work the run was in
-            # the middle of, the way the turn's own interruption describes it.
-            # Cancelling a run that is awaiting a tool never reaches
-            # ``aafter_agent``, so the root run settles its turn and releases
-            # its writer here. A nested cancellation belongs to the ``task``
-            # tool call above it, whose parent run keeps going.
-            if not namespace:
-                await self._interrupt_turn(state)
-            raise
-        except Exception as exc:
-            state.complete_tool(
-                tool_call_id,
-                namespace,
-                "error",
-                *_tool_output(f"{type(exc).__name__}: {exc}"),
-            )
-            raise
-        finally:
-            _namespace.reset(token)
-        state.complete_tool_result(tool_call_id, namespace, result)
-        return result
 
     async def atool_started(self, tool_call: ToolCall, message_id: str | None) -> None:
         """Record a tool call that another process runs, such as MDA's ``task``, under the
@@ -1240,7 +892,7 @@ class TranscriptMiddleware(OpenSWEMiddleware):
         """Record how a tool call ``atool_started`` recorded ended."""
         state = _lookup_state()
         if state.enabled:
-            state.complete_tool_result(result.tool_call_id, current_namespace(), result)
+            state.complete_tool_result(current_namespace(), result)
 
     async def _interrupt_turn(self, state: RunState) -> None:
         """End a cancelled turn. The cancel endpoint writes the same command id."""
@@ -1366,19 +1018,6 @@ def _turn_requested(
     )
 
 
-def _issuing_message_id(candidates: object, tool_call_id: str) -> str | None:
-    """The reply among ``candidates`` that made the tool call ``tool_call_id``."""
-    if not isinstance(candidates, Sequence):
-        return None
-    for message in reversed(candidates):
-        if not isinstance(message, AIMessage):
-            continue
-        for call in message.tool_calls or ():
-            if call.get("id") == tool_call_id:
-                return message.id if isinstance(message.id, str) else None
-    return None
-
-
 def _json_object(value: object) -> JsonObject:
     """``value`` as a JSON object, dropping keys pydantic could not encode."""
     if not isinstance(value, Mapping):
@@ -1392,74 +1031,3 @@ def _json_object(value: object) -> JsonObject:
         except PydanticSerializationError:
             logger.debug("Dropping unserializable transcript payload key", exc_info=True)
     return out
-
-
-def _result_message(
-    result: ToolMessage | GraphCommand[Any], tool_call_id: str
-) -> ToolMessage | None:
-    """The tool's own message, whether it returned one or a command carrying it."""
-    if isinstance(result, ToolMessage):
-        return result
-    update = result.update
-    updates = update.get("messages") if isinstance(update, Mapping) else None
-    return next(
-        (
-            item
-            for item in (updates if isinstance(updates, Sequence) else ())
-            if isinstance(item, ToolMessage) and item.tool_call_id == tool_call_id
-        ),
-        None,
-    )
-
-
-def _observing_nested_tools(
-    request: ToolCallRequest, state: RunState, namespace: list[str]
-) -> ToolCallRequest:
-    """``request`` with a runtime whose callbacks record the tools the call runs itself.
-
-    The handler is not inherited, so a subagent the call runs keeps recording its
-    own tool calls through this middleware rather than here.
-    """
-    runtime: ToolRuntime | None = request.runtime
-    if runtime is None:
-        return request
-    config = runtime.config
-    callbacks = config.get("callbacks")
-    if not isinstance(callbacks, (CallbackManager, AsyncCallbackManager)):
-        return request
-    observed = callbacks.copy()
-    observed.add_handler(_NestedToolHandler(state, namespace), inherit=False)
-    return request.override(runtime=replace(runtime, config={**config, "callbacks": observed}))
-
-
-def _attach(handler: AsyncCallbackHandler) -> CallbackManager | AsyncCallbackManager | None:
-    """Add ``handler`` to the node's callback manager so it sees model deltas.
-
-    The model node invokes with no explicit config, so the model inherits the
-    contextvar ``RunnableConfig``; its ``callbacks`` manager is where a handler
-    has to live to receive the child LLM run's token callbacks.
-    """
-    try:
-        callbacks = get_config().get("callbacks")
-    except RuntimeError:
-        return None
-    if not isinstance(callbacks, (CallbackManager, AsyncCallbackManager)):
-        logger.debug("No callback manager on the run config; delta capture disabled")
-        return None
-    try:
-        callbacks.add_handler(handler, inherit=True)
-    except Exception:
-        logger.warning("Could not attach transcript delta handler", exc_info=True)
-        return None
-    return callbacks
-
-
-def _detach(
-    manager: CallbackManager | AsyncCallbackManager | None, handler: AsyncCallbackHandler
-) -> None:
-    if manager is None:
-        return
-    try:
-        manager.remove_handler(handler)
-    except Exception:
-        logger.warning("Could not detach transcript delta handler", exc_info=True)

@@ -254,17 +254,6 @@ class PullRequest(Base):
         return await cls.get(owner, repo, number) or cls(owner=owner, repo=repo, number=number)
 
     @classmethod
-    async def for_repository(cls, owner: str, repo: str) -> list[Self]:
-        async with postgres.session() as session:
-            rows = await session.scalars(
-                cls._with_links(select(cls))
-                .join(cls.repository)
-                .where(Repository.key == f"{owner}/{repo}".lower())
-                .order_by(cls.number)
-            )
-            return list(rows)
-
-    @classmethod
     async def preview_candidates(cls, after: UUID | None) -> list[Self]:
         """A bounded recovery page of private, open PRs with a review thread."""
         query = (

@@ -73,13 +73,6 @@ class AskRequesterGuardMiddleware(OpenSWEMiddleware):
                 picked |= {head: heads[head] for head in named}
         return [pull for group in picked.values() for pull in group] or pulls
 
-    def wrap_tool_call(
-        self,
-        request: ToolCallRequest,
-        handler: Callable[[ToolCallRequest], ToolMessage | Command],
-    ) -> ToolMessage | Command:
-        raise NotImplementedError
-
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,

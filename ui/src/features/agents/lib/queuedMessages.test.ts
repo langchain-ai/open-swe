@@ -1,14 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import type {
-  Message,
-  PendingThreadMessage,
-  QueuedThreadMessage,
-} from "@/features/agents/lib/types"
+import type { PendingThreadMessage } from "@/features/agents/lib/types"
 import {
   queueEntryToTurn,
   visiblePendingMessages,
-  visibleQueuedMessages,
 } from "@/features/agents/lib/queuedMessages"
 
 describe("queueEntryToTurn", () => {
@@ -43,41 +38,6 @@ describe("queueEntryToTurn", () => {
       chunks: [{ kind: "text", text: content }],
       replies,
     })
-  })
-})
-
-describe("visibleQueuedMessages", () => {
-  it("reconciles a queued follow-up by exact message id", () => {
-    const queued: QueuedThreadMessage = {
-      id: "queued-1",
-      content: "same text",
-      createdAt: 2_000,
-    }
-    const streamed: Message = {
-      id: "queued-1",
-      author: "user",
-      timestamp: new Date(500).toISOString(),
-      chunks: [{ kind: "text", text: "different server envelope" }],
-    }
-
-    expect(visibleQueuedMessages([queued], [streamed])).toEqual([])
-  })
-
-  it("retains timestamp reconciliation for legacy queued records", () => {
-    const queued: QueuedThreadMessage = {
-      id: "queued-legacy-1",
-      content: "follow up",
-      createdAt: 2_000,
-    }
-    const streamed: Message = {
-      id: "message-1",
-      author: "user",
-      timestamp: new Date(3_000).toISOString(),
-      timestampIsFallback: true,
-      chunks: [{ kind: "text", text: "follow up" }],
-    }
-
-    expect(visibleQueuedMessages([queued], [streamed])).toEqual([])
   })
 })
 

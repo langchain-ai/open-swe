@@ -57,13 +57,6 @@ export const projectsApi = {
       `${path(projectId)}/members/${encodeURIComponent(userId)}`,
       { method: "DELETE" }
     ),
-  fileThread: (threadId: string, projectId: string | null) =>
-    agentsRequest<void>(
-      projectId
-        ? `${path(projectId)}/threads/${encodeURIComponent(threadId)}`
-        : `/projects/threads/${encodeURIComponent(threadId)}`,
-      { method: projectId ? "PUT" : "DELETE" }
-    ),
 }
 
 export const projectKeys = { all: ["projects"] as const }
@@ -193,14 +186,4 @@ export function useRemoveProjectMember() {
           ),
     "Couldn't remove from project"
   )
-}
-
-export function useFileThreadInProject() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (vars: { threadId: string; projectId: string | null }) =>
-      projectsApi.fileThread(vars.threadId, vars.projectId),
-    meta: { errorTitle: "Couldn't move thread" },
-    onSettled: () => invalidateAgentThreadLists(queryClient),
-  })
 }

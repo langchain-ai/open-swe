@@ -98,7 +98,6 @@ async def test_reviewer_limits_sandbox_to_reviewed_repository() -> None:
             new_callable=AsyncMock,
         ),
         patch("openswe.reviewer.fetch_agents_md", new_callable=AsyncMock, return_value=None),
-        patch("openswe.reviewer.make_model", return_value=MagicMock()),
     ):
         prepare = await _planned_prepare(config)
         await prepare.abefore_agent({"messages": []}, None)
@@ -129,7 +128,6 @@ async def test_reviewer_raises_when_app_installation_token_unavailable() -> None
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ) as mock_sandbox,
-        patch("openswe.reviewer.make_model", return_value=MagicMock()),
     ):
         prepare = await _planned_prepare(config)
         with pytest.raises(RuntimeError, match="installation token unavailable"):
@@ -253,7 +251,6 @@ async def test_reviewer_continues_when_thread_fetch_raises() -> None:
             new_callable=AsyncMock,
             side_effect=RuntimeError("network down"),
         ),
-        patch("openswe.reviewer.make_model", return_value=MagicMock()),
     ):
         prepare = await _planned_prepare(config)
         updates = await _run_prepare(prepare)
@@ -323,7 +320,6 @@ async def test_reviewer_populates_diff_line_set_from_github_api() -> None:
             new_callable=AsyncMock,
             return_value=pr_diff,
         ) as mock_fetch_diff,
-        patch("openswe.reviewer.make_model", return_value=MagicMock()),
     ):
         prepare = await _planned_prepare(config)
         updates = await _run_prepare(prepare)

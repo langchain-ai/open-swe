@@ -111,10 +111,3 @@ export function consumeAuthRedirect(candidate?: unknown): string {
   clearRememberedAuthRedirect()
   return path
 }
-
-export function authRedirectUrl(candidate?: unknown): string {
-  const path = sanitizeAuthRedirect(candidate)
-  const origin = browserOrigin()
-  if (!origin) return path
-  return new URL(path, origin).toString()
-}

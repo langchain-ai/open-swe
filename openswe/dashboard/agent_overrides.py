@@ -1,4 +1,4 @@
-"""Profile lookup + override helpers consumed by ``openswe.server.get_agent``."""
+"""Profile lookup + override helpers for starting an agent run (``openswe.server``)."""
 
 import logging
 from typing import Any
@@ -42,7 +42,7 @@ async def get_profile_default_repo(login: str | None) -> dict[str, str] | None:
 async def load_profile(login: str) -> dict[str, Any] | None:
     """The user's profile record, or ``None`` when it is missing or unreadable.
 
-    Fail-soft on purpose: every caller — ``openswe.server.get_agent``,
+    Fail-soft on purpose: every caller — the agent run's catalog in ``openswe.server``,
     :func:`get_profile_default_repo`, :func:`resolve_agent_model_id` — is on the
     path that starts an agent run, and a store blip must cost the run its
     per-user overrides, not the run itself. Dashboard reads that should surface

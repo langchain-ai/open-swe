@@ -22,7 +22,7 @@ from uuid import UUID
 
 from pydantic import AliasChoices, BaseModel, Field, JsonValue, field_validator
 
-from runtime_api.catalog import InboxSpec, ModelSpec, TaskContext
+from runtime_api.catalog import InboxSpec, ModelSpec
 from runtime_api.endpoint import LOOP_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
 
@@ -271,13 +271,6 @@ class ModelFailed(Report):
     error_type: str
 
 
-class Routed(RunRequest):
-    """A run's request with its human messages, for the deprecated ``ROUTE_MODEL``."""
-
-    # The run's human messages, the latest of which the route is for.
-    humans: list[dict[str, JsonValue]] = []
-
-
 class ScoutPlanEnd(RunRequest):
     # What the people who asked for the pull request said, as the scout summarized it.
     human_input_summary: str = ""
@@ -303,23 +296,6 @@ class InboxReceipt(RunRequest):
 
 class Done(BaseModel):
     """The backend did what it was asked; there is nothing more to say."""
-
-
-class Route(BaseModel):
-    """Deprecated, with ``ROUTE_MODEL``."""
-
-    # One of the routes ``RoutingRules.route_model_ids`` names, or ``default``.
-    route: str
-    # False when the classifier could not decide; the run uses the route for this
-    # call only, so a later turn classifies again instead of keeping a fallback.
-    persist: bool = True
-
-
-class ChosenModel(RunRequest):
-    """A model the run calls by id, such as one a person asked for, at an effort."""
-
-    model_id: str
-    effort: str | None = None
 
 
 class ReplyOnBehalf(RunCall):
@@ -349,18 +325,6 @@ BIND_SANDBOX = Endpoint(
 SANDBOX_UNREACHABLE = Endpoint("sandbox_unreachable", SandboxGone, Done, seconds=LOOP_CALL_SECONDS)
 # For the dashboard to show the thread's browser.
 BROWSER = Endpoint("browser", BrowserReport, Done, seconds=LOOP_CALL_SECONDS)
-# Deprecated: the runtime classifies a route and reads the task's context from its
-# catalog itself. Served until every MDA deployment does; a deployment from before
-# asks them, and deploys apart from the backend (``deploy_mda.yml``).
-ROUTE_MODEL = Endpoint(
-    "route_model", Routed, Route, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
-)
-TASK_CONTEXT = Endpoint(
-    "task_context", RunRequest, TaskContext, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
-)
-MODEL_CHOICE = Endpoint(
-    "model_choice", ChosenModel, ModelSpec, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
-)
 # Reads the person's current token, refreshing it when it is near expiry: safe to send again.
 GATEWAY_CREDENTIAL = Endpoint(
     "gateway_credential",

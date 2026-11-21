@@ -1,7 +1,4 @@
-import {
-  ArrowLeftIcon,
-  CaretRightIcon,
-} from "@langchain/macaw-components/icons"
+import { ArrowLeftIcon } from "@langchain/macaw-components/icons"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Card } from "@langchain/macaw-components/Card"
 import { Skeleton } from "@/components/Skeleton"
@@ -261,43 +258,6 @@ export function SettingsRowsSkeleton({
         </div>
       ))}
     </div>
-  )
-}
-
-/** A row that navigates to another settings page. */
-export function SettingsNavRow({
-  to,
-  params,
-  label,
-  description,
-}: {
-  to: string
-  params?: Record<string, string>
-  label: string
-  description?: string
-}) {
-  return (
-    <Link
-      to={to}
-      params={params}
-      className="flex items-center justify-between gap-space-6 px-space-4 py-space-3 transition-colors hover:bg-surface-level-2-hover"
-    >
-      <div className="flex flex-col gap-space-1">
-        <Text as="span" variant="md" weight="medium">
-          {label}
-        </Text>
-        {description && (
-          <Text as="span" variant="sm" color="secondary">
-            {description}
-          </Text>
-        )}
-      </div>
-      <CaretRightIcon
-        className="shrink-0 text-icon-secondary"
-        size={14}
-        weight="regular"
-      />
-    </Link>
   )
 }
 

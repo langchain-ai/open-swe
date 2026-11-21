@@ -23,12 +23,6 @@ class SlackLink:
             params["thread_ts"] = self.thread_ts
         return f"{dashboard_api_base_url()}/dashboard/api/slack/open?{urlencode(params)}"
 
-    @property
-    def channel_url(self) -> str:
-        if not self.channel_id.strip() or not self.team_id.strip():
-            return self.url
-        return f"https://slack.com/app_redirect?{urlencode({'channel': self.channel_id.strip(), 'team': self.team_id.strip()})}"
-
     def in_workspace(self, workspace_url: str) -> str:
         try:
             parsed = urlsplit(workspace_url)

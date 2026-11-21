@@ -40,17 +40,6 @@ def test_typed_getters(monkeypatch: pytest.MonkeyPatch) -> None:
         ENV.DEBUG_TRACEMALLOC_FRAMES.get_int(25)
 
 
-def test_deprecated_in_use_lists_aliases_and_obsolete_names() -> None:
-    env = {"LANGCHAIN_PROJECT": "k", "LANGSMITH_ENDPOINT": "e"}
-
-    found = dict(ENV.deprecated_in_use(env))
-
-    assert found["LANGCHAIN_PROJECT"] == "use LANGSMITH_PROJECT instead."
-    assert "LANGSMITH_ENDPOINT" not in found
-    # A legacy name on its own, with no current key configured at all, is reported.
-    assert "LANGCHAIN_API_KEY" in dict(ENV.deprecated_in_use({"LANGCHAIN_API_KEY": "k"}))
-
-
 def test_undeclared_variables_are_errors() -> None:
     with pytest.raises(AttributeError):
         _ = ENV.NOT_A_DECLARED_VARIABLE

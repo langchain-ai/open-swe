@@ -617,12 +617,3 @@ export function selectSelectedRightPanelSurface(
     null
   )
 }
-
-export function selectActiveRightPanelSurface(
-  byThreadKey: Record<string, ThreadRightPanelState>,
-  ref: PanelThreadRef | null | undefined
-): RightPanelSurface | null {
-  const state = selectThreadRightPanelState(byThreadKey, ref)
-  if (!state.isOpen) return null
-  return selectSelectedRightPanelSurface(byThreadKey, ref)
-}

@@ -76,10 +76,7 @@ import {
   useRenameAgentThread,
   useSetAgentThreadViewed,
 } from "@/features/agents/lib/queries"
-import {
-  noteReviewOpenedFromSidebar,
-  reviewPageRoute,
-} from "@/features/reviews/lib/reviewEntry"
+import { reviewPageRoute } from "@/features/reviews/lib/reviewEntry"
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 
@@ -686,10 +683,7 @@ export function SidebarThreadRow({
       <Link
         ref={activeRowRef}
         {...reviewPageRoute(review)}
-        onClick={(event) => {
-          handleNavigate(event)
-          if (!event.defaultPrevented) noteReviewOpenedFromSidebar(review)
-        }}
+        onClick={handleNavigate}
         onKeyDown={openContextMenuFromKeyboard}
         {...rowProps}
         draggable={draggable}
@@ -1150,10 +1144,7 @@ function ThreadHoverCard({
         (reference ? (
           <Link
             {...reviewPageRoute(reference)}
-            onClick={(event) => {
-              noteReviewOpenedFromSidebar(reference)
-              event.stopPropagation()
-            }}
+            onClick={(event) => event.stopPropagation()}
             className={prClassName}
           >
             {prContent}

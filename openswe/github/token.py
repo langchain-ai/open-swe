@@ -1,6 +1,5 @@
 """GitHub OAuth and LangSmith authentication utilities."""
 
-import asyncio
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -18,7 +17,6 @@ from openswe.github.thread_token import (
 from openswe.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
-_legacy_auth_impact_tasks: set[asyncio.Task[None]] = set()
 
 client = get_client()
 

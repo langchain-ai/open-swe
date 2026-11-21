@@ -32,10 +32,6 @@ from openswe.webhooks.common import (
 logger = logging.getLogger(__name__)
 
 CHANNEL: Final = "slack"
-#: The job that once reported forwarded messages the channel never asked about; nothing is
-#: remembered for it any more, so its schedule is cancelled.
-RETIRED_SWEEP_JOB: Final = "mda_slack_lost_requests"
-
 #: The Slack message subtypes Trigger Server starts runs for: plain messages and uploads.
 #: It ignores every other (``thread_broadcast``, edits, joins).
 FORWARDED_SUBTYPES: Final = frozenset({"", "file_share"})

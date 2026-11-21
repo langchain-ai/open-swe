@@ -1,6 +1,5 @@
-"""Transcript middleware: paragraph batching and the emitted event sequence."""
+"""Transcript middleware: the event sequence a run's reports emit."""
 
-import asyncio
 import base64
 import itertools
 from collections.abc import Sequence
@@ -10,12 +9,8 @@ from uuid import UUID, uuid7
 
 import pytest
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
-from langchain_core.callbacks.manager import AsyncCallbackManager
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
-from langchain_core.outputs import ChatGenerationChunk
-from langchain_core.tools import tool
-from langgraph.prebuilt.tool_node import ToolCallRequest, ToolRuntime
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from openswe.input_messages import build_input_messages
 from openswe.middleware import transcript as mw
@@ -97,18 +92,6 @@ def _model_request(messages: list[Any], state: dict[str, Any] | None = None) -> 
     )
 
 
-def _tool_request(tool_call_id: str, state: dict[str, Any]) -> ToolCallRequest:
-    return ToolCallRequest(
-        tool_call={"name": "read_file", "args": {"path": "a.py"}, "id": tool_call_id},
-        tool=None,
-        state=state,
-        runtime=None,
-    )
-
-
-# --- paragraph splitter ----------------------------------------------------
-
-
 # --- hook sequence ---------------------------------------------------------
 
 
@@ -132,14 +115,8 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
         return ModelResponse(result=[ai])
 
     await middleware.awrap_model_call(_model_request([human]), model_handler)
-
-    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
-        assert mw.current_namespace() == ["call-1"]
-        return ToolMessage(content="file body", tool_call_id="call-1")
-
-    await middleware.awrap_tool_call(
-        _tool_request("call-1", {"messages": [human, ai]}), tool_handler
-    )
+    await middleware.atool_started(ai.tool_calls[0], ai.id)
+    await middleware.atool_finished(ToolMessage(content="file body", tool_call_id="call-1"))
     await middleware.aafter_agent({"messages": [human, ai]}, None)
 
     assert engine.types == [
@@ -164,52 +141,6 @@ async def test_hook_sequence_for_a_transcribed_turn(monkeypatch: pytest.MonkeyPa
     assert completed.event.has_output is True
     assert completed.event.output_truncated is False
     assert completed.tool_output == "file body"
-
-
-async def test_tools_called_from_code_are_recorded_under_the_eval_call(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Code mode runs tools with `arun` and the eval call's callbacks, bypassing the tools node."""
-    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
-    middleware = mw.TranscriptMiddleware()
-    await middleware.abefore_agent({"messages": []}, None)
-
-    @tool
-    def read_file(path: str) -> str:
-        """Read a file."""
-        return f"body of {path}"
-
-    async def eval_handler(request: ToolCallRequest) -> ToolMessage:
-        config = request.runtime.config
-        await read_file.arun({"path": "a.py"}, callbacks=config["callbacks"], config=config)
-        return ToolMessage(content="done", tool_call_id="eval-1")
-
-    request = ToolCallRequest(
-        tool_call={"name": "eval", "args": {"code": "await tools.readFile()"}, "id": "eval-1"},
-        tool=None,
-        state={"messages": []},
-        runtime=ToolRuntime(
-            state={},
-            context=None,
-            config={"callbacks": AsyncCallbackManager(handlers=[])},
-            stream_writer=lambda _: None,
-            tool_call_id="eval-1",
-            store=None,
-        ),
-    )
-    await middleware.awrap_tool_call(request, eval_handler)
-    await middleware.aafter_agent({"messages": []}, None)
-
-    tools = [c.event for c in engine.commands if c.event.type.startswith("tool.")]
-    assert [(e.type, e.namespace) for e in tools] == [
-        ("tool.started", []),
-        ("tool.started", ["eval-1"]),
-        ("tool.completed", ["eval-1"]),
-        ("tool.completed", []),
-    ]
-    assert tools[1].name == "read_file"
-    assert tools[1].input == {"path": "a.py"}
-    assert tools[2].output_preview == "body of a.py"
 
 
 async def test_only_mid_run_human_messages_are_recorded_once(
@@ -559,91 +490,6 @@ async def test_model_failure_records_turn_failed(monkeypatch: pytest.MonkeyPatch
     assert "provider exploded" in failed.error
 
 
-async def test_streamed_fragments_keep_one_message_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Chunk ids need not match the final message id (OpenAI Responses).
-
-    The fragments and the canonical text have to land on the same row, and a
-    tool call issued by that message has to point at the id they used.
-    """
-    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
-    manager = AsyncCallbackManager(handlers=[])
-    monkeypatch.setattr(
-        mw,
-        "get_config",
-        lambda: {
-            "configurable": {"thread_id": THREAD_ID, "run_id": RUN_ID},
-            "callbacks": manager,
-        },
-    )
-    middleware = mw.TranscriptMiddleware()
-    await middleware.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
-
-    ai = AIMessage(
-        content="Hello there",
-        id="resp_final",
-        tool_calls=[{"name": "read_file", "args": {}, "id": "call-1"}],
-    )
-
-    async def model_handler(request: ModelRequest) -> ModelResponse:
-        sniffer = manager.handlers[-1]
-        for token in ("Hello", " ", "there", "\n\n"):
-            await sniffer.on_llm_new_token(
-                token,
-                chunk=ChatGenerationChunk(message=AIMessageChunk(content=token, id="lc_run--abc")),
-                run_id=uuid7(),
-            )
-        return ModelResponse(result=[ai])
-
-    await middleware.awrap_model_call(_model_request([]), model_handler)
-
-    async def tool_handler(request: ToolCallRequest) -> ToolMessage:
-        return ToolMessage(content="ok", tool_call_id="call-1")
-
-    await middleware.awrap_tool_call(_tool_request("call-1", {"messages": [ai]}), tool_handler)
-    await middleware.aafter_agent({"messages": []}, None)
-
-    message_events = [
-        command
-        for command in engine.commands
-        if command.event.type in {"message.appended", "message.completed"}
-    ]
-    used_ids = {command.event.message_id for command in message_events}
-    assert len(used_ids) == 1
-    assert used_ids != {"resp_final"}
-    assert message_events[-1].event.type == "message.completed"
-    assert message_events[-1].event.text == "Hello there"
-    assert "".join(command.event.text or "" for command in message_events[:-1]) == "Hello there\n\n"
-    tool_started = next(
-        command for command in engine.commands if command.event.type == "tool.started"
-    )
-    assert tool_started.event.message_id == next(iter(used_ids))
-
-
-async def test_a_cancelled_subagent_tool_leaves_the_parent_running(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    engine = _install(monkeypatch, transcribed=True, turn_id=uuid7())
-    parent = mw.TranscriptMiddleware()
-    subagent = mw.TranscriptMiddleware()
-    await parent.abefore_agent({"messages": [HumanMessage(content="hi", id="h")]}, None)
-
-    async def cancelled_tool(request: ToolCallRequest) -> ToolMessage:
-        raise asyncio.CancelledError
-
-    async def task_tool(request: ToolCallRequest) -> ToolMessage:
-        with pytest.raises(asyncio.CancelledError):
-            await subagent.awrap_tool_call(
-                _tool_request("inner-1", {"messages": []}), cancelled_tool
-            )
-        return ToolMessage(content="recovered", tool_call_id="task-1")
-
-    await parent.awrap_tool_call(_tool_request("task-1", {"messages": []}), task_tool)
-    await parent.aafter_agent({"messages": []}, None)
-
-    assert "turn.interrupted" not in engine.types
-    assert engine.types[-1] == "turn.completed"
-
-
 async def test_a_tool_results_image_is_stored_beside_its_event(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -653,17 +499,17 @@ async def test_a_tool_results_image_is_stored_beside_its_event(
     png = b"\x89PNG\r\n\x1a\n"
     encoded = base64.b64encode(png).decode()
 
-    async def screenshot(request: ToolCallRequest) -> ToolMessage:
-        # The block MDA's browser `screenshot` tool returns.
-        return ToolMessage(
+    await middleware.atool_started({"name": "screenshot", "args": {}, "id": "shot-1"}, "ai-1")
+    # The block MDA's browser `screenshot` tool returns.
+    await middleware.atool_finished(
+        ToolMessage(
             content=[
                 {"type": "text", "text": "Screenshot of the current page."},
                 {"type": "image", "url": f"data:image/png;base64,{encoded}"},
             ],
             tool_call_id="shot-1",
         )
-
-    await middleware.awrap_tool_call(_tool_request("shot-1", {"messages": []}), screenshot)
+    )
     await middleware.aafter_agent({"messages": []}, None)
 
     completed = next(c for c in engine.commands if isinstance(c.event, ToolCompleted))

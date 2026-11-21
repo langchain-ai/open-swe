@@ -2,14 +2,12 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx2
 import pytest
 
 from openswe.github import pull_request_dashboard_routes, pull_requests
 from openswe.github.pull_requests import PullRequest, PullRequestEvent
 from openswe.github.repositories import Repository
 from openswe.webhooks import common
-from scripts import sync_pull_request_descriptions
 from tests.github_channel import deliver_github_event
 
 pytestmark = pytest.mark.usefixtures("registry_db")
@@ -280,43 +278,3 @@ async def test_webhooks_sync_descriptions_without_auto_review(
     cleared = event.to_pull_request()
     assert cleared is not None
     assert (await cleared.save()).body == ""
-
-
-async def test_description_backfill_preserves_lifecycle_and_concurrent_edits(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    await PullRequest(owner="lc", repo="repo", number=7, state="merged").save()
-    await PullRequest(owner="lc", repo="repo", number=8).save()
-    monkeypatch.setattr(
-        sync_pull_request_descriptions,
-        "get_github_app_installation_id_for_repo",
-        AsyncMock(return_value=123),
-    )
-    monkeypatch.setattr(
-        sync_pull_request_descriptions,
-        "get_github_app_installation_token",
-        AsyncMock(return_value="token"),
-    )
-    monkeypatch.setattr(sync_pull_request_descriptions.postgres, "close", AsyncMock())
-
-    async def github_response(client: object, method: str, url: str) -> httpx2.Response:
-        number = int(url.rsplit("/", 1)[-1])
-        if number == 8:
-            await PullRequest(owner="lc", repo="repo", number=8, body="Webhook edit").save()
-        return httpx2.Response(
-            200,
-            json={"number": number, "title": "Searchable widgets", "body": "Render widgets"},
-            request=httpx2.Request(method, url),
-        )
-
-    monkeypatch.setattr(sync_pull_request_descriptions, "github_request", github_response)
-    assert await sync_pull_request_descriptions.sync() == 0
-    saved = await PullRequest.get("lc", "repo", 7)
-    assert saved is not None
-    assert (saved.title, saved.body, saved.state) == (
-        "Searchable widgets",
-        "Render widgets",
-        "merged",
-    )
-    newer = await PullRequest.get("lc", "repo", 8)
-    assert newer is not None and newer.body == "Webhook edit"

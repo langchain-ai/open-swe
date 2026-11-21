@@ -187,17 +187,3 @@ export function isTypingSafeShortcut(shortcut: string): boolean {
   const combo = parseCombo(shortcut)
   return combo.mod || combo.meta || combo.ctrl || combo.alt
 }
-
-export function shouldIgnoreHotkey(
-  event: KeyboardEvent,
-  enableInFormFields = false,
-  ignoreRepeat = true
-): boolean {
-  return (
-    event.defaultPrevented ||
-    event.isComposing ||
-    (ignoreRepeat && event.repeat) ||
-    isHotkeySuppressed(event.target) ||
-    (!enableInFormFields && isTypingContext(event.target))
-  )
-}

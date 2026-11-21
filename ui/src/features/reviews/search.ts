@@ -25,7 +25,7 @@ export interface ReviewsSearch extends ReviewQueueSearch {
   pr?: string
   /** Files expanded in the open pull request's preview. */
   files?: string[]
-  /** The preview's scroll position, as `formatScrollAnchor` writes it. */
+  /** The preview's scroll position, as `offset@path`. */
   at?: string
 }
 

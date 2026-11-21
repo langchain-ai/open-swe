@@ -1,17 +1,14 @@
-"""Stop the run at calls to tools the Responses client runs itself.
+"""Tools the Responses client runs itself.
 
-A call gets a placeholder result, and the run ends before the next model call.
-The client's real result arrives with the next run under the placeholder's
-message id, replacing it in place.
+A call gets a placeholder result, and the MDA run ends before the next model
+call (``rt/loop.py``). The client's real result arrives with the next run under
+the placeholder's message id, replacing it in place.
 """
 
 from collections.abc import Sequence
-from typing import Any
 
-from langchain.agents.middleware.types import AgentState, hook_config
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.runtime import Runtime
 
 from openswe.client_tools import PENDING_ARTIFACT_KEY, ClientToolSpec
 from openswe.middleware.trace import OpenSWEMiddleware
@@ -51,12 +48,3 @@ class ClientToolsMiddleware(OpenSWEMiddleware):
             id=ClientToolSpec.result_message_id(call_id),
             artifact={PENDING_ARTIFACT_KEY: True},
         )
-
-    @hook_config(can_jump_to=["end"])
-    async def abefore_model(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
-        for message in reversed(state["messages"]):
-            if not isinstance(message, ToolMessage):
-                return None
-            if isinstance(message.artifact, dict) and message.artifact.get(PENDING_ARTIFACT_KEY):
-                return {"jump_to": "end"}
-        return None

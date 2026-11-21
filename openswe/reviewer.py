@@ -1,10 +1,10 @@
-"""Reviewer graph factory.
+"""The review run: its catalog, its preparation and its prompt.
 
-Mirrors `openswe.server.get_agent`'s sandbox lifecycle but configures a deep
-agent for code review only:
+``reviewer_catalog`` works out what an MDA review run offers, and
+``prepare_reviewer_run`` readies the run before its first model call:
 
-- Deterministic repo prep (clone-or-fetch + checkout) before the agent's first
-  model call so the LLM doesn't burn tokens narrating ``gh repo clone``.
+- Deterministic repo prep (clone-or-fetch + checkout) so the model doesn't
+  burn tokens narrating ``gh repo clone``.
 - A computed unified diff and the set of (file, line) tuples in that diff,
   passed via the runnable config so ``add_finding`` can validate at creation
   time rather than failing at GitHub-publish time.
@@ -34,13 +34,11 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.skills import SkillsMiddleware, SkillsState
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from runtime_api.models import (
     DEFAULT_LLM_REASONING,
     ModelKwargs,
-    make_model,
     provider_model_kwargs,
 )
 from runtime_api.provenance import Provenance
@@ -109,7 +107,6 @@ from openswe.tools.review_apps import ReviewAppTools
 from openswe.utils import ttl_cache
 from openswe.utils.agents_md import fetch_agents_md, fetch_scoped_agents_md
 from openswe.utils.api_standards_skill import fetch_api_standards_skill
-from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.utils.startup_trace import aphase
 
 REVIEWER_SUBAGENT_SYSTEM_PROMPT = prompt("reviewer/subagent")
@@ -450,17 +447,6 @@ def _format_existing_findings(findings: list[Finding]) -> str:
             author = f.get("last_human_reply_author") or "human"
             lines.append(f"  Human reply from {author}: {human_reply}")
     return "\n".join(lines) if lines else "_(no open findings)_"
-
-
-def _make_model_or_defer(
-    model_id: str,
-    **kwargs: Any,
-) -> BaseChatModel:
-    try:
-        return make_model(model_id, **kwargs)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Deferring reviewer model setup failure for %s", model_id, exc_info=True)
-        return make_deferred_error_model(e, model_id=model_id)
 
 
 async def _cached_api_standards_skill() -> str | None:

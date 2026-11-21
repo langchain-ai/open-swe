@@ -8,7 +8,7 @@ import {
   isTerminalLinkPointerGesture,
   isTerminalPasteShortcut,
   shouldReportTerminalMouse,
-  terminalLinkAtPosition,
+  terminalLinkAtPositionWithRange,
   terminalWheelArrowData,
   terminalWheelDeltaRows,
 } from "./surface"
@@ -87,7 +87,7 @@ describe("Ghostty terminal links", () => {
       wrapsToNext: false,
     })
     const rows = [row("https://example.", false), row("com/reference", true)]
-    expect(terminalLinkAtPosition(rows, 1, 4)).toBe(
+    expect(terminalLinkAtPositionWithRange(rows, 1, 4)?.text).toBe(
       "https://example.com/reference"
     )
   })

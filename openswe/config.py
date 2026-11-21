@@ -128,19 +128,6 @@ class Registry:
     def variables(self) -> Iterator[EnvVar]:
         return iter(self._vars.values())
 
-    def deprecated_in_use(self, environ: Mapping[str, str] | None = None) -> list[tuple[str, str]]:
-        """``(variable, hint)`` for every deprecated name present in ``environ``."""
-        found: list[tuple[str, str]] = []
-        for var in self._vars.values():
-            if var.deprecated and var.is_set(environ):
-                if var.replaced_by and self._vars[var.replaced_by].is_set(environ):
-                    continue
-                found.append((var.name, var.deprecated))
-            source = var.source(environ)
-            if source is not None and source != var.name:
-                found.append((source, f"use {var.name} instead."))
-        return found
-
 
 ENV = Registry()
 

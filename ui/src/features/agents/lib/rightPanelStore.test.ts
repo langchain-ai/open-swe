@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import {
   migratePersistedRightPanelState,
-  selectActiveRightPanelSurface,
   selectThreadRightPanelState,
   useRightPanelStore,
 } from "@/features/agents/lib/rightPanelStore"
@@ -75,12 +74,6 @@ describe("right panel store", () => {
     closeSurface(ref, "diff")
     expect(state().surfaces).toEqual([])
     expect(state().isOpen).toBe(false)
-    expect(
-      selectActiveRightPanelSurface(
-        useRightPanelStore.getState().byThreadKey,
-        ref
-      )
-    ).toBeNull()
   })
 
   it("scopes surfaces per thread and per scope", () => {

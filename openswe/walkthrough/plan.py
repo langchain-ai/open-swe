@@ -327,9 +327,6 @@ class Plan(BaseModel):
     def complete(self, index: DiffIndex) -> bool:
         return not self.unplanned(index)
 
-    def number_of(self, chunk_id: str) -> int | None:
-        return next((i for i, c in enumerate(self.chunks, start=1) if c.id == chunk_id), None)
-
     def chunk(self, chunk_id: str) -> PlanChunk | None:
         return next((c for c in self.chunks if c.id == chunk_id), None)
 

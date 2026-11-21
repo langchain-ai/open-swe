@@ -1089,16 +1089,6 @@ export type PullRequestThreadIntent =
   | { intent: "message"; title: string; message: string }
   | { intent: "fix-up"; context: OpenPullRequest | null }
   | { intent: "address-comment"; comment_url: string; instructions: string }
-  | { intent: "comments"; comments: Array<AgentBatchComment> }
-
-export type AgentBatchComment =
-  | ({ kind: "line" } & Omit<ReviewCommentCreate, "start_side">)
-  | { kind: "thread"; comment_url: string; instructions: string }
-
-export interface PostedReviewComment {
-  id: number
-  html_url: string
-}
 
 export interface ResolveReviewThreadsResult {
   resolved: Array<string>
@@ -1240,16 +1230,6 @@ export interface PublishedReviewAssessment {
   auto_approved?: string | null
 }
 
-export interface ReviewAssessmentFeedbackInput {
-  rating: "helpful" | "unhelpful"
-  comment: string
-}
-
-export interface ReviewAssessmentFeedback extends ReviewAssessmentFeedbackInput {
-  login: string
-  updated_at: string
-}
-
 export interface ReviewDiffFile {
   baseSha: string
   headSha: string
@@ -1341,24 +1321,6 @@ export interface ReviewChatMeta {
   available: boolean
   assistant_id: string
   thread_id: string
-}
-
-/**
- * Absolute base URL for the PR chat's LangGraph StreamProvider. The SDK builds
- * request URLs as `new URL(apiUrl + path)`, so this must be absolute — a
- * same-origin base is promoted using the current origin.
- */
-export function reviewChatApiBase(
-  owner: string,
-  repo: string,
-  number: number
-): string {
-  const path = `${API_BASE}/dashboard/api/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/chat`
-  if (/^https?:\/\//.test(path)) return path
-  if (typeof window !== "undefined") {
-    return `${window.location.origin}${path.startsWith("/") ? "" : "/"}${path}`
-  }
-  return path
 }
 
 export interface HumanReviewRequestResult {
@@ -1724,11 +1686,6 @@ export const api = {
     loadPrDetails(repo, number),
   fixUpPullRequest: (pr: OpenPullRequest) =>
     pullRequestThread(pr.repo, pr.number, { intent: "fix-up", context: pr }),
-  sendCommentsToAgent: (
-    repo: string,
-    number: number,
-    comments: Array<AgentBatchComment>
-  ) => pullRequestThread(repo, number, { intent: "comments", comments }),
   resolveReviewThreads: (
     repo: string,
     number: number,
@@ -1832,26 +1789,6 @@ export const api = {
     request<void>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/description`,
       { method: "PATCH", body: JSON.stringify({ body }) }
-    ),
-  getAssessmentFeedback: (
-    owner: string,
-    repo: string,
-    number: number,
-    reviewId: number
-  ) =>
-    request<ReviewAssessmentFeedback | null>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`
-    ),
-  saveAssessmentFeedback: (
-    owner: string,
-    repo: string,
-    number: number,
-    reviewId: number,
-    feedback: ReviewAssessmentFeedbackInput
-  ) =>
-    request<ReviewAssessmentFeedback>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/feedback/${reviewId}`,
-      { method: "PUT", body: JSON.stringify(feedback) }
     ),
   getPullRequestLabels: (owner: string, repo: string, number: number) =>
     request<{
@@ -1977,16 +1914,6 @@ export const api = {
     request<SubmittedReview>(
       `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/submit-review`,
       { method: "POST", body: JSON.stringify(review) }
-    ),
-  postReviewComment: (
-    owner: string,
-    repo: string,
-    number: number,
-    comment: ReviewCommentCreate
-  ) =>
-    request<PostedReviewComment>(
-      `/reviews/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/comments`,
-      { method: "POST", body: JSON.stringify(comment) }
     ),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   traceFlightSeason: (signal?: AbortSignal) =>

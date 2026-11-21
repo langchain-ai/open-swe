@@ -1,4 +1,4 @@
-"""Review scout graph.
+"""The review scout run: its catalog and its preparation.
 
 Plans a pull request's shared walkthrough in the background: places every
 changed line in a chunk or in Other, and records a summary of the human input
@@ -15,12 +15,11 @@ from typing import Any, NotRequired
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import RunnableConfig
 from langgraph.runtime import Runtime
-from runtime_api.models import DEFAULT_LLM_REASONING, make_model, provider_model_kwargs
+from runtime_api.models import DEFAULT_LLM_REASONING, provider_model_kwargs
 from runtime_api.provenance import Provenance
 
 from openswe.dashboard.options import gate_fable_model
@@ -54,7 +53,6 @@ from openswe.tools.plan_walkthrough import (
 from openswe.tools.record_human_input import record_human_input
 from openswe.tools.suggest_task import suggest_task
 from openswe.ui_invalidations import Topic
-from openswe.utils.deferred_model import make_deferred_error_model
 from openswe.walkthrough.checkout import CheckoutError, CheckoutRateLimited, PinnedCheckout
 from openswe.walkthrough.planner import PlannerUnavailableError, PlanWorkspace
 from openswe.walkthrough.record import PlanMovedError, Walkthrough
@@ -279,14 +277,6 @@ async def finish_scout_plan(
             "scout_settled_lines": settled,
         },
     )
-
-
-def _make_model_or_defer(model_id: str, **kwargs: Any) -> BaseChatModel:
-    try:
-        return make_model(model_id, **kwargs)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Deferring review scout model setup failure for %s", model_id, exc_info=True)
-        return make_deferred_error_model(e, model_id=model_id)
 
 
 async def scout_models(cfg: RunConfig) -> SurfaceModels:

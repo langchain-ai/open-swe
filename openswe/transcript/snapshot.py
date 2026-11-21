@@ -145,14 +145,6 @@ class TranscriptSnapshot(BaseModel):
     notices: list[NoticeView]
     older_cursor: str | None
 
-    @staticmethod
-    async def turn_contents(
-        thread_id: str, turn_id: UUID, *, conn: AsyncConnection | None = None
-    ) -> tuple[list[MessageView], list[ToolCallView]]:
-        """Every message and tool call of one turn, in the order they happened."""
-        async with reading(conn) as conn:
-            return await _load_turn_contents(conn, thread_id, [turn_id])
-
 
 class TranscriptTurnPage(BaseModel):
     """One page of turns strictly older than the cursor that asked for it.
@@ -533,30 +525,3 @@ async def load_events(
             {"thread_id": thread_id, "after": after, "limit": limit},
         )
     return [StoredEvent.model_validate(dict(row)) for row in rows]
-
-
-async def load_head(thread_id: str, *, conn: AsyncConnection | None = None) -> int | None:
-    """The newest version in the thread's log, or ``None`` when untranscribed."""
-    async with reading(conn) as conn:
-        row = await _row(
-            conn,
-            "SELECT version FROM thread WHERE thread_id = :thread_id",
-            {"thread_id": thread_id},
-        )
-    return None if row is None else int(row["version"])
-
-
-async def load_run_start(
-    thread_id: str, run_id: str, *, conn: AsyncConnection | None = None
-) -> int | None:
-    """The version just before the first event recorded under ``run_id``."""
-    async with reading(conn) as conn:
-        row = await _row(
-            conn,
-            """
-            SELECT min(version) AS version FROM thread_event
-            WHERE thread_id = :thread_id AND run_id = :run_id
-            """,
-            {"thread_id": thread_id, "run_id": run_id},
-        )
-    return None if row is None or row["version"] is None else int(row["version"]) - 1

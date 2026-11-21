@@ -389,9 +389,6 @@ def _serialize_message(text: str, context: InputMessageContext) -> str:
     return f"<input-message {' '.join(attributes)}>\n{body}\n</input-message>"
 
 
-_ENVELOPE_CLOSE = "</input-message>"
-
-
 def _structured_content(
     content: str | list[dict[str, Any]], context: InputMessageContext
 ) -> str | list[dict[str, Any]]:

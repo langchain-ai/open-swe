@@ -9,15 +9,6 @@ from uuid import uuid4
 from xml.etree import ElementTree
 
 import pytest
-from deepagents.middleware.summarization import (
-    SummarizationEvent,
-    SummarizationState,
-    _DeepAgentsSummarizationMiddleware,
-)
-from langchain.agents.middleware.types import AgentState
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langgraph.graph.message import add_messages
-from langgraph.runtime import Runtime
 from runtime_api.catalog import InboxSpec
 from sqlalchemy import text, update
 
@@ -591,110 +582,6 @@ async def test_repaired_task_thread_checkpoints_owed_messages_once(
     async with postgres.session() as session:
         saved = await session.get_one(TaskMessage, message.id)
         assert saved.delivered_at is not None
-
-
-async def test_task_context_is_checkpointed_once_without_changing_request_prefix(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from openswe.middleware import task_coordination
-
-    task = store.Task(
-        title="Repair login",
-        coordinator_thread_id=_COORDINATOR,
-        delegated=True,
-    )
-    context = store.TaskContext(
-        task,
-        store.TaskMembership(thread_id=_COORDINATOR, task_id=task.id, role="coordinator"),
-    )
-    lookup = AsyncMock(return_value=None)
-    monkeypatch.setattr(store.TaskMembership, "context_for_thread", lookup)
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, None)
-    state: AgentState = {"messages": [HumanMessage(content="Repair login", id="request")]}
-
-    # The role and the task's context arrive as messages, so the system prompt stays the same.
-    role = await middleware.abefore_model(state, Runtime())
-    assert role is not None
-    assert [message["content"] for message in role["messages"]] == [middleware.instructions]
-    state["messages"] = add_messages(state["messages"], role["messages"])
-    assert await middleware.abefore_model(state, Runtime()) is None
-    state["messages"] = add_messages(
-        state["messages"],
-        [
-            AIMessage(
-                content="", tool_calls=[{"name": "start_async_task", "args": {}, "id": "spawn"}]
-            ),
-            ToolMessage(content="Worker started", tool_call_id="spawn"),
-        ],
-    )
-    lookup.return_value = context
-    update = await middleware.abefore_model(state, Runtime())
-    assert update is not None
-    assert len(update["messages"]) == 1
-    state["messages"] = add_messages(state["messages"], update["messages"])
-    assert str(task.id) in state["messages"][-1].text
-    assert _COORDINATOR in state["messages"][-1].text
-    state["messages"] = add_messages(
-        state["messages"],
-        [
-            AIMessage(
-                content="",
-                tool_calls=[{"name": "slack_no_reply_needed", "args": {}, "id": "quiet"}],
-            ),
-            ToolMessage(content="Done", tool_call_id="quiet"),
-        ],
-    )
-    assert await middleware.abefore_model(state, Runtime()) is None
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, None)
-    assert await middleware.abefore_model(state, Runtime()) is None
-
-
-async def test_task_context_returns_after_summarization_without_replacing_history(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from openswe.middleware import task_coordination
-
-    task = store.Task(title="Repair login", coordinator_thread_id=_COORDINATOR)
-    context = store.TaskContext(
-        task,
-        store.TaskMembership(thread_id=_COORDINATOR, task_id=task.id, role="coordinator"),
-    )
-    state: SummarizationState = {"messages": [HumanMessage(content="Repair login")]}
-    middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, context)
-    initial = await middleware.abefore_model(state, Runtime())
-    assert initial is not None
-    state["messages"] = add_messages(state["messages"], initial["messages"])
-    told = state["messages"][-2:]
-    for _ in range(2):
-        cutoff = len(state["messages"])
-        state["messages"] = add_messages(
-            state["messages"],
-            [
-                AIMessage(content="", tool_calls=[{"name": "ls", "args": {}, "id": "list"}]),
-                ToolMessage(content="Files", tool_call_id="list"),
-            ],
-        )
-        event: SummarizationEvent = {
-            "cutoff_index": cutoff,
-            "summary_message": HumanMessage(content="Investigating login"),
-            "file_path": None,
-        }
-        state["_summarization_event"] = event
-        before = list(state["messages"])
-        visible_before = _DeepAgentsSummarizationMiddleware._apply_event_to_messages(before, event)
-        assert not any(message in visible_before for message in told)
-        update = await middleware.abefore_model(state, Runtime())
-        assert update is not None
-        state["messages"] = add_messages(before, update["messages"])
-        assert state["messages"][:-2] == before
-        visible = _DeepAgentsSummarizationMiddleware._apply_event_to_messages(
-            state["messages"], event
-        )
-        assert visible[:-2] == visible_before
-        assert [message.content for message in visible[-2:]] == [m.content for m in told]
-        assert {message.id for message in visible[-2:]}.isdisjoint(m.id for m in told)
-        middleware = task_coordination.TaskCoordinationMiddleware(_COORDINATOR, context)
-        assert await middleware.abefore_model(state, Runtime()) is None
 
 
 @pytest.mark.parametrize("strategy", ["enqueue", "interrupt"])

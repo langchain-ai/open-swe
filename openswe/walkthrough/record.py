@@ -201,14 +201,6 @@ class Walkthrough(Base):
         return deleted is not None
 
     @classmethod
-    async def human_input_for(cls, pull_request_id: UUID) -> str | None:
-        """The PR's human input summary, or ``None`` when it has no plan yet."""
-        async with postgres.session() as session:
-            return await session.scalar(
-                select(cls.human_input_summary).where(cls.pull_request_id == pull_request_id)
-            )
-
-    @classmethod
     async def set_human_input(cls, pull_request_id: UUID, summary: str) -> bool:
         """Replace the PR's human input summary; ``False`` when it has no plan yet."""
         async with postgres.session() as session:

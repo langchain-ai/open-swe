@@ -87,7 +87,6 @@ from openswe.schedules.store import AGENT_SCHEDULE_JOB_KIND, launch_scheduled_ag
 from openswe.session_cost import run_session_cost_refresh
 from openswe.slack.channel_options import DIRECTORY_JOB as SLACK_CHANNEL_DIRECTORY
 from openswe.slack.channel_options import ensure_directory_sync, sync_directory
-from openswe.slack.mda_forwarding import RETIRED_SWEEP_JOB as SLACK_LOST_REQUESTS
 from openswe.slack.tools.search import PURGE_JOB as SLACK_SEARCH_GRANT_PURGE
 from openswe.slack.tools.search import PURGE_SCHEDULE as SLACK_SEARCH_GRANT_SCHEDULE
 from openswe.slack.tools.search import SlackSearchGrant
@@ -364,9 +363,6 @@ async def start_jobs() -> None:
         start_queue,
         lambda: queue.schedule(PreviewReady.RECOVER, cron="17 * * * *", key=PreviewReady.RECOVER),
         ensure_directory_sync,
-        # Retired: MDA's Slack channel builds its turns from the event, and nothing is
-        # remembered for it to miss.
-        lambda: queue.cancel_key(SLACK_LOST_REQUESTS),
         lambda: queue.schedule(
             THREAD_STATUS_RECONCILE, cron=RECONCILE_SCHEDULE, key=THREAD_STATUS_RECONCILE
         ),

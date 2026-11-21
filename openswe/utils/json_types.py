@@ -3,12 +3,11 @@
 from collections.abc import Mapping
 from typing import Any, cast
 
-from langgraph_sdk.schema import Run, Thread, ThreadState
+from langgraph_sdk.schema import Run, Thread
 
 type JsonObject = dict[str, Any]
 type ThreadLike = Thread | Mapping[str, Any]
 type RunLike = Run | Mapping[str, Any]
-type ThreadStateLike = ThreadState | Mapping[str, Any]
 
 
 def as_json_object(value: Any) -> JsonObject:

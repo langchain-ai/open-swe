@@ -25,8 +25,6 @@ from openswe.middleware.dynamic_tools import DynamicToolMiddleware
 from openswe.sandboxes.tool_models import ToolDescription
 
 _json = TypeAdapter(JsonValue)
-# Every surface lists the integration tools themselves, so none offers their loader.
-EXCLUDED_TOOLS = frozenset({"load_integration_tools"})
 
 
 def _parameters(tool: BaseTool) -> dict[str, JsonValue]:
@@ -180,8 +178,7 @@ class ToolSurface:
             integrations = await self.dynamic.catalog_tools()
             self.integration_names = [tool.name for tool in integrations]
             tools.update({tool.name: tool for tool in integrations})
-        excluded = self.excluded | EXCLUDED_TOOLS
-        self.tools = {name: tool for name, tool in tools.items() if name not in excluded}
+        self.tools = {name: tool for name, tool in tools.items() if name not in self.excluded}
 
 
 @dataclass(frozen=True)

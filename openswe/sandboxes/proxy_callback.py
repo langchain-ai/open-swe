@@ -50,10 +50,6 @@ logger = logging.getLogger(__name__)
 # How long LangSmith's proxy keeps an answer for a host: how long a sandbox its thread
 # moved off can still use the thread's credentials, and a token GitHub refused stays in use.
 CALLBACK_TTL_SECONDS: Final = 300
-# A rule no request matches, carrying the sandbox's ``env_vars`` in the config an MDA
-# deployment from before ``SandboxCreate.env_vars`` writes (``legacy_config``).
-ENV_RULE: Final = "open-swe-proxy-env"
-_ENV_RULE_MATCH: Final = "x-open-swe-proxy-env: never-sent"
 # More threads than this bound to one sandbox are not read; such a sandbox gets nothing.
 _BOUND_SCAN: Final = 200
 _LOOKUP_SECONDS: Final = 10.0
@@ -132,29 +128,6 @@ class SandboxProxyCallback:
         if (tools := tools_base_url()) is not None:
             env_vars[TOOLS_URL_ENV] = tools
         return env_vars
-
-    @classmethod
-    def legacy_config(
-        cls, proxy_config: dict[str, JsonValue], env_vars: Mapping[str, str]
-    ) -> dict[str, JsonValue]:
-        """``proxy_config`` with the sandbox's ``env_vars`` on a rule no request matches, for
-        an MDA deployment that creates sandboxes without them."""
-        if not env_vars:
-            return proxy_config
-        rules = proxy_config.get("rules")
-        return {
-            **proxy_config,
-            "rules": [
-                *(rules if isinstance(rules, list) else []),
-                {
-                    "name": ENV_RULE,
-                    "match_hosts": list(GITHUB_PROXY_RULES[0].hosts),
-                    "match_headers": [_ENV_RULE_MATCH],
-                    "headers": [],
-                    "env_vars": dict(env_vars),
-                },
-            ],
-        }
 
     @classmethod
     async def answer(cls, body: bytes, signature: str | None) -> ProxyCallbackAnswer:

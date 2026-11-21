@@ -151,8 +151,6 @@ async def test_mcp_discovery_without_a_model_call() -> None:
     properties = tools.catalog()[0].parameters["properties"]
     assert isinstance(properties, dict) and set(properties) == {"value"}
     assert "integration_echo" in tools.tools
-    # The surface lists the integration tools themselves, so it never offers their loader.
-    assert "load_integration_tools" not in tools.tools
 
 
 @pytest.mark.parametrize(

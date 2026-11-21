@@ -257,11 +257,3 @@ def dashboard_review_pr_url(locator: str) -> str | None:
     if not owner or not repo or not number.isascii() or not number.isdecimal() or int(number) < 1:
         return None
     return f"https://github.com/{owner}/{repo}/pull/{int(number)}"
-
-
-def dashboard_incident_url(incident_id: str) -> str | None:
-    """Build the dashboard Incidents detail URL for an incident id."""
-    base_url = dashboard_base_url()
-    if not base_url or not incident_id:
-        return None
-    return f"{base_url}/incidents/{quote(incident_id, safe='')}"

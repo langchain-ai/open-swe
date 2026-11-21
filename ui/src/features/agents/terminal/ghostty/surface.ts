@@ -270,14 +270,6 @@ function terminalColumnOffset(
   return offset
 }
 
-export function terminalLinkAtPosition(
-  rows: GhosttySnapshot["rowData"],
-  rowIndex: number,
-  column: number
-): string | null {
-  return terminalLinkAtPositionWithRange(rows, rowIndex, column)?.text ?? null
-}
-
 export interface TerminalLinkWithRange {
   readonly text: string
   readonly range: GhosttyCellRange

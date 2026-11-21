@@ -69,10 +69,6 @@ def apply() -> None:
             return FakeScriptedChatModel(script=build_script())
 
         server.make_model = _fake_make_model
-        # The review scout graph binds its own factory by name.
-        from openswe.review_scout import graph as review_scout_graph
-
-        review_scout_graph.__dict__["make_model"] = _fake_make_model
 
     # Callers pass installation ids, repository scopes and permission maps; the
     # fake GitHub does not care, so accept whatever the real signatures take.

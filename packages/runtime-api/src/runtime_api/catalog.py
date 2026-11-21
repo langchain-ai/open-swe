@@ -179,10 +179,6 @@ class SandboxSpec(BaseModel):
     # asks as they go out. None leaves the sandbox's own alone, as an external one keeps
     # its harness's.
     proxy_config: dict[str, JsonValue] | None = None
-    # Deprecated: MDA deployments from before ``proxy_config`` read this and write the
-    # proxy config the backend hands over (``runtime_api.sandbox_proxy``); remove once
-    # every deployment reads ``proxy_config``.
-    writes_proxy: bool = False
     # Whether the run may prepare before its sandbox is open and report the sandbox afterwards
     # (``runtime_api.loop.BIND_SANDBOX``), so its first model call waits for neither: nothing
     # preparing this run does reaches the sandbox. A backend from before that call says nothing.
@@ -346,10 +342,6 @@ class LoopRules(BaseModel):
     # started; None where it may not. A coordinator's first worker hands back the context
     # of the task it then joined (``runtime_api.workers.Worker``).
     task_context: TaskContext | None = None
-    # Deprecated: what an MDA deployment from before ``task_context`` reads to ask the
-    # backend's ``task_context`` before each call. Remove once every deployment reads
-    # ``task_context``.
-    task_coordination: bool = False
     # Whether the run may wait on a call its client runs itself.
     client_tools: bool = False
     # Open SWE's own framing of the tools the client runs, after every call's system prompt;

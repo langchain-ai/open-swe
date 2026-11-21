@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import text
 
-from openswe.analytics import identity, ingestion
+from openswe.analytics import ingestion
 from openswe.analytics.events import (
     EventName,
     FeedbackSubmittedPayload,
@@ -29,64 +29,6 @@ from tests.analytics.helpers import DAY, event
 async def projection_storage(analytics_db, monkeypatch):
     _, transaction = analytics_db
     monkeypatch.setattr(ingestion, "transaction", transaction)
-
-
-async def test_directory_preserves_immutable_identity_after_login_change(analytics_db, monkeypatch):
-    from openswe.analytics import directory
-
-    workspace, transaction = analytics_db
-    monkeypatch.setattr(directory, "transaction", transaction)
-    current_person = identity.opaque_person("github", 123)
-    other_person = identity.opaque_person("github", 456)
-    await directory.upsert_person(
-        provider="github",
-        immutable_person_key=123,
-        github_login="old-login",
-        email="self@example.com",
-    )
-    await directory.upsert_person(
-        provider="github", immutable_person_key=456, github_login="other", email="other@example.com"
-    )
-    for person in (current_person, other_person, other_person):
-        await ingestion.ingest(
-            event(
-                workspace,
-                EventName.RUN_STARTED,
-                RunStartedPayload(model_attribution_quality="unavailable"),
-                run_id=uuid4(),
-                user_id=person,
-            )
-        )
-    await directory.upsert_person(
-        provider="github", immutable_person_key=123, github_login="new-login"
-    )
-    async with transaction() as conn:
-        rows = (
-            (
-                await conn.execute(
-                    text(
-                        "SELECT person_id, github_login, email FROM identity_directory "
-                        "WHERE workspace_id = :workspace ORDER BY github_login"
-                    ),
-                    {"workspace": workspace},
-                )
-            )
-            .mappings()
-            .all()
-        )
-        assert [(row["person_id"], row["github_login"], row["email"]) for row in rows] == [
-            (current_person, "new-login", "self@example.com"),
-            (other_person, "other", "other@example.com"),
-        ]
-        assert (
-            await conn.scalar(
-                text(
-                    "SELECT count(*) FROM run_projection r JOIN identity_directory d "
-                    "ON r.workspace_id = d.workspace_id AND r.user_id = d.person_id"
-                )
-            )
-            == 3
-        )
 
 
 @pytest.mark.parametrize("versioned", [False, True])

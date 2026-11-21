@@ -52,7 +52,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 from runtime_api import files as file_api
-from runtime_api.catalog import JOINED_TASK_CONTEXT, ModelSpec
+from runtime_api.catalog import JOINED_TASK_CONTEXT
 from runtime_api.endpoint import Handlers
 from runtime_api.loop import (
     BIND_SANDBOX,
@@ -61,23 +61,19 @@ from runtime_api.loop import (
     GATEWAY_CREDENTIAL,
     INBOX,
     INBOX_RECEIVED,
-    MODEL_CHOICE,
     MODEL_FAILED,
     MODEL_RESULT,
     PREPARE,
     REPLY_ON_BEHALF,
-    ROUTE_MODEL,
     RUN_ENDED,
     RUN_STARTED,
     SANDBOX_UNREACHABLE,
     SETTLE_REVIEW_CHECK,
     STEP_LIMIT_REACHED,
-    TASK_CONTEXT,
     TOOL_RESULT,
     TOOL_STARTED,
     BindSandbox,
     BrowserReport,
-    ChosenModel,
     Done,
     GatewayCredential,
     Inbox,
@@ -90,19 +86,15 @@ from runtime_api.loop import (
     Prepared,
     ReplyOnBehalf,
     Report,
-    Route,
-    Routed,
     RunEnded,
     RunStarted,
     SandboxBound,
     SandboxGone,
     ScoutPlanEnd,
-    TaskContext,
     ToolCallReport,
     ToolResultReport,
 )
 from runtime_api.model_errors import LAST_MODEL_ERROR_KEY
-from runtime_api.models import chosen_model
 from runtime_api.operations import (
     CHECK_SHELL,
     OPERATION,
@@ -113,7 +105,6 @@ from runtime_api.operations import (
     ShellVerdict,
 )
 from runtime_api.reports import REPORTED, REPORTS, Reports, ReportsTaken
-from runtime_api.sandbox_proxy import SANDBOX_PROXY, SandboxProxy, SandboxProxyRequest
 from runtime_api.skills import SKILLS, RunSkills, SkillsRequest
 from runtime_api.slack import (
     SLACK_MOVE,
@@ -160,15 +151,12 @@ from openswe.agent_api.run_state import (
     run_hooks,
 )
 from openswe.agent_api.runs import in_graph_context, run_config
-from openswe.agent_api.server import RefusedCallError
 from openswe.agent_api.shell_guards import ShellGuards
 from openswe.agent_api.tokens import RemoteRun
 from openswe.agent_api.tool_sets import ToolSet, ToolSetNotKeptError
 from openswe.analytics.segment_activity import SegmentActivity
-from openswe.config import ENV
 from openswe.dashboard.langsmith_oauth import LangSmithModelAccess
 from openswe.execution import ExecutionProfile
-from openswe.middleware.model_selection import classify_route
 from openswe.middleware.notify_step_limit import notify_step_limit
 from openswe.middleware.plugin_chat import PluginChatTools
 from openswe.middleware.record_run_usage import RecordRunUsageMiddleware
@@ -180,7 +168,6 @@ from openswe.review_scout.graph import finish_scout_plan
 from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.sandboxes.lifecycle import take_stale_boot
-from openswe.sandboxes.proxy_callback import SandboxProxyCallback
 from openswe.sandboxes.state import SandboxUnreachableError
 from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
@@ -698,29 +685,6 @@ class TokenRun:
         await self._sandbox.tell_gone(sandbox_id=request.sandbox_id, reason=request.reason)
         return Done()
 
-    async def route_model(self, request: Routed) -> Route:
-        """Deprecated: an MDA deployment from before it classified routes itself asks here."""
-        selection = await classify_route(messages_from_dict(request.humans))
-        return Route(route=selection.route, persist=selection.persist)
-
-    async def model_choice(self, request: ChosenModel) -> ModelSpec:
-        """A model a person asked for. MDA now answers this itself from the catalog's
-        models; kept for one release, for MDA deployments that still ask."""
-        return chosen_model(
-            request.model_id, request.effort, fallback_model_id=ENV.LLM_FALLBACK_MODEL_ID.optional()
-        )
-
-    async def task_context(self, _request: RunRequest) -> TaskContext:
-        """Deprecated: an MDA deployment from before ``LoopRules.task_context`` asks here."""
-
-        async def read() -> TaskContext:
-            coordination = await TaskCoordinationMiddleware.for_thread(self.run.thread_id)
-            return coordination.task_context()
-
-        return await in_graph_context(
-            {**self.config, "run_name": "task_context"}, lambda _runtime: read()
-        )
-
     async def gateway_credential(self, _request: RunRequest) -> GatewayCredential:
         """Who the run's model calls go through the LLM gateway as."""
         credential = await LangSmithModelAccess.for_run(self.config).credential()
@@ -729,19 +693,6 @@ class TokenRun:
             extra={"gateway_credential": credential.kind, "thread_id": self.run.thread_id},
         )
         return credential
-
-    async def sandbox_proxy(self, _request: SandboxProxyRequest) -> SandboxProxy:
-        """Deprecated: the proxy config an MDA deployment from before ``SandboxSpec.proxy_config``
-        writes on the run's sandbox, which is that same config."""
-        managed = await self._sandbox.managed()
-        if managed.external:
-            # An external sandbox keeps the proxy config its harness gave it.
-            raise RefusedCallError("This thread's external sandbox keeps its own proxy config")
-        if managed.proxy_config is None:
-            raise RuntimeError("Could not read the sandbox's cloud identity rules")
-        return SandboxProxy(
-            config=SandboxProxyCallback.legacy_config(managed.proxy_config, managed.env_vars)
-        )
 
     async def reply_on_behalf(self, request: ReplyOnBehalf) -> Done:
         """Post the model's final answer for it, after it ignored the reply tool."""
@@ -912,11 +863,7 @@ CALLS.serve(INBOX_RECEIVED, TokenRun.inbox_received)
 CALLS.serve(MODEL_RESULT, TokenRun.model_result)
 CALLS.serve(TOOL_STARTED, TokenRun.tool_started)
 CALLS.serve(TOOL_RESULT, TokenRun.tool_result)
-CALLS.serve(ROUTE_MODEL, TokenRun.route_model)
-CALLS.serve(MODEL_CHOICE, TokenRun.model_choice)
-CALLS.serve(TASK_CONTEXT, TokenRun.task_context)
 CALLS.serve(GATEWAY_CREDENTIAL, TokenRun.gateway_credential)
-CALLS.serve(SANDBOX_PROXY, TokenRun.sandbox_proxy)
 CALLS.serve(REPLY_ON_BEHALF, TokenRun.reply_on_behalf)
 CALLS.serve(SLACK_MOVE, TokenRun.slack_move)
 CALLS.serve(SLACK_MOVED, TokenRun.slack_moved)

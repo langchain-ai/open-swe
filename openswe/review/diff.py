@@ -20,8 +20,6 @@ import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel
-
 if TYPE_CHECKING:
     from deepagents.backends.protocol import SandboxBackendProtocol
 
@@ -253,10 +251,6 @@ async def fetch_pr_diff(
         logger.exception("Failed to fetch PR diff for %s/%s#%s", owner, repo, pr_number)
         return None
     return response.text
-
-
-class _Comparison(BaseModel):
-    status: Literal["ahead", "behind", "diverged", "identical"]
 
 
 async def fetch_pr_metadata(

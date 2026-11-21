@@ -955,7 +955,6 @@ _NOT_FROM_CODE = frozenset({"task"}) | frozenset(
         "connect_managed_tools",
         "switch_to_performance_model",
         "record_human_input",
-        "load_integration_tools",
         "control_worker",
         "message_task_thread",
     }
@@ -2205,7 +2204,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             nudge_sender=REPLY_GUARD["id"],
         ),
         task_context=task_coordination.task_context(),
-        task_coordination=True,
         client_tools=client_tools is not None,
         client_prompt="\n\n".join(
             part

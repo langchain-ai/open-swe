@@ -1,12 +1,10 @@
 """Integration tools the graph factory loads into a run."""
 
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import langgraph_sdk
 import pytest
-from langchain.agents.middleware.types import ModelRequest
 from langchain_core.tools import StructuredTool
 from langgraph.graph.state import RunnableConfig
 
@@ -129,26 +127,6 @@ async def test_mcp_tools_load_for_non_admins_with_legacy_plan_state(
 
     dynamic = surface.dynamic
     assert dynamic is not None
-    captured: list[str] = []
-
-    async def capture(request: ModelRequest) -> Any:
-        captured.extend(tool.name for tool in request.tools)
-        return MagicMock()
-
-    for state, expected in [
-        ({}, [mcp_tool.name]),
-        ({"plan_mode": True}, [mcp_tool.name]),
-        ({"plan_mode": False}, [mcp_tool.name]),
-    ]:
-        captured.clear()
-        request = ModelRequest(
-            model=MagicMock(),
-            messages=[],
-            tools=[],
-            runtime=MagicMock(),
-            state={**state, "messages": [], "loaded_integration_tools": [mcp_tool.name]},
-        )
-        await dynamic.awrap_model_call(request, capture)
-        assert captured == expected
+    assert [tool.name for tool in await dynamic.catalog_tools()] == [mcp_tool.name]
 
     SANDBOX_BACKENDS.pop(thread_id, None)
