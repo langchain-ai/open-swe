@@ -3,10 +3,9 @@
 # ///
 """Vendor an upstream project from its main branch into vendor/.
 
-Each vendored project is one entry of PROJECTS: the Managed Deep Agents SDK (the
-`mda` CLI's Rust source and the `managed-deepagents` Python runtime, which mda/
-installs and `make mda-cli` builds the CLI from), the default, and langchain-quickjs,
-the code mode mda/ runs, from the deepagents repository.
+Each vendored project is one entry of PROJECTS: today langchain-quickjs, the code mode
+mda/ runs, from the deepagents repository. (The Managed Deep Agents SDK is not vendored:
+mda/ and the backend install it from a pinned langchainplus commit, vendor/README.md.)
 
     uv run scripts/vendor.py           # update to the head of upstream main
     uv run scripts/vendor.py <sha>     # update to a commit on upstream main
@@ -15,12 +14,12 @@ the code mode mda/ runs, from the deepagents repository.
                                        # release branch Open SWE needs before it lands
     uv run scripts/vendor.py --pr <n>  # carry upstream pull request <n>, or move it to its head
     uv run scripts/vendor.py --diff    # our changes: the tree against UPSTREAM's commit
-    uv run scripts/vendor.py --project langchain-quickjs ...
+    uv run scripts/vendor.py --project <name> ...
                                        # any of the above, for another vendored project
 
 UPSTREAM records the exact commit the tree comes from: its full SHA, then its date,
 then its branch when that is not main.
-Each project's upstream-prs record (vendor/mda-upstream-prs for the SDK) lists the
+Each project's upstream-prs record (vendor/<name>-upstream-prs) lists the
 upstream pull requests the tree carries on top of it, not yet on main: one per line,
 its number, the head commit carried, then its title.
 Our changes, carried pull requests included, are edits made in the tree itself, as in a
@@ -31,8 +30,8 @@ to a release branch keeps main's newer changes), leaving conflict markers where 
 sides changed the same lines; carried pull requests the new commit contains drop out of
 that record. Carrying a pull request three-way merges its changes into the tree the same
 way (base: where it branched off its base branch, or the head carried before). Both
-relock mda/ and the backend, which both install the runtime from the tree.
-Each project's repository variable (MDA_SDK_REPO, DEEPAGENTS_REPO) overrides its
+relock mda/, which installs the project from the tree.
+Each project's repository variable (DEEPAGENTS_REPO) overrides its
 upstream, e.g. a local checkout; pull requests are looked up on GitHub with `gh`.
 """
 
@@ -52,7 +51,7 @@ from typing import Final
 ROOT: Final = Path(__file__).resolve().parent.parent
 VENDOR: Final = ROOT / "vendor"
 RECORD: Final = "UPSTREAM"
-IGNORED_NAMES: Final = frozenset({"target", "_binaries", "__pycache__"})
+IGNORED_NAMES: Final = frozenset({"__pycache__"})
 
 
 class VendorError(Exception):
@@ -95,12 +94,6 @@ class Project:
     paths: tuple[str, ...]
     # Upstream paths never vendored, such as the project's own tests.
     skipped: tuple[str, ...] = ()
-    # What `make mda-cli` and local tooling write into the tree: kept across updates, never compared.
-    build_outputs: tuple[str, ...] = ()
-    # Outside the tree, so nothing mistakes it for a file upstream ships.
-    prs_record_name: str = ""
-    # Where our own changes to the tree are noted, one dated file each.
-    changes_name: str = ""
 
     @property
     def dest(self) -> Path:
@@ -108,11 +101,13 @@ class Project:
 
     @property
     def prs_record(self) -> Path:
-        return VENDOR / (self.prs_record_name or f"{self.name}-upstream-prs")
+        # Outside the tree, so nothing mistakes it for a file upstream ships.
+        return VENDOR / f"{self.name}-upstream-prs"
 
     @property
     def changes(self) -> str:
-        return f"vendor/{self.changes_name or f'{self.name}-changes'}"
+        # Where our own changes to the tree are noted, one dated file each.
+        return f"vendor/{self.name}-changes"
 
     @property
     def upstream_repo(self) -> str:
@@ -133,28 +128,6 @@ PROJECTS: Final = {
     project.name: project
     for project in (
         Project(
-            name="managed-deepagents-sdk",
-            repo_variable="MDA_SDK_REPO",
-            # MDA moved into langchainplus (langchain-ai/langchainplus#65592).
-            repo="git@github.com:langchain-ai/langchainplus.git",
-            github_repo="langchain-ai/langchainplus",
-            subdirectory="sdks/managed-deepagents",
-            paths=(
-                "Cargo.toml",
-                "Cargo.lock",
-                "rustfmt.toml",
-                "LICENSE",
-                "README.md",
-                "crates",
-                "packages/pypi",
-            ),
-            # The Python runtime's own tests never run here.
-            skipped=("packages/pypi/tests",),
-            build_outputs=("target", "packages/pypi/src/managed_deepagents/_binaries"),
-            prs_record_name="mda-upstream-prs",
-            changes_name="mda-changes",
-        ),
-        Project(
             name="langchain-quickjs",
             repo_variable="DEEPAGENTS_REPO",
             repo="git@github.com:langchain-ai/deepagents.git",
@@ -164,7 +137,7 @@ PROJECTS: Final = {
         ),
     )
 }
-DEFAULT_PROJECT: Final = "managed-deepagents-sdk"
+DEFAULT_PROJECT: Final = "langchain-quickjs"
 
 
 @dataclass(frozen=True)
@@ -404,11 +377,6 @@ def _install(
     dest = project.dest
     (tree / RECORD).write_text(f"{record}\n")
     prs.write()
-    # Keep build outputs, so `make mda-cli` need not start over.
-    for output in project.build_outputs:
-        if (dest / output).exists():
-            (tree / output).parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(dest / output, tree / output)
     shutil.rmtree(dest, ignore_errors=True)
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(tree, dest)
@@ -417,10 +385,9 @@ def _install(
             f"{done}, but it collides with our changes; settle each of these in "
             f"vendor/{project.name}:\n"
             + "\n".join(f"  {conflict}" for conflict in conflicts)
-            + "\nthen run `uv lock && (cd mda && uv lock)`."
+            + "\nthen run `(cd mda && uv lock)`."
         )
-    for project in (ROOT, ROOT / "mda"):
-        subprocess.run(["uv", "lock", "--quiet"], cwd=project, check=True)
+    subprocess.run(["uv", "lock", "--quiet"], cwd=ROOT / "mda", check=True)
     return done
 
 
@@ -555,9 +522,9 @@ def main() -> int:
                     file=sys.stderr,
                 )
             elif args.pr is not None:
-                print(f"{carry(upstream, args.pr, scratch)}; relocked mda/ and the backend.")
+                print(f"{carry(upstream, args.pr, scratch)}; relocked mda/.")
             else:
-                print(f"{update(upstream, args.sha, scratch)}; relocked mda/ and the backend.")
+                print(f"{update(upstream, args.sha, scratch)}; relocked mda/.")
         except VendorError as exc:
             print(exc, file=sys.stderr)
             return 1

@@ -18,7 +18,7 @@ dependencies = [
     "httpx2>=2.12.0",
     # Renders the prompts in prompts/, as the backend renders its own.
     "jinja2>=3.1.6",
-    # The vendored SDK's browser installs its extension from this package, so this
+    # The SDK's browser installs its extension from this package, so this
     # matches managed_deepagents.browser.STAGEHAND_VERSION.
     "stagehand==4.4.0",
     # The browser's tools; matches the pin `mda` injects into browser builds.
@@ -38,11 +38,12 @@ test = [
     "pytest-asyncio>=1.4.0",
 ]
 
-# Vendored, with the `mda` CLI `make mda-cli` builds into it (vendor/README.md).
-# Editable, so that CLI is read from the source tree.
+# The SDK's mda/0.11 branch in langchainplus, at a pinned commit until 0.11 is released;
+# `make mda-cli` builds the `mda` CLI from the same commit into the installed runtime,
+# and the backend's pyproject.toml pins the same commit (vendor/README.md).
 [tool.uv.sources]
-managed-deepagents = { path = "../vendor/managed-deepagents-sdk/packages/pypi", editable = true }
-# The code mode, vendored too, so Robin can change it before upstream does.
+managed-deepagents = { git = "https://github.com/langchain-ai/langchainplus", rev = "fe64cf81524d28e8fcea2bbb92f218c753d4cdb4", subdirectory = "sdks/managed-deepagents/packages/pypi" }
+# The code mode, vendored so Robin can change it before upstream does.
 langchain-quickjs = { path = "../vendor/langchain-quickjs", editable = true }
 # Shared with the backend; `mda build` bundles it as a local package.
 open-swe-runtime-api = { path = "../packages/runtime-api", editable = true }

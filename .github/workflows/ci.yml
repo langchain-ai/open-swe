@@ -328,14 +328,14 @@ jobs:
             exit 0
           fi
 
-          agent_unit_test_paths=(openswe packages tests mda vendor/managed-deepagents-sdk vendor/langchain-quickjs pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml ":(exclude)tests/e2e")
+          agent_unit_test_paths=(openswe packages tests mda vendor/langchain-quickjs pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml ":(exclude)tests/e2e")
           if git diff --quiet "$BASE_SHA" HEAD -- "${agent_unit_test_paths[@]}"; then
             echo "agent_unit_tests=false" >> "$GITHUB_OUTPUT"
           else
             echo "agent_unit_tests=true" >> "$GITHUB_OUTPUT"
           fi
 
-          paths=(openswe packages mda vendor/managed-deepagents-sdk vendor/langchain-quickjs ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml)
+          paths=(openswe packages mda vendor/langchain-quickjs ui tests/e2e package.json pnpm-lock.yaml pnpm-workspace.yaml pyproject.toml uv.lock langgraph.json Makefile .github/workflows/ci.yml)
           if git diff --quiet "$BASE_SHA" HEAD -- "${paths[@]}"; then
             echo "browser=false" >> "$GITHUB_OUTPUT"
           else
@@ -389,22 +389,17 @@ jobs:
         id: mda-cache
         uses: actions/cache@v6
         with:
-          path: vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_binaries/mda
-          key: mda-cli-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile', 'vendor/managed-deepagents-sdk/Cargo.*', 'vendor/managed-deepagents-sdk/UPSTREAM', 'vendor/managed-deepagents-sdk/crates/**') }}
+          path: .mda-sdk/bin
+          key: mda-cli-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile', 'mda/pyproject.toml') }}
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: steps.mda-cache.outputs.cache-hit != 'true'
         with:
-          workspaces: vendor/managed-deepagents-sdk
+          workspaces: .mda-sdk/src/sdks/managed-deepagents
+      # Fetches and builds the pinned SDK commit only when the cache has no binary
+      # for it (.mda-sdk/bin/mda-<rev>), then installs it into mda/'s runtime.
       - name: Build the mda CLI
         timeout-minutes: 15
-        env:
-          CACHE_HIT: ${{ steps.mda-cache.outputs.cache-hit }}
-        run: |
-          if [ "$CACHE_HIT" = true ]; then
-            touch vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_binaries/mda
-          else
-            make --always-make mda-cli
-          fi
+        run: make mda-cli
       - run: npm install --global pnpm@11.22.0
       # Chromium and the dashboard build are identical across the six shards
       # and change only with their own inputs, so all six restore them rather
@@ -498,22 +493,17 @@ jobs:
         id: mda-cache
         uses: actions/cache@v6
         with:
-          path: vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_binaries/mda
-          key: mda-cli-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile', 'vendor/managed-deepagents-sdk/Cargo.*', 'vendor/managed-deepagents-sdk/UPSTREAM', 'vendor/managed-deepagents-sdk/crates/**') }}
+          path: .mda-sdk/bin
+          key: mda-cli-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile', 'mda/pyproject.toml') }}
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: steps.mda-cache.outputs.cache-hit != 'true'
         with:
-          workspaces: vendor/managed-deepagents-sdk
+          workspaces: .mda-sdk/src/sdks/managed-deepagents
+      # Fetches and builds the pinned SDK commit only when the cache has no binary
+      # for it (.mda-sdk/bin/mda-<rev>), then installs it into mda/'s runtime.
       - name: Build the mda CLI
         timeout-minutes: 15
-        env:
-          CACHE_HIT: ${{ steps.mda-cache.outputs.cache-hit }}
-        run: |
-          if [ "$CACHE_HIT" = true ]; then
-            touch vendor/managed-deepagents-sdk/packages/pypi/src/managed_deepagents/_binaries/mda
-          else
-            make --always-make mda-cli
-          fi
+        run: make mda-cli
       - run: npm install --global pnpm@11.22.0
       - name: Install workspace dependencies
         timeout-minutes: 5

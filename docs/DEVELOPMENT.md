@@ -8,7 +8,7 @@ Deploying it for a team is the [installation guide](INSTALLATION.md).
 - **Python 3.14+** and [uv](https://docs.astral.sh/uv/)
 - [LangGraph CLI](https://docs.langchain.com/langsmith/cli) (installed by `uv sync --extra dev`)
 - Node 26+ and [pnpm](https://pnpm.io/) for the dashboard
-- Rust (`cargo`, e.g. via [rustup](https://rustup.rs/)): `make dev-mda` builds the `mda` CLI from the vendored Managed Deep Agents SDK ([vendor/README.md](../vendor/README.md))
+- Rust (`cargo`, e.g. via [rustup](https://rustup.rs/)): `make dev-mda` builds the `mda` CLI from the Managed Deep Agents SDK commit `mda/` pins ([vendor/README.md](../vendor/README.md))
 - A free [ngrok](https://ngrok.com/) account, so GitHub and Slack can reach your local backend (step 3)
 - A Slack workspace where you may create apps, and a GitHub account or organization where you may create a GitHub App
 
@@ -366,7 +366,7 @@ Ask users to attach that file to a report.
 |---|---|
 | `make dev` | `langgraph dev` on port 2024: graphs, webhooks, dashboard API, and the bundled dashboard when a build exists |
 | `make dev-mda` | `mda dev` on port 2025: the Managed Deep Agents runtime every Robin thread runs on |
-| `make mda-cli` | Build the `mda` CLI from the vendored SDK (`make dev-mda` does it first) |
+| `make mda-cli` | Build the `mda` CLI from the SDK commit `mda/` pins (`make dev-mda` does it first) |
 | `make dev-ui` | Vite, the backend, and MDA together; the UI hot-reloads on port 2024 |
 | `make web` | The Vite dev server alone on port 3000 |
 | `make build-dashboard` | Installs the dashboard's dependencies and builds it into `ui/.output/public` |

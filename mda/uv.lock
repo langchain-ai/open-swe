@@ -1395,7 +1395,7 @@ wheels = [
 [[package]]
 name = "managed-deepagents"
 version = "0.10.4"
-source = { editable = "../vendor/managed-deepagents-sdk/packages/pypi" }
+source = { git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=fe64cf81524d28e8fcea2bbb92f218c753d4cdb4#fe64cf81524d28e8fcea2bbb92f218c753d4cdb4" }
 dependencies = [
     { name = "deepagents" },
     { name = "httpx" },
@@ -1406,42 +1406,6 @@ dependencies = [
     { name = "langgraph-sdk" },
     { name = "pydantic" },
     { name = "typing-extensions" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "cryptography", marker = "extra == 'test'", specifier = ">=50.0.1" },
-    { name = "deepagents", specifier = ">=0.7.30,<1" },
-    { name = "fastmcp", marker = "extra == 'test'", specifier = ">=4.0.10,<5" },
-    { name = "httpx", specifier = ">=0.28.1,<1" },
-    { name = "langchain", specifier = ">=1.4.6,<2" },
-    { name = "langchain", extras = ["mcp"], marker = "extra == 'test'", specifier = ">=1.4.6,<2" },
-    { name = "langchain-core", specifier = ">=1.7.2,<2" },
-    { name = "langgraph", specifier = ">=1.2.19,<2" },
-    { name = "langgraph-prebuilt", specifier = ">=1.1.1,<2" },
-    { name = "langgraph-sdk", specifier = ">=0.4.13,<0.5" },
-    { name = "mcp", marker = "extra == 'test'", specifier = ">=2.2.0,<3" },
-    { name = "pydantic", specifier = ">=2.7.4,<2.15" },
-    { name = "pyjwt", extras = ["crypto"], marker = "extra == 'test'", specifier = ">=2.13.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=9.1.1" },
-    { name = "starlette", marker = "extra == 'test'", specifier = ">=1.6.0" },
-    { name = "typing-extensions", specifier = ">=4.12.2,<5" },
-    { name = "uvicorn", marker = "extra == 'test'", specifier = ">=0.54.0,<1" },
-]
-provides-extras = ["test"]
-
-[package.metadata.requires-dev]
-lint = [{ name = "ruff", specifier = ">=0.16.7,<0.18.0" }]
-typing = [
-    { name = "av", specifier = ">=15,<20" },
-    { name = "basedpyright", specifier = ">=1.40.1,<2.0.0" },
-    { name = "fastmcp", specifier = ">=4.0.10,<5" },
-    { name = "langchain", extras = ["mcp"], specifier = ">=1.4.6,<2" },
-    { name = "mcp", specifier = ">=2.2.0,<3" },
-    { name = "pillow", specifier = ">=11" },
-    { name = "stagehand", specifier = "==4.4.0" },
-    { name = "stagehand-middleware", specifier = "==0.1.2" },
-    { name = "ty", specifier = ">=0.0.80,<0.0.105" },
 ]
 
 [[package]]
@@ -1740,7 +1704,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.8.5,<2.0.0" },
     { name = "langchain-quickjs", editable = "../vendor/langchain-quickjs" },
     { name = "langsmith", specifier = ">=0.15.1" },
-    { name = "managed-deepagents", editable = "../vendor/managed-deepagents-sdk/packages/pypi" },
+    { name = "managed-deepagents", git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=fe64cf81524d28e8fcea2bbb92f218c753d4cdb4" },
     { name = "markdownify", specifier = "==1.2.3" },
     { name = "mcp", specifier = ">=2.2.0" },
     { name = "open-swe-runtime-api", editable = "../packages/runtime-api" },

@@ -43,6 +43,11 @@
     "RUN ( set -e && export SOURCE_COMMIT && apt-get update && apt-get install -y --no-install-recommends curl xz-utils ca-certificates && arch=$(uname -m) && case $arch in x86_64) node_arch=x64;; aarch64) node_arch=arm64;; *) echo unsupported arch $arch; exit 1;; esac && curl -fsSL https://nodejs.org/dist/v26.13.0/node-v26.13.0-linux-$node_arch.tar.xz | tar -xJ -C /usr/local --strip-components=1 && npm install --global pnpm@11.22.0 && cd /tmp/dashboard-src && pnpm install --frozen-lockfile --filter open-swe-dashboard... && export DASHBOARD_BASE_PATH=\"$(python3 -c 'import json; print(json.load(open(\"langgraph.json\")).get(\"http\", {}).get(\"mount_prefix\") or \"\")')/\" && pnpm --filter open-swe-dashboard run build && mkdir -p /opt/open-swe-dashboard && cp -R ui/.output/public/. /opt/open-swe-dashboard/ ) || echo 'dashboard build failed; continuing without the bundled UI'; rm -rf /tmp/dashboard-src /usr/local/lib/node_modules /usr/local/bin/node /usr/local/bin/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/pnpm /usr/local/bin/pnpx /root/.cache /root/.local/share/pnpm /var/lib/apt/lists/*",
     "RUN python3 /tmp/stamp_build_info.py /opt/open-swe-backend /opt/open-swe-dashboard && rm /tmp/stamp_build_info.py",
     "ENV DASHBOARD_STATIC_DIR=/opt/open-swe-dashboard",
+    "# managed-deepagents comes from a pinned commit of the private langchainplus repository, and the generated install step has no git credentials.",
+    "# Deployment builds mount each deployment secret as a BuildKit secret, and CI's manifest build mounts a read token: this fetches the SDK with them and points uv at that copy (scripts/fetch_mda_sdk.py).",
+    "COPY pyproject.toml scripts/fetch_mda_sdk.py /tmp/fetch-mda/",
+    "RUN --mount=type=secret,id=GITHUB_APP_ID --mount=type=secret,id=GITHUB_APP_INSTALLATION_ID --mount=type=secret,id=GITHUB_APP_PRIVATE_KEY --mount=type=secret,id=MDA_SDK_GITHUB_TOKEN python3 /tmp/fetch-mda/fetch_mda_sdk.py /tmp/fetch-mda/pyproject.toml && rm -rf /tmp/fetch-mda",
+    "ENV UV_OVERRIDE=/opt/managed-deepagents-override.txt",
     "COPY openswe /deps/open-swe/openswe",
     "RUN python3 -m compileall -q -j 0 --invalidation-mode checked-hash /deps/open-swe/openswe",
     "ENV UV_COMPILE_BYTECODE=1"

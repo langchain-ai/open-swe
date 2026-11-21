@@ -8,7 +8,7 @@ license = { text = "MIT" }
 dependencies = [
     "deepagents==0.7.41",
     # The types of the event endpoint requests the MDA deployment's channels send (mda/),
-    # from the vendored SDK the deployment runs (vendor/README.md).
+    # from the SDK commit the deployment runs, pinned below as mda/ pins it (vendor/README.md).
     "managed-deepagents>=0.10.1",
     # Verifies the signature MDA puts on those requests (MDA_SERVICE_SECRET).
     "standardwebhooks>=1.1.0",
@@ -62,7 +62,8 @@ dev = [
 # Shared with mda/: the contract between the backend and its MDA runtime.
 [tool.uv.sources]
 open-swe-runtime-api = { path = "packages/runtime-api", editable = true }
-managed-deepagents = { path = "vendor/managed-deepagents-sdk/packages/pypi", editable = true }
+# The same commit mda/pyproject.toml pins.
+managed-deepagents = { git = "https://github.com/langchain-ai/langchainplus", rev = "fe64cf81524d28e8fcea2bbb92f218c753d4cdb4", subdirectory = "sdks/managed-deepagents/packages/pypi" }
 
 [tool.uv]
 constraint-dependencies = [

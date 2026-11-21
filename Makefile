@@ -23,20 +23,32 @@ dev: $(if $(POSTGRES_URI),,postgres)
 dev-mda: mda-cli
 	cd mda && uv run --locked mda dev --port 2025 --no-browser
 
-# The `mda` CLI, built from the vendored SDK (vendor/README.md) into the runtime
-# package mda/ installs, where its `mda` command runs it from. Rebuilt only when its
-# sources change: the vendored build script, missing its .git, always reruns.
-# The binary is replaced by renaming a fresh copy over it: overwriting it in place
-# leaves macOS its old cached code signature, and the kernel kills the new build
+# The `mda` CLI, built from the commit mda/pyproject.toml pins `managed-deepagents` to,
+# then copied into that runtime as mda/ installs it, where its `mda` command runs it
+# from (managed_deepagents/_binaries/mda). The SDK's source is a shallow, sparse,
+# blobless checkout of that one commit in .mda-sdk/src, whose cargo target/ is kept
+# across commits; each commit's binary is kept as .mda-sdk/bin/mda-<rev>, built once.
+# The installed binary is replaced by renaming a fresh copy over it: overwriting it in
+# place leaves macOS its old cached code signature, and the kernel kills the new build
 # on launch (exit 137).
-MDA_SDK := vendor/managed-deepagents-sdk
-MDA_CLI := $(MDA_SDK)/packages/pypi/src/managed_deepagents/_binaries/mda
-mda-cli: $(MDA_CLI)
-$(MDA_CLI): $(MDA_SDK)/Cargo.toml $(MDA_SDK)/Cargo.lock $(MDA_SDK)/UPSTREAM $(shell find $(MDA_SDK)/crates -type f)
-	MDA_GIT_SHA=$$(cut -d' ' -f1 $(MDA_SDK)/UPSTREAM) MDA_GIT_DATE=$$(cut -d' ' -f2 $(MDA_SDK)/UPSTREAM) \
-		cargo build --locked --release --manifest-path $(MDA_SDK)/Cargo.toml
+MDA_REPO ?= https://github.com/langchain-ai/langchainplus
+MDA_REV := $(shell sed -n 's/^managed-deepagents = .*rev = "\([0-9a-f]*\)".*/\1/p' mda/pyproject.toml)
+MDA_SRC := .mda-sdk/src
+MDA_BIN := .mda-sdk/bin/mda-$(MDA_REV)
+mda-cli: $(MDA_BIN)
+	@dest="$$(cd mda && uv run --locked python -c 'from managed_deepagents._cli import binary_path; print(binary_path())')" && \
+		if ! cmp -s $(MDA_BIN) "$$dest"; then \
+			mkdir -p "$$(dirname "$$dest")" && cp $(MDA_BIN) "$$dest.tmp" && mv -f "$$dest.tmp" "$$dest" && \
+			echo "Installed the mda CLI ($(MDA_REV)) at $$dest"; \
+		fi
+$(MDA_BIN):
+	@test -n "$(MDA_REV)" || { echo "mda/pyproject.toml pins no managed-deepagents rev" >&2; exit 1; }
+	@test -d $(MDA_SRC)/.git || { git init -q $(MDA_SRC) && git -C $(MDA_SRC) sparse-checkout set sdks/managed-deepagents; }
+	git -C $(MDA_SRC) fetch -q --depth 1 --filter=blob:none $(MDA_REPO) $(MDA_REV)
+	git -C $(MDA_SRC) -c advice.detachedHead=false checkout -q --detach $(MDA_REV)
+	cargo build --locked --release --manifest-path $(MDA_SRC)/sdks/managed-deepagents/Cargo.toml
 	mkdir -p $(@D)
-	cp $(MDA_SDK)/target/release/mda $@.tmp
+	cp $(MDA_SRC)/sdks/managed-deepagents/target/release/mda $@.tmp
 	mv -f $@.tmp $@
 
 postgres:
@@ -162,7 +174,7 @@ help:
 	@echo '----'
 	@echo 'dev                          - run LangGraph dev server (starts the local PostgreSQL container unless POSTGRES_URI is set)'
 	@echo 'dev-mda                      - Managed Deep Agents dev server on :2025, where every agent run goes'
-	@echo 'mda-cli                      - build the mda CLI from the vendored SDK (needs cargo)'
+	@echo 'mda-cli                      - build the mda CLI from the SDK commit mda/ pins (needs cargo)'
 	@echo 'dev-ui                       - Vite, LangGraph, and MDA in one terminal (UI hot reload on :2024)'
 	@echo 'postgres                     - start the local PostgreSQL container on 127.0.0.1:5433'
 	@echo 'migration m="..."            - create the next database migration'

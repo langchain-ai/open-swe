@@ -113,7 +113,7 @@ Every call is authenticated with the run token.
   A subagent has no fallback: its timed-out call becomes its answer, which its `task` call hands back to the agent that delegated it.
   A call to a model that reads no images (`reads_images` in the catalog's `RunModels`) goes to the catalog's vision model once the conversation holds an image.
 
-- **One graph per graph and models:** `agent` is a `shared_factory` (`vendor/mda-changes/2026-10-27-shared-factory.md`).
+- **One graph per graph and models:** `agent` is a `shared_factory`.
   MDA builds it only from what is the same for every run that plays the graph on the same models (`GraphInputs`: the graph, the run's models, and where its workers report), once per process for each distinct inputs, and shares its compiled graph between every such run, thread and person, and every read of a thread's state.
   Every graph has the same middleware, so a thread reads alike through any of them.
   Nothing built belongs to one run: each run reads its catalog as it starts, and its tools and middleware read the run in progress per call (`rt.backend.current_run`): the operations offered, the model a call is routed to, the skills, the loop rules, and the sandbox, which MDA resolves per call from the run's catalog (`rt/managed_sandbox.py`).
@@ -207,10 +207,11 @@ The deploy workflow writes the deployed commit (`git rev-parse HEAD`) into `mda/
 Each turn's root trace carries that commit as `revision_id`, an `environment` derived from the CLI-injected `MDA_DEPLOYMENT_NAME` (`open-swe-mda-prod` reports `production`), and the backend's current `LANGCHAIN_REVISION_ID` as `LANGSMITH_AGENT_VERSION` from the run's catalog, overriding whatever metadata queued work saved.
 
 CI and manual deploys run the CLI from this project's locked environment.
-`managed-deepagents` is the SDK vendored in [`vendor/managed-deepagents-sdk`](../vendor/README.md): `mda/` installs its runtime as an editable path source, and `make mda-cli` builds its CLI with cargo into that runtime, where the `mda` command runs it.
-Run it before `mda build`, `mda dev` or `mda deploy`: until it has, the runtime has no CLI, and it rebuilds whenever the vendored CLI changed; `mda build` and `mda deploy` bundle that runtime, so what deploys is exactly the vendored tree.
-The SDK lives in langchainplus's `sdks/managed-deepagents`, and the tree tracks its `mda/0.11` branch until 0.11 lands on main: `uv run scripts/vendor.py --branch mda/0.11 [sha]` vendors the branch's head or a commit on it, records the exact commit in `UPSTREAM`, three-way merges upstream's changes into the files we edited there, and relocks `mda/`; `--pr <n>` carries an upstream pull request not yet on the branch, recorded in `vendor/mda-upstream-prs`; `--diff` prints our changes ([`vendor/README.md`](../vendor/README.md)).
-`langchain-quickjs`, the code mode, is vendored the same way in [`vendor/langchain-quickjs`](../vendor/README.md): `uv run scripts/vendor.py --project langchain-quickjs` takes the same arguments.
+`managed-deepagents` comes from langchainplus's `sdks/managed-deepagents` at the commit `[tool.uv.sources]` pins in `pyproject.toml` (on its `mda/0.11` branch until 0.11 is released); the backend pins the same commit ([`vendor/README.md`](../vendor/README.md)).
+`make mda-cli` builds the `mda` CLI with cargo from that commit and copies it into the runtime this project installs, where the `mda` command runs it.
+Run it before `mda build`, `mda dev` or `mda deploy`: until it has, the runtime has no CLI; `mda build` and `mda deploy` bundle the installed runtime, so what deploys is exactly the pinned commit.
+To move to a newer SDK, change the `rev` in both `pyproject.toml`s, relock both projects, and run `make mda-cli`.
+`langchain-quickjs`, the code mode, is vendored in [`vendor/langchain-quickjs`](../vendor/README.md) and managed with `uv run scripts/vendor.py`.
 Keep `deepagents` exactly pinned and refresh `mda/uv.lock` when bumping it; `--locked` rejects an out-of-date lockfile.
 
 Nothing here is generated from the backend: operations, subagents and models come from each run's `catalog`, typed by `runtime_api`.
