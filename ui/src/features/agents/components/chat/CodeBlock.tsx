@@ -17,6 +17,8 @@ interface CodeBlockProps {
 const SHIKI_THEME = { light: "github-light", dark: "github-dark" } as const
 
 const TOKEN_CACHE = new Map<string, Array<Array<ThemedToken>>>()
+/** An entry holds its code twice (key and tokens), so longer code is tokenized again instead. */
+const MAX_CACHED_CODE_LENGTH = 20_000
 
 function normalizeLanguage(language?: string): string {
   const raw = (language || "").toLowerCase().trim()
@@ -94,8 +96,10 @@ export function CodeBlock({ text, language, title }: CodeBlockProps) {
           lang: normalizedLanguage as BundledLanguage,
           theme: shikiTheme,
         })
-        if (TOKEN_CACHE.size >= 500) TOKEN_CACHE.clear()
-        TOKEN_CACHE.set(cacheKey, result.tokens)
+        if (code.length <= MAX_CACHED_CODE_LENGTH) {
+          if (TOKEN_CACHE.size >= 500) TOKEN_CACHE.clear()
+          TOKEN_CACHE.set(cacheKey, result.tokens)
+        }
         setTokens(result.tokens)
       })
       .catch((err: unknown) => {

@@ -303,6 +303,91 @@ describe("streamMessagesToUi", () => {
     })
   })
 
+  it("names a result's media blocks and leaves their base64 out of its output", () => {
+    const content = [
+      { type: "text", text: "Read 2 files." },
+      { type: "image", base64: "iVBORw0KGgo", mime_type: "image/png" },
+      { type: "file", base64: "A".repeat(4096), mime_type: "application/pdf" },
+    ]
+    const messages = streamMessagesToUi(
+      [
+        new AIMessage({
+          id: "ai-1",
+          content: "",
+          tool_calls: [
+            { id: "call-1", name: "read_file", args: {}, type: "tool_call" },
+          ],
+        }),
+        new ToolMessage({ tool_call_id: "call-1", content }),
+      ],
+      [
+        {
+          id: "call-1",
+          callId: "call-1",
+          name: "read_file",
+          namespace: ["tools:call-1"],
+          input: {},
+          args: {},
+          output: content,
+          status: "finished",
+          error: undefined,
+        },
+      ]
+    )
+
+    expect(messages[0]?.chunks[0]).toMatchObject({
+      kind: "tool-execution",
+      output: "Read 2 files.\n[file application/pdf, 3 KB]",
+      images: [{ kind: "image", mimeType: "image/png" }],
+    })
+  })
+
+  it("keeps the links of media a result only points to", () => {
+    const content = [
+      { type: "text", text: "Found 2 links." },
+      { type: "image", url: "https://example.com/chart.png" },
+      {
+        type: "file",
+        url: "https://example.com/report.pdf",
+        mime_type: "application/pdf",
+      },
+    ]
+    const messages = streamMessagesToUi(
+      [
+        new AIMessage({
+          id: "ai-1",
+          content: "",
+          tool_calls: [
+            { id: "call-1", name: "fetch", args: {}, type: "tool_call" },
+          ],
+        }),
+        new ToolMessage({ tool_call_id: "call-1", content }),
+      ],
+      [
+        {
+          id: "call-1",
+          callId: "call-1",
+          name: "fetch",
+          namespace: ["tools:call-1"],
+          input: {},
+          args: {},
+          output: content,
+          status: "finished",
+          error: undefined,
+        },
+      ]
+    )
+
+    expect(messages[0]?.chunks[0]).toMatchObject({
+      kind: "tool-execution",
+      output: [
+        "Found 2 links.",
+        "[image] https://example.com/chart.png",
+        "[file application/pdf] https://example.com/report.pdf",
+      ].join("\n"),
+    })
+  })
+
   it("attaches validated output iframe artifacts to their tool call", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({ id: "user-1", content: "draw a chart" }),

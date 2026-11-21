@@ -237,6 +237,39 @@ function toolOutputText(
   const value = assembled?.output
   if (value != null) {
     if (typeof value === "string") return value.trim() || undefined
+    const content: unknown = toolMessage?.content
+    if (Array.isArray(content)) {
+      const lines = content.flatMap((item: unknown): Array<string> => {
+        if (typeof item === "string") return [item]
+        if (!item || typeof item !== "object") return []
+        const block = item as Record<string, unknown>
+        if (typeof block.text === "string") return [block.text]
+        const inline = inlineImage(block)
+        // imageChunks shows these.
+        if (inline.base64 && inline.mimeType) return []
+        const mimeType = block.mime_type ?? block.mimeType
+        const imageUrl = block.image_url
+        const link =
+          block.url ??
+          (imageUrl && typeof imageUrl === "object"
+            ? (imageUrl as Record<string, unknown>).url
+            : imageUrl)
+        const dataUrl = typeof link === "string" && link.startsWith("data:")
+        const payload =
+          block.base64 ??
+          block.data ??
+          (dataUrl ? link.slice(link.indexOf(",") + 1) : undefined)
+        const size =
+          typeof payload === "string"
+            ? `, ${Math.ceil((payload.length * 3) / 4 / 1024)} KB`
+            : ""
+        const href = typeof link === "string" && !dataUrl ? ` ${link}` : ""
+        return [
+          `[${String(block.type ?? "block")}${typeof mimeType === "string" ? ` ${mimeType}` : ""}${size}]${href}`,
+        ]
+      })
+      return lines.join("\n").trim() || undefined
+    }
     try {
       return JSON.stringify(value)
     } catch {
