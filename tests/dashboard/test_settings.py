@@ -124,7 +124,7 @@ async def test_execution_defaults_api_is_admin_only_and_round_trips(
                 "/dashboard/api/settings/execution",
                 json={
                     "prompt": "Private instructions",
-                    "create_params": {"region": "us"},
+                    "create_params": {"run_config": {"env_vars": {"REGION": "us"}}},
                 },
             )
             assert response.status_code == status, response.text
@@ -145,7 +145,7 @@ async def test_execution_defaults_api_is_admin_only_and_round_trips(
             "create_params": {"before": "[REDACTED]", "after": "[REDACTED]"},
         }
         assert "Private instructions" not in entry.model_dump_json()
-        assert "region" not in entry.model_dump_json()
+        assert "REGION" not in entry.model_dump_json()
 
 
 @pytest.mark.parametrize(
@@ -154,6 +154,8 @@ async def test_execution_defaults_api_is_admin_only_and_round_trips(
         {"slack_channel_ids": ["C123"]},
         {"vcpus": 0},
         {"create_params": {"api_key": "must-not-persist"}},
+        {"create_params": {"region": "us"}},
+        {"create_params": {"labels": {"team": "infra"}}},
         {"create_params": {"proxy_config": {"rules": "invalid"}}},
         {
             "create_params": {

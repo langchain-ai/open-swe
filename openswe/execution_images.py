@@ -159,9 +159,7 @@ class ExecutionImageAttempt:
             sandbox_id, name, timeout=SnapshotBuild.capture_timeout()
         )
         async with postgres.session() as session:
-            current = ExecutionDefaults.model_validate(
-                await self.images.records.lock(session=session)
-            )
+            current = ExecutionDefaults.stored(await self.images.records.lock(session=session))
             state = ImageState.model_validate(
                 await self.images.records.lock("image", session=session)
             )
@@ -269,7 +267,7 @@ class ExecutionImages:
     async def begin(self, job: queue.Job) -> ExecutionImageAttempt | None:
         interrupted_builder: str | None = None
         async with postgres.session() as session:
-            definition = ExecutionDefaults.model_validate(await self.records.lock(session=session))
+            definition = ExecutionDefaults.stored(await self.records.lock(session=session))
             state = ImageState.model_validate(await self.records.lock("image", session=session))
             if not await job.held(session=session):
                 return None

@@ -108,7 +108,6 @@ def define_sandbox(
     proxy_config: ProxyConfig | dict[str, object] | None = None,
     resolve: SandboxResolve | None = None,
     existing_sandbox: str | None = None,
-    _openswe_create_fields: dict[str, object] | None = None,
     **options: object,
 ) -> SandboxDefinition:
     """Declare the managed execution environment for an agent.
@@ -126,10 +125,6 @@ def define_sandbox(
     run of the thread; a run that names none opens MDA's own sandbox for the thread.
     It can name any sandbox the deployment's key reaches, another thread's included,
     so take the name from something the agent trusts, never from a caller's input.
-
-    The ``_openswe_*`` arguments exist only for Open SWE's vendored copy and are not
-    MDA's API: see Open SWE's vendor/mda-changes/ for why, and what MDA should offer
-    instead.
     """
     if resolve is not None and not callable(resolve):
         raise TypeError("sandbox resolve must be a function")
@@ -151,9 +146,6 @@ def define_sandbox(
         dumped["proxy_config"] = proxy_config
     if existing_sandbox is not None:
         dumped["existing_sandbox"] = existing_sandbox
-    # Open SWE only; pydantic would copy or reject it, so it skips the model.
-    if _openswe_create_fields is not None:
-        dumped["_openswe_create_fields"] = _openswe_create_fields
     normalized = normalize_sandbox_options(dumped)
     return SandboxDefinition(normalized, resolve)
 

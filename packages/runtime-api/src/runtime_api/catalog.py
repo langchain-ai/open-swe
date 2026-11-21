@@ -8,7 +8,7 @@ run in, and what its middleware does around each model call.
 """
 
 from collections.abc import Mapping
-from typing import Final, Literal, Self
+from typing import ClassVar, Final, Literal, Self
 
 from pydantic import BaseModel, JsonValue, model_validator
 
@@ -108,11 +108,64 @@ class SandboxCreate(BaseModel):
     mem_bytes: int | None = None
     idle_ttl_seconds: int
     delete_after_stop_seconds: int
-    # Create-request fields the SDK does not model, such as ``preserve_memory_on_stop``.
+    # The other ``create_sandbox`` arguments, from ``EXTRA_FIELDS``.
     extra_fields: dict[str, JsonValue] = {}
     # The environment of every command in the sandbox, set in its own run config. None of it
     # is a credential.
     env_vars: dict[str, str] = {}
+
+    #: The LangSmith SDK ``create_sandbox`` arguments ``extra_fields`` may hold: the ones Robin
+    #: handles beyond the snapshot, VM size and TTLs above.
+    EXTRA_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "access_delegation",
+            "delete_after_stop_seconds",
+            "idle_ttl_seconds",
+            "mount_config",
+            "preserve_memory_on_stop",
+            "proxy_config",
+            "run_config",
+            "tag_value_ids",
+        }
+    )
+
+    def create_arguments(self) -> dict[str, JsonValue]:
+        """``extra_fields`` that go to ``create_sandbox``: only ``EXTRA_FIELDS``, never null.
+
+        Only a record saved before ``EXTRA_FIELDS`` was enforced holds any other key.
+        """
+        arguments: dict[str, JsonValue] = {
+            key: value
+            for key, value in self.extra_fields.items()
+            if key in self.EXTRA_FIELDS and value is not None
+        }
+        if "mount_config" in arguments:
+            arguments["mount_config"] = self.mount_config_argument(arguments["mount_config"])
+        return arguments
+
+    @staticmethod
+    def mount_config_argument(mount_config: JsonValue) -> JsonValue:
+        """``mount_config`` without its JSON nulls in ``auth``; anything else goes as it is.
+
+        The sandbox API reads a null as absent, so a proxy rule can authenticate the mount
+        instead, but the SDK's ``create_sandbox`` counts a null provider as set and rejects
+        it next to that provider's proxy rule (and a null ``auth`` outright).
+        """
+        if not isinstance(mount_config, dict) or "auth" not in mount_config:
+            return mount_config
+        auth = mount_config["auth"]
+        if auth is None:
+            without_auth: dict[str, JsonValue] = {
+                key: value for key, value in mount_config.items() if key != "auth"
+            }
+            return without_auth
+        if not isinstance(auth, dict):
+            return mount_config
+        providers: dict[str, JsonValue] = {
+            provider: value for provider, value in auth.items() if value is not None
+        }
+        with_providers: dict[str, JsonValue] = {**mount_config, "auth": providers}
+        return with_providers
 
 
 class SandboxSpec(BaseModel):

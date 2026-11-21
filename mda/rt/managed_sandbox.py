@@ -34,7 +34,7 @@ import random
 import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final, Protocol, runtime_checkable
 
 import httpx
@@ -57,7 +57,7 @@ from langsmith.sandbox import (
 )
 from managed_deepagents import ManagedServerRuntime, RunEndingError, define_sandbox
 from managed_deepagents._sandbox_proxy import ProxyConfigRefusedError  # noqa: PLC2701
-from managed_deepagents.sandbox import SandboxDefinition
+from managed_deepagents.sandbox import SandboxDefinition, normalize_sandbox_options
 from pydantic import JsonValue
 from runtime_api.catalog import SandboxCreate, SandboxSpec
 from runtime_api.loop import SANDBOX_UNREACHABLE, SandboxGone
@@ -141,23 +141,23 @@ def definition(
     ends the run. Without one MDA opens, or creates, its own sandbox for the thread; a task
     worker's run is an async subagent of its coordinator's, so that is the coordinator's.
     MDA creates it with ``proxy_config`` and writes that before each command; without one,
-    which only an external sandbox has, MDA leaves that existing sandbox's proxy config alone. Its commands' environment (``create.env_vars``)
-    goes in its own run config. The create fields the SDK does not model go as they are, but
-    for the proxy and run configs, which go as those options.
+    which only an external sandbox has, MDA leaves that existing sandbox's proxy config
+    alone. The catalog's ``proxy_config`` carries the workspace's, federated cloud rules
+    included, so ``create``'s own is not sent. Its commands' environment
+    (``create.env_vars``) goes in its own run config. ``create``'s other ``create_sandbox``
+    arguments go as they are; the typed ones win.
     """
+    fields = create.create_arguments()
+    fields.pop("proxy_config", None)
     run_config: dict[str, object] | None = None
     if create.env_vars:
-        declared = create.extra_fields.get("run_config")
-        declared = declared if isinstance(declared, dict) else {}
-        env_vars = declared.get("env_vars")
+        declared_run = fields.pop("run_config", None)
+        declared_run = declared_run if isinstance(declared_run, dict) else {}
+        env_vars = declared_run.get("env_vars")
         env_vars = env_vars if isinstance(env_vars, dict) else {}
-        run_config = {**declared, "env_vars": {**env_vars, **create.env_vars}}
-    as_options = {"proxy_config", *(["run_config"] if run_config is not None else [])}
-    return define_sandbox(
+        run_config = {**declared_run, "env_vars": {**env_vars, **create.env_vars}}
+    declared = define_sandbox(
         existing_sandbox=sandbox_id,
-        _openswe_create_fields={
-            key: value for key, value in create.extra_fields.items() if key not in as_options
-        },
         proxy_config=None if proxy_config is None else dict(proxy_config),
         run_config=run_config,
         snapshot_id=create.snapshot_id,
@@ -167,6 +167,7 @@ def definition(
         vcpus=create.vcpus,
         mem_bytes=create.mem_bytes,
     )
+    return replace(declared, options=normalize_sandbox_options({**fields, **declared.options}))
 
 
 def declared_sandbox() -> SandboxDefinition:

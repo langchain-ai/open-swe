@@ -1,12 +1,11 @@
 """LangSmith sandbox backend integration."""
 
 import asyncio
-import json
 import logging
 import secrets
 import shlex
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Literal, NotRequired, TypedDict
 
 import httpx2
@@ -22,6 +21,7 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 from langsmith.sandbox import (
+    AsyncSandbox,
     AsyncSandboxClient,
     CommandTimeoutError,
     ResourceNotFoundError,
@@ -31,11 +31,13 @@ from langsmith.sandbox import (
     SandboxServerReloadError,
 )
 from pydantic import BaseModel, JsonValue, TypeAdapter
+from runtime_api.catalog import SandboxCreate
 from runtime_api.sandbox_proxy import GITHUB_PROXY_RULES
 from runtime_api.sandbox_setup import GitIdentity
 
 from openswe.config import ENV
 from openswe.sandboxes.cloud_identity import federated_cloud
+from openswe.sandboxes.configuration import ExecutionConfiguration
 from openswe.sandboxes.paths import WORKSPACE_DIR, forget_work_dir, remember_work_dir
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
 from openswe.sandboxes.providers.registry import SandboxGoneError
@@ -132,33 +134,10 @@ def _get_sandbox_snapshot_config() -> tuple[int, int, int, int, int]:
     )
 
 
-def _get_sandbox_create_extra_fields() -> dict[str, Any]:
-    """Parse SANDBOX_CREATE_EXTRA_JSON into extra fields merged into the
-    sandbox-create request body, e.g. ``{"_internal_runtime": "v2"}``."""
-    raw = ENV.SANDBOX_CREATE_EXTRA_JSON.optional()
-    if not raw or not raw.strip():
-        return {}
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as e:
-        msg = f"SANDBOX_CREATE_EXTRA_JSON must be valid JSON, got {raw!r}"
-        raise ValueError(msg) from e
-    if not isinstance(parsed, dict):
-        msg = f"SANDBOX_CREATE_EXTRA_JSON must be a JSON object, got {type(parsed).__name__}"
-        raise ValueError(msg)
-    return parsed
-
-
-def _merge_sandbox_create_extra_fields(
-    create_params: dict[str, Any] | None,
-) -> dict[str, Any]:
-    return {**_get_sandbox_create_extra_fields(), **(create_params or {})}
-
-
 def get_sandbox_proxy_config(
     create_params: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    proxy_config = _merge_sandbox_create_extra_fields(create_params).get("proxy_config")
+    proxy_config = (create_params or {}).get("proxy_config")
     return dict(proxy_config) if isinstance(proxy_config, dict) else None
 
 
@@ -174,7 +153,8 @@ class LangSmithCreateOptions(BaseModel):
     mem_bytes: int | None = None
     idle_ttl_seconds: int
     delete_after_stop_seconds: int
-    # Create-request fields the SDK does not model, such as ``preserve_memory_on_stop``.
+    # The other ``create_sandbox`` arguments, from ``ExecutionConfiguration.CREATE_PARAMS``.
+    # Stored run profiles are digested with this field's name, so it keeps it.
     extra_fields: dict[str, JsonValue] = {}
 
     @classmethod
@@ -196,11 +176,13 @@ class LangSmithCreateOptions(BaseModel):
         ) = _get_sandbox_snapshot_config()
         if mem_bytes is None and vcpus is None:
             mem_bytes, vcpus = default_mem_bytes, default_vcpus
-        extra_fields = _merge_sandbox_create_extra_fields(create_params)
-        # The API boots its default root snapshot only when the key is absent:
-        # `snapshot_id` is a UUID server-side, so "" is rejected with a 422.
-        if not extra_fields.get("snapshot_id"):
-            extra_fields.pop("snapshot_id", None)
+        extra_fields = dict(create_params or {})
+        ExecutionConfiguration.check_create_param_keys(extra_fields)
+        # A TTL in ``create_params`` overrides the deployment's default; null keeps it.
+        if (idle := extra_fields.pop("idle_ttl_seconds", None)) is not None:
+            idle_ttl_seconds = idle
+        if (after_stop := extra_fields.pop("delete_after_stop_seconds", None)) is not None:
+            delete_after_stop_seconds = after_stop
         return cls(
             snapshot_id=snapshot_id or None,
             fs_capacity_bytes=(
@@ -212,22 +194,6 @@ class LangSmithCreateOptions(BaseModel):
             delete_after_stop_seconds=delete_after_stop_seconds,
             extra_fields=_json_object.validate_python(extra_fields),
         )
-
-
-def _install_create_extra_fields(client: AsyncSandboxClient, extra: dict[str, Any]) -> None:
-    """Merge extra fields until the SDK exposes create-payload passthrough."""
-    if not extra:
-        return
-    original_post = client._http.post  # noqa: SLF001
-
-    async def post_with_extra(url: Any, *args: Any, **kwargs: Any) -> Any:
-        payload = kwargs.get("json")
-        if str(url).endswith("/boxes") and isinstance(payload, dict):
-            kwargs["json"] = {**payload, **extra}
-        return await original_post(url, *args, **kwargs)
-
-    # RFC moving this into the SDK if it adds a public arbitrary create-fields API.
-    client._http.post = post_with_extra  # noqa: SLF001 # ty: ignore[invalid-assignment]
 
 
 class GitHubProxyHeader(TypedDict):
@@ -321,28 +287,10 @@ async def _reuse_existing_sandbox(client: AsyncSandboxClient, sandbox_id: str) -
         raise RuntimeError(msg) from e
 
 
-async def _create_sandbox_with_retry(
-    client: AsyncSandboxClient,
-    *,
-    snapshot_id: str,
-    fs_capacity_bytes: int | None,
-    vcpus: int | None,
-    mem_bytes: int | None,
-    idle_ttl_seconds: int | None,
-    delete_after_stop_seconds: int | None,
-    timeout: int,
-) -> Any:
+async def _create_sandbox_with_retry(create: Callable[[], Awaitable[AsyncSandbox]]) -> AsyncSandbox:
     for attempt in range(SANDBOX_CREATE_MAX_ATTEMPTS):
         try:
-            return await client.create_sandbox(
-                snapshot_id=snapshot_id,
-                fs_capacity_bytes=fs_capacity_bytes,
-                vcpus=vcpus,
-                mem_bytes=mem_bytes,
-                idle_ttl_seconds=idle_ttl_seconds,
-                delete_after_stop_seconds=delete_after_stop_seconds,
-                timeout=timeout,
-            )
+            return await create()
         except Exception as exc:
             if attempt == SANDBOX_CREATE_MAX_ATTEMPTS - 1 or not _is_retryable_sandbox_create_error(
                 exc
@@ -602,7 +550,6 @@ async def capture_snapshot_with_tag(
     Snapshots are Docker-style: ``name:tag`` is a mutable pointer at immutable
     content, so re-capturing a tag moves it rather than colliding. The Python SDK
     has no ``tag`` parameter yet, so the field is injected into the capture body
-    the same way ``_install_create_extra_fields`` injects sandbox-create fields,
     along with a request timeout longer than the client's default, which
     ``timeout`` does not cover: it only bounds the wait for the snapshot to be ready.
     """
@@ -1073,7 +1020,6 @@ class LangSmithProvider(SandboxProvider):
             ):
                 msg = f"{name} must be >= 0, got {value}"
                 raise ValueError(msg)
-        _get_sandbox_create_extra_fields()
 
     async def get_or_create(
         self,
@@ -1106,24 +1052,27 @@ class LangSmithProvider(SandboxProvider):
                 sandbox = await _reuse_existing_sandbox(client, sandbox_id)
                 return TimeoutLangSmithSandbox(sandbox.to_sync())
 
-            effective_snapshot_id = snapshot_id or ""
-            extra_fields = _merge_sandbox_create_extra_fields(create_params)
-            # The API boots its default root snapshot only when the key is absent:
-            # `snapshot_id` is a UUID server-side, so "" is rejected with a 422.
-            if not extra_fields.get("snapshot_id"):
-                extra_fields.pop("snapshot_id", None)
-            _install_create_extra_fields(client, extra_fields)
-
+            params = dict(create_params or {})
+            ExecutionConfiguration.check_create_param_keys(params)
+            if "mount_config" in params:
+                params["mount_config"] = SandboxCreate.mount_config_argument(params["mount_config"])
+            # A TTL in ``create_params`` overrides the one given; null keeps it.
+            if (idle := params.pop("idle_ttl_seconds", None)) is not None:
+                idle_ttl_seconds = idle
+            if (after_stop := params.pop("delete_after_stop_seconds", None)) is not None:
+                delete_after_stop_seconds = after_stop
             try:
                 sandbox = await _create_sandbox_with_retry(
-                    client,
-                    snapshot_id=effective_snapshot_id,
-                    fs_capacity_bytes=fs_capacity_bytes,
-                    vcpus=vcpus,
-                    mem_bytes=mem_bytes,
-                    idle_ttl_seconds=idle_ttl_seconds,
-                    delete_after_stop_seconds=delete_after_stop_seconds,
-                    timeout=timeout,
+                    lambda: client.create_sandbox(
+                        snapshot_id=snapshot_id or "",
+                        fs_capacity_bytes=fs_capacity_bytes,
+                        vcpus=vcpus,
+                        mem_bytes=mem_bytes,
+                        idle_ttl_seconds=idle_ttl_seconds,
+                        delete_after_stop_seconds=delete_after_stop_seconds,
+                        timeout=timeout,
+                        **params,
+                    )
                 )
             except Exception as e:
                 msg = f"Failed to create sandbox from snapshot '{snapshot_id}': {e}"

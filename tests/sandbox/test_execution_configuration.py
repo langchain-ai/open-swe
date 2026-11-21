@@ -7,9 +7,9 @@ from openswe.dashboard.execution_defaults import ExecutionDefaults
 @pytest.mark.parametrize(
     "create_params",
     [
-        {"env_vars": {"API_TOKEN": "sensitive"}},
-        {"env_vars": {"OPENAI_API_KEY": "sensitive"}},
-        {"clientSecret": "sensitive"},
+        {"run_config": {"env_vars": {"API_TOKEN": "sensitive"}}},
+        {"run_config": {"env_vars": {"OPENAI_API_KEY": "sensitive"}}},
+        {"mount_config": {"clientSecret": "sensitive"}},
         {
             "proxy_config": {
                 "rules": [
@@ -29,10 +29,46 @@ def test_create_params_reject_persisted_secrets(create_params: dict[str, JsonVal
         ExecutionDefaults(create_params=create_params)
 
 
+@pytest.mark.parametrize(
+    ("create_params", "unknown"),
+    [
+        ({"region": "us"}, "region"),
+        ({"_internal_runtime": "v2", "run_config": {}}, "_internal_runtime"),
+        (
+            {"labels": {}, "persistent": True, "restore_memory": True},
+            "labels, persistent, restore_memory",
+        ),
+        ({"snapshot_id": "snap", "name": "box"}, "name, snapshot_id"),
+    ],
+)
+def test_create_params_take_only_sandbox_create_options(
+    create_params: dict[str, JsonValue], unknown: str
+) -> None:
+    with pytest.raises(ValueError, match=f"create_params cannot set {unknown}: "):
+        ExecutionDefaults(create_params=create_params)
+    with pytest.raises(ValueError, match="cannot set"):
+        ExecutionDefaults.model_construct(create_params=create_params).sandbox_create_params()
+    # Defaults saved before the check still load, without the keys a write would reject.
+    stored = ExecutionDefaults.stored({"create_params": create_params})
+    assert stored.create_params == {
+        key: value for key, value in create_params.items() if key in ExecutionDefaults.CREATE_PARAMS
+    }
+
+
+def test_create_params_are_create_sandbox_arguments() -> None:
+    import inspect
+
+    from langsmith.sandbox import AsyncSandboxClient, SandboxClient
+
+    for client in (SandboxClient, AsyncSandboxClient):
+        arguments = set(inspect.signature(client.create_sandbox).parameters)
+        assert ExecutionDefaults.CREATE_PARAMS <= arguments
+
+
 def test_create_params_enforce_serialized_size_limit() -> None:
     with pytest.raises(ValueError, match="at most"):
         ExecutionDefaults(
-            create_params={"metadata": "x" * 20_000},
+            create_params={"run_config": {"note": "x" * 20_000}},
         )
 
 

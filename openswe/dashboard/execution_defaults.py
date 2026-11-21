@@ -32,7 +32,7 @@ class ExecutionDefaultsStore:
         self.records = SettingsRecords("execution")
 
     async def load(self, *, session: AsyncSession | None = None) -> ExecutionDefaults:
-        return ExecutionDefaults.model_validate(await self.records.get(session=session) or {})
+        return ExecutionDefaults.stored(await self.records.get(session=session))
 
     async def update(self, update: ExecutionDefaults) -> ExecutionDefaults:
         changes: JsonObject = update.model_dump(mode="json", exclude_unset=True)
@@ -47,7 +47,7 @@ class ExecutionDefaultsStore:
                 for field, value in changes.items()
                 if before.get(field) != value
             }
-        settings = ExecutionDefaults.model_validate(saved)
+        settings = ExecutionDefaults.stored(saved)
         await Topic.SETTINGS.invalidate()
         from openswe.execution_images import EXECUTION_IMAGES
 

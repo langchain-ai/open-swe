@@ -458,7 +458,7 @@ function ExecutionParametersSection({
   return (
     <SettingsSection
       title="Sandbox Parameters"
-      description="Additional sandbox creation parameters, such as provider region and mount_config. Configure proxy rules, governed tags, and LangSmith access in Sandbox Proxy. Never enter keys or secrets."
+      description="Additional sandbox create options: mount_config, run_config, preserve_memory_on_stop, idle_ttl_seconds, and delete_after_stop_seconds. Configure proxy rules, governed tags, and LangSmith access in Sandbox Proxy. Never enter keys or secrets."
     >
       <SettingsPanel>
         <Textarea

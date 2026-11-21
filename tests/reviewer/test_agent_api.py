@@ -843,7 +843,7 @@ async def test_a_runs_tool_and_shell_calls_never_plan_it_and_read_its_settings(
         uses_defaults=True,
         create=LangSmithCreateOptions.resolve(
             snapshot_id="pinned-image",
-            create_params={"env_vars": {"TEST_AUTHORITY": "private-value"}},
+            create_params={"run_config": {"env_vars": {"TEST_AUTHORITY": "private-value"}}},
         ),
     )
     digest = await profile.keep()

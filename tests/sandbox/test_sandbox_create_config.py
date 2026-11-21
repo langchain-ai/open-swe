@@ -25,7 +25,6 @@ async def test_global_defaults_are_pinned_and_public_metadata_cannot_expand_auth
     profile = await ExecutionProfile.resolve()
     execution_defaults.snapshot_id = "global-2"
     execution_defaults.create_params = {"proxy_config": {"rules": [{"name": "changed"}]}}
-    monkeypatch.setenv("SANDBOX_CREATE_EXTRA_JSON", '{"proxy_config":{"rules":["injected"]}}')
     with ExecutionProfile.bind(profile):
         pinned = await SandboxCreateConfig.resolve()
         assert pinned.snapshot_id == "global-1"
@@ -72,7 +71,6 @@ async def test_mda_recreation_tracks_the_image_without_changing_bound_authority(
     for snapshot in ("snapshot-2", "snapshot-3"):
         execution_defaults.snapshot_id = snapshot
         execution_defaults.create_params = {"proxy_config": {"rules": [{"name": "new"}]}}
-        monkeypatch.setenv("SANDBOX_CREATE_EXTRA_JSON", '{"proxy_config":{"rules":["injected"]}}')
         managed = await ManagedSandbox.for_thread("thread-1")
         assert managed is not None and managed.sandbox_id == "mda-sandbox"
         assert managed.create == original.model_copy(

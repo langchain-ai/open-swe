@@ -464,16 +464,22 @@ async def test_each_run_on_the_shared_graph_works_in_its_own_threads_sandbox(
     )
     store = InMemoryStore()
 
-    first = await _run(
-        store, "thread-1", _context("agent", "token-1", _catalog("web_search", "g1", snapshot="a"))
-    )
+    unbound = _catalog("web_search", "g1", snapshot="a")
+    assert unbound.sandbox is not None
+    # Keys a record saved before the allow-list may hold never reach MDA.
+    unbound.sandbox.create.extra_fields = {"existing_sandbox": "another-box", "region": "us"}
+    first = await _run(store, "thread-1", _context("agent", "token-1", unbound))
     catalog = _catalog("web_search", "g2", snapshot="b")
     assert catalog.sandbox is not None
     catalog.sandbox.sandbox_id = "recorded-box"
+    tag = "00000000-0000-0000-0000-000000000001"
     catalog.sandbox.create.extra_fields = {
         "preserve_memory_on_stop": True,
+        "tag_value_ids": [tag],
         "proxy_config": {"rules": []},
         "run_config": {"user": "agent", "env_vars": {"LANG": "C.UTF-8"}},
+        # The API reads a null provider as absent; the SDK would refuse it next to an AWS rule.
+        "mount_config": {"mounts": [], "auth": {"aws": None}},
     }
     catalog.sandbox.create.env_vars = {"GH_TOKEN": "proxy-injected"}
     second = await _run(store, "thread-2", _context("agent", "token-2", catalog))
@@ -484,15 +490,19 @@ async def test_each_run_on_the_shared_graph_works_in_its_own_threads_sandbox(
     options = resolved["thread-2"].options
     assert options["existing_sandbox"] == "recorded-box"
     assert "existing_sandbox" not in resolved["thread-1"].options
-    assert options["_openswe_create_fields"] == {"preserve_memory_on_stop": True}
     assert options["default_timeout"] == EXECUTE_TIMEOUT_SECONDS
     create = mda_runtime._sandbox_create_kwargs(resolved["thread-2"])
     assert not [key for key in create if key.startswith("_openswe_") or key == "existing_sandbox"]
+    # The create fields go as create_sandbox arguments; the catalog's proxy config wins.
+    assert create["preserve_memory_on_stop"] is True
+    assert create["tag_value_ids"] == [tag]
     assert create["proxy_config"] == _PROXY_CONFIG
     assert create["run_config"] == {
         "user": "agent",
         "env_vars": {"LANG": "C.UTF-8", "GH_TOKEN": "proxy-injected"},
     }
+    assert create["mount_config"] == {"mounts": [], "auth": {}}
+    assert "region" not in mda_runtime._sandbox_create_kwargs(resolved["thread-1"])
 
 
 async def test_a_run_retries_a_sandbox_the_sandbox_service_failed_to_open_and_reports_why_it_gave_up(

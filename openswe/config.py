@@ -508,7 +508,6 @@ ENV.var(
     "DEFAULT_SANDBOX_DELETE_AFTER_STOP_SECONDS", "Seconds after stop before deletion; 0 disables."
 )
 ENV.var("SANDBOX_EXECUTE_CLIENT_GRACE_SECONDS", "Client-side grace past a command's own timeout.")
-ENV.var("SANDBOX_CREATE_EXTRA_JSON", "JSON object merged into the sandbox create body.")
 ENV.var(
     "EXECUTION_SNAPSHOT_PREFIX",
     "Prefix for execution image snapshot names.",

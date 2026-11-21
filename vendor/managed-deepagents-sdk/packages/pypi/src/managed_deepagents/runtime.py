@@ -529,8 +529,6 @@ def _sandbox_create_kwargs(
     selection: _SandboxSelection | None = None,
 ) -> dict[str, object]:
     """Options for ``create_sandbox``."""
-    from managed_deepagents.sandbox import SandboxDefinition  # noqa: PLC0415
-
     create_kwargs = {
         key: value
         for key, value in sandbox.options.items()
@@ -542,7 +540,6 @@ def _sandbox_create_kwargs(
             "template_name",
             "existing_sandbox",
             *_BAKE_BASE_OPTION_KEYS,
-            *SandboxDefinition.RESOLUTION_OPTION_KEYS,
         }
     }
     # Keep a stopped sandbox long enough that a thread rarely outlives it: MDA never
@@ -3257,28 +3254,6 @@ def _claim_managed_sandbox(
         return claim.host_name
 
 
-def _send_create_fields(client: LangSmithSandboxClient, fields: Mapping[str, object]) -> None:
-    """Add ``fields`` to every create request ``client`` sends.
-
-    The SDK's ``create_sandbox`` takes only the fields it models, so the rest are
-    merged into the request body on its transport.
-    """
-    if not fields:
-        return
-    http = getattr(client, "_http", None)
-    post = getattr(http, "post", None)
-    if http is None or not callable(post):
-        raise RuntimeError("This langsmith SDK cannot send sandbox _openswe_create_fields")
-
-    def post_with_fields(url: object, *args: object, **kwargs: object) -> object:
-        payload = kwargs.get("json")
-        if str(url).endswith("/boxes") and isinstance(payload, dict):
-            kwargs["json"] = {**fields, **payload}
-        return post(url, *args, **kwargs)
-
-    http.post = post_with_fields
-
-
 def _is_sandbox_not_found_error(error: Exception) -> bool:
     from langsmith.sandbox import ResourceNotFoundError, SandboxConnectionError  # noqa: PLC0415
 
@@ -3885,13 +3860,10 @@ def _claim_langsmith_sandbox(
 
     A stopped sandbox still restarts here and waits: the SDK's start always waits.
     """
-    from managed_deepagents.sandbox import declared_create_fields  # noqa: PLC0415
-
     create_kwargs = _sandbox_create_kwargs(sandbox, selection)
     if not wait:
         create_kwargs["wait_for_ready"] = False
     client = _sandbox_client_for(sandbox)
-    _send_create_fields(client, declared_create_fields(sandbox.options))
     deployment = _managed_deployment_name()
     # A run that names an existing sandbox opens only that one, and never creates it.
     existing = _string_option(sandbox.options.get("existing_sandbox"))

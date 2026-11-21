@@ -1,13 +1,21 @@
 """Validated nonsecret configuration for Robin's sandbox images."""
 
 import json
+import logging
 import re
-from typing import TypedDict
+from collections.abc import Mapping
+from typing import ClassVar, Self, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationInfo, field_validator
+from runtime_api.catalog import SandboxCreate
 
 from openswe.github.repo_names import normalize_repo_full_name
 from openswe.sandboxes.cloud_identity import validate_access_delegation, validate_cloud_identity
+
+logger = logging.getLogger(__name__)
+
+# The validation context of a saved record (``ExecutionConfiguration.stored``).
+_STORED = {"stored": True}
 
 
 class SandboxResources(TypedDict, total=False):
@@ -18,6 +26,11 @@ class SandboxResources(TypedDict, total=False):
 
 class ExecutionConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    #: What ``create_params`` may set: the LangSmith SDK ``create_sandbox`` arguments Robin
+    #: handles beyond the snapshot and VM size, which have their own fields. They go to
+    #: ``create_sandbox`` as they are, and it takes no other key.
+    CREATE_PARAMS: ClassVar[frozenset[str]] = SandboxCreate.EXTRA_FIELDS
 
     prompt: str = ""
     repos: list[str] = Field(default_factory=list)
@@ -98,9 +111,31 @@ class ExecutionConfiguration(BaseModel):
             return any(cls.has_sensitive_parameter(item) for item in value)
         return False
 
+    @classmethod
+    def stored(cls, record: Mapping[str, object] | None) -> Self:
+        """A saved record. Its ``create_params`` may hold keys saved before ``CREATE_PARAMS``
+        was enforced: a write rejects them, but a load drops them, so the defaults still
+        load, and an admin can save them again without those keys."""
+        return cls.model_validate(record or {}, context=_STORED)
+
     @field_validator("create_params")
     @classmethod
+    def validate_create_params_in_context(
+        cls, params: dict[str, JsonValue], info: ValidationInfo
+    ) -> dict[str, JsonValue]:
+        if info.context == _STORED:
+            unknown = sorted(set(params) - cls.CREATE_PARAMS)
+            if unknown:
+                logger.warning(
+                    "Dropped saved sandbox create params that are not create options",
+                    extra={"create_param_keys": unknown},
+                )
+                params = {key: value for key, value in params.items() if key in cls.CREATE_PARAMS}
+        return cls.validate_create_params(params)
+
+    @classmethod
     def validate_create_params(cls, params: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        cls.check_create_param_keys(params)
         proxy_config = params.get("proxy_config")
         if proxy_config is not None:
             if not isinstance(proxy_config, dict):
@@ -118,6 +153,15 @@ class ExecutionConfiguration(BaseModel):
         validate_cloud_identity(params)
         validate_access_delegation(params)
         return params
+
+    @classmethod
+    def check_create_param_keys(cls, params: Mapping[str, object]) -> None:
+        unknown = sorted(set(params) - cls.CREATE_PARAMS)
+        if unknown:
+            raise ValueError(
+                f"create_params cannot set {', '.join(unknown)}: it takes only the sandbox "
+                f"create options {', '.join(sorted(cls.CREATE_PARAMS))}"
+            )
 
     def sandbox_resources(self) -> SandboxResources:
         resources: SandboxResources = {}

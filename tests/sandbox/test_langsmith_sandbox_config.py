@@ -11,8 +11,9 @@ from langsmith.sandbox import AsyncSandboxClient, ResourceNotFoundError
 
 from openswe.sandboxes.providers import langsmith as langsmith_provider
 from openswe.sandboxes.providers.langsmith import (
+    LangSmithCreateOptions,
+    LangSmithProvider,
     _create_sandbox_with_retry,
-    _install_create_extra_fields,
     _reuse_existing_sandbox,
     capture_snapshot_with_tag,
     create_langsmith_sandbox,
@@ -65,7 +66,6 @@ class _FakeSandboxClient:
 
     async def create_sandbox(self, **kwargs):
         self.calls += 1
-        self.last_kwargs = kwargs
         if self.calls <= self.failures:
             raise self.error()
         return {"sandbox": kwargs["snapshot_id"]}
@@ -84,44 +84,97 @@ async def test_create_sandbox_with_retry_retries_transient_errors(
     monkeypatch.setattr("openswe.sandboxes.providers.langsmith.asyncio.sleep", AsyncMock())
 
     result = await _create_sandbox_with_retry(
-        cast(AsyncSandboxClient, client),
-        snapshot_id="snap-1",
-        fs_capacity_bytes=None,
-        vcpus=None,
-        mem_bytes=None,
-        idle_ttl_seconds=None,
-        delete_after_stop_seconds=None,
-        timeout=180,
+        lambda: client.create_sandbox(snapshot_id="snap-1", timeout=180)
     )
 
     assert result == {"sandbox": "snap-1"}
     assert client.calls == 3
-    assert "name" not in client.last_kwargs
 
 
 @pytest.mark.asyncio
-async def test_install_create_extra_fields_merges_only_sandboxes_post() -> None:
-    calls: list[tuple[str, dict]] = []
+async def test_create_params_go_to_create_sandbox_as_arguments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[dict[str, object]] = []
 
-    class _FakeHttp:
-        async def post(self, url, **kwargs):  # noqa: ANN001, ANN003
-            payload = kwargs.get("json")
-            assert isinstance(payload, dict)
-            calls.append((url, payload))
-            return "ok"
+    class _Client:
+        def __init__(self, **_: object) -> None:
+            pass
 
-    class _FakeClient:
-        def __init__(self) -> None:
-            self._http = _FakeHttp()
+        async def __aenter__(self) -> _Client:
+            return self
 
-    client = _FakeClient()
-    _install_create_extra_fields(cast(AsyncSandboxClient, client), {"_internal_runtime": "v2"})
+        async def __aexit__(self, *_: object) -> None:
+            return None
 
-    await client._http.post("https://api/v2/sandboxes/boxes", json={"snapshot_id": "s"})
-    await client._http.post("https://api/v2/sandboxes/boxes/abc/start", json={"foo": "bar"})
+        async def create_sandbox(self, **kwargs: object) -> MagicMock:
+            created.append(kwargs)
+            return MagicMock()
 
-    assert calls[0][1] == {"snapshot_id": "s", "_internal_runtime": "v2"}
-    assert calls[1][1] == {"foo": "bar"}
+    monkeypatch.setattr(langsmith_provider, "AsyncSandboxClient", _Client)
+    monkeypatch.setattr(langsmith_provider, "TimeoutLangSmithSandbox", MagicMock())
+    provider = LangSmithProvider(api_key="test-key")
+    tag = "00000000-0000-0000-0000-000000000001"
+    await provider.get_or_create(
+        snapshot_id=None,
+        idle_ttl_seconds=300,
+        delete_after_stop_seconds=400,
+        create_params={
+            "preserve_memory_on_stop": True,
+            "tag_value_ids": [tag],
+            "delete_after_stop_seconds": 60,
+            "mount_config": {"mounts": [], "auth": {"aws": None, "gcp": {"service_account": "x"}}},
+        },
+    )
+    assert created == [
+        {
+            "timeout": 180,
+            "snapshot_id": "",
+            "fs_capacity_bytes": None,
+            "vcpus": None,
+            "mem_bytes": None,
+            "idle_ttl_seconds": 300,
+            "delete_after_stop_seconds": 60,
+            "preserve_memory_on_stop": True,
+            "tag_value_ids": [tag],
+            "mount_config": {"mounts": [], "auth": {"gcp": {"service_account": "x"}}},
+        }
+    ]
+    with pytest.raises(ValueError, match="create_params cannot set _internal_runtime"):
+        await provider.get_or_create(create_params={"_internal_runtime": "v2"})
+    assert len(created) == 1
+
+
+def test_mount_config_argument_drops_only_nulls() -> None:
+    from runtime_api.catalog import SandboxCreate
+
+    assert SandboxCreate.mount_config_argument({"mounts": [], "auth": None}) == {"mounts": []}
+    assert SandboxCreate.mount_config_argument({"auth": {"aws": None, "gcp": {"x": 1}}}) == {
+        "auth": {"gcp": {"x": 1}}
+    }
+    # Left for the sandbox API to reject, which it does when no mounts are listed.
+    for kept in ({"auth": {}}, {"auth": False}):
+        assert SandboxCreate.mount_config_argument(kept) == kept
+
+
+def test_create_options_take_create_params_ttls_and_reject_other_keys() -> None:
+    with patch(
+        "openswe.sandboxes.providers.langsmith._get_sandbox_snapshot_config",
+        return_value=(100, 2, 200, 300, 400),
+    ):
+        options = LangSmithCreateOptions.resolve(
+            create_params={"idle_ttl_seconds": 600, "preserve_memory_on_stop": True}
+        )
+        assert (options.idle_ttl_seconds, options.delete_after_stop_seconds) == (600, 400)
+        assert options.extra_fields == {"preserve_memory_on_stop": True}
+        # A null TTL keeps the deployment's default.
+        options = LangSmithCreateOptions.resolve(
+            create_params={"idle_ttl_seconds": None, "delete_after_stop_seconds": None}
+        )
+        assert (options.idle_ttl_seconds, options.delete_after_stop_seconds) == (300, 400)
+        assert options.extra_fields == {}
+        with pytest.raises(ValueError, match="create_params cannot set region"):
+            LangSmithCreateOptions.resolve(create_params={"region": "us"})
 
 
 @pytest.mark.asyncio
