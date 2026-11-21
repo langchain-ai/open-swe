@@ -332,6 +332,7 @@ def access(
     policy: Policy,
     *,
     per_call: Callable[[Mapping[str, object]], Policy | None] | None = None,
+    validation_error: str | None = None,
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Gate a tool by ``policy``; ``per_call`` may pick a different policy, or none, per call."""
 
@@ -350,7 +351,15 @@ def access(
             mode = (await resolve_access()).mode(applied)
             if mode is None:
                 return cast(R, {"ok": False, "error": _REFUSED})
-            result = await fn(*args, **kwargs)
+            try:
+                result = await fn(*args, **kwargs)
+            except ValidationError as exc:
+                if validation_error is None:
+                    raise
+                if mode != "full":
+                    raise ValueError(validation_error) from None
+                details = exc.json(include_input=False, include_context=False, include_url=False)
+                raise ValueError(f"{validation_error}: {details}") from None
             if mode == "full" or applied.sole is None:
                 return result
             if not isinstance(result, Mapping):

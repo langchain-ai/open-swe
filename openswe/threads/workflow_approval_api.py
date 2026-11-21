@@ -8,6 +8,7 @@ from langgraph_sdk.schema import Run
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.oauth import require_same_origin_for_mutations, require_session
 from openswe.dispatch import dispatch_agent_run
+from openswe.prompts import prompt
 from openswe.source_context import SourceContext
 from openswe.threads.identity import ThreadIdentity
 from openswe.threads.plan_api import fetch_thread_metadata
@@ -68,14 +69,14 @@ async def approve_workflow_push(
         thread_id, fingerprint, approved=True, actor=session["sub"]
     )
     if decision is None:
-        raise HTTPException(404, "workflow push approval not found")
+        raise HTTPException(404, "push approval not found")
     record, changed = decision
     if not changed:
         return {"status": f"already_{record['status']}", "fingerprint": fingerprint}
     await dispatch_followup(
         thread_id,
         metadata,
-        "The workflow-file push approval was approved. Retry the blocked git push now; do not alter workflow files before pushing.",
+        prompt("runs/workflow-push-approved"),
         github_login=session["sub"],
         user_email=session.get("email"),
     )
@@ -97,7 +98,7 @@ async def reject_workflow_push(
         thread_id, fingerprint, approved=False, actor=session["sub"]
     )
     if decision is None:
-        raise HTTPException(404, "workflow push approval not found")
+        raise HTTPException(404, "push approval not found")
     record, changed = decision
     if not changed:
         return {"status": f"already_{record['status']}", "fingerprint": fingerprint}

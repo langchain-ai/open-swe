@@ -148,6 +148,14 @@ async def test_execution_defaults_api_is_admin_only_and_round_trips(
         assert "REGION" not in entry.model_dump_json()
 
 
+def test_protected_paths_are_plain_repository_pathspecs() -> None:
+    update = SettingsUpdate(protected_paths=[" /CODEOWNERS ", ".github/workflows/", "CODEOWNERS"])
+    assert update.protected_paths == ["CODEOWNERS", ".github/workflows/"]
+    for path in (":(exclude)src", "../secrets", "a/./b", "line\nbreak", "ci/[yml", "ci/\\"):
+        with pytest.raises(ValidationError):
+            SettingsUpdate(protected_paths=[path])
+
+
 @pytest.mark.parametrize(
     "changes",
     [

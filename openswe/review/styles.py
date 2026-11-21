@@ -11,7 +11,7 @@ from uuid import UUID
 
 from langgraph_sdk import get_client
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import ForeignKey, Text, delete, func, select
+from sqlalchemy import ForeignKey, Text, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -120,7 +120,11 @@ class ReviewStyles:
         return await self._require(full_name)
 
     async def update_prompts(
-        self, full_name: RepoFullName, update: ReviewStylePromptUpdate
+        self,
+        full_name: RepoFullName,
+        update: ReviewStylePromptUpdate,
+        *,
+        expected_version: str | None = None,
     ) -> ReviewStyle:
         changes: dict[str, str | None] = {}
         if update.custom_prompt is not None:
@@ -128,7 +132,7 @@ class ReviewStyles:
         if "approval_mode" in update.model_fields_set:
             changes["approval_mode"] = update.approval_mode
         async with postgres.session() as session:
-            await self._upsert(session, full_name, changes)
+            await self._upsert(session, full_name, changes, expected_version=expected_version)
         return await self._require(full_name)
 
     async def delete(self, full_name: RepoFullName) -> None:
@@ -149,20 +153,47 @@ class ReviewStyles:
         changes: dict[str, str | None],
         *,
         created_by: str = "",
+        expected_version: str | None = None,
     ) -> None:
         """Create the style if it is missing, then apply ``changes`` (none keeps it as it is)."""
+        if expected_version not in (None, "missing"):
+            condition = (
+                ReviewStyleRow.updated_at.is_(None)
+                if expected_version == "unversioned"
+                else ReviewStyleRow.updated_at == datetime.fromisoformat(expected_version)
+            )
+            written = await session.scalar(
+                update(ReviewStyleRow)
+                .where(
+                    ReviewStyleRow.repository_id
+                    == select(Repository.id)
+                    .where(Repository.key == normalize_repo_full_name(full_name).lower())
+                    .scalar_subquery(),
+                    condition,
+                )
+                .values(**changes, updated_at=func.clock_timestamp())
+                .returning(ReviewStyleRow.repository_id)
+            )
+            if written is None:
+                raise ValueError(
+                    "Settings changed; read the resource privately again before retrying"
+                )
+            await Topic.REVIEW_STYLES.invalidate(session, key=full_name)
+            return
         repository_id = await Repository.ensure_id(session, full_name)
         upsert = insert(ReviewStyleRow).values(
             repository_id=repository_id, created_by=created_by, **changes
         )
-        if changes:
+        if changes and expected_version != "missing":
             statement = upsert.on_conflict_do_update(
                 index_elements=[ReviewStyleRow.repository_id],
                 set_={**changes, "updated_at": func.clock_timestamp()},
             )
         else:
             statement = upsert.on_conflict_do_nothing()
-        await session.execute(statement)
+        written = await session.scalar(statement.returning(ReviewStyleRow.repository_id))
+        if expected_version == "missing" and written is None:
+            raise ValueError("Settings changed; read the resource privately again before retrying")
         await Topic.REVIEW_STYLES.invalidate(session, key=full_name)
 
     async def _require(self, full_name: RepoFullName) -> ReviewStyle:

@@ -97,7 +97,7 @@ export function WorkflowApprovalCard({
                 className="text-icon-brand"
               />
               <Text as="span" variant="sm" color="secondary">
-                Workflow changes{" "}
+                Protected file changes{" "}
                 {approval.status === "approved" ? "approved" : "rejected"}
               </Text>
               <span className="truncate text-xs text-secondary">
@@ -133,7 +133,7 @@ export function WorkflowApprovalCard({
                 color="secondary"
                 variant="plain"
                 size="sm"
-                aria-label={`Expand workflow approval: push paused for review, ${fileLabel(approval.files.length)}, +${approval.diffStats.additions} -${approval.diffStats.deletions}`}
+                aria-label={`Expand push approval: push paused for review, ${fileLabel(approval.files.length)}, +${approval.diffStats.additions} -${approval.diffStats.deletions}`}
                 aria-expanded={false}
                 onClick={toggle}
                 className="h-auto w-full justify-start gap-space-2 border-0 p-space-3 text-left"
@@ -144,7 +144,7 @@ export function WorkflowApprovalCard({
                   className="shrink-0 text-icon-brand"
                 />
                 <span className="min-w-0 flex-1 truncate text-sm text-primary">
-                  Workflow changes
+                  Protected file changes
                 </span>
                 <span className="text-xs text-secondary">
                   Push paused for review
@@ -170,13 +170,13 @@ export function WorkflowApprovalCard({
                 variant="approval"
                 title={
                   inherited
-                    ? `Confirm workflow changes inherited from ${inherited}`
-                    : "Confirm GitHub Actions workflow changes"
+                    ? `Confirm protected file changes inherited from ${inherited}`
+                    : "Confirm protected file changes"
                 }
                 description={
                   inherited
-                    ? `Push paused for review. This branch now includes ${fileLabel(approval.files.length)} from merging ${inherited}. Robin did not author these workflow changes.`
-                    : `Push paused for review. Robin is ready to push ${fileLabel(approval.files.length)} in .github/workflows.`
+                    ? `Push paused for review. This branch now includes ${fileLabel(approval.files.length)} from merging ${inherited}. Robin did not author these changes.`
+                    : `Push paused for review. Robin is ready to push ${fileLabel(approval.files.length)} that match protected paths.`
                 }
                 state={busy ? "submitting" : "unanswered"}
                 approveLabel="Approve & continue push"
@@ -186,7 +186,7 @@ export function WorkflowApprovalCard({
               >
                 <IconButton
                   icon={CaretUpIcon}
-                  label="Collapse workflow approval"
+                  label="Collapse push approval"
                   color="secondary"
                   variant="plain"
                   size="sm"
@@ -202,8 +202,8 @@ export function WorkflowApprovalCard({
                     color="secondary"
                     className="mt-space-3"
                   >
-                    Workflow changes {approval.coordinatorStatus} on parent.
-                    This worker still needs separate approval.
+                    Protected file changes {approval.coordinatorStatus} on
+                    parent. This worker still needs separate approval.
                   </Text>
                 )}
 
@@ -236,16 +236,16 @@ export function WorkflowApprovalCard({
                       Why you need to confirm
                     </p>
                     <p className="mt-0.5 text-xs text-secondary">
-                      Workflow files control CI jobs and may access repository
-                      secrets. Robin pauses before pushing any workflow change.
+                      An admin listed these paths under Protected paths in
+                      Defaults. Robin pauses before pushing any change to them.
                     </p>
                   </div>
                 </div>
 
                 <p className="mt-space-2 text-xxs text-secondary">
-                  Approval covers this workflow diff on branches in this thread
-                  and repository. Different workflow diffs and lease-protected
-                  pushes require separate approval.
+                  Approval covers this diff on branches in this thread and
+                  repository. Different diffs and lease-protected pushes require
+                  separate approval.
                 </p>
 
                 <div className="mt-space-4 grid gap-space-2 sm:grid-cols-2">
@@ -254,8 +254,7 @@ export function WorkflowApprovalCard({
                       What happens next
                     </p>
                     <p className="mt-space-1 text-xs text-primary">
-                      The paused push resumes; only matching workflow diffs are
-                      approved.
+                      The paused push resumes; only matching diffs are approved.
                     </p>
                   </div>
                   <div className="rounded-md border border-default bg-surface-level-1 p-space-3">

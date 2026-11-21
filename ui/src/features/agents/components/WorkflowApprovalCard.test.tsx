@@ -82,9 +82,7 @@ describe("WorkflowApprovalCard", () => {
 
     const group = screen.getByTestId("workflow-approval-group")
     expect(group.className).toContain("mt-space-4")
-    expect(
-      screen.getByText("Confirm GitHub Actions workflow changes")
-    ).toBeTruthy()
+    expect(screen.getByText("Confirm protected file changes")).toBeTruthy()
     expect(screen.getByText("Why you need to confirm")).toBeTruthy()
     expect(
       screen.getByText("Review files and diff").closest("details")?.open
@@ -118,13 +116,13 @@ describe("WorkflowApprovalCard", () => {
       screen.queryByRole("button", { name: "Approve & continue push" })
     ).toBeNull()
     fireEvent.click(
-      screen.getByRole("button", { name: /Expand workflow approval/ })
+      screen.getByRole("button", { name: /Expand push approval/ })
     )
     expect(
       screen.getByRole("button", { name: "Approve & continue push" })
     ).toBeTruthy()
     fireEvent.click(
-      screen.getByRole("button", { name: "Collapse workflow approval" })
+      screen.getByRole("button", { name: "Collapse push approval" })
     )
     expect(
       screen.queryByRole("button", { name: "Approve & continue push" })
@@ -194,7 +192,7 @@ describe("WorkflowApprovalCard", () => {
         },
       })
       renderCard({ threadId: "thread-1" })
-      expect(screen.getByText(`Workflow changes ${status}`)).toBeTruthy()
+      expect(screen.getByText(`Protected file changes ${status}`)).toBeTruthy()
       expect(
         screen.queryByRole("button", { name: "Approve & continue push" })
       ).toBeNull()
@@ -217,7 +215,7 @@ describe("WorkflowApprovalCard", () => {
     })
   })
 
-  it("describes workflow changes inherited from the base branch", () => {
+  it("describes protected file changes inherited from the base branch", () => {
     mocks.useWorkflowApprovals.mockReturnValue({
       data: { approvals: [{ ...approval, inheritedFrom: "main" }] },
     })
@@ -225,7 +223,7 @@ describe("WorkflowApprovalCard", () => {
     renderCard({ threadId: "thread-1" })
 
     expect(
-      screen.getByText("Confirm workflow changes inherited from main")
+      screen.getByText("Confirm protected file changes inherited from main")
     ).toBeTruthy()
     expect(screen.getByText(/Robin did not author/)).toBeTruthy()
   })

@@ -429,6 +429,8 @@ export interface RobinSettings {
   review_apps?: Array<AppRelease> | null
   /** Checks, by name, whose success means a pull request's preview serves its head commit. */
   review_app_preview_checks?: Array<string> | null
+  /** Repository paths, as git glob pathspecs, whose changes Robin pushes only after the thread owner approves them. */
+  protected_paths?: Array<string> | null
   /** Instance only: listed apps added to everyone's web UI, each at the release an admin approved. */
   featured_apps?: Array<FeaturedApp> | null
   /** Instance only: the domains, each with its subdomains, a review's browser may sign in to. */

@@ -34,9 +34,25 @@ class ExecutionDefaultsStore:
     async def load(self, *, session: AsyncSession | None = None) -> ExecutionDefaults:
         return ExecutionDefaults.stored(await self.records.get(session=session))
 
-    async def update(self, update: ExecutionDefaults) -> ExecutionDefaults:
+    async def update(
+        self, update: ExecutionDefaults, *, expected_version: str | None = None
+    ) -> ExecutionDefaults:
         changes: JsonObject = update.model_dump(mode="json", exclude_unset=True)
-        if changes:
+        if expected_version is not None:
+            snapshot = await self.records.snapshot()
+            if snapshot.version != expected_version:
+                raise ValueError(
+                    "Settings changed; read the resource privately again before retrying"
+                )
+            before, saved = snapshot.value, {**snapshot.value, **changes}
+            try:
+                ExecutionDefaults.model_validate(saved)
+            except ValueError:
+                raise ValueError(
+                    "Invalid execution settings; inspect the resource privately"
+                ) from None
+            await self.records.put("", saved, expected_version=expected_version)
+        elif changes:
             before, saved = await self.records.patch("", changes)
         else:
             before = saved = await self.records.get() or {}

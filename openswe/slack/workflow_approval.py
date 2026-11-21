@@ -1,4 +1,4 @@
-"""Human decisions on workflow pushes, including cards delivered outside their thread."""
+"""Human decisions on protected-path pushes, including cards delivered outside their thread."""
 
 import logging
 
@@ -36,9 +36,9 @@ async def handle_button(
     channel_id = interaction.channel_id
     user_id = interaction.user.id
     if not channel_id or not user_id or not button.fingerprint:
-        return ignored("Missing workflow approval context")
+        return ignored("Missing push approval context")
     if button.action not in {"approve", "reject"}:
-        return ignored("Unknown workflow approval action")
+        return ignored("Unknown push approval action")
 
     async def refuse(reason: str) -> WebhookResponse:
         await post_slack_ephemeral_message(
@@ -53,19 +53,19 @@ async def handle_button(
 
     login = await User.login_for_slack(user_id)
     if not login:
-        return await refuse("Link your GitHub account before answering a workflow approval.")
+        return await refuse("Link your GitHub account before answering a push approval.")
     source_id = await lookup_slack_thread_id(channel_id, thread_ts) if thread_ts else None
     thread_id = button.thread_id or source_id
     if not thread_id:
-        return await refuse("This workflow approval is not associated with an agent thread.")
+        return await refuse("This push approval is not associated with an agent thread.")
     try:
         metadata = await fetch_thread_metadata(thread_id)
         await assert_thread_postable(metadata, login)
     except HTTPException:
         logger.info("Workflow approval target is not promptable", extra={"thread_id": thread_id})
-        return await refuse("You cannot answer this workflow approval request.")
+        return await refuse("You cannot answer this push approval request.")
     if not thread_is_owner(metadata, login):
-        return await refuse("Only the thread owner can answer this workflow approval request.")
+        return await refuse("Only the thread owner can answer this push approval request.")
     if button.thread_id and thread_id != source_id:
         if is_dm_channel(channel_context):
             eligible = await open_dm(user_id) == channel_id
@@ -77,32 +77,28 @@ async def handle_button(
                 and task.task.coordinator_thread_id == source_id
             )
         if not eligible:
-            return await refuse("This workflow approval card does not belong in this conversation.")
+            return await refuse("This push approval card does not belong in this conversation.")
 
     record = (await get_workflow_push_approvals(thread_id)).get(button.fingerprint)
     if record is None:
-        return await refuse(
-            "I couldn't find that workflow approval request. Trigger the push again."
-        )
+        return await refuse("I couldn't find that push approval request. Trigger the push again.")
     if record.get("status") != WORKFLOW_APPROVAL_PENDING:
-        return await refuse("This workflow approval was already answered; no action was taken.")
+        return await refuse("This push approval was already answered; no action was taken.")
     approved = button.action == "approve"
     decision = await decide_workflow_push_approval(
         thread_id, button.fingerprint, approved=approved, actor=login
     )
     if decision is None:
-        return await refuse(
-            "I couldn't find that workflow approval request. Trigger the push again."
-        )
+        return await refuse("I couldn't find that push approval request. Trigger the push again.")
     record, changed = decision
     if not changed:
         await _close_card(interaction, str(record.get("status")))
-        return await refuse("This workflow approval was already answered; no action was taken.")
+        return await refuse("This push approval was already answered; no action was taken.")
 
     verdict = "approved" if approved else "rejected"
     await _close_card(interaction, verdict)
-    confirmation = f"Workflow push {verdict}. " + (
-        "Robin will retry the blocked push." if approved else "No workflow files will be pushed."
+    confirmation = f"Push {verdict}. " + (
+        "Robin will retry the blocked push." if approved else "No protected files will be pushed."
     )
     await post_slack_ephemeral_message(
         channel_id,
@@ -121,7 +117,7 @@ async def handle_button(
             github_login=login,
             multitask_strategy="enqueue",
         )
-    return accepted(f"Workflow push {verdict}" + (", retry queued" if approved else ""))
+    return accepted(f"Push {verdict}" + (", retry queued" if approved else ""))
 
 
 async def _close_card(interaction: SlackInteraction, verdict: str) -> None:
@@ -129,15 +125,15 @@ async def _close_card(interaction: SlackInteraction, verdict: str) -> None:
     blocks.append(
         {
             "type": "context",
-            "elements": [{"type": "plain_text", "text": f"Workflow push {verdict}"}],
+            "elements": [{"type": "plain_text", "text": f"Push {verdict}"}],
         }
     )
     try:
         await update_slack_message(
             interaction.channel_id,
             interaction.message_ts,
-            interaction.message.text or f"Workflow push {verdict}",
+            interaction.message.text or f"Push {verdict}",
             blocks=blocks,
         )
     except Exception:
-        logger.warning("Could not close workflow approval card", exc_info=True)
+        logger.warning("Could not close push approval card", exc_info=True)

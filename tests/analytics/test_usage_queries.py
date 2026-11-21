@@ -631,3 +631,55 @@ class TestUsageHealth:
             await conn.execute(text("UPDATE deployment_metadata SET reporting_cutover_at = NULL"))
         with pytest.raises(RuntimeError, match="not been activated"):
             await UsageHealthPayload.read("all", as_of=self.now)
+
+
+async def test_own_usage_filters_before_totals_rank_and_pagination(usage_db):
+    own = await person("own", "own@example.com")
+    other = await person("other", "other@example.com")
+    own_run = await run(own, tokens=12)
+    await run(other, tokens=9000)
+    await pr(other, state="merged", additions=1000)
+    await insert(
+        "latest_cost_projection",
+        run_id=own_run,
+        observation_revision=1,
+        observed_at=NOW,
+        status="complete",
+        cost_usd=2.5,
+        total_tokens=12,
+        source="langsmith",
+        event_id=uuid4(),
+    )
+    result = await report(own_user_id=own, current_login="own", limit=1)
+    assert result["total_members"] == 1
+    assert len(result["rows"]) == 1
+    assert result["rows"][0]["rank"] == 1
+    assert result["rows"][0]["total_tokens"] == 12
+    assert result["rows"][0]["total_cost_usd"] == 2.5
+    assert result["next_cursor"] is None
+    assert "reviewer_stats" not in result
+    assert "other" not in str(result)
+    empty = await report(own_user_id=uuid4())
+    assert empty["rows"] == []
+    assert empty["total_members"] == 0
+    all_users = await report(admin=True)
+    assert all_users["total_members"] == 2
+
+
+async def test_own_usage_resolves_identity_alias_without_cross_person_leak(usage_db):
+    canonical = await person("canonical")
+    alias = uuid4()
+    other = await person("other")
+    await insert("identity_aliases", alias_person_id=alias, person_id=canonical)
+    await run(alias, tokens=5)
+    await run(other, tokens=100)
+    result = await report(own_user_id=alias, current_login="canonical")
+    assert result["total_members"] == 1
+    assert result["rows"][0]["total_tokens"] == 5
+
+
+def test_month_to_date_starts_at_midnight_utc() -> None:
+    from openswe.analytics.queries import period_start
+
+    as_of = datetime(2026, 11, 18, 12, 30, tzinfo=UTC)
+    assert period_start("mtd", as_of=as_of) == datetime(2026, 11, 1, tzinfo=UTC)

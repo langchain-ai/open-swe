@@ -8987,6 +8987,21 @@
             ],
             "title": "Pr Summaries"
           },
+          "protected_paths": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protected Paths"
+          },
           "review_app_preview_checks": {
             "anyOf": [
               {

@@ -7,10 +7,9 @@ surprise review comments on every PR.
 
 import logging
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from openswe.database import postgres
-from openswe.github.repo_names import normalize_repo_full_name
 from openswe.github.repositories import Repository
 
 logger = logging.getLogger(__name__)
@@ -27,13 +26,10 @@ async def list_enabled_review_repos() -> list[str]:
         )
 
 
-async def set_review_repo_enabled(full_name: str, enabled: bool) -> list[str]:
-    full_name = normalize_repo_full_name(full_name)
-    async with postgres.session() as session:
-        repository_id = await Repository.ensure_id(session, full_name)
-        await session.execute(
-            update(Repository).where(Repository.id == repository_id).values(review_enabled=enabled)
-        )
+async def set_review_repo_enabled(
+    full_name: str, enabled: bool, *, expected_version: str | None = None
+) -> list[str]:
+    await Repository.set_review_enabled(full_name, enabled, expected_version=expected_version)
     return await list_enabled_review_repos()
 
 

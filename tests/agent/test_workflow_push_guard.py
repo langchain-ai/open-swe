@@ -76,7 +76,8 @@ class _Backend:
         if f"merge-base {self.head} origin/main" in command:
             return _Response("base-sha\n")
         if "diff --name-only" in command:
-            return _Response(f"{self.workflow_files}\n" if self.workflow_files else "")
+            end = "\0" if " -z " in command else "\n"
+            return _Response(f"{self.workflow_files}{end}" if self.workflow_files else "")
         if "diff --binary --full-index" in command:
             return _Response(
                 "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n+new\n-old\n"
@@ -122,6 +123,14 @@ class _Request:
         return next_request
 
 
+_WORKFLOWS = guard.ProtectedPaths((".github/workflows/",))
+
+
+@pytest.fixture(autouse=True)
+def _protect_workflows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(guard.ProtectedPaths, "load", AsyncMock(return_value=_WORKFLOWS))
+
+
 @pytest.fixture(autouse=True)
 def _clear_backend_cache() -> Any:
     guard.SANDBOX_BACKENDS.clear()
@@ -162,7 +171,7 @@ def test_parse_git_push_rejects_unsafe_options(options: str) -> None:
 
 async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
     backend = _Backend()
-    change = await guard._workflow_change_for_push(
+    change = await _WORKFLOWS.change_for_push(
         backend,
         guard.ParsedGitPush(
             repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
@@ -182,7 +191,7 @@ async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
         == "git -C /repo push origin aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:refs/heads/feature"
     )
     assert len(change.fingerprint) == 64
-    lease_change = await guard._workflow_change_for_push(
+    lease_change = await _WORKFLOWS.change_for_push(
         backend,
         guard.ParsedGitPush(
             repo_dir="/repo",
@@ -195,14 +204,14 @@ async def test_workflow_change_for_push_fingerprints_workflow_diff() -> None:
     assert lease_change is not None
     assert lease_change.fingerprint != change.fingerprint
     backend.head = "b" * 40
-    same_diff = await guard._workflow_change_for_push(
+    same_diff = await _WORKFLOWS.change_for_push(
         backend, guard.ParsedGitPush("/repo", "origin", "feature", "feature")
     )
     assert same_diff is not None
     assert same_diff.fingerprint == change.fingerprint
     assert backend.head in same_diff.fixed_command
     backend.workflow_files = ".github/workflows/other.yml"
-    different_diff = await guard._workflow_change_for_push(
+    different_diff = await _WORKFLOWS.change_for_push(
         backend, guard.ParsedGitPush("/repo", "origin", "feature", "feature")
     )
     assert different_diff is not None
@@ -261,11 +270,11 @@ async def test_release_branch_push_excludes_inherited_workflows(
     monkeypatch.setattr(guard, "_backend", AsyncMock(return_value=backend))
     request = _Request(f"git -C {shlex.quote(str(tmp_path))} push origin feature")
     middleware = guard.WorkflowPushGuardMiddleware()
-    assert await middleware._change_for_request(request) is None
+    assert await middleware._change_for_request(request, _WORKFLOWS) is None
 
     workflow.write_text("new workflow\n")
     await backend.git("commit -qam workflow")
-    change = await middleware._change_for_request(request)
+    change = await middleware._change_for_request(request, _WORKFLOWS)
     assert change is not None
     assert change.base_sha == release_sha
     assert "-release workflow" in change.diff_preview
@@ -273,7 +282,7 @@ async def test_release_branch_push_excludes_inherited_workflows(
 
     if not upstream:
         await backend.git("update-ref refs/remotes/origin/other-feature HEAD")
-        assert await middleware._change_for_request(request) is None
+        assert await middleware._change_for_request(request, _WORKFLOWS) is None
 
 
 async def test_merging_default_branch_skips_approval_for_its_workflows(
@@ -308,7 +317,7 @@ async def test_merging_default_branch_skips_approval_for_its_workflows(
     monkeypatch.setattr(guard, "_backend", AsyncMock(return_value=backend))
     request = _Request(f"git -C {shlex.quote(str(repo))} push origin feature")
     middleware = guard.WorkflowPushGuardMiddleware()
-    assert await middleware._change_for_request(request) is None
+    assert await middleware._change_for_request(request, _WORKFLOWS) is None
 
     publisher = tmp_path / "publisher"
     await backend.git(f"clone -q {shlex.quote(str(origin))} {shlex.quote(str(publisher))}")
@@ -321,23 +330,31 @@ async def test_merging_default_branch_skips_approval_for_its_workflows(
     await publisher_backend.git("push -q origin main")
     default_sha = await publisher_backend.git("rev-parse HEAD")
     assert (await backend.aexecute(f"git cat-file -e {default_sha}")).exit_code != 0
-    assert await middleware._change_for_request(request) is None
+    assert await middleware._change_for_request(request, _WORKFLOWS) is None
 
     await backend.git("config remote.origin.pushurl https://github.com/example/other.git")
-    assert await middleware._change_for_request(request) is not None
+    assert await middleware._change_for_request(request, _WORKFLOWS) is not None
     await backend.git("config --unset remote.origin.pushurl")
 
     await backend.git("config --add remote.origin.url https://github.com/example/other.git")
-    assert await middleware._change_for_request(request) is not None
+    assert await middleware._change_for_request(request, _WORKFLOWS) is not None
     await backend.git("config --unset-all remote.origin.url")
     await backend.git(f"config remote.origin.url {shlex.quote(str(origin))}")
-    assert await middleware._change_for_request(request) is None
+    assert await middleware._change_for_request(request, _WORKFLOWS) is None
 
     workflow.write_text("v3\n")
     await backend.git("commit -qam 'feature workflow'")
-    change = await middleware._change_for_request(request)
+    change = await middleware._change_for_request(request, _WORKFLOWS)
     assert change is not None
     assert "+v3" in change.diff_preview
+
+    await backend.git("reset -q --hard HEAD~1")
+    (repo / ".github/workflows/café.yml").write_text("quoted\n")
+    await backend.git("add .github/workflows")
+    await backend.git("commit -qm 'quoted workflow name'")
+    change = await middleware._change_for_request(request, _WORKFLOWS)
+    assert change is not None
+    assert ".github/workflows/café.yml" in change.files
 
 
 async def test_new_branch_without_shared_remote_history_fails_closed(tmp_path: Path) -> None:
@@ -351,7 +368,7 @@ async def test_new_branch_without_shared_remote_history_fails_closed(tmp_path: P
 
 
 async def test_workflow_change_marks_merge_workflows_as_inherited() -> None:
-    change = await guard._workflow_change_for_push(
+    change = await _WORKFLOWS.change_for_push(
         _Backend(inherited_from_main=True),
         guard.ParsedGitPush(
             repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
@@ -363,7 +380,7 @@ async def test_workflow_change_marks_merge_workflows_as_inherited() -> None:
 
 
 async def test_workflow_change_does_not_misattribute_preexisting_workflows() -> None:
-    change = await guard._workflow_change_for_push(
+    change = await _WORKFLOWS.change_for_push(
         _Backend(inherited_from_main=True, workflows_changed_by_merge=False),
         guard.ParsedGitPush(
             repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
@@ -408,7 +425,7 @@ async def test_workflow_change_for_push_ignores_non_workflow_push() -> None:
     backend = _Backend(workflow_files="")
 
     assert (
-        await guard._workflow_change_for_push(
+        await _WORKFLOWS.change_for_push(
             backend,
             guard.ParsedGitPush(
                 repo_dir="/repo", remote="origin", local_ref="feature", remote_ref="feature"
@@ -422,7 +439,7 @@ async def test_workflow_change_for_push_rejects_non_current_refspec() -> None:
     backend = _Backend()
 
     with pytest.raises(guard.WorkflowPushInspectionError):
-        await guard._workflow_change_for_push(
+        await _WORKFLOWS.change_for_push(
             backend,
             guard.ParsedGitPush(
                 repo_dir="/repo", remote="origin", local_ref="evil", remote_ref="feature"
@@ -596,6 +613,55 @@ async def test_non_workflow_push_runs_without_approval(
     assert called is True
     assert isinstance(result, ToolMessage)
     assert result.content == "pushed"
+
+
+async def test_push_runs_uninspected_without_protected_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _Backend()
+    guard.SANDBOX_BACKENDS["thread-1"] = SandboxBackendProxy(
+        cast(SandboxBackendProtocol, backend), thread_id="thread-1"
+    )
+    monkeypatch.setattr(
+        guard.ProtectedPaths, "load", AsyncMock(return_value=guard.ProtectedPaths(()))
+    )
+
+    async def handler(_request: ToolCallRequest) -> ToolMessage:
+        return ToolMessage(content="pushed", tool_call_id="call-1")
+
+    result = await guard.WorkflowPushGuardMiddleware().awrap_tool_call(
+        cast(ToolCallRequest, _Request("git -C /repo push -f origin feature")), handler
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.content == "pushed"
+    assert backend.commands == []
+
+
+async def test_protected_paths_match_their_globs_only(tmp_path: Path) -> None:
+    backend = _GitBackend(tmp_path)
+    await backend.git("init -b main")
+    await backend.git("config user.email test@example.com")
+    await backend.git("config user.name Test")
+    await backend.git("commit --allow-empty -qm initial")
+    await backend.git("update-ref refs/remotes/origin/main HEAD")
+    await backend.git("checkout -qb feature")
+    workflow = tmp_path / ".github/workflows/ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("ci\n")
+    (tmp_path / "deployments/dev").mkdir(parents=True)
+    (tmp_path / "deployments/dev/main.tf").write_text("tf\n")
+    (tmp_path / "deployments/dev/values.yaml").write_text("values\n")
+    await backend.git("add .")
+    await backend.git("commit -qm changes")
+    paths = guard.ProtectedPaths(("deployments/**/*.tf",))
+    push = guard.ParsedGitPush(str(tmp_path), "origin", "feature", "feature")
+
+    change = await paths.change_for_push(cast(SandboxBackendProtocol, backend), push)
+
+    assert change is not None
+    assert change.files == ["deployments/dev/main.tf"]
+    assert "values" not in change.diff_preview
 
 
 @pytest.mark.parametrize(

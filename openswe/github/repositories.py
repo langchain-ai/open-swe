@@ -47,6 +47,7 @@ class Repository(Base):
     github_checked_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
     # Automatic review is opt-in; ``None`` means nobody has turned it on or off yet.
     review_enabled: Mapped[bool | None] = mapped_column(default=None, init=False)
+    review_settings_version: Mapped[UUID | None] = mapped_column(default=None, init=False)
     # Whether the default branch requires the ``Robin Approves`` check, and when that was read.
     approval_check_required: Mapped[bool | None] = mapped_column(default=None, init=False)
     approval_check_checked_at: Mapped[datetime | None] = mapped_column(default=None, init=False)
@@ -73,6 +74,53 @@ class Repository(Base):
             ).returning(cls.id)
         )
         return result.scalar_one()
+
+    @property
+    def review_version(self) -> str:
+        return f"{self.id}:{self.review_settings_version or 'unversioned'}"
+
+    @classmethod
+    async def set_review_enabled(
+        cls, full_name: str, enabled: bool, *, expected_version: str | None = None
+    ) -> None:
+        key = normalize_repo_full_name(full_name).lower()
+        version = uuid7()
+        async with postgres.session() as session:
+            if expected_version == "missing":
+                row = cls(full_name=full_name)
+                statement = (
+                    insert(cls)
+                    .values(
+                        id=row.id,
+                        key=key,
+                        full_name=row.full_name,
+                        review_enabled=enabled,
+                        review_settings_version=version,
+                    )
+                    .on_conflict_do_nothing(index_elements=[cls.key])
+                    .returning(cls.id)
+                )
+            else:
+                statement = update(cls).where(cls.key == key)
+                if expected_version is None:
+                    await cls.ensure_id(session, full_name)
+                else:
+                    row_id, separator, previous = expected_version.partition(":")
+                    if not separator:
+                        raise ValueError("Invalid repository settings version")
+                    statement = statement.where(
+                        cls.id == UUID(row_id),
+                        cls.review_settings_version.is_(None)
+                        if previous == "unversioned"
+                        else cls.review_settings_version == UUID(previous),
+                    )
+                statement = statement.values(
+                    review_enabled=enabled, review_settings_version=version
+                ).returning(cls.id)
+            if (await session.execute(statement)).scalar_one_or_none() is None:
+                raise ValueError(
+                    "Settings changed; read the resource privately again before retrying"
+                )
 
     @classmethod
     async def resolve_default_branch(cls, owner: str, name: str) -> str:

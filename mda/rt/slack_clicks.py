@@ -55,12 +55,11 @@ _RETRY_EXPIRED: Final = (
     "This Retry button has expired or is invalid. Send your request again to retry."
 )
 _NO_WORKFLOW_PUSH: Final = (
-    "I couldn't find that workflow approval request. "
-    "Trigger the push again to create a fresh approval."
+    "I couldn't find that push approval request. Trigger the push again to create a fresh approval."
 )
 _WORKFLOW_PUSH_DECIDED: Final = {
-    "approved": "Workflow push approved. Robin will retry the blocked push.",
-    "rejected": "Workflow push rejected. No workflow files will be pushed.",
+    "approved": "Push approved. Robin will retry the blocked push.",
+    "rejected": "Push rejected. No protected files will be pushed.",
 }
 
 

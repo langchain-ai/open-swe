@@ -5,6 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { api, type RobinSettings, type RobinSettingsPatch } from "@/lib/api"
+import { invalidationTopic } from "@/lib/invalidations/topics"
 
 export type StringSettingField = {
   [K in keyof RobinSettings]-?: RobinSettings[K] extends
@@ -30,6 +31,7 @@ export function useInstanceSettings(): InstanceSettings {
   const snapshot = useQuery({
     queryKey: QUERY_KEY,
     queryFn: api.getInstanceSettings,
+    meta: { invalidatedBy: [invalidationTopic("settings")] },
   })
   const mutation = useMutation({
     mutationKey: MUTATION_KEY,

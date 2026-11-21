@@ -1,10 +1,11 @@
 """PostgreSQL records for global settings and execution profiles."""
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, and_, delete, func, select
+from sqlalchemy import ColumnElement, and_, delete, func, select, update
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,6 +22,12 @@ class SettingsRecord(Base):
     key: Mapped[str] = mapped_column(primary_key=True)
     value: Mapped[JsonObject] = mapped_column(JSONB)
     updated_at: Mapped[datetime | None] = mapped_column(server_default=NOW, init=False)
+
+
+@dataclass(frozen=True)
+class SettingsSnapshot:
+    value: JsonObject
+    version: str
 
 
 class SettingsRecords:
@@ -46,17 +53,52 @@ class SettingsRecords:
         )
         return dict(rows.tuples().all())
 
+    async def snapshot(self, key: str = "") -> SettingsSnapshot:
+        async with postgres.session() as session:
+            row = (
+                await session.execute(
+                    select(SettingsRecord.value, SettingsRecord.updated_at).where(self._where(key))
+                )
+            ).one_or_none()
+        if row is None:
+            return SettingsSnapshot({}, "missing")
+        return SettingsSnapshot(
+            row.value, row.updated_at.isoformat() if row.updated_at else "unversioned"
+        )
+
     async def put(
-        self, key: str, value: JsonObject, *, session: AsyncSession | None = None
+        self,
+        key: str,
+        value: JsonObject,
+        *,
+        expected_version: str | None = None,
+        session: AsyncSession | None = None,
     ) -> None:
         async with postgres.session(session) as session:
             upsert = insert(SettingsRecord).values(tier=self.tier, key=key, value=value)
-            await session.execute(
-                upsert.on_conflict_do_update(
+            if expected_version == "missing":
+                statement = upsert.on_conflict_do_nothing()
+            elif expected_version is None:
+                statement = upsert.on_conflict_do_update(
                     index_elements=[SettingsRecord.tier, SettingsRecord.key],
                     set_={"value": value, "updated_at": func.clock_timestamp()},
                 )
-            )
+            else:
+                condition = (
+                    SettingsRecord.updated_at.is_(None)
+                    if expected_version == "unversioned"
+                    else SettingsRecord.updated_at == datetime.fromisoformat(expected_version)
+                )
+                statement = (
+                    update(SettingsRecord)
+                    .where(self._where(key), condition)
+                    .values(value=value, updated_at=func.clock_timestamp())
+                )
+            result = await session.scalar(statement.returning(SettingsRecord.key))
+            if result is None:
+                raise ValueError(
+                    "Settings changed; read the resource privately again before retrying"
+                )
 
     async def lock(self, key: str = "", *, session: AsyncSession) -> JsonObject:
         """Read a record under the caller's transaction lock, creating an empty one if absent."""

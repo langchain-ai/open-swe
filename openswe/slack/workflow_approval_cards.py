@@ -1,4 +1,4 @@
-"""Deliver workflow approval requests without granting agents the decision."""
+"""Deliver push approval requests without granting agents the decision."""
 
 import logging
 from collections.abc import Mapping
@@ -39,24 +39,25 @@ def workflow_approval_message(thread_id: str, record: Mapping[str, object]) -> s
     review = f"\n\n*Review diff:* <{url}|Open in Robin>" if url else ""
     inherited = record.get("inherited_from")
     if inherited:
-        headline = "*Confirm workflow changes inherited from the base branch*"
+        headline = "*Confirm protected file changes inherited from the base branch*"
         source = (
-            f"This branch now includes {len(paths)} GitHub Actions files from merging "
-            f"`{escape(str(inherited))}`. Robin did not author these workflow changes."
+            f"This branch now includes {len(paths)} protected files from merging "
+            f"`{escape(str(inherited))}`. Robin did not author these changes."
         )
     else:
-        headline = "*Confirm GitHub Actions workflow changes*"
-        source = "Robin is ready to push GitHub Actions workflow changes."
+        headline = "*Confirm protected file changes*"
+        source = "Robin is ready to push changes to protected files."
     return (
         f"{headline}\n{source}\n"
         f"*Repository:* `{escape(str(record.get('repo') or ''))}`\n"
         f"*Branch:* `{escape(str(record.get('branch') or ''))}`\n\n"
-        "*Why confirmation is required:* Workflows control CI jobs and may access repository secrets.\n\n"
+        "*Why confirmation is required:* An admin listed these paths under Protected paths "
+        "in Robin's Defaults, so their changes need the thread owner's approval.\n\n"
         f"{listed}\n\n*Diff stat:* {stats.get('files', len(paths))} files, "
         f"+{stats.get('additions', 0)} / -{stats.get('deletions', 0)}{review}\n\n"
-        "Only the implementation thread's owner can approve. Approval covers this workflow "
-        "diff on branches in this thread and repository. Different workflow diffs and "
-        "lease-protected pushes require separate approval."
+        "Only the implementation thread's owner can approve. Approval covers this diff on "
+        "branches in this thread and repository. Different diffs and lease-protected pushes "
+        "require separate approval."
     )
 
 
@@ -79,13 +80,13 @@ async def share_workflow_approval(
     destination = await fetch_thread_metadata(current_thread_id)
     await assert_thread_postable(destination, actor_login)
     if thread_is_private(metadata) and not thread_is_private(destination):
-        raise HTTPException(403, "private workflow approvals cannot be shared into public threads")
+        raise HTTPException(403, "private push approvals cannot be shared into public threads")
     location = SourceContext.from_metadata(destination).slack_thread
     if location is None or location.location is None:
         raise HTTPException(409, "current thread has no active Slack location")
     record = (await get_workflow_push_approvals(thread_id)).get(fingerprint)
     if not record or record.get("status") != WORKFLOW_APPROVAL_PENDING:
-        raise HTTPException(409, "workflow approval is no longer pending")
+        raise HTTPException(409, "push approval is no longer pending")
     message = workflow_approval_message(thread_id, record)
     await post_slack_thread_reply_with_ts(
         location.channel_id,
@@ -119,7 +120,7 @@ async def propagate_workflow_approval(thread_id: str, record: Mapping[str, objec
                 origin = DmOrigin(
                     channel_id=location.channel_id,
                     thread_ts=location.thread_ts,
-                    subject="Workflow push approval",
+                    subject="Push approval",
                 )
                 if not thread_is_private(metadata) or thread_is_private(coordinator):
                     try:

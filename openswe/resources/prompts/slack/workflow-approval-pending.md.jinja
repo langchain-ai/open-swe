@@ -1,8 +1,8 @@
-Your implementation worker {{ thread_id }} is blocked on a human workflow-file push approval (fingerprint {{ fingerprint }}).
+Your implementation worker {{ thread_id }} is blocked on a human push approval for protected paths (fingerprint {{ fingerprint }}).
 Use manage_thread with action="share_workflow_approval", thread_id="{{ thread_id }}", and fingerprint="{{ fingerprint }}" to present its approval card in this Slack conversation.
 This only shares the request; it does not approve it.
 The card supplies the exact review link and approval buttons.
 Refer the owner to that card rather than sending another approval link or reproducing the fingerprint.
-Never construct or rewrite a workflow approval URL.
-The owner must review the exact workflow diff and click the card themselves.
+Never construct or rewrite a push approval URL.
+The owner must review the exact diff and click the card themselves.
 Do not approve on their behalf or start a duplicate implementation.

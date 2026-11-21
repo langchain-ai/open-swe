@@ -4,6 +4,7 @@ import { SettingsPage } from "@/components/AppShell"
 import { ExecutionDefaultsSettings } from "@/features/settings/components/ExecutionDefaultsSettings"
 import { ExpeditedReviewSection } from "@/features/settings/components/ExpeditedReviewSection"
 import { FeaturedAppsSection } from "@/features/settings/components/FeaturedAppsSettings"
+import { ProtectedPathsSection } from "@/features/settings/components/ProtectedPathsSection"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
 import { ShadowReviewSection } from "@/features/settings/components/ShadowReviewSection"
 import {
@@ -42,6 +43,7 @@ function AdminDefaultsPage() {
         )}
       />
       <DefaultRepoSection repositories={repos.data?.repositories ?? []} />
+      <ProtectedPathsSection />
       <ReviewSettings canEdit />
       <ExpeditedReviewSection />
       <ShadowReviewSection

@@ -49,6 +49,9 @@ _TOOL_MODULES = {
     "write_database_rows": ".repair_data",
     "read_only_sql": ".read_only_sql",
     "read_user_settings": ".read_user_settings",
+    "read_settings": ".settings",
+    "patch_settings": ".settings",
+    "read_usage": ".usage",
     "record_human_input": ".record_human_input",
     "report_platform_issue": ".report_platform_issue",
     "upload_session": ".upload_session",
@@ -141,6 +144,9 @@ __all__ = [
     "write_database_rows",
     "read_only_sql",
     "read_user_settings",
+    "read_settings",
+    "patch_settings",
+    "read_usage",
     "record_human_input",
     "report_platform_issue",
     "upload_session",
@@ -284,6 +290,7 @@ if TYPE_CHECKING:
     from openswe.tools.schedule_thread_wakeup import schedule_thread_wakeup
     from openswe.tools.search_pull_requests import search_pull_requests
     from openswe.tools.send_announcement import send_announcement
+    from openswe.tools.settings import patch_settings, read_settings
     from openswe.tools.snapshotctl import snapshotctl
     from openswe.tools.submit_thread_feedback import submit_thread_feedback
     from openswe.tools.suggest_task import suggest_task
@@ -299,6 +306,7 @@ if TYPE_CHECKING:
     from openswe.tools.transcribe_audio import transcribe_audio
     from openswe.tools.update_finding import update_finding
     from openswe.tools.upload_session import upload_session
+    from openswe.tools.usage import read_usage
     from openswe.tools.user_skills import delete_user_skill, save_user_skill
 
 

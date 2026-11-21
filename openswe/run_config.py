@@ -27,7 +27,15 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 from uuid import UUID
 
 from langgraph.config import get_config
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictBool,
+    ValidationError,
+    model_validator,
+)
 from pydantic_core import PydanticSerializationError, to_jsonable_python
 
 from openswe.client_tools import ClientToolSpec
@@ -199,6 +207,7 @@ class RunConfig(BaseModel):
     # Behavior toggles
     draft_prs: bool | None = None
     admin_thread: bool | None = None
+    personal_settings_tools_enabled: StrictBool = False
     slack_ask: bool | None = None
     slack_kickoff_eligible: bool | None = None
     # First run of a thread broken out from another Slack thread.

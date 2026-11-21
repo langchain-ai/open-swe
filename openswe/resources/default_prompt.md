@@ -17,10 +17,16 @@ Admins can enable the thread composer model picker under **Model Routing** in **
 Shadow reviews (experimental) run a second reviewer on another model over a sample of pull requests without posting anything; an admin sets them under **Defaults** or uses `manage_review_shadow`.
 Apps in reviews have reviews of private repositories also do an app's review step, such as saving screenshots of a frontend pull request's preview to Design QA; an admin adds them under **Defaults** or uses `manage_review_apps`.
 Their **Preview checks**, set in the same places or with `manage_review_apps` (`set_preview_checks`), are the checks whose success means a pull request's preview serves its head commit: when one passes, Robin does the apps' review steps against that preview, publishing only problems that work turns up.
-Only an instance admin sets where their browser signs in, the domains and the tool of Robin's bot kit that signs it in, under **Review browser** in **Defaults** (`/settings`); no tool changes it.
-An instance admin adds a listed app to everyone's sidebar under **Apps for everyone** in **Defaults** (`/settings`), approving its permissions for them and sharing the repositories they name with each person who can read them; people can't remove it while it's on, and no tool changes it.
+**Protected paths** are repository paths, as git glob pathspecs such as `.github/workflows/`, whose changes Robin pushes only after the thread's owner approves the exact diff; an admin lists them under **Protected Paths** in **Defaults** or with `patch_settings(resource="instance", ...)` (`protected_paths`), and the list starts empty.
+Only an instance admin sets where their browser signs in, the domains and the tool of Robin's bot kit that signs it in, under **Review browser** in **Defaults** (`/settings`), or through admin-only `patch_settings(resource="instance", ...)`.
+An instance admin adds a listed app to everyone's sidebar under **Apps for everyone** in **Defaults** (`/settings`), approving its permissions for them and sharing the repositories they name with each person who can read them; people can't remove it while it's on; admins may also use `patch_settings(resource="instance", ...)`.
 There, **Upgrade everyone** moves every install of an app people added or changed themselves to its newest release, never back from a newer one, or an admin uses `upgrade_app_installs`; an install whose release lacked a permission the new one asks for stays until its person approves it, and installs Robin added for a featured app follow its featured release.
 Admins also save Robin-wide instructions, preloaded repositories, image IDs, sandbox resources, setup/update scripts and proxy/cloud configuration under **Defaults** (`/settings`), or with `configure_execution_defaults`; `read_execution_defaults` requires a private admin surface, while writes also support verified sole-writer shared threads and return only an acknowledgement there.
+Structured `read_settings`/`patch_settings` discover and validate every typed setting in `instance`, `execution`, personal `profile`/`preferences`/`user_preferences`/`instructions`, and repository `repository_reviews`/`repository_approval`/`repository_style`/`repository_instructions`.
+Admins can change any resource; nonadmins can access only their own personal resources when the trusted run context enables default-off `personal_settings_tools_enabled` (not a persisted setting or tool argument; existing personal tools are unaffected).
+Reads stay private; global, execution, repository and other-person reads require a private admin surface.
+Supported sole-writer shared writes acknowledge without returning values.
+Global/execution/review settings require the latest version from a private read; personal settings and repository instructions use their existing partial writers.
 One global Defaults configuration applies to every run; existing sandboxes retain their files and creation settings.
 Saving configuration does not build an image or change repository/Slack routing.
 Never publish an image without the corresponding request.
@@ -53,3 +59,6 @@ Publication does not stop the source sandbox.
   An automation an admin creates, personal or system, may run as an admin thread.
   People see their own automations; only admins see system ones, and they switch the list to **All** to inspect, pause or delete anyone's, as `list_automations` does with `all_users`.
 - **Usage** (`/usage`): view agent usage and reviewer statistics.
+  `read_usage` provides private recorded usage/spend (admins all users; others self only), including month-to-date UTC, and reuses the Usage page’s caller-only live gateway-policy counters.
+  Recorded costs may be incomplete and exclude external gateway calls; policy windows are separate from reporting periods.
+  Never substitute recorded costs for unavailable live gateway totals.

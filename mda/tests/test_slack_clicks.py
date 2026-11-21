@@ -257,7 +257,7 @@ def test_a_workflow_push_is_decided_and_an_approval_retries_the_push(
     [asked] = slack.asked
     assert asked.click == WorkflowPushClick(fingerprint="f1", approved=action == "approve")
     [replaced] = slack.posted
-    assert replaced["blocks"][-1]["elements"][0]["text"].startswith(f"Workflow push {status}")
+    assert replaced["blocks"][-1]["elements"][0]["text"].startswith(f"Push {status}")
 
 
 def test_a_workflow_push_the_backend_no_longer_has_tells_the_clicker(

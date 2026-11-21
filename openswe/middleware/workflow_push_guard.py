@@ -1,4 +1,4 @@
-"""Gate workflow-file pushes on human approval."""
+"""Gate pushes that change an admin's protected paths on the thread owner's approval."""
 
 import hashlib
 import json
@@ -16,6 +16,7 @@ from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+from openswe.dashboard.settings import load_instance_settings
 from openswe.middleware.pr_creation_guard import executable_name, shell_commands, shell_tokens
 from openswe.middleware.trace import OpenSWEMiddleware
 from openswe.prompts import prompt
@@ -39,7 +40,6 @@ from openswe.utils.dashboard_links import dashboard_workflow_approval_url
 
 logger = logging.getLogger(__name__)
 
-_WORKFLOW_PREFIX = ".github/workflows/"
 _SHELL_OPERATORS = {";", "|", "||", "&"}
 _REF_NAME = re.compile(r"^[A-Za-z0-9._/@+-]+$")
 _GIT_OBJECT_ID = re.compile(r"^[0-9a-fA-F]{40,64}$")
@@ -93,10 +93,10 @@ class ParsedGitPush:
         args.extend([self.remote, f"{head_sha}:refs/heads/{self.remote_branch}"])
         return _git_command(repo_dir, " ".join(shlex.quote(arg) for arg in args))
 
-    async def workflows_match_remote_default(
+    async def files_match_remote_default(
         self, backend: SandboxBackendProtocol, root: str, head: str, files: list[str]
     ) -> bool:
-        """Check workflows against the remote default, rejecting rewritten push destinations."""
+        """Check ``files`` against the remote default, rejecting rewritten push destinations."""
         rewrites = await _run_git(
             backend,
             root,
@@ -139,7 +139,7 @@ class ParsedGitPush:
             )
             if not fetched.ok:
                 return False
-        quoted_files = " ".join(shlex.quote(name) for name in files)
+        quoted_files = " ".join(shlex.quote(f":(top,literal){name}") for name in files)
         same = await _run_git(
             backend,
             root,
@@ -281,39 +281,16 @@ def _chained_push_dirs(command: str) -> list[str | None]:
     return dirs
 
 
-async def _may_push_workflow_changes(backend: Any, repo_dir: str | None) -> bool:
-    """Whether a push from ``repo_dir`` could carry ``.github/workflows`` changes.
-
-    Pending edits count: a chained ``git commit`` may commit them before the push.
-    A repository that cannot be inspected counts too, such as one the same
-    command clones: nothing shows what it would push.
-    """
-    pending = await _run_git(
-        backend, repo_dir, "status --porcelain --untracked-files=all -- .github/workflows"
-    )
-    if not pending.ok or pending.output:
-        return True
-    for base in ("@{upstream}", "origin/HEAD"):
-        unpushed = await _run_git(
-            backend,
-            repo_dir,
-            f"diff --name-only {shlex.quote(f'{base}...HEAD')} -- .github/workflows",
-        )
-        if unpushed.ok:
-            return bool(unpushed.output)
-    return True
-
-
 def _chained_push_message(request: ToolCallRequest) -> ToolMessage:
     content = {
         "status": "error",
         "error_type": "WorkflowPushMustStandAlone",
         "error": (
             "This command pushes as part of a longer command, and that push could carry "
-            "GitHub workflow file changes, so Robin cannot show the thread owner what it "
+            "changes to protected paths, so Robin cannot show the thread owner what it "
             "pushes. Nothing ran. Commit first, then run the push on its own (for example "
-            "`git -C <repo> push -u origin <branch>`); workflow changes then go to the "
-            "thread owner for approval."
+            "`git -C <repo> push -u origin <branch>`); changes to protected paths then go to "
+            "the thread owner for approval."
         ),
     }
     return ToolMessage(
@@ -457,13 +434,16 @@ def _git_command(repo_dir: str | None, args: str) -> str:
     return f"git {args}"
 
 
-async def _run_git(backend: Any, repo_dir: str | None, args: str) -> GitInspectResult:
+async def _run_git(
+    backend: Any, repo_dir: str | None, args: str, *, strip: bool = True
+) -> GitInspectResult:
     try:
         response = await backend.aexecute(_git_command(repo_dir, args), timeout=30)
     except Exception:
         logger.debug("workflow push inspection failed for git %s", args, exc_info=True)
         return GitInspectResult("", False)
-    return GitInspectResult(_response_output(response).strip(), _response_ok(response))
+    output = _response_output(response)
+    return GitInspectResult(output.strip() if strip else output, _response_ok(response))
 
 
 def _first_line(text: str) -> str:
@@ -520,40 +500,6 @@ def _diff_stats(files: list[str], numstat: str) -> dict[str, int]:
     return {"files": len(files), "additions": additions, "deletions": deletions}
 
 
-async def _inherited_workflow_source(backend: Any, root: str, head: str) -> str | None:
-    parents = await _run_git(backend, root, f"rev-list --parents -n 1 {shlex.quote(head)}")
-    parts = _first_line(parents.output).split() if parents.ok else []
-    if len(parts) != 3:
-        return None
-    first_parent, merged_parent = parts[1:]
-    if first_parent == merged_parent:
-        return None
-    origin_head = await _run_git(backend, root, "symbolic-ref --short refs/remotes/origin/HEAD")
-    source_ref = _first_line(origin_head.output) if origin_head.ok else ""
-    if not source_ref:
-        return None
-    source_contains_parent = await _run_git(
-        backend,
-        root,
-        f"merge-base --is-ancestor {shlex.quote(merged_parent)} {shlex.quote(source_ref)}",
-    )
-    if not source_contains_parent.ok:
-        return None
-    feature_workflow_diff = await _run_git(
-        backend,
-        root,
-        f"diff --quiet {shlex.quote(first_parent)} {shlex.quote(head)} -- .github/workflows",
-    )
-    if feature_workflow_diff.ok:
-        return None
-    merged_workflow_diff = await _run_git(
-        backend,
-        root,
-        f"diff --quiet {shlex.quote(merged_parent)} {shlex.quote(head)} -- .github/workflows",
-    )
-    return source_ref.removeprefix("origin/") if merged_workflow_diff.ok else None
-
-
 def _approval_url(thread_id: str | None, fingerprint: str) -> str | None:
     if not thread_id:
         return None
@@ -589,110 +535,187 @@ async def _new_branch_base(backend: SandboxBackendProtocol, root: str, head: str
     return max(boundaries, key=lambda boundary: boundary[0])[1] if boundaries else ""
 
 
-async def _workflow_change_for_push(
-    backend: SandboxBackendProtocol, parsed: ParsedGitPush
-) -> WorkflowPushChange | None:
-    root_result = await _run_git(backend, parsed.repo_dir, "rev-parse --show-toplevel")
-    if not root_result.ok:
-        return parsed.inspection_failed()
-    root = _first_line(root_result.output)
-    if not root:
-        return parsed.inspection_failed()
+@dataclass(frozen=True)
+class ProtectedPaths:
+    """The repository paths, as git glob pathspecs, whose changes need the owner's approval."""
 
-    target_sha = await _run_git(backend, root, f"rev-parse {shlex.quote(parsed.local_ref)}")
-    head = _first_line(target_sha.output) if target_sha.ok else ""
-    if not head or not _GIT_OBJECT_ID.fullmatch(head):
-        return parsed.inspection_failed()
+    patterns: tuple[str, ...]
 
-    remote_branch = f"refs/remotes/{parsed.remote}/{parsed.remote_branch}"
-    remote_branch_exists = await _run_git(
-        backend, root, f"rev-parse --verify {shlex.quote(remote_branch)}"
-    )
-    if remote_branch_exists.ok and _first_line(remote_branch_exists.output):
-        base_result = await _run_git(backend, root, f"rev-parse {shlex.quote(remote_branch)}")
-        base_sha = _first_line(base_result.output) if base_result.ok else ""
-        lease_sha = base_sha
-        if parsed.forced and not _GIT_OBJECT_ID.fullmatch(lease_sha):
+    @classmethod
+    async def load(cls) -> ProtectedPaths:
+        """The instance's protected paths, read fresh so a save applies to the next push."""
+        try:
+            settings = await load_instance_settings()
+        except Exception as exc:
+            logger.warning("Could not read protected paths", exc_info=True)
+            raise WorkflowPushInspectionError(
+                "Robin could not read which paths need approval before a push. Nothing ran. "
+                "Retry the push shortly."
+            ) from exc
+        return cls(settings.protected_paths)
+
+    @property
+    def pathspec(self) -> str:
+        return " ".join(shlex.quote(f":(top,glob){pattern}") for pattern in self.patterns)
+
+    async def may_push_changes(self, backend: Any, repo_dir: str | None) -> bool:
+        """Whether a push from ``repo_dir`` could carry changes to these paths.
+
+        Pending edits count: a chained ``git commit`` may commit them before the push.
+        A repository that cannot be inspected counts too, such as one the same
+        command clones: nothing shows what it would push.
+        """
+        pending = await _run_git(
+            backend, repo_dir, f"status --porcelain --untracked-files=all -- {self.pathspec}"
+        )
+        if not pending.ok or pending.output:
+            return True
+        for base in ("@{upstream}", "origin/HEAD"):
+            unpushed = await _run_git(
+                backend,
+                repo_dir,
+                f"diff --name-only {shlex.quote(f'{base}...HEAD')} -- {self.pathspec}",
+            )
+            if unpushed.ok:
+                return bool(unpushed.output)
+        return True
+
+    async def inherited_source(self, backend: Any, root: str, head: str) -> str | None:
+        """The branch a merge at ``head`` brought every change to these paths from, if any."""
+        parents = await _run_git(backend, root, f"rev-list --parents -n 1 {shlex.quote(head)}")
+        parts = _first_line(parents.output).split() if parents.ok else []
+        if len(parts) != 3:
+            return None
+        first_parent, merged_parent = parts[1:]
+        if first_parent == merged_parent:
+            return None
+        origin_head = await _run_git(backend, root, "symbolic-ref --short refs/remotes/origin/HEAD")
+        source_ref = _first_line(origin_head.output) if origin_head.ok else ""
+        if not source_ref:
+            return None
+        source_contains_parent = await _run_git(
+            backend,
+            root,
+            f"merge-base --is-ancestor {shlex.quote(merged_parent)} {shlex.quote(source_ref)}",
+        )
+        if not source_contains_parent.ok:
+            return None
+        feature_diff = await _run_git(
+            backend,
+            root,
+            f"diff --quiet {shlex.quote(first_parent)} {shlex.quote(head)} -- {self.pathspec}",
+        )
+        if feature_diff.ok:
+            return None
+        merged_diff = await _run_git(
+            backend,
+            root,
+            f"diff --quiet {shlex.quote(merged_parent)} {shlex.quote(head)} -- {self.pathspec}",
+        )
+        return source_ref.removeprefix("origin/") if merged_diff.ok else None
+
+    async def change_for_push(
+        self, backend: SandboxBackendProtocol, parsed: ParsedGitPush
+    ) -> WorkflowPushChange | None:
+        """What ``parsed`` would push to these paths, or None when it changes none of them."""
+        root_result = await _run_git(backend, parsed.repo_dir, "rev-parse --show-toplevel")
+        if not root_result.ok:
             return parsed.inspection_failed()
-    else:
-        base_sha = await _new_branch_base(backend, root, head)
-        lease_sha = ""
-    if not base_sha:
-        return parsed.inspection_failed()
-    range_expr = f"{shlex.quote(base_sha)}..{shlex.quote(head)}"
+        root = _first_line(root_result.output)
+        if not root:
+            return parsed.inspection_failed()
 
-    names = await _run_git(
-        backend,
-        root,
-        f"diff --name-only --diff-filter=ACMRTD {range_expr} -- .github/workflows",
-    )
-    if not names.ok:
-        return parsed.inspection_failed()
-    files = sorted(
-        line.strip()
-        for line in names.output.splitlines()
-        if line.strip().startswith(_WORKFLOW_PREFIX)
-    )
-    if not files:
-        return None
+        target_sha = await _run_git(backend, root, f"rev-parse {shlex.quote(parsed.local_ref)}")
+        head = _first_line(target_sha.output) if target_sha.ok else ""
+        if not head or not _GIT_OBJECT_ID.fullmatch(head):
+            return parsed.inspection_failed()
 
-    branch = await _run_git(backend, root, "rev-parse --abbrev-ref HEAD")
-    branch_name = _first_line(branch.output) if branch.ok else ""
-    if not branch_name or branch_name == "HEAD" or parsed.remote_branch != branch_name:
-        return parsed.inspection_failed()
-    if parsed.local_ref not in {"HEAD", branch_name, f"refs/heads/{branch_name}"}:
-        return parsed.inspection_failed()
-    if await parsed.workflows_match_remote_default(backend, root, head, files):
-        return None
+        remote_branch = f"refs/remotes/{parsed.remote}/{parsed.remote_branch}"
+        remote_branch_exists = await _run_git(
+            backend, root, f"rev-parse --verify {shlex.quote(remote_branch)}"
+        )
+        if remote_branch_exists.ok and _first_line(remote_branch_exists.output):
+            base_result = await _run_git(backend, root, f"rev-parse {shlex.quote(remote_branch)}")
+            base_sha = _first_line(base_result.output) if base_result.ok else ""
+            lease_sha = base_sha
+            if parsed.forced and not _GIT_OBJECT_ID.fullmatch(lease_sha):
+                return parsed.inspection_failed()
+        else:
+            base_sha = await _new_branch_base(backend, root, head)
+            lease_sha = ""
+        if not base_sha:
+            return parsed.inspection_failed()
+        range_expr = f"{shlex.quote(base_sha)}..{shlex.quote(head)}"
 
-    diff = await _run_git(
-        backend, root, f"diff --binary --full-index {range_expr} -- .github/workflows"
-    )
-    if not diff.ok or not diff.output:
-        return parsed.inspection_failed()
-    numstat = await _run_git(backend, root, f"diff --numstat {range_expr} -- .github/workflows")
-    diff_preview, diff_preview_truncated = _diff_preview(diff.output)
-    diff_stats = _diff_stats(files, numstat.output if numstat.ok else "")
-    inherited_from = await _inherited_workflow_source(backend, root, head)
+        names = await _run_git(
+            backend,
+            root,
+            f"diff --name-only -z --diff-filter=ACMRTD {range_expr} -- {self.pathspec}",
+            strip=False,
+        )
+        if not names.ok:
+            return parsed.inspection_failed()
+        files = sorted(name for name in names.output.split("\0") if name)
+        if not files:
+            return None
 
-    remote = await _run_git(backend, root, "config --get remote.origin.url")
-    repo = _normalize_remote(_first_line(remote.output)) if remote.ok else ""
-    fixed_command = parsed.command_for_head(root, head, lease_sha)
-    payload: dict[str, object] = {
-        "repo": repo,
-        "files": files,
-        "diff": diff.output,
-        "remote": parsed.remote,
-        "force_with_lease": parsed.force_with_lease,
-    }
-    if not repo.startswith(("https://", "http://", "ssh://", "git://", "git@")):
-        payload["repo_dir"] = root
-    if not repo or parsed.forced:
-        payload.update(
+        branch = await _run_git(backend, root, "rev-parse --abbrev-ref HEAD")
+        branch_name = _first_line(branch.output) if branch.ok else ""
+        if not branch_name or branch_name == "HEAD" or parsed.remote_branch != branch_name:
+            return parsed.inspection_failed()
+        if parsed.local_ref not in {"HEAD", branch_name, f"refs/heads/{branch_name}"}:
+            return parsed.inspection_failed()
+        if await parsed.files_match_remote_default(backend, root, head, files):
+            return None
+
+        diff = await _run_git(
+            backend, root, f"diff --binary --full-index {range_expr} -- {self.pathspec}"
+        )
+        if not diff.ok or not diff.output:
+            return parsed.inspection_failed()
+        numstat = await _run_git(backend, root, f"diff --numstat {range_expr} -- {self.pathspec}")
+        diff_preview, diff_preview_truncated = _diff_preview(diff.output)
+        diff_stats = _diff_stats(files, numstat.output if numstat.ok else "")
+        inherited_from = await self.inherited_source(backend, root, head)
+
+        remote = await _run_git(backend, root, "config --get remote.origin.url")
+        repo = _normalize_remote(_first_line(remote.output)) if remote.ok else ""
+        fixed_command = parsed.command_for_head(root, head, lease_sha)
+        payload: dict[str, object] = {
+            "repo": repo,
+            "files": files,
+            "diff": diff.output,
+            "remote": parsed.remote,
+            "force_with_lease": parsed.force_with_lease,
+        }
+        if not repo.startswith(("https://", "http://", "ssh://", "git://", "git@")):
+            payload["repo_dir"] = root
+        if not repo or parsed.forced:
+            payload.update(
+                branch=branch_name,
+                base_sha=base_sha,
+                head_sha=head,
+                local_ref=parsed.local_ref,
+                remote_ref=parsed.remote_ref,
+            )
+        if parsed.force_flags:
+            payload["force_flags"] = parsed.force_flags
+        return WorkflowPushChange(
+            fingerprint=_fingerprint(payload),
+            repo=repo,
             branch=branch_name,
             base_sha=base_sha,
             head_sha=head,
+            files=files,
+            diff_stats=diff_stats,
+            diff_preview=diff_preview,
+            diff_preview_truncated=diff_preview_truncated,
+            inherited_from=inherited_from,
+            remote=parsed.remote,
             local_ref=parsed.local_ref,
             remote_ref=parsed.remote_ref,
+            fixed_command=fixed_command,
         )
-    if parsed.force_flags:
-        payload["force_flags"] = parsed.force_flags
-    return WorkflowPushChange(
-        fingerprint=_fingerprint(payload),
-        repo=repo,
-        branch=branch_name,
-        base_sha=base_sha,
-        head_sha=head,
-        files=files,
-        diff_stats=diff_stats,
-        diff_preview=diff_preview,
-        diff_preview_truncated=diff_preview_truncated,
-        inherited_from=inherited_from,
-        remote=parsed.remote,
-        local_ref=parsed.local_ref,
-        remote_ref=parsed.remote_ref,
-        fixed_command=fixed_command,
-    )
 
 
 def _blocked_message(
@@ -795,11 +818,13 @@ async def _approval_state(request: ToolCallRequest, change: WorkflowPushChange) 
 
 
 class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
-    """Require approval before pushing `.github/workflows` changes."""
+    """Require the owner's approval before pushing changes to the instance's protected paths."""
 
     state_schema = AgentState
 
-    async def _change_for_request(self, request: ToolCallRequest) -> WorkflowPushChange | None:
+    async def _change_for_request(
+        self, request: ToolCallRequest, paths: ProtectedPaths
+    ) -> WorkflowPushChange | None:
         for command in shell_commands(request):
             parsed = _parse_git_push(command)
             if parsed is None:
@@ -807,7 +832,7 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
             backend = await _backend(_thread_id(request))
             if backend is None:
                 return parsed.inspection_failed()
-            return await _workflow_change_for_push(backend, parsed)
+            return await paths.change_for_push(backend, parsed)
         return None
 
     async def _handle_change_async(
@@ -833,8 +858,17 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        commands = shell_commands(request)
+        if not any(
+            _standalone_push_args(command) is not None or _chained_push_dirs(command)
+            for command in commands
+        ):
+            return await handler(request)
         try:
-            change = await self._change_for_request(request)
+            paths = await ProtectedPaths.load()
+            if not paths.patterns:
+                return await handler(request)
+            change = await self._change_for_request(request, paths)
         except WorkflowPushInspectionError as exc:
             return ToolMessage(
                 content=json.dumps(
@@ -849,13 +883,13 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
             )
         if change is not None:
             return await self._handle_change_async(request, handler, change)
-        if await self._unsupported_workflow_push(request):
+        if await self._unsupported_push(request, paths):
             return _unsupported_push_message(request)
-        if await self._chained_workflow_push(request):
+        if await self._chained_push(request, paths):
             return _chained_push_message(request)
         return await handler(request)
 
-    async def _unsupported_workflow_push(self, request: ToolCallRequest) -> bool:
+    async def _unsupported_push(self, request: ToolCallRequest, paths: ProtectedPaths) -> bool:
         """Whether ``request`` is a standalone push with options the guard cannot inspect."""
         dirs = [
             args[1]
@@ -867,12 +901,12 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         if backend is None:
             return bool(dirs)
         for repo_dir in dirs:
-            if await _may_push_workflow_changes(backend, repo_dir):
+            if await paths.may_push_changes(backend, repo_dir):
                 return True
         return False
 
-    async def _chained_workflow_push(self, request: ToolCallRequest) -> bool:
-        """Whether ``request`` pushes workflow changes as one step of a longer command."""
+    async def _chained_push(self, request: ToolCallRequest, paths: ProtectedPaths) -> bool:
+        """Whether ``request`` pushes protected changes as one step of a longer command."""
         dirs = [
             repo_dir
             for command in shell_commands(request)
@@ -882,6 +916,6 @@ class WorkflowPushGuardMiddleware(OpenSWEMiddleware):
         if backend is None:
             return bool(dirs)
         for repo_dir in dirs:
-            if await _may_push_workflow_changes(backend, repo_dir):
+            if await paths.may_push_changes(backend, repo_dir):
                 return True
         return False

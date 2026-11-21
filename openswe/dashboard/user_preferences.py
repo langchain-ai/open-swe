@@ -42,12 +42,14 @@ def _normalize(record: dict[str, Any] | None) -> dict[str, Any]:
 
 
 async def get_user_preferences(
-    login: str, *, session: AsyncSession | None = None
+    login: str, *, session: AsyncSession | None = None, strict: bool = False
 ) -> dict[str, Any]:
     try:
         async with postgres.session(session) as db, db.begin_nested():
             record = await USER_PREFERENCES.get(login, session=db)
     except Exception:  # noqa: BLE001
+        if strict:
+            raise
         # Preferences only pick defaults; a store hiccup must not block a run.
         logger.debug("Could not load user preferences", exc_info=True)
         record = None

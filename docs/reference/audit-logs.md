@@ -68,3 +68,31 @@ Writes are bounded to three seconds, shielded from AnyIO request cancellation, a
 A crash, database outage, or failed write can lose an event; this is not a transactional or tamper-proof compliance ledger.
 PostgreSQL administrators can still change rows.
 There is no automatic expiry or external export; operators must manage retention and backups for their installation.
+
+### Structured settings and usage tools
+
+`read_settings` and `patch_settings` expose schemas derived from the dashboard's typed global, execution, personal and repository settings models, not arbitrary SQL.
+Admins may access every resource and select a target person's immutable UUID.
+Nonadmins may access only their own personal settings when the backend supplies `personal_settings_tools_enabled: true` in the trusted run context (default off).
+This is a per-run parameter, not a persisted admin setting or a model-supplied tool argument; existing private-thread and ownership checks still apply.
+Existing ordinary personal-settings tools retain their access rules.
+Unknown fields and wrong types are rejected by existing validators/writers.
+Identity and credential metadata are not settings fields.
+
+Reads remain private, with admin-surface authorization for global, execution, repository and other-person resources.
+Supported shared writes require a verified sole writer and return only acknowledgements.
+Global, execution, repository opt-in and review-style writes use atomic version checks, including against dashboard writes.
+Personal settings and repository instructions keep their existing validated partial-write semantics.
+Writes use normal audit, cache and side-effect paths.
+Saving execution defaults never publishes images or recreates sandboxes.
+
+`read_usage` uses the same recorded analytics as Usage.
+Admins may read all users from a private admin surface; nonadmins may read only themselves.
+Own-only filters use immutable person IDs and their scoped identity aliases before final ranking, totals and pagination; personal responses omit other-user, reviewer and global ingestion metadata.
+Month-to-date starts at midnight UTC on the first; deployment reporting cutover can limit recorded coverage.
+Recorded costs may be incomplete and exclude external gateway calls.
+For the caller only, the tool also reuses the Usage page's authorized live gateway-policy counters, preserving policy-window resets and authorization/unavailability statuses instead of treating these as arbitrary-period totals.
+Other-user/deployment-wide live gateway spend is not supported.
+
+These resources are Robin instance/user/repository records, not Smith organization/tenant tables.
+Existing admin, private-owner and repository-access boundaries apply; no raw database tool, tenant-table access or cross-person credential grant is added.

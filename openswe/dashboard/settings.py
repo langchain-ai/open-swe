@@ -43,6 +43,9 @@ _LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 _DOMAIN = re.compile(rf"(?=.{{1,253}}$){_LABEL}(?:\.{_LABEL})+")
 # An MCP connection's name, then the name of a tool on its server.
 _SESSION_TOOL = re.compile(r"[A-Za-z0-9_.-]{1,128}")
+# What a glob pathspec escapes, and its bracket expressions; an unclosed one matches nothing.
+_GLOB_ESCAPE = re.compile(r"\\.")
+_GLOB_BRACKET = re.compile(r"\[!?\]?[^\]]*\]")
 
 
 class AppRelease(TypedDict):
@@ -88,6 +91,10 @@ class SettingsUpdate(BaseModel):
     # as whom.
     review_browser_domains: list[str] | None = Field(default=None, max_length=20)
     review_browser_session_tool: str | None = None
+    protected_paths: list[str] | None = Field(default=None, max_length=50)
+    """Repository paths, as git glob pathspecs, such as ``.github/workflows/`` or
+    ``deployments/**/*.tf``: Robin pushes a change to a matching file only after its thread's
+    owner approves that exact diff."""
     featured_apps: list[FeaturedApp] | None = Field(default=None, max_length=20)
     """Listed apps added to everyone's web UI, their permissions approved for them, each at
     the release an instance admin approved and sharing its ``repositories`` with each person
@@ -190,6 +197,27 @@ class SettingsUpdate(BaseModel):
         if any(len(name) > 200 for name in names):
             raise ValueError("a preview check is a name of at most 200 characters")
         return names
+
+    @field_validator("protected_paths")
+    @classmethod
+    def _protected_paths(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        paths = list(dict.fromkeys(path.strip().lstrip("/") for path in v if path.strip()))
+        for path in paths:
+            if (
+                len(path) > 200
+                or path.startswith(":")
+                or any(part in {".", ".."} for part in path.split("/"))
+                or any(ord(char) < 32 for char in path)
+                or "[" in _GLOB_BRACKET.sub("", _GLOB_ESCAPE.sub("", path))
+                or _GLOB_ESCAPE.sub("", path).endswith("\\")
+            ):
+                raise ValueError(
+                    f"{path!r} isn't a repository path, such as .github/workflows/ or "
+                    "deployments/**/*.tf"
+                )
+        return paths
 
     @field_validator("review_browser_domains")
     @classmethod
@@ -336,6 +364,7 @@ def _default_settings() -> dict[str, Any]:
         "review_app_preview_checks": [],
         "review_browser_domains": [],
         "review_browser_session_tool": None,
+        "protected_paths": [],
         "featured_apps": [],
         # On by default; the settings show it on until an admin turns it off.
         "model_routing_enabled": True,
@@ -479,12 +508,14 @@ def _bind_settings_changes(changes: dict[str, SettingsChange] | None) -> None:
         entry.enrichments.settings_changes = changes
 
 
-async def upsert_instance_settings(update: SettingsUpdate) -> dict[str, Any]:
+async def upsert_instance_settings(
+    update: SettingsUpdate, *, expected_version: str | None = None
+) -> dict[str, Any]:
     """Replace the instance record. Raises ``ValueError`` for a Fable model saved as a default."""
     update.apply_fable_policy(fable_enabled=bool(update.fable_enabled))
     value = _record_values(update)
     changes = await _settings_changes(value)
-    await INSTANCE_SETTINGS.put("", value)
+    await INSTANCE_SETTINGS.put("", value, expected_version=expected_version)
     _bind_settings_changes(changes)
     await _forget_cached_settings()
     await Topic.SETTINGS.invalidate()
@@ -665,6 +696,12 @@ class Settings(Mapping[str, Any]):
             if isinstance(value, list)
             else frozenset()
         )
+
+    @property
+    def protected_paths(self) -> tuple[str, ...]:
+        """The paths whose changes Robin pushes only after the thread's owner approves them."""
+        value = self.get("protected_paths")
+        return tuple(v for v in value if isinstance(v, str)) if isinstance(value, list) else ()
 
     @property
     def review_app_releases(self) -> dict[UUID, UUID]:

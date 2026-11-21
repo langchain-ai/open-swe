@@ -22,6 +22,8 @@ async def test_catalog_respects_admin_and_uses_python_schema(
     assert "read_only_sql" in tools
     assert "execute_database_sql" in tools
     assert "read_execution_defaults" in tools
+    assert {"read_settings", "patch_settings", "read_usage"} <= tools.keys()
+    assert {"read_settings", "patch_settings", "read_usage"} <= (await USER.tools()).keys()
     assert "configure_execution_defaults" in tools
     assert "upload_session" in tools
     parameters = tool_parameters(tools["manage_feature_flags"][0])
@@ -54,3 +56,17 @@ async def test_invoke_validates_python_parameters(monkeypatch: pytest.MonkeyPatc
     result = await ADMIN.invoke("manage_feature_flags", {"action": "invalid"})
     assert result.status == "error"
     assert "action" in str(result.content)
+
+
+@pytest.mark.asyncio
+async def test_structured_settings_invocation_rechecks_resource_policy(
+    registry_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONFIGURED_ADMINS", "admin")
+    result = await ADMIN.invoke("read_settings", {"resource": "instance", "schema_only": True})
+    assert (
+        "personal_settings_tools_enabled" not in json.loads(result.content)["schema"]["properties"]
+    )
+    refused = await USER.invoke("read_settings", {"resource": "instance", "schema_only": True})
+    assert json.loads(refused.content)["ok"] is False

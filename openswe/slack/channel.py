@@ -42,6 +42,7 @@ from openswe import event_claims
 from openswe.dispatch import CHANNEL_METADATA_KEY, COMPLETION_WEBHOOK_URL, prepare_durable_run
 from openswe.input_messages import RunInput
 from openswe.mda_channels.api import ChannelCall
+from openswe.prompts import prompt
 from openswe.routing.store import is_listening_channel
 from openswe.schedules.store import slack_channel_watched
 from openswe.slack import forks, mda_forwarding
@@ -88,10 +89,6 @@ _DECLINE_SCOPE: Final = "slack_turn_decline"
 _DECLINE_TTL: Final = timedelta(minutes=10)
 #: Claims for the notice a ``/breakout:web`` posts in its Slack thread, one per call.
 _WEB_BREAKOUT_SCOPE: Final = "slack_web_breakout_notice"
-_WORKFLOW_PUSH_RETRY: Final = (
-    "The workflow-file push approval was approved. Retry the blocked git push now; "
-    "do not alter workflow files before pushing."
-)
 
 
 def _no_run(reason: str, **fields: str) -> None:
@@ -723,7 +720,9 @@ async def _click_request(
         event_ts=plan.action_ts,
         event_id=f"slack-click:{uuid7()}",
         user_id=plan.user_id,
-        text=click.text if isinstance(click, OptionClick) else _WORKFLOW_PUSH_RETRY,
+        text=click.text
+        if isinstance(click, OptionClick)
+        else prompt("runs/workflow-push-approved"),
         bot_user_id=common.SLACK_BOT_USER_ID,
         thread_id=run_thread,
         concierge_mode=concierge,
