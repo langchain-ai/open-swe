@@ -107,28 +107,25 @@ async def test_latest_work_run_keeps_the_live_run_ahead_of_a_queued_follow_up(
 ) -> None:
     live = runtimes.MdaRun(run_id="live", status="running", created_at=datetime.now(UTC))
     queued = runtimes.MdaRun(run_id="follow-up", status=queued_status, created_at=datetime.now(UTC))
+    selected: list[list[str]] = []
+
+    def runs(request: httpx2.Request) -> httpx2.Response:
+        selected.append(request.url.params.get_list("select"))
+        run = live if request.url.params.get("status") == "running" else queued
+        return httpx2.Response(200, json=[run.model_dump(mode="json")])
+
     threads = runtimes._MdaThreads(mda)
     monkeypatch.setattr(
         runtimes.MdaRuntime,
         "read_http",
         property(
-            lambda self: httpx2.AsyncClient(
-                base_url=mda.url,
-                transport=httpx2.MockTransport(
-                    lambda request: httpx2.Response(
-                        200,
-                        json=[
-                            (
-                                live if request.url.params.get("status") == "running" else queued
-                            ).model_dump(mode="json")
-                        ],
-                    )
-                ),
-            )
+            lambda self: httpx2.AsyncClient(base_url=mda.url, transport=httpx2.MockTransport(runs))
         ),
     )
     run = await threads.latest_run("work")
     assert run is not None and run.run_id == "live" and run.active
+    # MDA lists a run whole, kwargs included, unless asked for fields.
+    assert selected == [list(runtimes.MdaRun.model_fields)] * 2
 
 
 @pytest.mark.parametrize("bypass", ["127.0.0.1", "*.0.0.1"])

@@ -170,6 +170,8 @@ class MdaRun(BaseModel):
 
 
 _runs = TypeAdapter(list[MdaRun])
+# Without a select MDA lists each run whole, its kwargs (input, config, context) included.
+_RUN_FIELDS: Final = tuple(("select", field) for field in MdaRun.model_fields)
 
 
 class ChannelThreadError(RuntimeError):
@@ -842,7 +844,9 @@ class _MdaThreads(_SdkThreads):
 
     async def latest_run(self, thread_id: str) -> MdaRun | None:
         async with self.runtime.read_http as client:
-            response = await client.get(f"/threads/{thread_id}/runs", params={"limit": 1})
+            response = await client.get(
+                f"/threads/{thread_id}/runs", params=(("limit", "1"), *_RUN_FIELDS)
+            )
         if response.status_code == httpx2.codes.NOT_FOUND:
             return None
         response.raise_for_status()
@@ -850,7 +854,8 @@ class _MdaThreads(_SdkThreads):
         if runs and runs[0].status in {"pending", "interrupted"}:
             async with self.runtime.read_http as client:
                 response = await client.get(
-                    f"/threads/{thread_id}/runs", params={"status": "running", "limit": 1}
+                    f"/threads/{thread_id}/runs",
+                    params=(("status", "running"), ("limit", "1"), *_RUN_FIELDS),
                 )
             if response.status_code == httpx2.codes.NOT_FOUND:
                 return None
