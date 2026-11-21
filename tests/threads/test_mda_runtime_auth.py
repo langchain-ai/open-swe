@@ -180,3 +180,39 @@ async def test_mda_pools_reuse_isolated_connections_until_shutdown(
         finally:
             await close_pool()
             await asyncio.wait_for(closed.get(), 2)
+
+
+async def test_mda_state_forwards_select_and_rejects_non_object_json(
+    mda: runtimes.MdaRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen_selects: list[list[str]] = []
+    payloads: list[bytes] = [
+        b'{"values":{"messages":[{"id":"m1"}]}}',
+        b"[1, 2, 3]",
+    ]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen_selects.append(request.url.params.get_list("select"))
+        return httpx2.Response(
+            200, content=payloads.pop(0), headers={"content-type": "application/json"}
+        )
+
+    threads = runtimes._MdaThreads(mda)
+    monkeypatch.setattr(
+        runtimes.MdaRuntime,
+        "read_http",
+        property(
+            lambda self: httpx2.AsyncClient(
+                base_url=mda.url, transport=httpx2.MockTransport(handler)
+            )
+        ),
+    )
+
+    timings: dict[str, float] = {}
+    state = await threads.state("t1", select=["values.messages"], timings=timings)
+    assert state == {"values": {"messages": [{"id": "m1"}]}}
+    assert seen_selects == [["values.messages"]]
+    assert "mda" in timings and "parse" in timings
+
+    with pytest.raises(ValueError, match="Expected JSON object"):
+        await threads.state("t1")

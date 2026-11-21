@@ -1763,9 +1763,13 @@ async def _channel_history(
     it with its first run, so it has no messages to read yet.
     """
     try:
-        if not new and _state_messages(await THREADS.state(pr_thread_id)):
+        if not new and _state_messages(
+            await THREADS.state(pr_thread_id, select=["values.messages"])
+        ):
             return []
-        messages = _state_messages(await THREADS.state(channel_thread_id))
+        messages = _state_messages(
+            await THREADS.state(channel_thread_id, select=["values.messages"])
+        )
     except Exception:  # noqa: BLE001 - the review still runs, without the conversation
         common.logger.warning(
             "Could not read the channel conversation a PR thread continues",
@@ -2298,7 +2302,7 @@ async def conversation_started(thread_id: str) -> bool:
     and the first run would never see the issue.
     """
     try:
-        state = await THREADS.state(thread_id)
+        state = await THREADS.state(thread_id, select=["values.messages"])
     except NotFoundError:
         # Indexed, but no run created it on MDA yet.
         return False

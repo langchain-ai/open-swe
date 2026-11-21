@@ -286,7 +286,10 @@ async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatc
     history_finished, profile_finished = asyncio.Event(), asyncio.Event()
     blocked = asyncio.Event()
 
-    async def read_history(thread_id: str) -> dict[str, object]:
+    seen_select: list[list[str] | None] = []
+
+    async def read_history(thread_id: str, *, select: list[str] | None = None) -> dict[str, object]:
+        seen_select.append(select)
         history_started.set()
         try:
             await blocked.wait()
@@ -323,6 +326,7 @@ async def test_failed_run_start_drains_prefetches(monkeypatch: pytest.MonkeyPatc
         assert raised.value is error
         assert profile_finished.is_set()
         assert history_finished.is_set()
+        assert seen_select == [["values.messages"]]
     finally:
         blocked.set()
         await profile_finished.wait()

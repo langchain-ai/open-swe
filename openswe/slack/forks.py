@@ -47,7 +47,9 @@ async def held_timestamps(thread_id: str) -> set[str]:
     started on, or when MDA can't say."""
     try:
         async with RUNTIMES.mda_runtime.read_http as client:
-            response = await client.get(f"/threads/{thread_id}/state")
+            response = await client.get(
+                f"/threads/{thread_id}/state", params={"select": ["values.messages"]}
+            )
         if response.status_code == httpx2.codes.NOT_FOUND:
             return set()
         response.raise_for_status()

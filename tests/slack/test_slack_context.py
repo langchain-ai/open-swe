@@ -444,7 +444,8 @@ def _setup_slack_mention_fakes(
         async def get(self, thread_id: str) -> dict:
             return {"metadata": {"visibility": "public"}}
 
-        async def get_state(self, thread_id: str) -> dict:
+        async def get_state(self, thread_id: str, *, select: list[str] | None = None) -> dict:
+            captured["state_select"] = select
             return {"values": captured.get("thread_state_values", {"messages": []})}
 
         async def update(self, *, thread_id: str, metadata: dict) -> None:

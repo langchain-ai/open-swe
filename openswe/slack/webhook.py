@@ -16,12 +16,14 @@ import httpx2
 from fastapi import HTTPException
 from langchain_core.messages.content import create_text_block
 from pydantic import JsonValue
+from runtime_api.loop import VISIBLE_FROM
 from runtime_api.slack import SlackMessageOrigin, SlackNotice, SlackTurnPrompt
 
 from openswe.dashboard.langsmith_login import LangSmithLogin
 from openswe.dashboard.settings_cache import cached_settings
 from openswe.human_review.requests import HumanReviewRequest
 from openswe.input_messages import (
+    SUMMARIZATION_EVENT_KEY,
     ChannelIdentity,
     InputMessageContext,
     MessageKind,
@@ -182,7 +184,16 @@ async def _dispatched_slack_context(thread_id: str) -> tuple[set[str], set[str]]
     the turn.
     """
     try:
-        state = as_json_object(await THREADS.state(thread_id))
+        state = as_json_object(
+            await THREADS.state(
+                thread_id,
+                select=[
+                    "values.messages",
+                    f"values.{SUMMARIZATION_EVENT_KEY}",
+                    f"values.{VISIBLE_FROM}",
+                ],
+            )
+        )
     except Exception:  # noqa: BLE001
         common.logger.warning(
             "Could not read thread state; Slack context may repeat",

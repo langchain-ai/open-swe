@@ -871,6 +871,27 @@ async def test_an_issue_thread_continues_only_once_a_run_took_the_issue(
     monkeypatch.setattr(github_webhooks.THREADS, "state", read)
 
     assert await github_webhooks.conversation_started("thread-1") is started
+    read.assert_awaited_once_with("thread-1", select=["values.messages"])
+
+
+async def test_channel_history_selects_only_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, list[str] | None]] = []
+
+    async def fake_state(thread_id: str, *, select: list[str] | None = None) -> dict[str, object]:
+        calls.append((thread_id, select))
+        if thread_id == "pr-thread":
+            return {"values": {"messages": []}}
+        return {"values": {"messages": [{"type": "human", "content": "context"}]}}
+
+    monkeypatch.setattr(github_webhooks.THREADS, "state", fake_state)
+
+    messages = await github_webhooks._channel_history("channel-thread", "pr-thread")
+
+    assert messages == [{"type": "human", "content": "context"}]
+    assert calls == [
+        ("pr-thread", ["values.messages"]),
+        ("channel-thread", ["values.messages"]),
+    ]
 
 
 @pytest.mark.parametrize(

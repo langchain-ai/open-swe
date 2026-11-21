@@ -865,8 +865,8 @@ async def _requested_visibility(
 class _ThreadHistory:
     """What the graph already holds of a thread's conversation, read from its state.
 
-    Only the state carries the dynamic context a run injected, so this is a full
-    state read; callers start it early so it overlaps their other lookups.
+    Only the state carries the dynamic context a run injected, so this reads
+    ``values.messages``; callers start it early so it overlaps their other lookups.
     """
 
     read: bool = False
@@ -877,7 +877,7 @@ class _ThreadHistory:
     async def of(cls, thread_id: str) -> _ThreadHistory:
         """The thread's history, empty when its state cannot be read."""
         try:
-            state = await THREADS.state(thread_id)
+            state = await THREADS.state(thread_id, select=["values.messages"])
         except Exception:
             logger.debug("Could not read dashboard thread history for %s", thread_id, exc_info=True)
             return cls()

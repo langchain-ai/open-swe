@@ -279,7 +279,7 @@ async def _compact_list_item(item: Mapping[str, object]) -> dict[str, object]:
     )
     thread_id = item.get("id")
     if outcome is None and isinstance(thread_id, str):
-        thread_state = await THREADS.state(thread_id)
+        thread_state = await THREADS.state(thread_id, select=["values.messages"])
         outcome = _last_assistant_outcome(_state_messages(thread_state))
     result["final_message"] = outcome[:500] if outcome else None
     return result

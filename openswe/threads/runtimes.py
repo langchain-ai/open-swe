@@ -880,7 +880,14 @@ class _MdaThreads(_SdkThreads):
                 )
         response.raise_for_status()
         with phase(record, "parse"):
-            return _object.validate_python(orjson.loads(response.content))
+            # orjson only emits JSON primitives, so recursive JsonValue validation only
+            # burns CPU on the event loop; verifying the top-level object is enough.
+            parsed = orjson.loads(response.content)
+            if not isinstance(parsed, dict):
+                raise ValueError(
+                    f"Expected JSON object from thread state, got {type(parsed).__name__}"
+                )
+            return parsed
 
     async def has_active_run(self, thread_id: str) -> bool:
         for status in ("pending", "running"):

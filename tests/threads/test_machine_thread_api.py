@@ -202,7 +202,9 @@ async def test_a_machine_run_drops_a_message_id_the_thread_already_holds(
     principal = _bot_caller()
 
     class _State:
-        async def state(self, thread_id: str) -> dict[str, object]:
+        async def state(
+            self, thread_id: str, *, select: list[str] | None = None
+        ) -> dict[str, object]:
             return {"values": {"messages": [{"id": "prompt-1", "type": "human", "content": "x"}]}}
 
     monkeypatch.setattr(runs, "THREADS", _State())

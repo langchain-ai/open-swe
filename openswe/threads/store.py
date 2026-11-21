@@ -306,12 +306,14 @@ class ThreadStore:
         await index.delete(thread.thread_id)
         await TaskMessage.forget(thread.thread_id)
 
-    async def state(self, thread_id: str) -> dict[str, JsonValue] | None:
+    async def state(
+        self, thread_id: str, *, select: list[str] | None = None
+    ) -> dict[str, JsonValue] | None:
         """The thread's state as its runtime keeps it, or ``None`` for an unknown thread."""
         thread = await self.get(thread_id)
         if thread is None:
             return None
-        return await self.state_of(thread)
+        return await self.state_of(thread, select=select)
 
     async def state_of(
         self,

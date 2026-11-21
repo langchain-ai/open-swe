@@ -104,7 +104,9 @@ class ThreadStoreOverClient(ThreadStore):
         await proxy.langgraph_client().threads.update(thread_id=thread_id, metadata=dict(metadata))
         return None
 
-    async def state(self, thread_id: str) -> dict[str, Any] | None:
+    async def state(
+        self, thread_id: str, *, select: list[str] | None = None
+    ) -> dict[str, Any] | None:
         return await proxy.langgraph_client().threads.get_state(thread_id)
 
     async def state_of(

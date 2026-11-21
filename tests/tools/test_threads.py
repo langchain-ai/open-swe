@@ -307,8 +307,13 @@ async def test_list_threads_outcomes_and_pagination(
     records[0]["final_message"] = outcome
     records[1]["messages"] = [{"role": "assistant", "content": outcome}]
 
-    async def get_state(thread_id: str) -> dict[str, object] | None:
+    seen_select: list[list[str] | None] = []
+
+    async def get_state(
+        thread_id: str, *, select: list[str] | None = None
+    ) -> dict[str, object] | None:
         assert thread_id not in {"thread-0", "thread-1"}
+        seen_select.append(select)
         if thread_id == "thread-48":
             return None
         return {
@@ -337,6 +342,7 @@ async def test_list_threads_outcomes_and_pagination(
     collected = result["items"]
     assert len(collected) == 50
     if compact:
+        assert seen_select and all(s == ["values.messages"] for s in seen_select)
         assert len(json.dumps(result)) < 20_000
         assert collected[0] == {
             **{key: records[0][key] for key in ("id", "status", "createdAt", "updatedAt", "title")},

@@ -513,9 +513,8 @@ async def test_a_slack_mention_without_github_prepares_a_canonical_chat_run(
     captured: dict[str, object] = {}
     _setup_slack_mention_fakes(monkeypatch, captured)
     monkeypatch.setattr(slack_service, "persist_display_name", AsyncMock())
-    monkeypatch.setattr(
-        slack_service.THREADS, "state", AsyncMock(return_value={"values": {"messages": []}})
-    )
+    state_mock = AsyncMock(return_value={"values": {"messages": []}})
+    monkeypatch.setattr(slack_service.THREADS, "state", state_mock)
     monkeypatch.setattr(
         slack_ask.common, "account_link_reason", AsyncMock(return_value=github_reason)
     )
@@ -536,6 +535,10 @@ async def test_a_slack_mention_without_github_prepares_a_canonical_chat_run(
     )
 
     assert isinstance(prepared, slack_service.SlackChannelRun)
+    state_mock.assert_awaited_once_with(
+        "t-1",
+        select=["values.messages", "values._summarization_event", "values.visible_from"],
+    )
     config = prepared.configurable
     assert config["github_linked"] is False
     assert config["repo"] is None

@@ -75,6 +75,7 @@ def state(monkeypatch: pytest.MonkeyPatch) -> dict[str, JsonValue | None]:
 
     def handle(request: httpx2.Request) -> httpx2.Response:
         if request.url.path == f"/threads/{_SOURCE}/state":
+            assert request.url.params.get_list("select") == ["values.messages"]
             if held["state"] is None:
                 return httpx2.Response(404, json={"detail": "not found"})
             return httpx2.Response(200, json=held["state"])
