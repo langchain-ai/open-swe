@@ -32,6 +32,11 @@ function FeatureFlagsPage() {
           label="Background command callbacks"
           description="Background commands you start report completion from the sandbox instead of being polled every minute."
         />
+        <ProfileSwitchRow
+          field="experimental_proactivity"
+          label="Proactive Robin"
+          description="Each weekday Robin looks across your recent threads and, when your work shows a need, proposes recurring help such as a daily brief. At most one suggestion a day."
+        />
       </SettingsSection>
     </SettingsPage>
   )

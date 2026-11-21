@@ -1,0 +1,9 @@
+The person's Robin threads from the last week, most recently active first:
+{% for thread in threads %}
+
+<thread id="{{ thread.id }}" title="{{ thread.title }}" last_active="{{ thread.updated }}"{% if thread.resolved %} resolved="true"{% endif %}>
+{% for message in thread.messages %}
+{{ message.role }}: {{ message.text }}
+{% endfor %}
+</thread>
+{% endfor %}

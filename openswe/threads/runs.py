@@ -47,6 +47,7 @@ from openswe.dispatch import (
 )
 from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.input_messages import (
+    InputMessageContext,
     PersonIdentity,
     RunMessage,
     SystemIdentity,
@@ -602,8 +603,13 @@ async def start_dashboard_thread(
     repos: Sequence[str],
     visibility: Literal["public", "private"],
     unlisted: bool = False,
+    context: InputMessageContext | None = None,
+    systems: list[SystemIdentity] | None = None,
 ) -> str:
-    """Start a person's dashboard thread; the first repo is the one its sandbox opens in."""
+    """Start a person's dashboard thread; the first repo is the one its sandbox opens in.
+
+    ``context`` sends ``prompt`` as someone other than the person, such as a system.
+    """
     identity = ThreadIdentity(login)
     if identity.user_id is not None and repos:
         raise HTTPException(403, "This account has no GitHub repository access")
@@ -635,6 +641,8 @@ async def start_dashboard_thread(
         await _build_dashboard_configurable(thread_id, login, thread_metadata(thread)),
         source=DASHBOARD_SOURCE,
         thread_title=None,
+        context=context,
+        systems=systems,
         client=client,
     )
     return thread_id

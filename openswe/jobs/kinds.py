@@ -65,6 +65,7 @@ from openswe.plugins.records import (
     ATTACHMENT_SWEEP_SCHEDULE,
     AttachmentObjects,
 )
+from openswe.proactivity.heartbeat import ProactiveHeartbeat
 from openswe.review.approval_withdrawal import ApprovalWithdrawal
 
 __all__ = ["WORKER"]
@@ -116,6 +117,7 @@ WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)
 WORKER.register(ApprovalWithdrawal.JOB)(ApprovalWithdrawal.retry)
 WORKER.register(ReviewScoutTarget.RETRY_JOB)(ReviewScoutTarget.retry)
 WORKER.register(TASK_MESSAGE_DELIVERY)(TaskMessage.retry)
+WORKER.register(ProactiveHeartbeat.JOB)(ProactiveHeartbeat.run)
 WORKER.register(INCIDENT_JOIN)(IncidentChannel.join)
 WORKER.register(INCIDENT_INVESTIGATE)(IncidentChannel.investigate)
 WORKER.register(MANAGED_TOOLS_CONSENT)(ConsentWait.run)
@@ -383,6 +385,9 @@ async def start_jobs() -> None:
         ),
         lambda: queue.schedule(
             ATTACHMENT_SWEEP_JOB, cron=ATTACHMENT_SWEEP_SCHEDULE, key=ATTACHMENT_SWEEP_JOB
+        ),
+        lambda: queue.schedule(
+            ProactiveHeartbeat.JOB, cron=ProactiveHeartbeat.SCHEDULE, key=ProactiveHeartbeat.JOB
         ),
     ]
     for step in steps:

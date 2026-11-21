@@ -103,6 +103,7 @@ class ProfileUpdate(ThreadTitlePreference):
     auto_human_review_enabled: bool = True
     review_request_dms_enabled: bool = True
     concierge_mode: bool | None = None
+    experimental_proactivity: bool | None = None
     draft_prs: bool | None = None
     review_draft_prs: bool | None = None
     experimental_background_callbacks: bool | None = Field(
@@ -398,6 +399,7 @@ async def put_my_profile(update: ProfileUpdate, reader: DashboardReadDep) -> dic
     patch = UserPreferencesPatch(
         concierge_mode=update.concierge_mode,
         thread_title_instructions=update.thread_title_instructions,
+        experimental_proactivity=update.experimental_proactivity,
     )
     preferences = await reader.user.merge_preferences(patch, session=reader.session)
     profile = await upsert_profile(login, reader.email or "", update, session=reader.session)

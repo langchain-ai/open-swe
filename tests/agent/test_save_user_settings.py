@@ -269,6 +269,7 @@ async def test_private_read_exposes_all_ordinary_settings_only_for_requester(
                 "review_request_dms_enabled": True,
                 "concierge_mode": False,
                 "thread_title_instructions": "",
+                "experimental_proactivity": False,
             },
             "preferences": {
                 "default_visibility": "private",

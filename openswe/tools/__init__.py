@@ -66,6 +66,7 @@ _TOOL_MODULES = {
     "publish_artifact": ".publish_artifact",
     "save_user_instructions": ".save_user_instructions",
     "save_user_settings": ".save_user_settings",
+    "accept_proactive_offer": ".proactivity",
     "save_user_skill": ".user_skills",
     "delete_user_skill": ".user_skills",
     "schedule_thread_wakeup": ".schedule_thread_wakeup",
@@ -157,6 +158,7 @@ __all__ = [
     "publish_artifact",
     "save_user_instructions",
     "save_user_settings",
+    "accept_proactive_offer",
     "list_projects",
     "create_project",
     "update_project",
@@ -249,6 +251,7 @@ if TYPE_CHECKING:
     from openswe.tools.open_pull_request import link_pull_request, open_pull_request
     from openswe.tools.organization_skills import delete_organization_skill, save_organization_skill
     from openswe.tools.output_iframe import output_iframe
+    from openswe.tools.proactivity import accept_proactive_offer
     from openswe.tools.projects import (
         create_project,
         list_projects,

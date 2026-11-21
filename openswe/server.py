@@ -176,6 +176,7 @@ from openswe.threads.recent_context import RecentContextAudience, recent_thread_
 from openswe.threads.store import THREADS
 from openswe.threads.summary import DASHBOARD_SOURCE
 from openswe.tools import (
+    accept_proactive_offer,
     add_managed_tools_server,
     assign_human_reviewer,
     auto_assign_human_reviewer,
@@ -646,6 +647,7 @@ def _is_subagent_excluded_tool(name: str) -> bool:
         "connect_managed_tools",
         "discover_managed_tools",
         "save_user_settings",
+        "accept_proactive_offer",
         "list_projects",
         "create_project",
         "update_project",
@@ -712,6 +714,7 @@ AGENT_TOOLS: Final = (
     publish_app,
     save_user_instructions,
     save_user_settings,
+    accept_proactive_offer,
     list_projects,
     create_project,
     update_project,

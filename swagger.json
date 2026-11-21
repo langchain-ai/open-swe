@@ -5711,6 +5711,17 @@
             ],
             "title": "Experimental Background Callbacks"
           },
+          "experimental_proactivity": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experimental Proactivity"
+          },
           "review_draft_prs": {
             "anyOf": [
               {
