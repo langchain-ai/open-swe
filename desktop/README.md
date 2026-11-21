@@ -11,7 +11,10 @@ First launch requires connectivity to download the UI; failure shows a retry scr
 
 Every thread runs in the cloud, in its own sandbox, exactly as it does from the web.
 In your private threads, the app also lets Robin ask to read or write a file on this Mac, copy a file into the thread's sandbox, or run a command here.
-Each action waits for your approval in a native dialog that names the thread and shows the exact path, contents or command; the thread's card links to the dialog but cannot decide.
+Each action waits for your approval in a native popup within its thread that names the thread and shows the exact path, contents or command; the thread's card links to the popup but cannot decide.
+The popup appears only while that thread is open, leaves the sidebar usable, and never brings the app to the foreground.
+Navigating away hides it without answering the request; threads with pending requests show **Needs approval** in the sidebar.
+Requests still expire on their original deadline while hidden.
 **Allow in <folder> for this thread** lets that thread act in the folder without asking for 30 minutes, for actions the runtime's reviewer clears and paths that cannot hold credentials.
 Grants live only in the running app: quitting or signing out ends them.
 

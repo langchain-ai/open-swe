@@ -77,6 +77,14 @@ class ApprovalQueue {
       .filter((request) => !threadId || request.threadId === threadId);
   }
 
+  pendingThreads(): string[] {
+    return [
+      ...new Set(
+        this.list().flatMap(({ threadId }) => (threadId ? [threadId] : [])),
+      ),
+    ];
+  }
+
   /** Denies every request, as when local access closes. */
   clear(): void {
     // oxlint-disable-next-line unicorn/no-useless-spread -- settling removes each entry

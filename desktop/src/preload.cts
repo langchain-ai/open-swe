@@ -64,6 +64,10 @@ contextBridge.exposeInMainWorld("openSweDesktop", {
   },
   localAccessRequests: (threadId) =>
     ipcRenderer.invoke("desktop:local-access-requests", threadId),
+  setLocalAccessThread: (threadId, bounds) =>
+    ipcRenderer.invoke("desktop:set-local-access-thread", threadId, bounds),
+  pendingLocalAccessThreads: () =>
+    ipcRenderer.invoke("desktop:pending-local-access-threads"),
   reviewLocalAccessRequest: (id) =>
     ipcRenderer.invoke("desktop:review-local-access-request", id),
   onLocalAccessRequestsChanged: (callback) => {

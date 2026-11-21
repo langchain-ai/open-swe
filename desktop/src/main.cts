@@ -485,6 +485,17 @@ function configureDesktopIpc() {
         createdAt,
       }));
   });
+  ipcMain.handle(
+    "desktop:set-local-access-thread",
+    (event, threadId, bounds) => {
+      requireTrustedDesktopIpc(event);
+      return approvalPanel.setThread(threadId, bounds);
+    },
+  );
+  ipcMain.handle("desktop:pending-local-access-threads", (event) => {
+    requireTrustedDesktopIpc(event);
+    return approvalQueue.pendingThreads();
+  });
   ipcMain.handle("desktop:review-local-access-request", (event, id) => {
     requireTrustedDesktopIpc(event);
     if (typeof id === "string") approvalPanel.review(id);
@@ -1401,7 +1412,17 @@ function createWindow(initialUrl = APP_URL) {
     event.preventDefault(),
   );
   window.webContents.on("did-navigate", () => {
-    if (mainWindow === window && menuCommands.reset()) createMenu();
+    if (mainWindow === window) {
+      if (menuCommands.reset()) createMenu();
+      approvalPanel.reset();
+      approvalPanel.sync();
+    }
+  });
+  window.webContents.on("did-navigate-in-page", () => {
+    if (mainWindow === window) approvalPanel.sync();
+  });
+  window.on("resize", () => {
+    if (mainWindow === window) approvalPanel.sync();
   });
   window.webContents.on("did-finish-load", () =>
     window.webContents.send("desktop:fullscreen-change", window.isFullScreen()),

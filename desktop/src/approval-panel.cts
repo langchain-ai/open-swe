@@ -5,6 +5,7 @@ type Decision = "deny" | "once" | "grant";
 
 interface PendingApproval {
   id: string;
+  threadId: string | null;
   kind: string;
   threadTitle: string | null;
   concern: string | null;
@@ -28,8 +29,12 @@ const DECIDE_URL = "open-swe-approval://decide";
 class ApprovalPanel {
   private view: WebContentsView | null = null;
   private window: BrowserWindow | null = null;
-  private fit: (() => void) | null = null;
   private showing: string | null = null;
+  private scoped = false;
+  private scope: {
+    threadId: string;
+    bounds: { x: number; y: number; width: number; height: number };
+  } | null = null;
   /** Requests the person put off; they stay pending until decided or expired. */
   private readonly later = new Set<string>();
   /** A request the person asked to review from its thread, shown before the others. */
@@ -41,9 +46,49 @@ class ApprovalPanel {
     private readonly displayFolder: (folder: string) => string,
   ) {}
 
+  setThread(threadId: unknown, bounds: unknown): boolean {
+    if (typeof threadId !== "string" || !threadId || threadId.length > 256)
+      return false;
+    this.scoped = true;
+    if (bounds === null) {
+      if (this.scope?.threadId === threadId) this.scope = null;
+    } else {
+      if (
+        typeof bounds !== "object" ||
+        !bounds ||
+        !("x" in bounds) ||
+        !("y" in bounds) ||
+        !("width" in bounds) ||
+        !("height" in bounds)
+      ) {
+        this.setThread(threadId, null);
+        return false;
+      }
+      const { x, y, width, height } = bounds;
+      if (
+        typeof x !== "number" ||
+        typeof y !== "number" ||
+        typeof width !== "number" ||
+        typeof height !== "number" ||
+        ![x, y, width, height].every(Number.isFinite) ||
+        x < 0 ||
+        y < 0 ||
+        width <= 0 ||
+        height <= 0
+      ) {
+        this.setThread(threadId, null);
+        return false;
+      }
+      this.scope = { threadId, bounds: { x, y, width, height } };
+    }
+    this.sync();
+    return true;
+  }
+
   /** Opens the panel on `id`, as a thread's Review button asks. */
   review(id: string): void {
-    if (!this.queue.get(id)) return;
+    const request = this.queue.get(id);
+    if (!request || !this.matches(request)) return;
     this.later.delete(id);
     this.chosen = id;
     this.sync();
@@ -54,8 +99,11 @@ class ApprovalPanel {
     const next = this.next();
     if (!next) return this.hide();
     const window = this.currentWindow();
-    if (!window || window.isDestroyed()) return;
+    if (!window || window.isDestroyed()) return this.hide();
+    const bounds = this.bounds();
+    if (!bounds) return this.hide();
     const view = this.attach(window);
+    view.setBounds(bounds);
     if (this.showing === next.id) return;
     this.showing = next.id;
     const shown = {
@@ -70,18 +118,75 @@ class ApprovalPanel {
         hash: encodeURIComponent(JSON.stringify(shown)),
       },
     );
-    window.focus();
-    view.webContents.focus();
+  }
+
+  reset(): void {
+    this.scope = null;
+    this.scoped = false;
+    this.hide();
+  }
+
+  private bounds(): {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null {
+    const window = this.currentWindow();
+    if (!window || window.isDestroyed()) return null;
+    const content = window.getContentBounds();
+    const zoom = window.webContents.getZoomFactor();
+    if (!Number.isFinite(zoom) || zoom <= 0) return null;
+    if (this.scoped && !this.scope) return null;
+    const bounds = this.scope?.bounds ?? {
+      x: 0,
+      y: 44,
+      width: content.width / zoom,
+      height: content.height / zoom - 44,
+    };
+    const x = Math.min(content.width, Math.ceil(bounds.x * zoom));
+    const y = Math.min(
+      content.height,
+      Math.ceil(Math.max(44, bounds.y) * zoom),
+    );
+    const width = Math.min(Math.floor(bounds.width * zoom), content.width - x);
+    const height = Math.min(
+      Math.floor((bounds.y + bounds.height) * zoom) - y,
+      content.height - y,
+    );
+    return width >= 480 && height >= 480 ? { x, y, width, height } : null;
+  }
+
+  private matches(request: PendingApproval): boolean {
+    if (
+      (this.scoped && request.threadId !== this.scope?.threadId) ||
+      !this.bounds()
+    )
+      return false;
+    const window = this.currentWindow();
+    if (!window || window.isDestroyed()) return false;
+    try {
+      const match = new URL(window.webContents.getURL()).pathname.match(
+        /^\/agents\/([^/]+)\/?$/,
+      );
+      return Boolean(
+        match && decodeURIComponent(match[1]) === request.threadId,
+      );
+    } catch {
+      return false;
+    }
   }
 
   private next(): PendingApproval | undefined {
     for (const id of this.later) if (!this.queue.get(id)) this.later.delete(id);
     if (this.chosen) {
       const chosen = this.queue.get(this.chosen);
-      if (chosen) return chosen;
+      if (chosen && this.matches(chosen)) return chosen;
       this.chosen = null;
     }
-    return this.queue.list().find((request) => !this.later.has(request.id));
+    return this.queue
+      .list()
+      .find((request) => this.matches(request) && !this.later.has(request.id));
   }
 
   private attach(window: BrowserWindow): WebContentsView {
@@ -102,6 +207,14 @@ class ApprovalPanel {
       const params = new URL(url).searchParams;
       const id = params.get("id") ?? "";
       const choice = params.get("choice");
+      const request = this.queue.get(id);
+      if (
+        this.view !== view ||
+        id !== this.showing ||
+        !request ||
+        !this.matches(request)
+      )
+        return;
       if (choice === "later") this.later.add(id);
       else if (choice === "deny" || choice === "once" || choice === "grant")
         this.queue.decide(id, choice);
@@ -109,16 +222,9 @@ class ApprovalPanel {
       this.showing = null;
       this.sync();
     });
-    const fit = () => {
-      const { width, height } = window.getContentBounds();
-      view.setBounds({ x: 0, y: 0, width, height });
-    };
-    fit();
-    window.on("resize", fit);
     window.once("closed", () => {
       if (this.window === window) this.hide();
     });
-    this.fit = fit;
     window.contentView.addChildView(view);
     this.view = view;
     this.window = window;
@@ -127,13 +233,11 @@ class ApprovalPanel {
 
   private hide(): void {
     if (this.view && this.window && !this.window.isDestroyed()) {
-      if (this.fit) this.window.off("resize", this.fit);
       this.window.contentView.removeChildView(this.view);
     }
     // A view's page outlives its window: close it whether or not the window is gone.
     if (this.view && !this.view.webContents.isDestroyed())
       this.view.webContents.close();
-    this.fit = null;
     this.view = null;
     this.window = null;
     this.showing = null;

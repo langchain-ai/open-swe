@@ -28,6 +28,7 @@ import {
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Spinner } from "@langchain/macaw-components/Spinner"
+import { Badge } from "@langchain/macaw-components/Badge"
 import { useZIndex } from "@langchain/macaw-components/utils/useZIndex"
 import zIndices from "@langchain/macaw-components/utils/zIndices"
 import { CheckCircleIcon } from "@phosphor-icons/react/dist/ssr/CheckCircle"
@@ -448,6 +449,7 @@ export function SidebarThreadRow({
   live,
   indent = false,
   hidden = false,
+  needsApproval = false,
   onActive,
   onNavigate,
   onTogglePin,
@@ -459,6 +461,7 @@ export function SidebarThreadRow({
   pinned: boolean
   archived: boolean
   live?: PullRequestSnapshot
+  needsApproval?: boolean
   /** Nested under a repository: indent the content, not the highlight box. */
   indent?: boolean
   hidden?: boolean
@@ -634,7 +637,11 @@ export function SidebarThreadRow({
           (moreMenuOpen || titleDraft !== null) && "invisible min-w-6"
         )}
       >
-        {item.status === "running" || item.waitingForDelegatedWork ? (
+        {needsApproval ? (
+          <Badge size="xxs" color="warning">
+            Needs approval
+          </Badge>
+        ) : item.status === "running" || item.waitingForDelegatedWork ? (
           <RunningIndicator label="Thread running" />
         ) : item.status === "error" ? (
           <ErrorIndicator label="Thread error" />

@@ -1,11 +1,21 @@
 /** @vitest-environment jsdom */
 
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
-import { cleanup, render, screen, fireEvent } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
 import { SidebarThreadRow } from "./SidebarThreadRow"
+import { LocalAccessRequests } from "./LocalAccessRequests"
+import { EmbeddedThreadContext } from "../lib/embeddedThread"
+import { SidebarLayoutProvider } from "@/components/sidebar-layout"
 import { cloudSidebarThread } from "../lib/sidebarThreads"
 import { agentThreadKeys } from "../lib/queries"
 import { projectKeys } from "@/features/projects/lib/projects"
@@ -552,4 +562,108 @@ it("always shows the Recents organize and new thread controls", async () => {
   const newThread = screen.getByRole("button", { name: "New thread" })
   for (const control of [organize, newThread])
     expect(control.className).not.toMatch(/\bopacity-0\b/)
+})
+
+it("suspends approvals behind mobile navigation and opens embedded requests in their thread", async () => {
+  vi.stubGlobal("innerWidth", 700)
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    }
+  )
+  const setThread = vi.fn().mockResolvedValue(true)
+  const review = vi.fn()
+  vi.stubGlobal("openSweDesktop", {
+    setLocalAccessThread: setThread,
+    reviewLocalAccessRequest: review,
+    localAccessRequests: async () => [
+      { id: "request", kind: "read", concern: null },
+    ],
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const content = (collapsed: boolean, embedded: boolean) => (
+    <QueryClientProvider client={client}>
+      <SidebarLayoutProvider
+        value={{
+          width: 260,
+          collapsed,
+          setWidth: stub.noop,
+          setCollapsed: stub.noop,
+          setCollapsedForPage: stub.noop,
+          toggle: stub.noop,
+          closeOnMobile: stub.noop,
+        }}
+      >
+        <EmbeddedThreadContext.Provider value={embedded ? {} : null}>
+          <div data-chat-drop-zone>
+            <LocalAccessRequests threadId="thread-1" />
+          </div>
+        </EmbeddedThreadContext.Provider>
+      </SidebarLayoutProvider>
+    </QueryClientProvider>
+  )
+  const { rerender } = render(content(true, false))
+  fireEvent.click(await screen.findByRole("button", { name: "Review" }))
+  expect(review).toHaveBeenCalledWith("request")
+  expect(setThread.mock.lastCall?.[1]).not.toBeNull()
+  rerender(content(false, false))
+  expect(setThread).toHaveBeenLastCalledWith("thread-1", null)
+  rerender(content(true, false))
+  expect(setThread.mock.lastCall?.[1]).not.toBeNull()
+  rerender(content(true, true))
+  expect(setThread).toHaveBeenLastCalledWith("thread-1", null)
+  review.mockClear()
+  fireEvent.click(screen.getByRole("button", { name: "Open thread to review" }))
+  expect(stub.noop).toHaveBeenCalledWith({
+    to: "/agents/$threadId",
+    params: { threadId: "thread-1" },
+  })
+  expect(review).not.toHaveBeenCalled()
+})
+
+it("keeps approval badges on the requesting thread until its queue clears", async () => {
+  vi.stubGlobal("innerWidth", 1440)
+  let pending = ["another-thread"]
+  const events = new EventTarget()
+  vi.stubGlobal("openSweDesktop", {
+    getUpdateState: async () => ({ status: "idle" }),
+    onUpdateState: () => () => {},
+    onCommand: () => () => {},
+    pendingLocalAccessThreads: async () => pending,
+    onLocalAccessRequestsChanged: (callback: () => void) => {
+      events.addEventListener("change", callback)
+      return () => events.removeEventListener("change", callback)
+    },
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { enabled: false, retry: false } },
+  })
+  client.setQueryData(projectKeys.all, [])
+  render(
+    <QueryClientProvider client={client}>
+      <AppCommandProvider>
+        <AgentsShell user={USER} activeThreadId="thread-1">
+          <div />
+        </AgentsShell>
+      </AppCommandProvider>
+    </QueryClientProvider>
+  )
+  await screen.findByRole("link", { name: "Thread" })
+  expect(screen.queryByText("Needs approval")).toBeNull()
+  pending = ["thread-1"]
+  await act(() => events.dispatchEvent(new Event("change")))
+  expect(
+    screen
+      .getByRole("link", { name: "Thread" })
+      .contains(await screen.findByText("Needs approval"))
+  ).toBe(true)
+  fireEvent.click(screen.getByRole("link", { name: "Thread" }))
+  expect(screen.getByText("Needs approval")).toBeTruthy()
+  pending = []
+  await act(() => events.dispatchEvent(new Event("change")))
+  await waitFor(() => expect(screen.queryByText("Needs approval")).toBeNull())
 })

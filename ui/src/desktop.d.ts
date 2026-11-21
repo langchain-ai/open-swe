@@ -95,6 +95,11 @@ declare global {
           createdAt: number
         }>
       >
+      pendingLocalAccessThreads?: () => Promise<string[]>
+      setLocalAccessThread?: (
+        threadId: string,
+        bounds: { x: number; y: number; width: number; height: number } | null
+      ) => Promise<boolean>
       /** Opens the desktop's own approval panel on a request; only it can decide. */
       reviewLocalAccessRequest?: (id: string) => Promise<void>
       onLocalAccessRequestsChanged?: (callback: () => void) => () => void

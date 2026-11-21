@@ -23,6 +23,7 @@ import { FolderOpenIcon } from "@phosphor-icons/react/dist/ssr/FolderOpen"
 import { PushPinSlashIcon } from "@phosphor-icons/react/dist/ssr/PushPinSlash"
 import {
   useQueries,
+  useQuery,
   useQueryClient,
   type UseQueryOptions,
 } from "@tanstack/react-query"
@@ -191,6 +192,23 @@ export function AgentsSidebar({
   const scrollViewport = useRef<HTMLDivElement>(null)
   const { openPalette } = useAppCommandControls()
   const queryClient = useQueryClient()
+  const desktop =
+    typeof window !== "undefined" ? window.openSweDesktop : undefined
+  const approvalThreads = useQuery({
+    queryKey: ["pending-local-access-threads", user.user_id],
+    queryFn: () =>
+      desktop?.pendingLocalAccessThreads?.() ?? Promise.resolve([]),
+    enabled: Boolean(desktop?.pendingLocalAccessThreads),
+  })
+  useEffect(
+    () =>
+      desktop?.onLocalAccessRequestsChanged?.(() => {
+        void queryClient.invalidateQueries({
+          queryKey: ["pending-local-access-threads", user.user_id],
+        })
+      }),
+    [desktop, queryClient, user.user_id]
+  )
   const openThread = useCallback(
     (threadId: string) => {
       const review = queryClient.getQueryData<AgentThread>(
@@ -211,8 +229,7 @@ export function AgentsSidebar({
     expandRepo,
     setView,
   } = useSidebarPrefs()
-  const isDesktop =
-    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+  const isDesktop = Boolean(desktop)
   const newThreadShortcut = useShortcutLabel(
     isDesktop ? "mod+n" : "mod+shift+o"
   )
@@ -220,13 +237,11 @@ export function AgentsSidebar({
     status: "idle",
   })
   useEffect(() => {
-    const desktop = window.openSweDesktop
     if (!desktop) return
     void desktop.getUpdateState().then(setUpdateState)
     return desktop.onUpdateState(setUpdateState)
-  }, [])
+  }, [desktop])
   const installUpdate = useCallback(async () => {
-    const desktop = window.openSweDesktop
     if (!desktop || updateState.status !== "ready") return
     const readyState = updateState
     setUpdateState({ ...readyState, status: "installing" })
@@ -234,7 +249,7 @@ export function AgentsSidebar({
     setUpdateState((current) =>
       current.status === "installing" ? readyState : current
     )
-  }, [updateState])
+  }, [desktop, updateState])
   const updateInstalling = updateState.status === "installing"
   const repoMode = prefs.organize === "repo"
   const includeAutomations =
@@ -577,6 +592,10 @@ export function AgentsSidebar({
       <SidebarThreadRow
         key={item.key}
         {...rowProps(item, live)}
+        needsApproval={Boolean(
+          desktop?.pendingLocalAccessThreads &&
+          approvalThreads.data?.includes(item.id)
+        )}
         indent={indent}
         hidden={hidden}
         onActive={onActive}
