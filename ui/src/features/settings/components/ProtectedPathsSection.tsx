@@ -46,7 +46,6 @@ function ProtectedPathsEditor({ settings }: { settings: InstanceSettings }) {
         <Textarea
           aria-label="Protected paths"
           size="md"
-          placeholder={".github/workflows/\nCODEOWNERS\ndeployments/**/*.tf"}
           hintText="One path per line, relative to the repository root. A directory covers everything under it; * stays within one directory and **/ spans any depth."
           value={draft}
           onChange={setDraft}
