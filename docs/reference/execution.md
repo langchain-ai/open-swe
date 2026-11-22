@@ -10,8 +10,7 @@ Projects organize threads and may bind a repository; they do not select executio
 Repository and Slack bindings control inbound integrations, not sandbox credentials or images.
 Admins use `list_integration_bindings`, `bind_repository`, `unbind_repository`, `bind_slack_channel`, and `unbind_slack_channel`.
 
-- `bind_repository(repo="owner/name", may_start_threads=False)` binds a repository without granting GitHub Actions permission to start threads
-- Only an explicit `may_start_threads=True` authorizes federated workflow starts; repository access and OIDC verification still apply
+- `bind_repository(repo="owner/name")` binds a repository
 - `bind_slack_channel(channel_id="C0123456789", prompt="Investigate reports; ask before implementing fixes.")` listens with editable channel instructions
 - Removing a binding does not delete its repository, Slack channel, threads, or image contents
 

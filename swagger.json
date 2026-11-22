@@ -6934,20 +6934,6 @@
         "title": "RepositoriesBody",
         "type": "object"
       },
-      "RepositoryConfiguration": {
-        "additionalProperties": false,
-        "properties": {
-          "may_start_threads": {
-            "title": "May Start Threads",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "may_start_threads"
-        ],
-        "title": "RepositoryConfiguration",
-        "type": "object"
-      },
       "RepositoryInfo": {
         "properties": {
           "default_branch": {
@@ -6995,18 +6981,13 @@
       "RepositorySettings": {
         "additionalProperties": false,
         "properties": {
-          "may_start_threads": {
-            "title": "May Start Threads",
-            "type": "boolean"
-          },
           "repo": {
             "title": "Repo",
             "type": "string"
           }
         },
         "required": [
-          "repo",
-          "may_start_threads"
+          "repo"
         ],
         "title": "RepositorySettings",
         "type": "object"
@@ -22879,16 +22860,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RepositoryConfiguration"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "content": {
@@ -25559,7 +25530,7 @@
     },
     "/dashboard/api/threads/{thread_id}/commands": {
       "post": {
-        "description": "Every way a thread is started or continued, whoever is asking.\n\nThe dashboard, an API key and a federated workflow all post the same command\nhere; what differs is the thread the first one stamps.",
+        "description": "Every way a thread is started or continued, whoever is asking.\n\nThe dashboard and an API key both post the same command\nhere; what differs is the thread the first one stamps.",
         "operationId": "api_thread_commands_dashboard_api_threads__thread_id__commands_post",
         "parameters": [
           {

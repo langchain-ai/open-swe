@@ -12,31 +12,26 @@ from openswe.utils.json_types import JsonObject
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 
-async def test_repository_binding_preserves_identity_and_separates_workflow_permission() -> None:
+async def test_repository_binding_preserves_identity() -> None:
     async with postgres.session() as session:
         creator = User(display_name="Creator")
         editor = User(display_name="Editor")
         session.add_all([creator, editor])
-    assert await INTEGRATIONS.repository_permission("acme/widgets") is None
-    await INTEGRATIONS.configure_repository(
-        "Acme/Widgets", may_start_threads=False, actor=creator.id
-    )
-    assert await INTEGRATIONS.contains_repo("ACME/widgets")
-    assert not await INTEGRATIONS.repository_may_start_threads("acme/widgets")
+    await INTEGRATIONS.configure_repository("Acme/Widgets", actor=creator.id)
+    assert [repo.repo for repo in (await INTEGRATIONS.settings()).repos] == ["Acme/Widgets"]
     async with postgres.session() as session:
         before = (await session.scalars(select(RepositoryBinding))).one()
-    await INTEGRATIONS.configure_repository("acme/widgets", may_start_threads=True, actor=editor.id)
+    await INTEGRATIONS.configure_repository("acme/widgets", actor=editor.id)
     async with postgres.session() as session:
         after = (await session.scalars(select(RepositoryBinding))).one()
     assert before.id == after.id
     assert after.created_by == creator.id
     assert after.updated_by == editor.id
     assert after.updated_at > before.updated_at
-    assert await INTEGRATIONS.repository_may_start_threads("Acme/Widgets")
     await INTEGRATIONS.remove_repository("acme/widgets")
     await INTEGRATIONS.remove_repository("acme/widgets")
-    assert not await INTEGRATIONS.repository_may_start_threads("acme/widgets")
-    await INTEGRATIONS.configure_repository("acme/widgets", may_start_threads=False, actor=None)
+    assert (await INTEGRATIONS.settings()).repos == []
+    await INTEGRATIONS.configure_repository("acme/widgets", actor=None)
     async with postgres.session() as session:
         replacement = (await session.scalars(select(RepositoryBinding))).one()
     assert replacement.id != before.id

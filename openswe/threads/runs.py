@@ -45,7 +45,6 @@ from openswe.dispatch import (
     dispatch_agent_run,
     dispatch_input,
 )
-from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.input_messages import (
     InputMessageContext,
     PersonIdentity,
@@ -1846,8 +1845,6 @@ async def _create_system_thread_record(
         metadata["repo_explicitly_none"] = True
     if external_sandbox is not None:
         metadata.update(external_sandbox.metadata())
-    if principal.token_repositories is not None:
-        metadata[GITHUB_TOKEN_REPOSITORIES_KEY] = list(principal.token_repositories)
     client = langgraph_client()
     try:
         await create_thread(
@@ -1863,18 +1860,13 @@ async def _create_system_thread_record(
     return as_thread_dict(await client.threads.get(thread_id))
 
 
-async def _system_repo_config(
-    configurable: Mapping[str, Any], principal: Principal
-) -> dict[str, str]:
+async def _system_repo_config(configurable: Mapping[str, Any]) -> dict[str, str]:
     """The repository a machine's thread works in.
 
     Any repository the GitHub App can reach will do, not only ones its
-    global defaults prefer. A federated workflow that names none gets its own repository, which is the
-    only one it could have been talking about.
+    global defaults prefer.
     """
     requested = configurable.get("repo")
-    if requested is None and principal.default_repo:
-        requested = principal.default_repo
     if requested is None:
         return {}
     repo_config = _parse_repo(requested)
@@ -1939,7 +1931,7 @@ async def _enrich_system_run_start_command(
     external_sandbox = await ExternalSandbox.resolve(
         client_configurable, principal, creating=creating
     )
-    repo_config = await _system_repo_config(client_configurable, principal)
+    repo_config = await _system_repo_config(client_configurable)
     if creating:
         title = client_configurable.get("title")
         metadata = thread_metadata(

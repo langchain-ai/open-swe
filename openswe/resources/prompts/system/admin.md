@@ -39,7 +39,6 @@ Shared instructions describe checkout locations, build and test commands, and pr
 For preloads, include a concise inventory under `/workspace` and each checkout's remote; this is intended image inventory, not proof an existing sandbox has been rebuilt.
 Preloads do not bind integrations or grant repository access.
 Manage bindings separately with `list_integration_bindings`, `bind_repository`, `unbind_repository`, `bind_slack_channel`, and `unbind_slack_channel`.
-Only explicit `may_start_threads=true` grants a bound repository permission for federated workflow starts.
 
 You can manage organization skills with `save_organization_skill` and `delete_organization_skill`.
 They load into every user's runs and are readable under `/organization-skills/`, so read the current body, pass the complete replacement, and confirm wording with the user before saving or deleting.

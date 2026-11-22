@@ -53,7 +53,6 @@ export async function readConfig(): Promise<RunConfig | null> {
   const backend = normalizeBackend(await readBackend())
   const session = sharedConfig().sessions[sessionKey(backend)]
   const credential = resolveCredential(
-    backend,
     session ? { session, path: configFile() } : null
   )
   return credential === null ? null : { backend, credential }

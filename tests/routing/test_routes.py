@@ -35,18 +35,12 @@ async def client(
         yield client
 
 
-async def test_repository_writes_are_strict_and_separate_binding_from_workflow_grant(
-    client: httpx.AsyncClient,
-) -> None:
+async def test_repository_binding_round_trips(client: httpx.AsyncClient) -> None:
     path = "/dashboard/api/routing/repositories/acme/widgets"
-    refused = await client.put(path, json={"may_start_threads": "true"})
-    assert refused.status_code == 422
-    bound = await client.put(path, json={"may_start_threads": False})
+    bound = await client.put(path)
     assert bound.status_code == 200
-    assert bound.json() == {"repo": "acme/widgets", "may_start_threads": False}
-    assert not await INTEGRATIONS.repository_may_start_threads("acme/widgets")
-    assert (await client.put(path, json={"may_start_threads": True})).status_code == 200
-    assert await INTEGRATIONS.repository_may_start_threads("acme/widgets")
+    assert bound.json() == {"repo": "acme/widgets"}
+    assert (await client.put(path)).status_code == 200
     assert (await client.delete(path)).status_code == 204
     assert (await client.delete(path)).status_code == 204
 
@@ -55,7 +49,7 @@ async def test_queue_configuration_prevents_unbinding_through_http_and_tool(
     client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = "/dashboard/api/routing/repositories/acme/widgets"
-    assert (await client.put(path, json={"may_start_threads": True})).status_code == 200
+    assert (await client.put(path)).status_code == 200
     async with postgres.session() as session:
         binding = (await session.scalars(select(RepositoryBinding))).one()
         binding.merge_queue_config = {}
@@ -84,7 +78,6 @@ async def test_queue_configuration_prevents_unbinding_through_http_and_tool(
         retained = (await session.scalars(select(RepositoryBinding))).one()
         assert retained.id == binding_id
         assert retained.merge_queue_config == {}
-        assert retained.may_start_threads is True
 
 
 async def test_invalid_channel_and_unavailable_slack_do_not_create_bindings(
@@ -118,9 +111,7 @@ async def test_routing_read_and_write_require_authentication() -> None:
     ) as client:
         assert (await client.get("/dashboard/api/routing")).status_code == 401
         assert (
-            await client.put(
-                "/dashboard/api/routing/repositories/acme/widgets", json={"may_start_threads": True}
-            )
+            await client.put("/dashboard/api/routing/repositories/acme/widgets")
         ).status_code == 401
 
 
@@ -152,14 +143,14 @@ async def test_member_can_read_bindings_but_only_admin_can_change_them(
             "slack_channels": [],
         }
         path = "/dashboard/api/routing/repositories/acme/widgets"
-        assert (await client.put(path, json={"may_start_threads": True})).status_code == 403
+        assert (await client.put(path)).status_code == 403
         assert (await client.delete(path)).status_code == 403
         client.cookies.set(
             "osw_session",
             issue_session(login="admin", email=None, avatar_url=None, user_id=str(admin.id)),
         )
-        assert (await client.put(path, json={"may_start_threads": False})).status_code == 200
+        assert (await client.put(path)).status_code == 200
         assert (await client.get("/dashboard/api/routing")).json() == {
-            "repos": [{"repo": "acme/widgets", "may_start_threads": False}],
+            "repos": [{"repo": "acme/widgets"}],
             "slack_channels": [],
         }

@@ -861,7 +861,7 @@ async def api_thread_commands(
 ) -> Response:
     """Every way a thread is started or continued, whoever is asking.
 
-    The dashboard, an API key and a federated workflow all post the same command
+    The dashboard and an API key both post the same command
     here; what differs is the thread the first one stamps.
     """
     body = await request.body()

@@ -198,9 +198,7 @@ async def test_a_global_settings_write_reaches_an_open_stream(registry_db: None)
                     if topic is Topic.SETTINGS:
                         await upsert_instance_settings(SettingsUpdate(pr_summaries=False))
                     else:
-                        await INTEGRATIONS.configure_repository(
-                            "acme/app", may_start_threads=False, actor=None
-                        )
+                        await INTEGRATIONS.configure_repository("acme/app", actor=None)
 
                     assert _parse(await anext(frames)) == (
                         "invalidated",

@@ -458,7 +458,7 @@ async def test_queue_binding_cannot_be_unbound_and_out_of_band_removal_stays_fen
         await queue.renew(lease, timedelta(seconds=60))
     with pytest.raises(ValueError, match="binding"):
         await queue.record_evidence(attempt.id, "late-report", {"artifact_id": 2}, lease)
-    await INTEGRATIONS.configure_repository("acme/widgets", may_start_threads=False, actor=None)
+    await INTEGRATIONS.configure_repository("acme/widgets", actor=None)
     async with postgres.session() as session:
         replacement = (await session.scalars(select(RepositoryBinding))).one()
     with pytest.raises(ValueError, match="explicit handoff"):

@@ -132,48 +132,6 @@ test.describe("Global Defaults and routing", () => {
     }
   });
 
-  test("GitHub Actions permission is an explicit, persistent repository setting", async ({
-    page,
-  }) => {
-    await loginAs(page, ADMIN);
-    const path = "/dashboard/api/routing/repositories/fakeorg/demo";
-    const response = await page.request.get("/dashboard/api/routing");
-    expect(response.ok()).toBeTruthy();
-    const routing = (await response.json()) as {
-      repos: Array<{ repo: string; may_start_threads: boolean }>;
-    };
-    const original = routing.repos.find((row) => row.repo === "fakeorg/demo");
-    try {
-      const seeded = await page.request.put(path, {
-        headers: SAME_ORIGIN_HEADERS,
-        data: { may_start_threads: false },
-      });
-      expect(seeded.ok()).toBeTruthy();
-      await page.goto("/admin/integrations");
-      const permission = page.getByRole("switch", {
-        name: "Let fakeorg/demo start threads",
-        exact: true,
-      });
-      await expect(permission).not.toBeChecked();
-      const saved = page.waitForResponse(
-        (item) =>
-          item.url().endsWith(path) && item.request().method() === "PUT",
-      );
-      await permission.click();
-      expect((await saved).status()).toBe(200);
-      await page.reload();
-      await expect(permission).toBeChecked();
-    } finally {
-      const restored = original
-        ? await page.request.put(path, {
-            headers: SAME_ORIGIN_HEADERS,
-            data: { may_start_threads: original.may_start_threads },
-          })
-        : await page.request.delete(path, { headers: SAME_ORIGIN_HEADERS });
-      expect(restored.ok()).toBeTruthy();
-    }
-  });
-
   test("global execution instructions always apply to new runs", async ({
     page,
   }) => {
@@ -233,10 +191,7 @@ test.describe("Global Defaults and routing", () => {
     expect(execution.status()).toBe(403);
     const routing = await page.request.put(
       "/dashboard/api/routing/repositories/fakeorg/demo",
-      {
-        headers: SAME_ORIGIN_HEADERS,
-        data: { may_start_threads: true },
-      },
+      { headers: SAME_ORIGIN_HEADERS },
     );
     expect(routing.status()).toBe(403);
     await openNewAgentHome(page);

@@ -4,7 +4,6 @@ import {
   type CoordinatorThread,
   type TaskActivity,
 } from "./api.ts"
-import { CredentialError } from "./credentials.ts"
 import { errorMessage } from "./json.ts"
 
 /** How the thread's last run ended. */
@@ -29,7 +28,7 @@ function wait(ms: number): Promise<void> {
 function retryable(cause: unknown): boolean {
   if (cause instanceof ApiError)
     return cause.status >= 500 || cause.status === 408 || cause.status === 429
-  return !(cause instanceof ProtocolError || cause instanceof CredentialError)
+  return !(cause instanceof ProtocolError)
 }
 
 /** Calls `read` until it answers, backing off through failures a backend restart causes. */

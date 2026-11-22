@@ -492,7 +492,6 @@ GitHub lists every delivery and its response under the App's **Advanced** tab.
 **Defaults and integration bindings.**
 Every run uses global shared defaults, with personal repository preferences and explicit thread choices where supported.
 Admins manage repository and Slack bindings under **Integrations**; these do not select different sandbox images or settings.
-Adding a repository binding does not grant GitHub Actions permission to start threads: enable **Can start threads** explicitly.
 See [Defaults, routing, and sandbox images](reference/execution.md) for the tools, API, and access model.
 
 ---
@@ -559,16 +558,16 @@ Optionally give the agent an incident tracker by adding its MCP server, for exam
 </details>
 
 <details id="api-keys">
-<summary><strong>Machine callers: API keys and GitHub Actions</strong></summary>
+<summary><strong>Machine callers: API keys</strong></summary>
 
-LangSmith API keys and GitHub Actions workflows can start Robin threads without a browser session.
+LangSmith API keys can start Robin threads without a browser session.
 They post the same command the dashboard posts, to `POST /dashboard/api/threads/<thread_id>/commands`.
 
 Every creating command names the kind of thread it wants in `config.configurable.thread_type`:
 
 | `thread_type` | Who may ask for it |
 |---|---|
-| `system` | the bot (Workspace Admin service keys), federated workflows, and admins |
+| `system` | the bot (Workspace Admin service keys) and admins |
 | `workspace` | any signed-in person, or their personal access token |
 | `private` | any signed-in person, or their personal access token |
 
@@ -595,32 +594,8 @@ curl -X POST "<URL>/dashboard/api/threads/$(uuidgen | tr 'A-Z' 'a-z')/commands" 
         "config": {"configurable": {"thread_type": "system", "repo": "acme/api"}}}}'
 ```
 
-**GitHub Actions, with no stored secret.**
-A workflow asks GitHub for an OIDC token naming its repository, ref and workflow, and presents that instead of a key.
-Robin verifies GitHub's signature against its published keys, checks the audience, and then checks its own trust policy: the repository must have an integration binding with explicit `may_start_threads=true`.
-Enable **Can start threads** for the repository under **Integrations**, or use `bind_repository(repo="owner/name", may_start_threads=True)`.
-Binding a repository never implies the grant.
+A GitHub Actions workflow calls Robin the same way, with a Workspace Admin service key stored as a secret.
 
-Set `GITHUB_OIDC_AUDIENCE` to the value your workflows request; it defaults to `DASHBOARD_BASE_URL`.
-
-```yaml
-permissions:
-  id-token: write
-steps:
-  - id: token
-    run: |
-      echo "value=$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-        "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=<URL>" | jq -r .value)" >> "$GITHUB_OUTPUT"
-  - run: |
-      curl -X POST "<URL>/dashboard/api/threads/$(uuidgen | tr 'A-Z' 'a-z')/commands" \
-        -H "Authorization: Bearer ${{ steps.token.outputs.value }}" \
-        -H 'Content-Type: application/json' \
-        -d '{"id": 1, "method": "run.start", "params": {
-              "input": {"messages": [{"type": "human", "content": "Nightly build failed, investigate"}]},
-              "config": {"configurable": {"thread_type": "system"}}}}'
-```
-
-A workflow that names no `repo` works in its own repository.
 A machine caller reads back only the threads it started, through `GET /dashboard/api/threads` and `GET /dashboard/api/threads/<id>`, and their transcripts, through `GET /dashboard/api/threads/<id>/transcript`, `/transcript/turns`, `/transcript/events`, `/transcript/tool-calls/<id>/output` and `/transcript/attachments/<id>`; unknown, revoked and expired credentials all answer `401`.
 
 </details>

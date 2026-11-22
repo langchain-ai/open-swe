@@ -47,12 +47,9 @@ The CLI uses the first credential it finds:
 
 1. **`OPEN_SWE_API_KEY`** — a LangSmith API key from the LangSmith workspace Robin signs people in to (keys from any other workspace are refused).
    A personal access token (`lsv2_pt_…`) acts as its person, whose Robin login must be live; a service key (`lsv2_sk_…`) with `workspaces:manage` (a Workspace Admin key) acts as the workspace's bot.
-1. **GitHub Actions** — inside a job with `permissions: id-token: write`, the job's own OIDC token, requested with the backend URL as its audience (override with `OPEN_SWE_OIDC_AUDIENCE`).
-   An admin must first enable **Can start threads** for the repository under **Integrations**, or call `bind_repository(repo="owner/name", may_start_threads=True)`.
-   Binding alone does not grant federated workflow-start permission.
 1. **A person's session** — `OPEN_SWE_SESSION`, or the one `robin login` stored.
 
-A service key and a workflow are machines: their threads are always `system` threads.
+A service key is a machine: its threads are always `system` threads.
 A person's threads are always private.
 
 ### Sign in as a person
@@ -77,15 +74,17 @@ Exits 1 when there is no credential or the server rejects it.
 
 ### Run in GitHub Actions
 
+Use a Workspace Admin service key stored as a repository secret:
+
 ```yaml
 permissions:
   contents: read
-  id-token: write
 steps:
   - uses: actions/checkout@v4
   - run: robin run "fix the flaky upload test and open a pull request"
     env:
       OPEN_SWE_BACKEND_URL: https://robin.example.com
+      OPEN_SWE_API_KEY: ${{ secrets.ROBIN_SERVICE_KEY }}
 ```
 
 ### Backend

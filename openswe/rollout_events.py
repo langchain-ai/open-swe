@@ -1,8 +1,9 @@
 """Accept a deployment event after an environment has finished syncing.
 
-The route trusts a GitHub Actions OIDC token instead of a shared secret. A
-verified deploy is written to the event log so a thread that was asked for
-a rollout check can wake through ``listen_events`` after its pull request merges.
+The route trusts Robin's bot: a LangSmith service key from Robin's workspace
+with ``workspaces:manage``. A verified deploy is written to the event log so a
+thread that was asked for a rollout check can wake through ``listen_events``
+after its pull request merges.
 """
 
 import hashlib
@@ -16,15 +17,14 @@ import httpx2
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, JsonValue
 
+from openswe.dashboard.langsmith_api_keys import LANGSMITH_API_KEYS
 from openswe.dispatch import dispatch_agent_run
-from openswe.federation.github_oidc import GitHubActionsClaims, InvalidFederatedToken
-from openswe.federation.github_oidc import verify as verify_github_oidc
 from openswe.github.http import GitHubAppUnavailable, GitHubClient
 from openswe.github.repositories import Repository
 from openswe.input_messages import InputMessageContext, SystemIdentity
 from openswe.prompts import prompt
-from openswe.routing.store import INTEGRATIONS
 from openswe.source_context import SlackThreadRef, SourceContext
+from openswe.threads.principals import Principal
 from openswe.webhooks.event_log import EventLog, EventRefs
 from openswe.webhooks.event_subscriptions import EventSubscription
 
@@ -39,7 +39,6 @@ class RolloutAccepted(TypedDict):
     commits: int
 
 
-_AUDIENCE = "openswe-rollout"
 ROLLOUT_CHECK_REQUESTED = "rollout_check"
 MERGE_COMMIT_SHA = "merge_commit_sha"
 MERGE_COMMIT_PR_URL = "merge_commit_pr_url"
@@ -51,6 +50,7 @@ _LISTEN_DAYS = 7
 _ROLLOUT_SKILL = ".agents/skills/rollout-check/SKILL.md"
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _TARGET_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,80}$")
+_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
 _ROLLOUT_ASK: SystemIdentity = {
     "id": "system:rollout-check",
     "display_name": "Rollout check",
@@ -78,8 +78,9 @@ _CONFIG_KEYS = (
 
 
 class RolloutEvent(BaseModel):
-    """A deploy notice reduced to the target and the commits subscriptions match."""
+    """A deploy notice reduced to the repository, target and the commits subscriptions match."""
 
+    repository: str
     target: str
     commits: list[str]
 
@@ -87,6 +88,9 @@ class RolloutEvent(BaseModel):
     def parse(cls, payload: object) -> RolloutEvent | None:
         """Return the event, or None when the body is not a rollout event."""
         if not isinstance(payload, dict):
+            return None
+        repository = payload.get("repository")
+        if not isinstance(repository, str) or not _REPOSITORY_RE.fullmatch(repository.strip()):
             return None
         target = payload.get("target")
         commits = payload.get("commits")
@@ -104,12 +108,12 @@ class RolloutEvent(BaseModel):
                     kept.append(sha)
         if not kept:
             return None
-        return cls(target=target.strip().lower(), commits=kept)
+        return cls(repository=repository.strip(), target=target.strip().lower(), commits=kept)
 
-    async def delivery_id(self, repository: str) -> str:
+    async def delivery_id(self) -> str:
         canonical = json.dumps(
             {
-                "repository": repository.lower(),
+                "repository": self.repository.lower(),
                 "target": self.target,
                 "commits": sorted(self.commits),
             },
@@ -236,26 +240,14 @@ def _already_listening(subscriptions: list[EventSubscription], sha: str) -> bool
     return False
 
 
-async def _authorize(header: str) -> GitHubActionsClaims:
-    """A verified workflow whose repository may already start threads."""
-    token = _bearer(header)
-    if not token:
+async def _authorize(request: Request) -> None:
+    """Refuse anything but Robin's bot, which may already start threads in any repository."""
+    token = _bearer(request.headers.get("Authorization", ""))
+    key = await LANGSMITH_API_KEYS.verify(token) if token else None
+    if key is None or key.kind != "service":
+        logger.warning("Rejected a rollout event without Robin's bot key")
         raise HTTPException(status_code=401, detail="Invalid token")
-    try:
-        claims = await verify_github_oidc(token, _AUDIENCE)
-    except InvalidFederatedToken as exc:
-        logger.warning("Rejected rollout OIDC token", extra={"rollout_error": str(exc)})
-        raise HTTPException(status_code=401, detail="Invalid token") from None
-    if not await INTEGRATIONS.repository_may_start_threads(claims.repository):
-        logger.warning(
-            "Rejected rollout event from a repository that may not start threads",
-            extra={
-                "rollout_repository": claims.repository,
-                "rollout_workflow": claims.workflow_ref,
-            },
-        )
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return claims
+    await Principal.of_langsmith_key(request, key)
 
 
 async def accept_rollout_deploy(target: str, commits: list[str]) -> RolloutAccepted:
@@ -392,7 +384,7 @@ async def ask_to_monitor_rollout(
 @router.post("/webhooks/rollout")
 async def rollout_webhook(request: Request) -> RolloutAccepted:
     """Verify a deployment event, record it, and acknowledge it."""
-    claims = await _authorize(request.headers.get("Authorization", ""))
+    await _authorize(request)
     body = await request.body()
     try:
         payload = json.loads(body)
@@ -406,8 +398,8 @@ async def rollout_webhook(request: Request) -> RolloutAccepted:
         _stored_body(event.target, event.commits),
         "deployment",
         event_type=_DEPLOYED,
-        delivery_id=await event.delivery_id(claims.repository),
-        refs=EventRefs(github_repository=claims.repository),
+        delivery_id=await event.delivery_id(),
+        refs=EventRefs(github_repository=event.repository),
     )
     if not stored:
         raise HTTPException(status_code=503, detail="Deployment event was not recorded")

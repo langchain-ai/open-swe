@@ -33,13 +33,9 @@ async def list_integration_bindings() -> dict[str, object]:
 @expose_mcp(access="admin")
 @audit_tool()
 @access(_WRITE)
-async def bind_repository(repo: str, may_start_threads: bool = False) -> dict[str, object]:
-    """Bind a repository; workflow thread creation requires its separate explicit grant."""
-    record = await INTEGRATIONS.configure_repository(
-        repo,
-        may_start_threads=may_start_threads,
-        actor=await RoutingActor.id(),
-    )
+async def bind_repository(repo: str) -> dict[str, object]:
+    """Bind a repository to Robin's integrations."""
+    record = await INTEGRATIONS.configure_repository(repo, actor=await RoutingActor.id())
     return {"ok": True, **record.model_dump(mode="json")}
 
 

@@ -163,21 +163,21 @@ async def test_routing_migrations_reset_channels_and_preserve_repositories_and_h
         bindings = (
             await conn.execute(
                 text(
-                    "SELECT r.full_name, b.may_start_threads, b.merge_queue_config, b.id FROM integration_repository b JOIN repository r ON r.id = b.repository_id ORDER BY r.key"
+                    "SELECT r.full_name, b.merge_queue_config, b.id FROM integration_repository b JOIN repository r ON r.id = b.repository_id ORDER BY r.key"
                 )
             )
         ).all()
-        assert [(name, granted) for name, granted, _, _ in bindings] == [
-            ("acme/allowed", True),
-            ("acme/mismatched", False),
-            ("acme/ordinary", False),
+        assert [name for name, _, _ in bindings] == [
+            "acme/allowed",
+            "acme/mismatched",
+            "acme/ordinary",
         ]
-        assert bindings[0][2] == {
+        assert bindings[0][1] == {
             "repository": "acme/allowed",
             "operator_emails": ["operator@example.com"],
         }
-        assert all(config is None for _, _, config, _ in bindings[1:])
-        assert all(binding_id.version == 7 for _, _, _, binding_id in bindings)
+        assert all(config is None for _, config, _ in bindings[1:])
+        assert all(binding_id.version == 7 for _, _, binding_id in bindings)
         assert await conn.scalar(text("SELECT count(*) FROM integration_slack_channel")) == 0
         assert set(
             await conn.scalars(text("SELECT id FROM slack_channel WHERE id LIKE 'C0%'"))
@@ -186,7 +186,7 @@ async def test_routing_migrations_reset_channels_and_preserve_repositories_and_h
             await conn.scalar(
                 text("SELECT routing_repository_id FROM merge_queue WHERE id = :id"), {"id": queue}
             )
-            == bindings[0][3]
+            == bindings[0][2]
         )
         assert (
             await conn.scalar(

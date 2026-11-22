@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from openswe.audit_logs.middleware import audit_endpoint
 from openswe.dashboard.deps import ADMIN_DEP, DashboardReadDep
@@ -18,12 +18,6 @@ from openswe.routing.store import (
 from openswe.slack.channels import ChannelLookupUnavailable
 
 router = APIRouter(tags=["routing"])
-
-
-class RepositoryConfiguration(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    may_start_threads: bool = Field(strict=True)
 
 
 class ChannelConfiguration(BaseModel):
@@ -56,13 +50,9 @@ async def api_routing(reader: DashboardReadDep) -> IntegrationSettings:
 @router.put("/routing/repositories/{owner}/{name}", dependencies=ERRORS)
 @audit_endpoint
 async def api_configure_repository(
-    owner: str, name: str, body: RepositoryConfiguration, admin: dict[str, object] = ADMIN_DEP
+    owner: str, name: str, admin: dict[str, object] = ADMIN_DEP
 ) -> RepositorySettings:
-    return await INTEGRATIONS.configure_repository(
-        f"{owner}/{name}",
-        actor=session_user_id(admin),
-        may_start_threads=body.may_start_threads,
-    )
+    return await INTEGRATIONS.configure_repository(f"{owner}/{name}", actor=session_user_id(admin))
 
 
 @router.delete("/routing/repositories/{owner}/{name}", status_code=204, dependencies=ERRORS)

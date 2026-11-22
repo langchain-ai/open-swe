@@ -1,56 +1,56 @@
-"""The rollout webhook trusts a GitHub Actions OIDC token for an allowed repo."""
+"""The rollout webhook trusts only Robin's bot: a LangSmith service key from its workspace."""
 
 import json
-import time
 from unittest.mock import DEFAULT, AsyncMock
 
 import httpx
-import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric import rsa
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
+from openswe.dashboard.langsmith_api_keys import LANGSMITH_API_KEYS, LangSmithApiKey
 from openswe.rollout_events import router
-from openswe.routing.store import INTEGRATIONS
 
-_PRIVATE = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _REPO = "langchain-ai/langchainplus"
-_DEV = f"{_REPO}/.github/workflows/deploy_build_push_migrate_dev.yaml"
-_AUDIENCE = "openswe-rollout"
+_BOT = "lsv2_sk_bot"
+_PAT = "lsv2_pt_ada"
 
 
-class _SigningKey:
-    def __init__(self) -> None:
-        self.key = _PRIVATE.public_key()
+class _Rollout:
+    """Robin's bot key, a person's key, and the deploy notices they send."""
 
+    @staticmethod
+    async def verify(token: str) -> LangSmithApiKey | None:
+        if token == _BOT:
+            return LangSmithApiKey(
+                kind="service",
+                fingerprint="bot",
+                organization_id="org",
+                workspace_id="ws",
+                audit_id="langsmith:bot",
+            )
+        if token == _PAT:
+            return LangSmithApiKey(
+                kind="personal",
+                fingerprint="ada",
+                organization_id="org",
+                workspace_id="ws",
+                audit_id="langsmith:ada",
+                ls_user_id="ls-ada",
+            )
+        if token.startswith("lsv2_"):
+            raise HTTPException(401, "invalid LangSmith API key")
+        return None
 
-class _Keys:
-    def get_signing_key_from_jwt(self, token: str) -> _SigningKey:
-        return _SigningKey()
-
-
-def _token(**overrides: object) -> str:
-    now = int(time.time())
-    claims: dict[str, object] = {
-        "iss": "https://token.actions.githubusercontent.com",
-        "aud": _AUDIENCE,
-        "sub": f"repo:{_REPO}:ref:refs/heads/main",
-        "repository": _REPO,
-        "workflow_ref": f"{_DEV}@refs/heads/main",
-        "iat": now,
-        "exp": now + 300,
-    }
-    claims.update(overrides)
-    encoded = jwt.encode(claims, _PRIVATE, algorithm="RS256")
-    return encoded if isinstance(encoded, str) else encoded.decode()
+    @staticmethod
+    def event(target: str, commits: list[str], **extra: object) -> bytes:
+        return json.dumps(
+            {"repository": _REPO, "target": target, "commits": commits, **extra}
+        ).encode()
 
 
 @pytest.fixture
 async def app(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    await INTEGRATIONS.configure_repository(_REPO, may_start_threads=True, actor=None)
-    await INTEGRATIONS.configure_repository("other/repo", may_start_threads=False, actor=None)
-
-    monkeypatch.setattr("openswe.federation.github_oidc._keys", lambda: _Keys())
+    monkeypatch.setattr(LANGSMITH_API_KEYS, "verify", _Rollout.verify)
     from openswe.webhooks.event_log import EventLog
 
     record = AsyncMock(wraps=EventLog.record)
@@ -70,9 +70,9 @@ async def _post(app: FastAPI, body: bytes, token: str | None) -> httpx.Response:
 
 
 @pytest.mark.asyncio
-async def test_rollout_webhook_acknowledges_a_github_actions_token(app: FastAPI) -> None:
-    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40, "b" * 40, "not-a-sha"]}).encode()
-    response = await _post(app, body, _token())
+async def test_rollout_webhook_acknowledges_robins_bot(app: FastAPI) -> None:
+    body = _Rollout.event("gcp-dev", ["a" * 40, "b" * 40, "not-a-sha"])
+    response = await _post(app, body, _BOT)
     assert response.status_code == 200
     assert response.json() == {"status": "accepted", "target": "gcp-dev", "commits": 2}
     args = app.state.record.await_args
@@ -85,45 +85,36 @@ async def test_rollout_webhook_acknowledges_a_github_actions_token(app: FastAPI)
     }
 
 
+@pytest.mark.parametrize("token", [None, _PAT, "lsv2_sk_elsewhere", "not-a-langsmith-key"])
 @pytest.mark.asyncio
-async def test_rollout_webhook_rejects_a_token_for_another_audience(app: FastAPI) -> None:
-    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
-    response = await _post(app, body, _token(aud="https://openswe.langchain.dev"))
-    assert response.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_rollout_webhook_rejects_a_repository_that_may_not_start_threads(
-    app: FastAPI,
+async def test_rollout_webhook_rejects_anything_but_the_bot(
+    app: FastAPI, token: str | None
 ) -> None:
-    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 40]}).encode()
-    response = await _post(app, body, _token(repository="other/repo"))
+    response = await _post(app, _Rollout.event("gcp-dev", ["a" * 40]), token)
     assert response.status_code == 401
+    app.state.record.assert_not_awaited()
 
 
+@pytest.mark.parametrize("repository", [None, "", "langchainplus", "a/b/c"])
 @pytest.mark.asyncio
-async def test_rollout_webhook_accepts_another_workflow_in_a_granted_repository(
-    app: FastAPI,
-) -> None:
-    body = json.dumps({"target": "gcp-us-prod", "commits": ["c" * 40]}).encode()
-    response = await _post(
-        app,
-        body,
-        _token(workflow_ref=f"{_REPO}/.github/workflows/other.yaml@refs/heads/main"),
-    )
-    assert response.status_code == 200
+async def test_rollout_webhook_requires_a_repository(app: FastAPI, repository: str | None) -> None:
+    payload: dict[str, object] = {"target": "gcp-dev", "commits": ["a" * 40]}
+    if repository is not None:
+        payload["repository"] = repository
+    response = await _post(app, json.dumps(payload).encode(), _BOT)
+    assert response.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_rollout_webhook_rejects_a_non_utf8_body(app: FastAPI) -> None:
-    response = await _post(app, b"\xff\xfe\xfa", _token())
+    response = await _post(app, b"\xff\xfe\xfa", _BOT)
     assert response.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_rollout_webhook_stores_a_lowercase_full_sha(app: FastAPI) -> None:
-    body = json.dumps({"target": " GCP-Dev ", "commits": [f"  {'A' * 40}  ", "a" * 40]}).encode()
-    response = await _post(app, body, _token())
+    body = _Rollout.event(" GCP-Dev ", [f"  {'A' * 40}  ", "a" * 40])
+    response = await _post(app, body, _BOT)
     assert response.status_code == 200
     assert response.json()["commits"] == 1
     assert json.loads(app.state.record.await_args.args[1])["commits"] == ["a" * 40]
@@ -131,23 +122,23 @@ async def test_rollout_webhook_stores_a_lowercase_full_sha(app: FastAPI) -> None
 
 @pytest.mark.asyncio
 async def test_rollout_webhook_rejects_a_short_sha(app: FastAPI) -> None:
-    body = json.dumps({"target": "gcp-dev", "commits": ["a" * 7]}).encode()
-    response = await _post(app, body, _token())
+    body = _Rollout.event("gcp-dev", ["a" * 7])
+    response = await _post(app, body, _BOT)
     assert response.status_code == 400
     app.state.record.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_rollout_webhook_rejects_an_empty_commit_list(app: FastAPI) -> None:
-    body = json.dumps({"target": "gcp-dev", "commits": []}).encode()
-    response = await _post(app, body, _token())
+    body = _Rollout.event("gcp-dev", [])
+    response = await _post(app, body, _BOT)
     assert response.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_rollout_webhook_stores_target_and_commits_without_a_channel(app: FastAPI) -> None:
-    body = json.dumps({"target": "gcp-staging", "channel": "dev", "commits": ["a" * 40]}).encode()
-    response = await _post(app, body, _token())
+    body = _Rollout.event("gcp-staging", ["a" * 40], channel="dev")
+    response = await _post(app, body, _BOT)
     assert response.status_code == 200
     recorded = app.state.record.await_args
     assert recorded.kwargs["event_type"] == "deployed"
@@ -159,12 +150,12 @@ async def test_rollout_webhook_asks_for_a_retry_when_the_event_is_not_stored(
     app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     app.state.record.return_value = False
-    body = json.dumps({"target": "gcp-staging", "commits": ["a" * 40]}).encode()
-    response = await _post(app, body, _token())
+    body = _Rollout.event("gcp-staging", ["a" * 40])
+    response = await _post(app, body, _BOT)
     assert response.status_code == 503
     app.state.record.return_value = DEFAULT
-    assert (await _post(app, body, _token())).status_code == 200
-    assert (await _post(app, body, _token())).status_code == 200
+    assert (await _post(app, body, _BOT)).status_code == 200
+    assert (await _post(app, body, _BOT)).status_code == 200
     assert app.state.record.await_count == 3
 
 
@@ -174,8 +165,8 @@ class TestRolloutRetries:
             (" GCP-Dev ", ["A" * 40, "b" * 40, "a" * 40]),
             ("gcp-dev", ["b" * 40, "a" * 40]),
         ]:
-            body = json.dumps({"target": target, "commits": commits}).encode()
-            assert (await _post(app, body, _token())).status_code == 200
+            body = _Rollout.event(target, commits)
+            assert (await _post(app, body, _BOT)).status_code == 200
         from sqlalchemy import text
 
         from openswe.database import transaction
@@ -184,15 +175,14 @@ class TestRolloutRetries:
             assert await conn.scalar(text("SELECT count(*) FROM event_log")) == 1
 
     async def test_distinct_repositories_targets_and_commits_are_recorded(
-        self, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+        self, app: FastAPI
     ) -> None:
-        await INTEGRATIONS.configure_repository("other/repo", may_start_threads=True, actor=None)
         for repository, target, commit in [
             (_REPO, "gcp-dev", "a" * 40),
             ("other/repo", "gcp-dev", "a" * 40),
             (_REPO, "gcp-us-prod", "a" * 40),
             (_REPO, "gcp-dev", "b" * 40),
         ]:
-            body = json.dumps({"target": target, "commits": [commit]}).encode()
-            assert (await _post(app, body, _token(repository=repository))).status_code == 200
+            body = _Rollout.event(target, [commit], repository=repository)
+            assert (await _post(app, body, _BOT)).status_code == 200
         assert app.state.record.await_count == 4

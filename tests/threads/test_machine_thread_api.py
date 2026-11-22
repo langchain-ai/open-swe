@@ -11,8 +11,6 @@ import pytest
 from fastapi import HTTPException
 
 from openswe.dashboard.langsmith_api_keys import LangSmithApiKey
-from openswe.federation.github_oidc import GitHubActionsClaims
-from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.tasks import activity
 from openswe.tasks.routes import api_thread_workers
 from openswe.threads import index, runs
@@ -84,27 +82,15 @@ async def machine(monkeypatch: pytest.MonkeyPatch, registry_db: None) -> _FakeCl
     return client
 
 
-def _bot_caller() -> Principal:
+def _bot_caller(workspace_id: str = "ws") -> Principal:
     key = LangSmithApiKey(
         kind="service",
         fingerprint="0123456789abcdef",
         organization_id="org",
-        workspace_id="ws",
+        workspace_id=workspace_id,
         audit_id="langsmith:key-1",
     )
     return Principal.of_bot(key)
-
-
-def _workflow_caller(repository: str = "acme/api", visibility: str = "private") -> Principal:
-    return Principal.of_workflow(
-        GitHubActionsClaims(
-            sub=f"repo:{repository}:ref:refs/heads/main",
-            repository=repository,
-            repository_owner=repository.split("/", 1)[0],
-            repository_visibility=visibility,
-            workflow_ref=f"{repository}/.github/workflows/nightly.yml@refs/heads/main",
-        ),
-    )
 
 
 async def test_the_bot_starts_a_system_thread_with_no_person_on_it(machine: _FakeClient) -> None:
@@ -221,20 +207,6 @@ async def test_a_machine_run_drops_a_message_id_the_thread_already_holds(
     assert "id" not in enriched["params"]["input"]["messages"][-1]
 
 
-async def test_a_workflow_defaults_to_its_own_repository(machine: _FakeClient) -> None:
-    enriched = await runs._enrich_system_run_start_command(
-        "thread-2",
-        _workflow_caller(),
-        _command("Fix the nightly", thread_type="system"),
-        metadata={},
-        creating=True,
-    )
-
-    configurable = enriched["params"]["config"]["configurable"]
-    assert configurable["repo"] == {"owner": "acme", "name": "api"}
-    assert machine.threads.created[0]["metadata"]["started_by_id"] == "github_actions:acme/api"
-
-
 async def test_the_bot_can_use_another_repository_the_app_can_reach(machine: _FakeClient) -> None:
     principal = _bot_caller()
 
@@ -295,31 +267,13 @@ def test_only_an_admin_may_ask_for_a_system_thread(monkeypatch: pytest.MonkeyPat
 
 async def test_a_machine_reads_back_only_what_it_started(machine: _FakeClient) -> None:
     mine = _bot_caller()
-    theirs = _workflow_caller()
+    theirs = _bot_caller("other-ws")
 
     started = {"started_by_id": mine.started_by_id}
     mine.assert_can_read(started)
     with pytest.raises(HTTPException) as refused:
         theirs.assert_can_read(started)
     assert refused.value.status_code == 404
-
-
-@pytest.mark.parametrize(
-    ("visibility", "scope"),
-    [("public", ["acme/api"]), ("", ["acme/api"]), ("private", None), ("internal", None)],
-)
-async def test_a_workflow_on_a_public_repository_records_a_single_repository_scope(
-    machine: _FakeClient, visibility: str, scope: list[str] | None
-) -> None:
-    await runs._enrich_system_run_start_command(
-        "thread-scope",
-        _workflow_caller(visibility=visibility),
-        _command("Fix the nightly", thread_type="system"),
-        metadata={},
-        creating=True,
-    )
-
-    assert machine.threads.created[0]["metadata"].get(GITHUB_TOKEN_REPOSITORIES_KEY) == scope
 
 
 @dataclass(frozen=True)
@@ -420,7 +374,7 @@ async def test_a_machine_reads_the_transcript_of_only_the_thread_it_started(
     machine: _FakeClient, read: _TranscriptRead
 ) -> None:
     mine = _bot_caller()
-    theirs = _workflow_caller()
+    theirs = _bot_caller("other-ws")
     transcript = await _transcript_started_by(mine)
 
     await read(transcript, mine)
@@ -433,7 +387,7 @@ async def test_a_machine_reads_the_workers_of_only_the_thread_it_started(
     machine: _FakeClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     mine = _bot_caller()
-    theirs = _workflow_caller()
+    theirs = _bot_caller("other-ws")
     thread_id = str(uuid7())
     await index.create(
         thread_id, runtime="mda", metadata={"source": "api", STARTED_BY_ID: mine.started_by_id}
@@ -456,7 +410,7 @@ async def test_a_machine_stream_ends_on_a_thread_another_machine_started(
     machine: _FakeClient,
 ) -> None:
     mine = _bot_caller()
-    theirs = _workflow_caller()
+    theirs = _bot_caller("other-ws")
     transcript = await _transcript_started_by(mine)
 
     async with aclosing(_stream(transcript.thread_id, 0, theirs)) as stream:
@@ -486,16 +440,6 @@ async def test_external_sandbox_requires_bot_and_enforces_unique_binding(
         return httpx2.Response(200, request=req, json=sandboxes[name])
 
     monkeypatch.setattr(SandboxAPI, "request", fake_request)
-    with pytest.raises(HTTPException) as workflow_refused:
-        await runs._enrich_system_run_start_command(
-            str(uuid7()),
-            _workflow_caller(),
-            _command("Solve task", thread_type="system", sandbox_id="tb-task-1"),
-            metadata={},
-            creating=True,
-        )
-    assert workflow_refused.value.status_code == 403
-
     with pytest.raises(HTTPException) as missing_refused:
         await runs._enrich_system_run_start_command(
             str(uuid7()),

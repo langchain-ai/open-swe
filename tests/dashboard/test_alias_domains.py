@@ -1,4 +1,4 @@
-"""A second domain (DASHBOARD_ALIAS_URLS) answers sign-in, MCP and OIDC as itself."""
+"""A second domain (DASHBOARD_ALIAS_URLS) answers sign-in and MCP as itself."""
 
 from pathlib import Path
 
@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 
 from openswe.api.public_origin import PublicOriginMiddleware
 from openswe.dashboard.oauth import allowed_dashboard_origins, sanitize_redirect_to
-from openswe.federation import github_oidc
 from openswe.utils import dashboard_links
 from openswe.utils.dashboard_links import PUBLIC_ORIGIN_HEADER
 
@@ -21,7 +20,6 @@ def domains(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DASHBOARD_BASE_URL", CANONICAL)
     monkeypatch.setenv("DASHBOARD_API_BASE_URL", CANONICAL)
     monkeypatch.setenv("DASHBOARD_ALIAS_URLS", f"{ALIAS}/, https://ROBIN-staging.example:443")
-    monkeypatch.delenv("GITHUB_OIDC_AUDIENCE", raising=False)
 
 
 @pytest.mark.parametrize(
@@ -84,15 +82,6 @@ def test_other_requests_keep_the_canonical_domain(headers: dict[str, str]) -> No
 def test_aliases_are_allowed_origins() -> None:
     assert {CANONICAL, ALIAS} <= allowed_dashboard_origins()
     assert sanitize_redirect_to(f"{ALIAS}/agents/t1") == f"{ALIAS}/agents/t1"
-
-
-def test_oidc_accepts_the_canonical_audience_first_then_the_aliases(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    assert github_oidc.audiences() == [CANONICAL, "https://robin-staging.example", ALIAS]
-
-    monkeypatch.setenv("GITHUB_OIDC_AUDIENCE", ALIAS)
-    assert github_oidc.audiences() == [ALIAS, "https://robin-staging.example"]
 
 
 def test_mcp_signs_in_and_verifies_on_the_domain_it_was_reached_through(

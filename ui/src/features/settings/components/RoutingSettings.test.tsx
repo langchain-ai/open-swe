@@ -22,10 +22,7 @@ afterEach(() => {
 
 class RoutingSettingsServer {
   routing: RoutingData = {
-    repos: [
-      { repo: "acme/api", may_start_threads: false },
-      { repo: "acme/web", may_start_threads: false },
-    ],
+    repos: [{ repo: "acme/api" }, { repo: "acme/web" }],
     slack_channels: [
       { channel_id: "CTEAM0001", prompt: "Help with engineering work." },
       {
@@ -91,11 +88,7 @@ class RoutingSettingsServer {
     if (path.startsWith("/routing/repositories/")) {
       const repo = path.slice("/routing/repositories/".length)
       this.routing.repos = this.routing.repos.filter((row) => row.repo !== repo)
-      if (method === "PUT")
-        this.routing.repos.push({
-          repo,
-          may_start_threads: body.may_start_threads,
-        })
+      if (method === "PUT") this.routing.repos.push({ repo })
     } else {
       const channel_id = path.slice("/routing/slack-channels/".length)
       this.routing.slack_channels = this.routing.slack_channels.filter(
@@ -125,60 +118,36 @@ class RoutingSettingsServer {
   }
 }
 
-it("optimistically changes Actions permission, locks concurrent writes, and rolls back failure", async () => {
+it("binds a repository optimistically without rewriting unrelated bindings", async () => {
   const server = new RoutingSettingsServer()
-  server.failure = "Permission save refused"
   server.holdNextSave()
   server.render()
-  const web = await screen.findByRole("switch", {
-    name: "Let acme/web start threads",
-  })
-  fireEvent.click(web)
-  await vi.waitFor(() =>
-    expect(server.writes).toEqual([
-      {
-        path: "/routing/repositories/acme/web",
-        method: "PUT",
-        body: { may_start_threads: true },
-      },
-    ])
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Choose repositories" })
   )
-  expect(web.getAttribute("aria-checked")).toBe("true")
-  expect(web.hasAttribute("data-disabled")).toBe(true)
-  const apiToggle = screen.getByRole("switch", {
-    name: "Let acme/api start threads",
-  })
-  expect(apiToggle.hasAttribute("data-disabled")).toBe(true)
-  fireEvent.click(apiToggle)
-  expect(server.writes).toHaveLength(1)
-  server.release?.()
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "Permission save refused"
-  )
-  await vi.waitFor(() => expect(web.getAttribute("aria-checked")).toBe("false"))
-})
-
-it("adds a repository with Actions permission off without rewriting unrelated bindings", async () => {
-  const server = new RoutingSettingsServer()
-  server.render()
-  const choose = await screen.findByRole("button", {
-    name: "Choose repositories",
-  })
-  fireEvent.click(choose)
   fireEvent.click(await screen.findByRole("checkbox", { name: "new" }))
   fireEvent.click(screen.getByRole("button", { name: "Save 3 repositories" }))
   await vi.waitFor(() =>
     expect(server.writes).toEqual([
-      {
-        path: "/routing/repositories/acme/new",
-        method: "PUT",
-        body: { may_start_threads: false },
-      },
+      { path: "/routing/repositories/acme/new", method: "PUT", body: null },
     ])
   )
-  expect(
-    await screen.findByRole("switch", { name: "Let acme/new start threads" })
-  ).toBeTruthy()
+  expect(screen.getByText("acme/new")).toBeTruthy()
+  server.release?.()
+  await vi.waitFor(() => expect(server.routing.repos).toHaveLength(3))
+})
+
+it("rolls back a repository binding the server refuses", async () => {
+  const server = new RoutingSettingsServer()
+  server.failure = "Binding refused"
+  server.render()
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Choose repositories" })
+  )
+  fireEvent.click(await screen.findByRole("checkbox", { name: "new" }))
+  fireEvent.click(screen.getByRole("button", { name: "Save 3 repositories" }))
+  expect((await screen.findByRole("alert")).textContent).toBe("Binding refused")
+  await vi.waitFor(() => expect(screen.queryByText("acme/new")).toBeNull())
 })
 
 it("copies a template without writing and preserves a customized listening draft after failure", async () => {

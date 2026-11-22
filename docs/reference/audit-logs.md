@@ -10,7 +10,7 @@ Time, workspace/time, and operation/time indexes support queries.
 
 ## Coverage
 
-- Authenticated dashboard `POST`, `PUT`, `PATCH`, and `DELETE` requests, including API-key and federated GitHub Actions thread requests.
+- Authenticated dashboard `POST`, `PUT`, `PATCH`, and `DELETE` requests, including API-key thread requests.
   Operation names use the endpoint name without its `api_` prefix.
   This is **API activity**, not proof of a committed business mutation: some POST endpoints are reads, and HTTP success follows the response status.
 - The `save_user_settings`, `save_user_instructions`, `manage_feature_flags`, and `manage_review_approval_mode` tools, whether called by the agent directly or from code mode.

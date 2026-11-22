@@ -279,10 +279,6 @@ ENV.var(
     "Backend-only signing secret for the queue dispatch gateway; never used by agents.",
     secret=True,
 )
-ENV.var(
-    "GITHUB_OIDC_AUDIENCE",
-    "Audience a federated GitHub Actions token must carry; defaults to the dashboard URL.",
-)
 ENV.var("OPEN_SWE_MENTION_TAGS", "Comma-separated handles this deployment answers to.")
 ENV.var("EXTRA_INTERNAL_BOT_LOGINS", "Comma-separated bot logins treated as internal commenters.")
 ENV.var(

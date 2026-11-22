@@ -895,7 +895,6 @@ export interface ExecutionDefaults {
 
 export interface RepositorySettings {
   repo: string
-  may_start_threads: boolean
 }
 
 export interface RoutingSettings {
@@ -1482,10 +1481,10 @@ export const api = {
       method: "DELETE",
     }),
   getRouting: () => request<RoutingSettings>("/routing"),
-  configureRoutingRepository: (repo: string, may_start_threads: boolean) =>
+  configureRoutingRepository: (repo: string) =>
     request<RepositorySettings>(
       `/routing/repositories/${repo.split("/").map(encodeURIComponent).join("/")}`,
-      { method: "PUT", body: JSON.stringify({ may_start_threads }) }
+      { method: "PUT" }
     ),
   removeRoutingRepository: (repo: string) =>
     request<void>(

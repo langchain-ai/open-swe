@@ -44,7 +44,6 @@ class RepositoryBinding(IntegrationRecord):
     repository_id: Mapped[UUID] = mapped_column(
         ForeignKey("repository.id", ondelete="CASCADE"), unique=True
     )
-    may_start_threads: Mapped[bool] = mapped_column(default=False, server_default="false")
     merge_queue_config: Mapped[dict[str, JsonValue] | None] = mapped_column(
         JSONB(none_as_null=True), default=None
     )
@@ -63,7 +62,6 @@ class RepositorySettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     repo: str
-    may_start_threads: bool
 
 
 class ChannelSettings(BaseModel):
@@ -88,26 +86,20 @@ class IntegrationStore:
 
     async def settings(self, *, session: AsyncSession | None = None) -> IntegrationSettings:
         async with postgres.session(session) as session:
-            repos = (
-                await session.execute(
-                    select(Repository.full_name, RepositoryBinding)
+            repos = list(
+                await session.scalars(
+                    select(Repository.full_name)
                     .join(RepositoryBinding, RepositoryBinding.repository_id == Repository.id)
                     .order_by(Repository.key)
                 )
-            ).all()
+            )
             channels = list(
                 await session.scalars(
                     select(SlackChannelBinding).order_by(SlackChannelBinding.channel_id)
                 )
             )
         return IntegrationSettings(
-            repos=[
-                RepositorySettings(
-                    repo=name,
-                    may_start_threads=row.may_start_threads,
-                )
-                for name, row in repos
-            ],
+            repos=[RepositorySettings(repo=name) for name in repos],
             slack_channels=[
                 ChannelSettings(
                     channel_id=row.channel_id,
@@ -117,29 +109,10 @@ class IntegrationStore:
             ],
         )
 
-    async def contains_repo(self, full_name: str) -> bool:
-        return await self.repository_permission(full_name) is not None
-
-    async def repository_permission(self, full_name: str) -> bool | None:
-        try:
-            key = normalize_repo_full_name(full_name).lower()
-        except ValueError:
-            return None
-        async with postgres.session() as session:
-            return await session.scalar(
-                select(RepositoryBinding.may_start_threads)
-                .join(Repository, Repository.id == RepositoryBinding.repository_id)
-                .where(Repository.key == key)
-            )
-
-    async def repository_may_start_threads(self, full_name: str) -> bool:
-        return await self.repository_permission(full_name) is True
-
     async def configure_repository(
         self,
         full_name: str,
         *,
-        may_start_threads: bool,
         actor: UUID | None,
     ) -> RepositorySettings:
         name = normalize_repo_full_name(full_name)
@@ -147,14 +120,12 @@ class IntegrationStore:
             repository_id = await Repository.ensure_id(session, name)
             row = RepositoryBinding(
                 repository_id=repository_id,
-                may_start_threads=may_start_threads,
                 created_by=actor,
                 updated_by=actor,
             )
             upsert = insert(RepositoryBinding).values(
                 id=row.id,
                 repository_id=repository_id,
-                may_start_threads=may_start_threads,
                 created_by=actor,
                 updated_by=actor,
             )
@@ -162,14 +133,13 @@ class IntegrationStore:
                 upsert.on_conflict_do_update(
                     index_elements=[RepositoryBinding.repository_id],
                     set_={
-                        "may_start_threads": may_start_threads,
                         "updated_by": actor,
                         "updated_at": func.clock_timestamp(),
                     },
                 )
             )
         await Topic.ROUTING.invalidate()
-        return RepositorySettings(repo=name, may_start_threads=may_start_threads)
+        return RepositorySettings(repo=name)
 
     async def remove_repository(self, full_name: str) -> None:
         from openswe.merge_queue.store import MergeQueue

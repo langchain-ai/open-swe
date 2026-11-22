@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import { ApiClient, ApiError, type CoordinatorThread } from "../src/api.ts"
-import { CredentialError, SessionCredential } from "../src/credentials.ts"
+import { SessionCredential } from "../src/credentials.ts"
 import { followTask } from "../src/follow.ts"
 
 /** A thread whose activity reads all fail with `cause`; everything else is never reached. */
@@ -72,10 +72,6 @@ describe("followTask through backend failures", () => {
   })
 
   test.each([
-    [
-      "a credential the CLI could not obtain",
-      () => new CredentialError("no OIDC token"),
-    ],
     ["a rejected credential", () => new ApiError(401, "unauthorized")],
     [
       "a thread the backend cannot find",

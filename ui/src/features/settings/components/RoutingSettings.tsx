@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@langchain/macaw-components/Button"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
-import { Switch } from "@langchain/macaw-components/Switch"
 
 import { SettingsPanel, SettingsSection } from "@/components/AppShell"
 import { api, type RoutingSettings as RoutingData } from "@/lib/api"
@@ -18,7 +17,7 @@ import { AddListeningChannel } from "./AddListeningChannel"
 import { ListeningChannelRow } from "./ListeningChannelRow"
 
 type RoutingChange =
-  | { kind: "repository"; repo: string; allowed: boolean | null }
+  | { kind: "repository"; repo: string; bound: boolean }
   | { kind: "channel"; id: string; prompt: string | null }
 
 const QUERY_KEY = ["routing"]
@@ -38,9 +37,8 @@ export function RoutingSettings() {
     mutationFn: async (changes: RoutingChange[]) => {
       for (const change of changes) {
         if (change.kind === "repository") {
-          if (change.allowed === null)
-            await api.removeRoutingRepository(change.repo)
-          else await api.configureRoutingRepository(change.repo, change.allowed)
+          if (change.bound) await api.configureRoutingRepository(change.repo)
+          else await api.removeRoutingRepository(change.repo)
         } else if (change.prompt === null)
           await api.removeRoutingChannel(change.id)
         else await api.configureRoutingChannel(change.id, change.prompt)
@@ -58,11 +56,7 @@ export function RoutingSettings() {
             repos = repos.filter(
               (row) => row.repo.toLowerCase() !== change.repo.toLowerCase()
             )
-            if (change.allowed !== null)
-              repos = [
-                ...repos,
-                { repo: change.repo, may_start_threads: change.allowed },
-              ]
+            if (change.bound) repos = [...repos, { repo: change.repo }]
           } else {
             channels = channels.filter((row) => row.channel_id !== change.id)
             if (change.prompt !== null)
@@ -135,7 +129,7 @@ export function RoutingSettings() {
     <>
       <SettingsSection
         title="Repositories"
-        description="Bind repositories for inbound GitHub and Linear routing. Binding is not an access grant or a preload setting. Can start threads lets a GitHub Actions workflow create ownerless threads with its own OIDC-issued token."
+        description="Bind repositories for inbound GitHub and Linear routing. Binding is not an access grant or a preload setting."
       >
         <SettingsPanel>
           {save.error &&
@@ -151,24 +145,9 @@ export function RoutingSettings() {
               {repositories.map((row) => (
                 <li
                   key={row.repo.toLowerCase()}
-                  className="flex flex-wrap items-center justify-between gap-space-3 py-space-2"
+                  className="py-space-2 font-mono text-xs break-all text-primary"
                 >
-                  <span className="min-w-0 font-mono text-xs break-all text-primary">
-                    {row.repo}
-                  </span>
-                  <label className="flex items-center gap-space-2 text-xs text-secondary">
-                    Can start threads
-                    <Switch
-                      aria-label={`Let ${row.repo} start threads`}
-                      checked={row.may_start_threads}
-                      disabled={disabled}
-                      onChange={(allowed) =>
-                        save.mutate([
-                          { kind: "repository", repo: row.repo, allowed },
-                        ])
-                      }
-                    />
-                  </label>
+                  {row.repo}
                 </li>
               ))}
             </ul>
@@ -187,14 +166,14 @@ export function RoutingSettings() {
                   .map((repo) => ({
                     kind: "repository" as const,
                     repo,
-                    allowed: null,
+                    bound: false,
                   })),
                 ...next
                   .filter((repo) => !known.has(repo.toLowerCase()))
                   .map((repo) => ({
                     kind: "repository" as const,
                     repo,
-                    allowed: false,
+                    bound: true,
                   })),
               ]
               if (changes.length) save.mutate(changes)
