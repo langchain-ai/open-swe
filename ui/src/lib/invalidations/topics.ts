@@ -6,12 +6,7 @@ import type { Query } from "@tanstack/react-query"
  * `meta.invalidatedBy`; an invalidation of any of them refetches it, so it
  * never needs a `refetchInterval`.
  */
-type Topic =
-  | "settings"
-  | "routing"
-  | "incident-settings"
-  | "announcements"
-  | "slack-channels"
+type Topic = "settings" | "routing" | "announcements" | "slack-channels"
 /** Topics whose records each have one of their own, `<topic>/<key>`. */
 type KeyedTopic =
   | "threads"

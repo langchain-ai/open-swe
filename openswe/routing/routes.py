@@ -11,6 +11,7 @@ from openswe.dashboard.oauth import session_user_id
 from openswe.routing.store import (
     INTEGRATIONS,
     ChannelPrompt,
+    ChannelRuleSettings,
     ChannelSettings,
     IntegrationSettings,
     RepositorySettings,
@@ -24,6 +25,13 @@ class ChannelConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prompt: ChannelPrompt
+
+
+class ChannelRuleConfiguration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: ChannelPrompt
+    kickoff: ChannelPrompt = ""
 
 
 class RoutingErrors:
@@ -79,3 +87,22 @@ async def api_configure_slack_channel(
 @audit_endpoint
 async def api_remove_slack_channel(channel_id: str, _admin: dict[str, object] = ADMIN_DEP) -> None:
     await INTEGRATIONS.remove_channel(channel_id)
+
+
+@router.put("/routing/slack-channel-rules/{prefix}", dependencies=ERRORS)
+@audit_endpoint
+async def api_configure_slack_channel_rule(
+    prefix: str, body: ChannelRuleConfiguration, admin: dict[str, object] = ADMIN_DEP
+) -> ChannelRuleSettings:
+    return await INTEGRATIONS.configure_channel_rule(
+        prefix,
+        prompt=body.prompt,
+        kickoff=body.kickoff,
+        actor=session_user_id(admin),
+    )
+
+
+@router.delete("/routing/slack-channel-rules/{prefix}", status_code=204, dependencies=ERRORS)
+@audit_endpoint
+async def api_remove_slack_channel_rule(prefix: str, _admin: dict[str, object] = ADMIN_DEP) -> None:
+    await INTEGRATIONS.remove_channel_rule(prefix)

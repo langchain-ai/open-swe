@@ -112,7 +112,7 @@ def harness(registry_db: None, monkeypatch: pytest.MonkeyPatch) -> _Harness:
         ),
     )
     monkeypatch.setattr(
-        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+        "openswe.routing.channel_rules.handle_slack_event", AsyncMock(return_value=None)
     )
     return state
 

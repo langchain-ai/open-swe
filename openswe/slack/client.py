@@ -1437,7 +1437,7 @@ async def fetch_slack_thread_messages(
     With ``complete``, a failed page raises instead of returning the pages fetched so far.
     """
 
-    # An incident session spans the whole channel rather than one thread.
+    # A channel session spans the whole channel rather than one thread.
     session_channel = thread_ts == "0"
 
     messages: list[dict[str, Any]] = []

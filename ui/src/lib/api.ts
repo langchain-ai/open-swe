@@ -897,9 +897,16 @@ export interface RepositorySettings {
   repo: string
 }
 
+export interface SlackChannelRule {
+  prefix: string
+  prompt: string
+  kickoff: string
+}
+
 export interface RoutingSettings {
   repos: RepositorySettings[]
   slack_channels: Array<{ channel_id: string; prompt: string }>
+  slack_channel_rules: SlackChannelRule[]
 }
 
 export type FindingSeverity = "low" | "medium" | "high" | "critical"
@@ -1500,6 +1507,25 @@ export const api = {
     request<void>(`/routing/slack-channels/${encodeURIComponent(channelId)}`, {
       method: "DELETE",
     }),
+  configureRoutingChannelRule: (
+    prefix: string,
+    prompt: string,
+    kickoff: string
+  ) =>
+    request<SlackChannelRule>(
+      `/routing/slack-channel-rules/${encodeURIComponent(prefix)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ prompt, kickoff }),
+      }
+    ),
+  removeRoutingChannelRule: (prefix: string) =>
+    request<void>(
+      `/routing/slack-channel-rules/${encodeURIComponent(prefix)}`,
+      {
+        method: "DELETE",
+      }
+    ),
   getExecutionDefaults: () => request<ExecutionDefaults>("/settings/execution"),
   updateExecutionDefaults: (changes: Partial<ExecutionDefaults>) =>
     request<ExecutionDefaults>("/settings/execution", {

@@ -110,7 +110,7 @@ class RunSettings(BaseModel):
     # its catalog lists only those the model is offered.
     tools: str | None = None
     execution: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    # Where an incident channel's kickoff run answers.
+    # Where a channel rule's kickoff run answers.
     slack_thread: dict[str, JsonValue] | None = None
     # Tools the run's catalog offers the model but never grants (``Catalog.disabled``).
     disabled_tools: list[str] = []

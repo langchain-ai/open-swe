@@ -19,7 +19,11 @@ export function ChannelPromptForm({
   onCancel,
   mode = "edit",
   canSave = true,
+  changed = false,
+  promptRequired = mode === "add",
+  saveLabel,
   error,
+  children,
 }: {
   label: string
   prompt: string
@@ -28,7 +32,11 @@ export function ChannelPromptForm({
   onCancel: () => void
   mode?: "edit" | "add"
   canSave?: boolean
+  changed?: boolean
+  promptRequired?: boolean
+  saveLabel?: string
   error?: ReactNode
+  children?: ReactNode
 }) {
   const [draft, setDraft] = useState(prompt)
   const [selected, setSelected] = useState<ChannelPromptTemplate | null>(null)
@@ -105,11 +113,12 @@ export function ChannelPromptForm({
         disabled={disabled}
         placeholder="Describe when Robin should respond, how it should help, and who to involve."
         hintText={
-          mode === "add"
+          promptRequired
             ? "Add instructions before listening. They guide behavior; they do not grant access or change bot settings."
             : "These instructions guide behavior; they do not grant access or change bot settings. Leave blank for general assistance."
         }
       />
+      {children}
       {error && (
         <p role="alert" className="text-sm text-error-secondary">
           {error}
@@ -122,11 +131,13 @@ export function ChannelPromptForm({
           disabled={
             disabled ||
             !canSave ||
-            (mode === "add" ? !draft.trim() : draft.trim() === prompt)
+            (promptRequired && !draft.trim()) ||
+            (mode === "edit" && draft.trim() === prompt && !changed)
           }
           onClick={() => onSave(draft.trim())}
         >
-          {mode === "add" ? "Save and start listening" : "Save instructions"}
+          {saveLabel ??
+            (mode === "add" ? "Save and start listening" : "Save instructions")}
         </Button>
         <Button
           size="xs"

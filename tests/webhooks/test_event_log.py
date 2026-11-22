@@ -526,7 +526,7 @@ async def test_slack_event_links_a_single_known_pr_without_dispatching(
     )
     monkeypatch.setattr(common, "verify_slack_signature", lambda **kwargs: True)
     monkeypatch.setattr(
-        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+        "openswe.routing.channel_rules.handle_slack_event", AsyncMock(return_value=None)
     )
     monkeypatch.setattr(
         common,

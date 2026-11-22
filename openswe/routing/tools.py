@@ -26,7 +26,7 @@ class RoutingActor:
 @expose_mcp(access="admin")
 @access(_READ)
 async def list_integration_bindings() -> dict[str, object]:
-    """List instance repository bindings and listening Slack channels."""
+    """List instance repository bindings, listening Slack channels and channel name rules."""
     return {"ok": True, **(await INTEGRATIONS.settings()).model_dump(mode="json")}
 
 
@@ -70,4 +70,35 @@ async def bind_slack_channel(channel_id: str, prompt: ChannelPrompt) -> dict[str
 async def unbind_slack_channel(channel_id: str) -> dict[str, object]:
     """Remove one Slack channel binding."""
     await INTEGRATIONS.remove_channel(channel_id)
+    return {"ok": True}
+
+
+@expose_mcp(access="admin")
+@audit_tool()
+@access(_WRITE)
+async def bind_slack_channel_prefix(
+    prefix: str, prompt: ChannelPrompt, kickoff: ChannelPrompt = ""
+) -> dict[str, object]:
+    """Listen in every public channel whose name starts with a prefix, joining new ones."""
+    try:
+        record = await INTEGRATIONS.configure_channel_rule(
+            prefix,
+            prompt=prompt,
+            kickoff=kickoff,
+            actor=await RoutingActor.id(),
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, **record.model_dump(mode="json")}
+
+
+@expose_mcp(access="admin")
+@audit_tool()
+@access(_WRITE)
+async def unbind_slack_channel_prefix(prefix: str) -> dict[str, object]:
+    """Remove one channel name rule; channels bound individually keep listening."""
+    try:
+        await INTEGRATIONS.remove_channel_rule(prefix)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
     return {"ok": True}

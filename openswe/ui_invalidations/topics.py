@@ -135,9 +135,6 @@ class Topic(BaseTopic):
     REVIEW_STYLES: ClassVar[KeyedTopic[RepoFullName]]
     """Any repository's review style, including its analysis status."""
 
-    INCIDENT_SETTINGS: ClassVar[Topic]
-    """The incident channel policy."""
-
     REQUIRED_CHECKS: ClassVar[KeyedTopic[str]]
 
     PULL_REQUESTS: ClassVar[KeyedTopic[PullRequestKey]]
@@ -368,7 +365,6 @@ async def _readable_threads(session: Session, thread_ids: set[str]) -> set[str]:
 Topic.SETTINGS = Topic("settings")
 Topic.ROUTING = Topic("routing")
 Topic.REVIEW_STYLES = KeyedTopic("review-styles")
-Topic.INCIDENT_SETTINGS = Topic("incident-settings")
 Topic.REQUIRED_CHECKS = KeyedTopic("required-checks", authorize_keys=_readable_required_checks)
 Topic.PULL_REQUESTS = KeyedTopic("pull-requests", authorize_keys=_readable_pull_requests)
 Topic.PULL_REQUEST_STATE = KeyedTopic("pull-request-state", authorize_keys=_readable_pull_requests)

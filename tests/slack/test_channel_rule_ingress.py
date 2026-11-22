@@ -1,4 +1,4 @@
-"""Slack signature and early Incidents routing boundaries."""
+"""Slack signature and early channel rule routing boundaries."""
 
 import hashlib
 import hmac
@@ -8,13 +8,13 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from openswe.database.postgres import transaction
-from openswe.incidents import channels, service
-from openswe.incidents.models import IncidentPolicy
+from openswe.routing import channel_rules as channels
+from openswe.routing.store import INTEGRATIONS
 from openswe.slack import routes
 from openswe.slack.payloads import SlackChannelContext
 from openswe.webhooks import common
@@ -22,7 +22,7 @@ from openswe.webhooks import common
 pytestmark = pytest.mark.usefixtures("registry_db")
 
 
-_SIGNING_SECRET = "incidents-test-signing-secret"
+_SIGNING_SECRET = "channel-rules-test-signing-secret"
 
 
 @pytest.fixture
@@ -54,10 +54,6 @@ def _payload(event: dict) -> dict:
     }
 
 
-def _incident_state(monkeypatch, policy: IncidentPolicy) -> None:
-    monkeypatch.setattr(service.POLICIES, "get", AsyncMock(return_value=policy))
-
-
 def _post(client, payload, *, timestamp=None, signature=None):
     body = json.dumps(payload).encode()
     timestamp = timestamp or str(int(time.time()))
@@ -84,7 +80,7 @@ def _post(client, payload, *, timestamp=None, signature=None):
         {"type": "channel_rename", "channel": {"id": "C1", "name": "inc-payments"}},
     ],
 )
-def test_signed_incidents_event_precedes_coding_filters(client, handler, monkeypatch, event):
+def test_signed_channel_rule_event_precedes_coding_filters(client, handler, monkeypatch, event):
     context = AsyncMock(side_effect=AssertionError("coding channel lookup must not run"))
     claim = AsyncMock(side_effect=AssertionError("generic fail-open claim must not run"))
     monkeypatch.setattr(common, "resolve_slack_channel_context", context)
@@ -95,33 +91,13 @@ def test_signed_incidents_event_precedes_coding_filters(client, handler, monkeyp
     assert response.status_code == 200
     assert response.json() == {"status": "accepted"}
     handler.assert_awaited_once()
-    assert handler.await_args.args[0] == _payload(event)
+    assert handler.await_args.args[0] == event
     context.assert_not_awaited()
     claim.assert_not_awaited()
 
 
-@pytest.mark.parametrize("status", ["duplicate"])
-def test_an_incident_channel_event_stays_isolated_when_handler_declines_work(
-    client, handler, monkeypatch, status
-):
-    handler.return_value = {"status": status}
-    monkeypatch.setattr(
-        common,
-        "resolve_slack_channel_context",
-        AsyncMock(side_effect=AssertionError("coding path")),
-    )
-
-    response = _post(
-        client,
-        _payload({"type": "channel_created", "channel": {"id": "C1", "name": "inc-payments"}}),
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {"status": status}
-
-
 @pytest.mark.parametrize("failure", ["invalid_signature", "expired_timestamp"])
-def test_invalid_slack_auth_never_reaches_incidents(client, handler, failure):
+def test_invalid_slack_auth_never_reaches_channel_rules(client, handler, failure):
     response = _post(
         client,
         _payload({"type": "channel_created", "channel": {"id": "C1", "name": "inc-errors"}}),
@@ -131,19 +107,6 @@ def test_invalid_slack_auth_never_reaches_incidents(client, handler, failure):
 
     assert response.status_code == 401
     handler.assert_not_awaited()
-
-
-def test_handler_errors_do_not_fall_through_to_coding(client, handler, monkeypatch):
-    handler.side_effect = HTTPException(401, "wrong installation")
-    monkeypatch.setattr(
-        common,
-        "resolve_slack_channel_context",
-        AsyncMock(side_effect=AssertionError("coding path")),
-    )
-
-    response = _post(client, _payload({"type": "channel_created", "channel": {"id": "C1"}}))
-
-    assert response.status_code == 401
 
 
 def test_unregistered_event_falls_through_to_ordinary_slack(client, handler, monkeypatch):
@@ -159,10 +122,7 @@ def test_unregistered_event_falls_through_to_ordinary_slack(client, handler, mon
 
 
 async def test_overlapping_channel_events_queue_one_join(client, monkeypatch):
-    _incident_state(
-        monkeypatch,
-        IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1", channel_prefix="inc-"),
-    )
+    await INTEGRATIONS.configure_channel_rule("inc-", prompt="", kickoff="", actor=None)
     monkeypatch.setattr(
         common,
         "resolve_slack_channel_context",
@@ -185,3 +145,14 @@ async def test_overlapping_channel_events_queue_one_join(client, monkeypatch):
             text("SELECT count(*) FROM job WHERE kind = :kind"), {"kind": channels.JOIN_JOB}
         )
     assert queued == 1
+
+
+async def test_a_channel_no_rule_matches_falls_through(client, monkeypatch):
+    await INTEGRATIONS.configure_channel_rule("inc-", prompt="", kickoff="", actor=None)
+
+    assert (
+        await channels.handle_slack_event(
+            {"type": "channel_created", "channel": {"id": "C2", "name": "eng-errors"}}
+        )
+        is None
+    )

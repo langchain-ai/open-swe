@@ -22,6 +22,7 @@ afterEach(() => {
 
 class RoutingSettingsServer {
   routing: RoutingData = {
+    slack_channel_rules: [],
     repos: [{ repo: "acme/api" }, { repo: "acme/web" }],
     slack_channels: [
       { channel_id: "CTEAM0001", prompt: "Help with engineering work." },
@@ -62,6 +63,7 @@ class RoutingSettingsServer {
           { id: "CNEW00001", name: "new" },
           { id: "CABSENT01", name: "not-joined" },
           { id: "CSHARED01", name: "external" },
+          { id: "CINC00001", name: "inc-api" },
         ].map((channel) => ({
           ...channel,
           is_member: channel.id !== "CABSENT01",
@@ -89,6 +91,18 @@ class RoutingSettingsServer {
       const repo = path.slice("/routing/repositories/".length)
       this.routing.repos = this.routing.repos.filter((row) => row.repo !== repo)
       if (method === "PUT") this.routing.repos.push({ repo })
+    } else if (path.startsWith("/routing/slack-channel-rules/")) {
+      const prefix = decodeURIComponent(
+        path.slice("/routing/slack-channel-rules/".length)
+      )
+      this.routing.slack_channel_rules =
+        this.routing.slack_channel_rules.filter((row) => row.prefix !== prefix)
+      if (method === "PUT") {
+        const rule = { prefix, prompt: body.prompt, kickoff: body.kickoff }
+        this.routing.slack_channel_rules.push(rule)
+        return Response.json(rule)
+      }
+      return new Response(null, { status: 204 })
     } else {
       const channel_id = path.slice("/routing/slack-channels/".length)
       this.routing.slack_channels = this.routing.slack_channels.filter(
@@ -405,6 +419,128 @@ it("preserves failed instruction edits for retry without changing other channels
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
   expect(screen.getByText("Triage reports. The DRI is @owner.")).toBeTruthy()
   expect(server.writes).toHaveLength(2)
+})
+
+it("starts listening by name pattern from the same dialog and rolls back failed removal", async () => {
+  const server = new RoutingSettingsServer()
+  server.render()
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Start listening" })
+  )
+  fireEvent.click(screen.getByRole("radio", { name: "Channels named…" }))
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Channel Name Starts With" }),
+    { target: { value: "#INC-" } }
+  )
+  expect(
+    await screen.findByText("Covers 1 public channel now: #inc-api.")
+  ).toBeTruthy()
+  const save = screen.getByRole<HTMLButtonElement>("button", {
+    name: "Save and start listening",
+  })
+  expect(save.disabled).toBe(false)
+  fireEvent.click(
+    screen.getByRole("switch", {
+      name: "Start a run when Robin joins a new matching channel",
+    })
+  )
+  expect(save.disabled).toBe(true)
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "On-join Instructions" }),
+    { target: { value: "Investigate and report findings." } }
+  )
+  server.holdNextSave()
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save and start listening" })
+  )
+  expect(await screen.findByText("#inc-*")).toBeTruthy()
+  expect(server.routing.slack_channel_rules).toEqual([])
+  server.release?.()
+  await vi.waitFor(() =>
+    expect(
+      screen.queryByRole("textbox", { name: "Channel Name Starts With" })
+    ).toBeNull()
+  )
+  expect(server.writes).toEqual([
+    {
+      path: "/routing/slack-channel-rules/inc-",
+      method: "PUT",
+      body: {
+        prompt: "",
+        kickoff: "Investigate and report findings.",
+      },
+    },
+  ])
+  expect(
+    screen.getByText("1 channel now · joins new ones automatically")
+  ).toBeTruthy()
+
+  const stop = async () => {
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "More actions for #inc-*" }),
+      { button: 0, ctrlKey: false }
+    )
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Stop listening" })
+    )
+    const confirmation = screen.getByRole("dialog", {
+      name: "Stop listening in #inc-*?",
+    })
+    fireEvent.click(
+      within(confirmation).getByRole("button", { name: "Stop listening" })
+    )
+  }
+  server.failure = "Rule removal refused"
+  server.holdNextSave()
+  await stop()
+  await vi.waitFor(() => expect(screen.queryByText("#inc-*")).toBeNull())
+  server.release?.()
+  expect(await screen.findByText("Rule removal refused")).toBeTruthy()
+  expect(await screen.findByText("#inc-*")).toBeTruthy()
+  await stop()
+  await vi.waitFor(() => expect(server.routing.slack_channel_rules).toEqual([]))
+  expect(screen.queryByText("#inc-*")).toBeNull()
+  expect(server.routing.slack_channels).toHaveLength(2)
+})
+
+it("flags channels whose own instructions win, retains a failed pattern edit, and can turn off its on-join run", async () => {
+  const server = new RoutingSettingsServer()
+  server.routing.slack_channel_rules = [
+    { prefix: "inc-", prompt: "Triage.", kickoff: "Investigate." },
+  ]
+  server.routing.slack_channels.push({
+    channel_id: "CINC00001",
+    prompt: "Own instructions for this incident.",
+  })
+  server.render()
+  expect(await screen.findByText("On join")).toBeTruthy()
+  expect(
+    await screen.findByText("0 channels now · joins new ones automatically")
+  ).toBeTruthy()
+  expect(screen.getByText("Own instructions")).toBeTruthy()
+  fireEvent.click(
+    screen.getByRole("button", { name: "Edit instructions for #inc-*" })
+  )
+  const toggle = screen.getByRole("switch", {
+    name: "Start a run when Robin joins a new matching channel",
+  })
+  fireEvent.click(toggle)
+  server.failure = "Rule edit refused"
+  fireEvent.click(screen.getByRole("button", { name: "Save instructions" }))
+  expect(await screen.findByText("Rule edit refused")).toBeTruthy()
+  expect(server.routing.slack_channel_rules[0]?.kickoff).toBe("Investigate.")
+  fireEvent.click(screen.getByRole("button", { name: "Save instructions" }))
+  await vi.waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "Save instructions" })
+    ).toBeNull()
+  )
+  expect(server.routing.slack_channel_rules[0]).toEqual({
+    prefix: "inc-",
+    prompt: "Triage.",
+    kickoff: "",
+  })
+  expect(screen.queryByText("On join")).toBeNull()
 })
 
 it("offers only eligible unbound channels and never starts listening to an unverified pasted channel", async () => {

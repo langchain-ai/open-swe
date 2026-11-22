@@ -5,7 +5,6 @@ import {
   GearRegularIcon,
   InfoRegularIcon,
   SlidersHorizontalRegularIcon,
-  WarningRegularIcon,
 } from "@langchain/macaw-components/icons"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { ChartBarIcon } from "@phosphor-icons/react/dist/ssr/ChartBar"
@@ -104,7 +103,6 @@ const NAV: Array<NavGroup> = [
         label: "Integrations",
         icon: PuzzlePieceIcon,
       },
-      { to: "/admin/incidents", label: "Incidents", icon: WarningRegularIcon },
       { to: "/admin/operations", label: "Operations", icon: PulseIcon },
       {
         to: "/admin/audit-logs",

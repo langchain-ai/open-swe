@@ -15,10 +15,16 @@ import {
 import { RepositoryPicker } from "./RoutingBindingPickers"
 import { AddListeningChannel } from "./AddListeningChannel"
 import { ListeningChannelRow } from "./ListeningChannelRow"
+import { ListeningPatternRow, patternMatches } from "./ListeningPatternRow"
 
 type RoutingChange =
   | { kind: "repository"; repo: string; bound: boolean }
   | { kind: "channel"; id: string; prompt: string | null }
+  | {
+      kind: "rule"
+      prefix: string
+      instructions: { prompt: string; kickoff: string } | null
+    }
 
 const QUERY_KEY = ["routing"]
 
@@ -39,6 +45,15 @@ export function RoutingSettings() {
         if (change.kind === "repository") {
           if (change.bound) await api.configureRoutingRepository(change.repo)
           else await api.removeRoutingRepository(change.repo)
+        } else if (change.kind === "rule") {
+          if (change.instructions === null)
+            await api.removeRoutingChannelRule(change.prefix)
+          else
+            await api.configureRoutingChannelRule(
+              change.prefix,
+              change.instructions.prompt,
+              change.instructions.kickoff
+            )
         } else if (change.prompt === null)
           await api.removeRoutingChannel(change.id)
         else await api.configureRoutingChannel(change.id, change.prompt)
@@ -51,12 +66,20 @@ export function RoutingSettings() {
         if (!current) return current
         let repos = current.repos
         let channels = current.slack_channels
+        let rules = current.slack_channel_rules
         for (const change of changes) {
           if (change.kind === "repository") {
             repos = repos.filter(
               (row) => row.repo.toLowerCase() !== change.repo.toLowerCase()
             )
             if (change.bound) repos = [...repos, { repo: change.repo }]
+          } else if (change.kind === "rule") {
+            rules = rules.filter((row) => row.prefix !== change.prefix)
+            if (change.instructions !== null)
+              rules = [
+                ...rules,
+                { prefix: change.prefix, ...change.instructions },
+              ]
           } else {
             channels = channels.filter((row) => row.channel_id !== change.id)
             if (change.prompt !== null)
@@ -66,7 +89,12 @@ export function RoutingSettings() {
               ]
           }
         }
-        return { repos, slack_channels: channels }
+        return {
+          ...current,
+          repos,
+          slack_channels: channels,
+          slack_channel_rules: rules,
+        }
       })
       return { previous }
     },
@@ -97,6 +125,19 @@ export function RoutingSettings() {
     return null
   }
   const attentionCount = channelIds.filter((id) => attentionFor(id)).length
+  const rules = [...(routing.data?.slack_channel_rules ?? [])].sort((a, b) =>
+    a.prefix.localeCompare(b.prefix)
+  )
+  const prefixes = rules.map((rule) => rule.prefix)
+  const ruleEditError = (prefix: string) =>
+    save.variables?.some(
+      (change) =>
+        change.kind === "rule" &&
+        change.prefix === prefix &&
+        change.instructions !== null
+    )
+      ? save.error?.message
+      : undefined
 
   if (!routing.data)
     return (
@@ -192,10 +233,15 @@ export function RoutingSettings() {
                 Listening channels
               </h3>
               <p className="text-xs/relaxed text-secondary">
-                {channels.length === 0
+                {channels.length === 0 && rules.length === 0
                   ? "Not listening anywhere yet."
                   : [
-                      `${channels.length} ${channels.length === 1 ? "channel" : "channels"}`,
+                      channels.length
+                        ? `${channels.length} ${channels.length === 1 ? "channel" : "channels"}`
+                        : null,
+                      rules.length
+                        ? `${rules.length} name ${rules.length === 1 ? "pattern" : "patterns"}`
+                        : null,
                       attentionCount
                         ? `${attentionCount} ${attentionCount === 1 ? "needs" : "need"} attention`
                         : null,
@@ -206,27 +252,36 @@ export function RoutingSettings() {
             </div>
             <AddListeningChannel
               selected={channelIds}
+              prefixes={prefixes}
               disabled={disabled}
               error={save.error?.message}
               onSave={(id, prompt, onSuccess) =>
                 save.mutate([{ kind: "channel", id, prompt }], { onSuccess })
               }
+              onSavePattern={(prefix, prompt, kickoff, onSuccess) =>
+                save.mutate(
+                  [{ kind: "rule", prefix, instructions: { prompt, kickoff } }],
+                  { onSuccess }
+                )
+              }
             />
           </div>
           {save.error &&
             save.variables?.some(
-              (change) => change.kind === "channel" && change.prompt === null
+              (change) =>
+                (change.kind === "channel" && change.prompt === null) ||
+                (change.kind === "rule" && change.instructions === null)
             ) && (
               <div role="alert" className="mt-space-3">
                 <Banner intent="error">{save.error.message}</Banner>
               </div>
             )}
-          {channels.length === 0 ? (
+          {channels.length === 0 && rules.length === 0 ? (
             <EmptyState
               size="sm"
               icon={HashIcon}
               title="Robin isn’t listening to any channels."
-              description="Pick a channel and a template like Ask or Kitchen. Robin will reply there without an @mention."
+              description="Pick a channel, or a name prefix like inc-, and a template like Ask or Kitchen. Robin will reply there without an @mention."
               className="mt-space-4 rounded-lg border border-dashed border-default"
             />
           ) : (
@@ -270,10 +325,48 @@ export function RoutingSettings() {
                   />
                 )
               })}
+              {rules.map((rule) => (
+                <ListeningPatternRow
+                  key={`pattern:${rule.prefix}`}
+                  rule={rule}
+                  matches={
+                    directory.data
+                      ? patternMatches(
+                          rule.prefix,
+                          directory.data.channels,
+                          prefixes,
+                          channelIds
+                        )
+                      : null
+                  }
+                  disabled={disabled}
+                  error={ruleEditError(rule.prefix)}
+                  onSave={(prompt, kickoff, onSuccess) =>
+                    save.mutate(
+                      [
+                        {
+                          kind: "rule",
+                          prefix: rule.prefix,
+                          instructions: { prompt, kickoff },
+                        },
+                      ],
+                      { onSuccess }
+                    )
+                  }
+                  onRemove={() =>
+                    save.mutate([
+                      { kind: "rule", prefix: rule.prefix, instructions: null },
+                    ])
+                  }
+                />
+              ))}
             </ul>
           )}
           <div className="mt-space-3 flex flex-col items-start gap-space-2 text-xs text-secondary sm:flex-row sm:items-center sm:justify-between sm:gap-space-3">
-            <span>Only internal channels Robin has joined can be added.</span>
+            <span>
+              Only internal channels Robin has joined can be added. Patterns
+              cover public channels and join new matches.
+            </span>
             <RefreshSlackChannels
               refresh={directory.refresh}
               isRefreshing={directory.isLoading || directory.isRefreshing}

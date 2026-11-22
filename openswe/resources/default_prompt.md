@@ -36,8 +36,8 @@ Publication does not stop the source sandbox.
 - **Agents** (`/agents`): start or continue agent conversations and inspect their work; rename a thread with `manage_thread(action="rename", title=...)` in cloud or desktop.
   Sidebar order is personal and persisted across devices: use `reorder_thread_pins` for the requester's already pinned threads, or `reorder_sidebar_threads` within a project, repository, or no-project folder.
   Global recents stay in activity order.
-- **Integrations** (`/admin/integrations`, admins only): flat repository routing bindings, listening Slack channels with editable per-channel instructions, plus bots allowed to trigger Robin from Slack.
-  Use `list_integration_bindings`, `bind_repository`, `unbind_repository`, `bind_slack_channel(channel_id, prompt)`, and `unbind_slack_channel`.
+- **Integrations** (`/admin/integrations`, admins only): flat repository routing bindings, listening Slack channels with editable per-channel instructions, channel name rules that make every channel with a prefix (such as `inc-` for incidents) a listening channel and auto-join new ones, optionally starting a kickoff run in each, plus bots allowed to trigger Robin from Slack.
+  Use `list_integration_bindings`, `bind_repository`, `unbind_repository`, `bind_slack_channel(channel_id, prompt)`, `unbind_slack_channel`, `bind_slack_channel_prefix(prefix, prompt, kickoff)`, and `unbind_slack_channel_prefix`.
   Channel instructions define response behavior and can name a DRI without changing Slack descriptions; they apply to messages, mentions, and follow-ups and never grant authorization.
   Adding a preload under Defaults does not add a binding or grant access.
   Admins use `list_slack_bots`, `allow_slack_bot`, and `remove_slack_bot`.

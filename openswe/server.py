@@ -127,9 +127,11 @@ from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
 from openswe.routing.tools import (
     bind_repository,
     bind_slack_channel,
+    bind_slack_channel_prefix,
     list_integration_bindings,
     unbind_repository,
     unbind_slack_channel,
+    unbind_slack_channel_prefix,
 )
 from openswe.run_config import RunConfig
 from openswe.runtime.constants import (
@@ -565,9 +567,9 @@ async def _resolve_user_custom_instructions(login: str | None) -> str | None:
         return None
 
 
-# An incident channel's kickoff run acts for no one and reads untrusted channel
+# A channel rule's kickoff run acts for no one and reads untrusted channel
 # messages, so it only researches and replies in its own thread.
-INCIDENT_KICKOFF_EXCLUDED_TOOLS: frozenset[str] = frozenset(
+CHANNEL_KICKOFF_EXCLUDED_TOOLS: frozenset[str] = frozenset(
     {
         "task",
         "start_thread",
@@ -607,6 +609,8 @@ INCIDENT_KICKOFF_EXCLUDED_TOOLS: frozenset[str] = frozenset(
         "unbind_repository",
         "bind_slack_channel",
         "unbind_slack_channel",
+        "bind_slack_channel_prefix",
+        "unbind_slack_channel_prefix",
         "configure_execution_defaults",
         "publish_execution_image",
         "rebuild_execution_image",
@@ -679,7 +683,9 @@ ADMIN_TOOLS = (
     bind_repository,
     unbind_repository,
     bind_slack_channel,
+    bind_slack_channel_prefix,
     unbind_slack_channel,
+    unbind_slack_channel_prefix,
     list_automations,
     create_automation,
     update_automation,
@@ -2070,12 +2076,12 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         static_tools = [
             tool for tool in static_tools if tool not in (expedite_pr_approval, merge_expedited_pr)
         ]
-    incident_kickoff = cfg.source == "incidents_agent"
-    if incident_kickoff:
+    channel_kickoff = cfg.source == "incidents_agent"
+    if channel_kickoff:
         static_tools = [
             tool
             for tool in static_tools
-            if _registered_tool_name(tool) not in INCIDENT_KICKOFF_EXCLUDED_TOOLS
+            if _registered_tool_name(tool) not in CHANNEL_KICKOFF_EXCLUDED_TOOLS
         ]
     if settings.get("implementation_walkthrough_enabled") is True:
         static_tools = [
@@ -2089,8 +2095,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     excluded_tools = (
         _slack_ask_excluded_tools(cfg)
         if slack_ask_mode
-        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_KICKOFF_EXCLUDED_TOOLS
-        if incident_kickoff
+        else DEEP_AGENT_EXCLUDED_TOOLS | CHANNEL_KICKOFF_EXCLUDED_TOOLS
+        if channel_kickoff
         else DEEP_AGENT_EXCLUDED_TOOLS
     )
     # A client's tool replaces any server tool of the same name, so the endpoint's
@@ -2280,7 +2286,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     surface.excluded = (
         _slack_ask_excluded_tools(cfg)
         if slack_ask_mode
-        else DEEP_AGENT_EXCLUDED_TOOLS | INCIDENT_KICKOFF_EXCLUDED_TOOLS
-        if incident_kickoff
+        else DEEP_AGENT_EXCLUDED_TOOLS | CHANNEL_KICKOFF_EXCLUDED_TOOLS
+        if channel_kickoff
         else DEEP_AGENT_EXCLUDED_TOOLS
     )

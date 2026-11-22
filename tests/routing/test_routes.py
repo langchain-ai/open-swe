@@ -141,6 +141,7 @@ async def test_member_can_read_bindings_but_only_admin_can_change_them(
         assert (await client.get("/dashboard/api/routing")).json() == {
             "repos": [],
             "slack_channels": [],
+            "slack_channel_rules": [],
         }
         path = "/dashboard/api/routing/repositories/acme/widgets"
         assert (await client.put(path)).status_code == 403
@@ -153,4 +154,24 @@ async def test_member_can_read_bindings_but_only_admin_can_change_them(
         assert (await client.get("/dashboard/api/routing")).json() == {
             "repos": [{"repo": "acme/widgets"}],
             "slack_channels": [],
+            "slack_channel_rules": [],
         }
+
+
+async def test_channel_rules_are_written_by_prefix(client: httpx.AsyncClient) -> None:
+    path = "/dashboard/api/routing/slack-channel-rules/INC-"
+    saved = await client.put(path, json={"prompt": "Answer responders.", "kickoff": "Investigate."})
+    assert saved.status_code == 200
+    assert saved.json() == {
+        "prefix": "inc-",
+        "prompt": "Answer responders.",
+        "kickoff": "Investigate.",
+    }
+    rules = (await INTEGRATIONS.settings()).slack_channel_rules
+    assert [rule.model_dump() for rule in rules] == [saved.json()]
+    refused = await client.put(
+        "/dashboard/api/routing/slack-channel-rules/inc%20x", json={"prompt": ""}
+    )
+    assert refused.status_code == 400
+    assert (await client.delete(path)).status_code == 204
+    assert (await INTEGRATIONS.settings()).slack_channel_rules == []

@@ -80,6 +80,8 @@ _TOOL_MODULES = {
     "unbind_repository": "openswe.routing.tools",
     "bind_slack_channel": "openswe.routing.tools",
     "unbind_slack_channel": "openswe.routing.tools",
+    "bind_slack_channel_prefix": "openswe.routing.tools",
+    "unbind_slack_channel_prefix": "openswe.routing.tools",
     "send_announcement": ".send_announcement",
     "start_thread": ".threads",
     "slack_add_reaction": "openswe.slack.tools.add_reaction",
@@ -181,6 +183,8 @@ __all__ = [
     "unbind_repository",
     "bind_slack_channel",
     "unbind_slack_channel",
+    "bind_slack_channel_prefix",
+    "unbind_slack_channel_prefix",
     "send_announcement",
     "start_thread",
     "slack_add_reaction",
@@ -208,9 +212,11 @@ if TYPE_CHECKING:
     from openswe.routing.tools import (
         bind_repository,
         bind_slack_channel,
+        bind_slack_channel_prefix,
         list_integration_bindings,
         unbind_repository,
         unbind_slack_channel,
+        unbind_slack_channel_prefix,
     )
     from openswe.slack.tools.add_reaction import slack_add_reaction
     from openswe.slack.tools.attach_html import slack_attach_html

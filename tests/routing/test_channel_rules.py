@@ -1,4 +1,4 @@
-"""Joining new incident channels and kicking off an investigation."""
+"""Joining new channels a channel name rule matches and starting its kickoff run."""
 
 import uuid
 from contextlib import asynccontextmanager
@@ -7,11 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
 
-from openswe.incidents import channels
-from openswe.incidents.models import IncidentPolicy
 from openswe.jobs.queue import Job
+from openswe.routing import channel_rules as channels
+from openswe.routing.store import ChannelRuleSettings
 from openswe.slack.channels import SlackChannel
 
 CHANNEL = {
@@ -29,8 +28,12 @@ CHANNEL = {
 
 @pytest.fixture
 def slack(monkeypatch):
-    policy = IncidentPolicy(enabled=True, workspace_id="T1", slack_app_id="A1")
-    monkeypatch.setattr(channels.service, "get_policy", AsyncMock(return_value=policy))
+    rule = ChannelRuleSettings(prefix="inc-", prompt="", kickoff="Investigate the incident.")
+    monkeypatch.setattr(
+        channels.INTEGRATIONS,
+        "channel_rule",
+        AsyncMock(side_effect=lambda name: rule if name.startswith("inc-") else None),
+    )
     client = SimpleNamespace(
         conversations_join=AsyncMock(), chat_postMessage=AsyncMock(return_value={"ts": "5.0"})
     )
@@ -69,18 +72,14 @@ async def queued(kind: str) -> Job:
     return job(kind, call.args[1])
 
 
-async def test_a_new_incident_channel_is_joined_and_investigated_in_a_thread(slack):
+async def test_a_new_matching_channel_is_joined_and_kicked_off_in_a_thread(slack):
     response = await channels.handle_slack_event(
-        {
-            "team_id": "T1",
-            "api_app_id": "A1",
-            "event": {"type": "channel_created", "channel": {"id": "C1", "name": "inc-api"}},
-        }
+        {"type": "channel_created", "channel": {"id": "C1", "name": "inc-api"}}
     )
     assert response == {"status": "accepted"}
 
-    await channels.IncidentChannel.join(await queued(channels.JOIN_JOB))
-    await channels.IncidentChannel.investigate(await queued(channels.INVESTIGATE_JOB))
+    await channels.RuleChannel.join(await queued(channels.JOIN_JOB))
+    await channels.RuleChannel.kickoff(await queued(channels.KICKOFF_JOB))
 
     slack.conversations_join.assert_awaited_once_with(channel="C1")
     channels.resolve_slack_thread_id.assert_awaited_once_with("C1", "5.0")
@@ -93,15 +92,27 @@ async def test_a_new_incident_channel_is_joined_and_investigated_in_a_thread(sla
         "channel_id": "C1",
         "thread_ts": "5.0",
     }
-    assert "#inc-api" in str(run.kwargs["input"]["messages"][-1]["content"])
+    task = str(run.kwargs["input"]["messages"][-1]["content"])
+    assert "#inc-api" in task
+    assert "Investigate the incident." in task
+
+
+async def test_a_rule_without_kickoff_only_joins(slack):
+    channels.INTEGRATIONS.channel_rule.side_effect = lambda name: ChannelRuleSettings(
+        prefix="inc-", prompt="", kickoff=""
+    )
+
+    await channels.RuleChannel.join(job(channels.JOIN_JOB, {"channel_id": "C1", "name": "inc-api"}))
+
+    slack.conversations_join.assert_awaited_once_with(channel="C1")
+    slack.chat_postMessage.assert_not_awaited()
+    channels.queue.schedule.assert_not_awaited()
 
 
 async def test_a_channel_robin_already_joined_gets_no_second_kickoff(slack):
     SlackChannel.fetch.return_value = {**CHANNEL, "is_member": True}
 
-    await channels.IncidentChannel.join(
-        job(channels.JOIN_JOB, {"channel_id": "C1", "name": "inc-api"})
-    )
+    await channels.RuleChannel.join(job(channels.JOIN_JOB, {"channel_id": "C1", "name": "inc-api"}))
 
     slack.chat_postMessage.assert_not_awaited()
     channels.queue.schedule.assert_not_awaited()
@@ -111,39 +122,24 @@ async def test_a_retried_join_still_kicks_off_after_its_own_join(slack):
     SlackChannel.fetch.return_value = {**CHANNEL, "is_member": True}
     retry = job(channels.JOIN_JOB, {"channel_id": "C1", "name": "inc-api"}, attempts=1)
 
-    await channels.IncidentChannel.join(retry)
+    await channels.RuleChannel.join(retry)
 
     slack.chat_postMessage.assert_awaited_once()
-    assert (await queued(channels.INVESTIGATE_JOB)).payload["thread_ts"] == "5.0"
+    assert (await queued(channels.KICKOFF_JOB)).payload["thread_ts"] == "5.0"
 
 
 async def test_other_channels_fall_through_to_ordinary_slack(slack):
-    base = {"team_id": "T1", "api_app_id": "A1"}
     other = {"type": "channel_created", "channel": {"id": "C2", "name": "eng"}}
-    assert await channels.handle_slack_event({**base, "event": other}) is None
+    assert await channels.handle_slack_event(other) is None
     message = {"type": "message", "channel": "C1", "text": "hi"}
-    assert await channels.handle_slack_event({**base, "event": message}) is None
-
-
-@pytest.mark.parametrize("field", ["team_id", "api_app_id"])
-async def test_wrong_installation_is_rejected(slack, field):
-    payload = {
-        "team_id": "T1",
-        "api_app_id": "A1",
-        "event": {"type": "channel_created", "channel": {"id": "C1", "name": "inc-api"}},
-        field: "wrong",
-    }
-    with pytest.raises(HTTPException) as error:
-        await channels.handle_slack_event(payload)
-    assert error.value.status_code == 401
-    channels.queue.schedule.assert_not_awaited()
+    assert await channels.handle_slack_event(message) is None
 
 
 async def test_a_retried_join_skips_a_channel_shared_outside_the_workspace(slack):
     SlackChannel.fetch.return_value = {**CHANNEL, "is_member": True, "is_ext_shared": True}
     retry = job(channels.JOIN_JOB, {"channel_id": "C1", "name": "inc-api"}, attempts=1)
 
-    await channels.IncidentChannel.join(retry)
+    await channels.RuleChannel.join(retry)
 
     slack.conversations_join.assert_not_awaited()
     slack.chat_postMessage.assert_not_awaited()
@@ -160,10 +156,10 @@ async def test_a_retried_join_reuses_only_its_own_recent_notice(slack, monkeypat
     ]
     retry = job(channels.JOIN_JOB, {"channel_id": "C1", "name": "inc-api"}, attempts=1)
 
-    await channels.IncidentChannel.join(retry)
+    await channels.RuleChannel.join(retry)
 
     slack.chat_postMessage.assert_not_awaited()
-    assert (await queued(channels.INVESTIGATE_JOB)).payload["thread_ts"] == f"{now + 2:.6f}"
+    assert (await queued(channels.KICKOFF_JOB)).payload["thread_ts"] == f"{now + 2:.6f}"
 
 
 @pytest.mark.parametrize("started", [True, False])
@@ -175,11 +171,11 @@ async def test_a_retried_investigation_starts_a_run_only_if_none_started(
     runs = SimpleNamespace(latest_run=AsyncMock(return_value=object() if started else None))
     monkeypatch.setattr(channels.RUNTIMES, "runs_on", lambda runtime: runs)
     retry = job(
-        channels.INVESTIGATE_JOB,
-        {"channel_id": "C1", "name": "inc-api", "thread_ts": "5.0"},
+        channels.KICKOFF_JOB,
+        {"channel_id": "C1", "name": "inc-api", "thread_ts": "5.0", "kickoff": "Investigate."},
         attempts=1,
     )
 
-    await channels.IncidentChannel.investigate(retry)
+    await channels.RuleChannel.kickoff(retry)
 
     assert channels.create_durable_run.await_count == int(not started)

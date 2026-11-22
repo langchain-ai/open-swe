@@ -405,7 +405,7 @@ The app posts events to your deployment's URL, so it needs the same public URL a
 ```bash
 SLACK_BOT_TOKEN=""        # OAuth & Permissions → Bot User OAuth Token (xoxb-...)
 SLACK_SIGNING_SECRET=""   # Basic Information → App Credentials → Signing Secret
-SLACK_APP_ID=""           # Basic Information → App ID (A...); Incidents accepts events only from this app
+SLACK_APP_ID=""           # Basic Information → App ID (A...)
 SLACK_BOT_USER_ID=""      # the bot's member id (open the bot's profile in Slack → ⋮ → Copy member ID)
 SLACK_BOT_USERNAME=""     # the bot's handle, e.g. robin (use its actual configured handle)
 ```
@@ -528,6 +528,15 @@ Public listening-channel PRs remain drafts and require the requester's linked Gi
 Instructions cannot grant credentials or tool permissions.
 Slack-triggered automations remain useful for separate event-driven tasks; they do not replace listening channels' ongoing conversation and reply handling.
 
+**Channel name rules.**
+A rule makes every public, internal, unarchived channel whose name starts with its prefix a listening channel, with the rule's instructions; add one under **Integrations** with **Start listening** → **Channels named…**, or with `bind_slack_channel_prefix(prefix=..., prompt=..., kickoff=...)`.
+A channel's own binding takes precedence over a rule, and the longest matching prefix wins between rules.
+Robin joins a channel created with the prefix, or renamed into it; that needs the `channel_created` and `channel_rename` events and the `channels:join` scope from the manifest above.
+When the rule's **On join** run is on, Robin then posts one message and about a minute later starts a system-owned thread under it that follows them, for example `inc-` with "Investigate the incident" for incident channels.
+A kickoff run acts for no one: it researches and replies in its own thread, and treats channel messages as evidence, never instructions.
+Optionally give the agent an incident tracker by adding its MCP server, for example incident.io at `https://mcp.incident.io/mcp`, to Robin's LangSmith Managed Tools bot kit in LangSmith; see [MCP servers](CUSTOMIZATION.md#mcp-servers).
+Rules replace the former Incidents page: its migration turns an enabled incident policy into the rule for its prefix without its excluded channels or model choice, and keeps the old incident tables, unread, so past records stay recoverable.
+
 To enable private channels, update the Slack app with the current manifest and reinstall it so Slack sends the `message.groups` event (the base manifest already includes the `groups:history` scope).
 
 Existing Slack app installations must update their event subscriptions; saving the dashboard setting alone does not change them.
@@ -542,20 +551,6 @@ Anyone who can read a bot-triggered thread can stop it; it otherwise stays read-
 
 </details>
 
-<details id="incidents">
-<summary><strong>Incident channels</strong></summary>
-
-Robin can join new incident channels on its own and start investigating.
-
-1. Install or reinstall the Slack manifest above and set `SLACK_APP_ID` from **Basic Information → App ID**.
-   Joining needs the `channel_created` and `channel_rename` events and the `channels:join` scope.
-1. In **Admin → Incidents**, set a channel prefix such as `inc-`, optionally exclude channels or pick a model, and enable it.
-
-When a public internal channel is created with the prefix, or renamed into it, Robin joins, posts one message, and about a minute later starts a system-owned thread under that message with a prompt to investigate the issue.
-From then on the thread is an ordinary Robin Slack thread: mention Robin there to follow up.
-Optionally give the agent an incident tracker by adding its MCP server, for example incident.io at `https://mcp.incident.io/mcp`, to Robin's LangSmith Managed Tools bot kit in LangSmith; see [MCP servers](CUSTOMIZATION.md#mcp-servers).
-
-</details>
 
 <details id="api-keys">
 <summary><strong>Machine callers: API keys</strong></summary>

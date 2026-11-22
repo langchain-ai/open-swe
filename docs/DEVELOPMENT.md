@@ -200,9 +200,9 @@ The App's **Advanced** tab lists every delivery and its response, and ngrok's in
 Use **Defaults** (`/settings`) for global behavior and sandbox configuration, and **Integrations** (`/admin/integrations`) to bind repositories and configure listening Slack channels and their per-channel instructions.
 Bindings do not select different execution settings; see [Defaults, routing, and sandbox images](reference/execution.md).
 
-**Incident channels.**
-Follow [incident channel setup](INSTALLATION.md#incidents) and set `SLACK_APP_ID`.
-The kickoff run is dispatched straight from the Slack webhook on the main `agent` graph, so `make dev` or `make dev-ui` is all that is needed.
+**Channel name rules.**
+Add one under **Integrations** with **Start listening** → **Channels named…**; see [channel name rules](INSTALLATION.md#5-create-the-slack-app).
+A rule's kickoff run is dispatched straight from the Slack webhook on the main `agent` graph, so `make dev` or `make dev-ui` is all that is needed.
 
 Record the worktree, process IDs, fixed tunnel domain, and state location in ignored `logs/local-dev/` notes in the primary checkout so the next session can reuse them.
 

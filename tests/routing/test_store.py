@@ -87,3 +87,43 @@ async def test_channel_reconfiguration_keeps_one_binding_and_removal_is_idempote
     await INTEGRATIONS.remove_channel("C0TEST")
     assert (await INTEGRATIONS.settings()).slack_channels == []
     assert not await INTEGRATIONS.listens_to_channel("C0TEST")
+
+
+async def test_a_channel_rule_listens_in_public_channels_named_with_its_prefix() -> None:
+    public: JsonObject = {
+        "is_channel": True,
+        "is_private": False,
+        "is_ext_shared": False,
+        "is_pending_ext_shared": False,
+    }
+    await SlackChannel.save_all(
+        {**public, "id": "C0INC", "name": "inc-42-db"},
+        {**public, "id": "C0SEV", "name": "inc-sev1-api"},
+        {**public, "id": "C0OLD", "name": "inc-41", "is_archived": True},
+        {**public, "id": "C0EXT", "name": "inc-43", "is_ext_shared": True},
+        {**public, "id": "C0ENG", "name": "eng-inc-1"},
+    )
+    await INTEGRATIONS.configure_channel_rule(
+        "#INC-", prompt="Answer responders.", kickoff="Investigate.", actor=None
+    )
+    await INTEGRATIONS.configure_channel_rule(
+        "inc-sev", prompt="Page the DRI.", kickoff="", actor=None
+    )
+
+    assert await INTEGRATIONS.channel_prompt("C0INC") == "Answer responders."
+    assert await INTEGRATIONS.channel_prompt("C0SEV") == "Page the DRI."
+    for channel_id in ("C0OLD", "C0EXT", "C0ENG", "C0UNKNOWN"):
+        assert not await INTEGRATIONS.listens_to_channel(channel_id)
+    assert (await INTEGRATIONS.channel_rule("inc-7")).kickoff == "Investigate."
+    assert await INTEGRATIONS.channel_rule("eng") is None
+
+    async with postgres.session() as session:
+        session.add(SlackChannelBinding(channel_id="C0INC", prompt="Own instructions."))
+    assert await INTEGRATIONS.channel_prompt("C0INC") == "Own instructions."
+
+    await INTEGRATIONS.remove_channel_rule("inc-")
+    assert await INTEGRATIONS.channel_prompt("C0INC") == "Own instructions."
+    assert await INTEGRATIONS.channel_prompt("C0SEV") == "Page the DRI."
+    assert await INTEGRATIONS.channel_rule("inc-7") is None
+    with pytest.raises(ValueError, match="prefix"):
+        await INTEGRATIONS.configure_channel_rule("inc *", prompt="", kickoff="", actor=None)

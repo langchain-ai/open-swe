@@ -74,7 +74,7 @@ def _dm_payload(
 def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     slack_events.reset_slack_event_claims()
     monkeypatch.setattr(
-        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+        "openswe.routing.channel_rules.handle_slack_event", AsyncMock(return_value=None)
     )
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:

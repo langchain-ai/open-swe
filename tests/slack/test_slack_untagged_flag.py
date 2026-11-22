@@ -131,7 +131,7 @@ def _patch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(slack_routes, "allow_solo_thread_followup", AsyncMock(return_value=False))
     monkeypatch.setattr(slack_routes, "is_listening_channel", AsyncMock(return_value=False))
     monkeypatch.setattr(
-        "openswe.incidents.channels.handle_slack_event", AsyncMock(return_value=None)
+        "openswe.routing.channel_rules.handle_slack_event", AsyncMock(return_value=None)
     )
 
     async def channel_context(_channel_id: str, *, use_cache: bool = True) -> SlackChannelContext:

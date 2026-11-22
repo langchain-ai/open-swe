@@ -41,9 +41,6 @@ from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLI
 from openswe.human_review.settling import SETTLE_JOB as HUMAN_REVIEW_SETTLE
 from openswe.human_review.settling import SettleTarget
 from openswe.human_review.standard import run_deadline, settle_pull_request, settle_repository
-from openswe.incidents.channels import INVESTIGATE_JOB as INCIDENT_INVESTIGATE
-from openswe.incidents.channels import JOIN_JOB as INCIDENT_JOIN
-from openswe.incidents.channels import IncidentChannel
 from openswe.jobs import queue
 from openswe.jobs.cron_import import import_agent_server_crons
 from openswe.jobs.queue import Job
@@ -67,6 +64,9 @@ from openswe.plugins.records import (
 )
 from openswe.proactivity.heartbeat import ProactiveHeartbeat
 from openswe.review.approval_withdrawal import ApprovalWithdrawal
+from openswe.routing.channel_rules import JOIN_JOB as CHANNEL_RULE_JOIN
+from openswe.routing.channel_rules import KICKOFF_JOB as CHANNEL_RULE_KICKOFF
+from openswe.routing.channel_rules import RuleChannel
 
 __all__ = ["WORKER"]
 from openswe.execution_images import EXECUTION_IMAGES
@@ -117,8 +117,8 @@ WORKER.register(ApprovalWithdrawal.JOB)(ApprovalWithdrawal.retry)
 WORKER.register(ReviewScoutTarget.RETRY_JOB)(ReviewScoutTarget.retry)
 WORKER.register(TASK_MESSAGE_DELIVERY)(TaskMessage.retry)
 WORKER.register(ProactiveHeartbeat.JOB)(ProactiveHeartbeat.run)
-WORKER.register(INCIDENT_JOIN)(IncidentChannel.join)
-WORKER.register(INCIDENT_INVESTIGATE)(IncidentChannel.investigate)
+WORKER.register(CHANNEL_RULE_JOIN)(RuleChannel.join)
+WORKER.register(CHANNEL_RULE_KICKOFF)(RuleChannel.kickoff)
 WORKER.register(MANAGED_TOOLS_CONSENT)(ConsentWait.run)
 WORKER.register(MANAGED_TOOLS_CARD_RESUME)(ConnectCard.resume_job)
 

@@ -1467,6 +1467,45 @@
         "maxLength": 32000,
         "type": "string"
       },
+      "ChannelRuleConfiguration": {
+        "additionalProperties": false,
+        "properties": {
+          "kickoff": {
+            "$ref": "#/components/schemas/ChannelPrompt",
+            "default": ""
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/ChannelPrompt"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "ChannelRuleConfiguration",
+        "type": "object"
+      },
+      "ChannelRuleSettings": {
+        "additionalProperties": false,
+        "properties": {
+          "kickoff": {
+            "$ref": "#/components/schemas/ChannelPrompt",
+            "default": ""
+          },
+          "prefix": {
+            "title": "Prefix",
+            "type": "string"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/ChannelPrompt"
+          }
+        },
+        "required": [
+          "prefix",
+          "prompt"
+        ],
+        "title": "ChannelRuleSettings",
+        "type": "object"
+      },
       "ChannelSettings": {
         "additionalProperties": false,
         "properties": {
@@ -2607,20 +2646,6 @@
         "title": "DocumentWrite",
         "type": "object"
       },
-      "DuplicateIncidentResponse": {
-        "properties": {
-          "status": {
-            "const": "duplicate",
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status"
-        ],
-        "title": "DuplicateIncidentResponse",
-        "type": "object"
-      },
       "EnabledReviewRepoUpdate": {
         "properties": {
           "enabled": {
@@ -3682,27 +3707,6 @@
         "title": "HumanReviewRequestBody",
         "type": "object"
       },
-      "IncidentSettingsBody": {
-        "additionalProperties": false,
-        "properties": {
-          "expected_version": {
-            "minimum": 0.0,
-            "title": "Expected Version",
-            "type": "integer"
-          },
-          "policy": {
-            "additionalProperties": true,
-            "title": "Policy",
-            "type": "object"
-          }
-        },
-        "required": [
-          "expected_version",
-          "policy"
-        ],
-        "title": "IncidentSettingsBody",
-        "type": "object"
-      },
       "InstallBody": {
         "properties": {
           "permissions": {
@@ -3763,6 +3767,13 @@
             "title": "Repos",
             "type": "array"
           },
+          "slack_channel_rules": {
+            "items": {
+              "$ref": "#/components/schemas/ChannelRuleSettings"
+            },
+            "title": "Slack Channel Rules",
+            "type": "array"
+          },
           "slack_channels": {
             "items": {
               "$ref": "#/components/schemas/ChannelSettings"
@@ -3773,7 +3784,8 @@
         },
         "required": [
           "repos",
-          "slack_channels"
+          "slack_channels",
+          "slack_channel_rules"
         ],
         "title": "IntegrationSettings",
         "type": "object"
@@ -13145,82 +13157,6 @@
         "tags": [
           "dashboard",
           "auth"
-        ]
-      }
-    },
-    "/dashboard/api/incidents/settings": {
-      "get": {
-        "operationId": "get_settings_dashboard_api_incidents_settings_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Settings Dashboard Api Incidents Settings Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Get Settings",
-        "tags": [
-          "dashboard",
-          "incidents"
-        ]
-      },
-      "patch": {
-        "operationId": "update_settings_dashboard_api_incidents_settings_patch",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IncidentSettingsBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Update Settings Dashboard Api Incidents Settings Patch",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "DashboardSession": []
-          }
-        ],
-        "summary": "Update Settings",
-        "tags": [
-          "dashboard",
-          "incidents"
         ]
       }
     },
@@ -22894,6 +22830,103 @@
         ]
       }
     },
+    "/dashboard/api/routing/slack-channel-rules/{prefix}": {
+      "delete": {
+        "operationId": "api_remove_slack_channel_rule_dashboard_api_routing_slack_channel_rules__prefix__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prefix",
+            "required": true,
+            "schema": {
+              "title": "Prefix",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Remove Slack Channel Rule",
+        "tags": [
+          "dashboard",
+          "routing"
+        ]
+      },
+      "put": {
+        "operationId": "api_configure_slack_channel_rule_dashboard_api_routing_slack_channel_rules__prefix__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prefix",
+            "required": true,
+            "schema": {
+              "title": "Prefix",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelRuleConfiguration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelRuleSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Configure Slack Channel Rule",
+        "tags": [
+          "dashboard",
+          "routing"
+        ]
+      }
+    },
     "/dashboard/api/routing/slack-channels/{channel_id}": {
       "delete": {
         "operationId": "api_remove_slack_channel_dashboard_api_routing_slack_channels__channel_id__delete",
@@ -28106,9 +28139,6 @@
                     },
                     {
                       "$ref": "#/components/schemas/ChallengeResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/DuplicateIncidentResponse"
                     }
                   ],
                   "title": "Response Slack Webhook Webhooks Slack Post"

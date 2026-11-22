@@ -24,7 +24,7 @@ import type { SlackChannelOption } from "@/lib/api"
 import { slackChannelHref } from "@/lib/slack-channels"
 import { ChannelPromptForm } from "./ChannelPromptEditor"
 
-function SlackMark() {
+export function SlackMark() {
   return (
     <svg aria-hidden="true" viewBox="0 0 2447.6 2452.5" className="size-4">
       <g clipRule="evenodd" fillRule="evenodd">

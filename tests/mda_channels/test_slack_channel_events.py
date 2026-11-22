@@ -19,7 +19,6 @@ _SERVICE_SECRET = "5e" * 32  # noqa: S105 - test value
 @pytest.fixture(autouse=True)
 def _setup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MDA_SERVICE_SECRET", _SERVICE_SECRET)
-    monkeypatch.setenv("SLACK_APP_ID", "A1")
 
 
 def _call(kind: str, channel: JsonValue) -> dict[str, JsonValue]:
@@ -73,16 +72,13 @@ async def test_a_channel_change_keeps_the_backends_records(
     monkeypatch: pytest.MonkeyPatch, kind: str, channel: JsonValue, directory: bool
 ) -> None:
     observe = AsyncMock()
-    incident = AsyncMock(return_value=None)
+    rules = AsyncMock(return_value=None)
     monkeypatch.setattr(slack_channel_events.SlackChannel, "observe", observe)
-    monkeypatch.setattr(slack_channel_events.incidents, "handle_slack_event", incident)
+    monkeypatch.setattr(slack_channel_events.channel_rules, "handle_slack_event", rules)
 
     response = await _post(_call(kind, channel))
 
     assert response.status_code == 200
     assert response.json() is None, "it starts no run"
     assert observe.await_count == int(directory)
-    # Incidents sees Slack's envelope, with the workspace MDA verified and this app.
-    envelope = incident.await_args.args[0]
-    assert envelope["event"] == {"type": kind, "channel": channel}
-    assert (envelope["team_id"], envelope["api_app_id"]) == ("T1", "A1")
+    assert rules.await_args.args[0] == {"type": kind, "channel": channel}

@@ -58,6 +58,16 @@ class SlackChannelBinding(IntegrationRecord):
     prompt: Mapped[str] = mapped_column(Text, default="", server_default="")
 
 
+class SlackChannelRule(IntegrationRecord):
+    """Listening in every public internal channel whose name starts with ``prefix``."""
+
+    __tablename__ = "integration_slack_channel_rule"
+
+    prefix: Mapped[str] = mapped_column(Text, unique=True)
+    prompt: Mapped[str] = mapped_column(Text, default="", server_default="")
+    kickoff: Mapped[str] = mapped_column(Text, default="", server_default="")
+
+
 class RepositorySettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -71,9 +81,18 @@ class ChannelSettings(BaseModel):
     prompt: ChannelPrompt
 
 
+class ChannelRuleSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prefix: str
+    prompt: ChannelPrompt
+    kickoff: ChannelPrompt = ""
+
+
 class IntegrationSettings(BaseModel):
     repos: list[RepositorySettings]
     slack_channels: list[ChannelSettings]
+    slack_channel_rules: list[ChannelRuleSettings]
 
 
 class IntegrationStore:
@@ -83,6 +102,13 @@ class IntegrationStore:
         if not re.fullmatch(r"[CG][A-Z0-9]+", channel_id):
             raise ValueError("Choose a Slack channel ID starting with C or G")
         return channel_id
+
+    @staticmethod
+    def channel_prefix(raw: str) -> str:
+        prefix = raw.strip().removeprefix("#").lower()
+        if not re.fullmatch(r"[a-z0-9_-]{1,60}", prefix):
+            raise ValueError("Use a nonempty Slack channel name prefix, such as inc-")
+        return prefix
 
     async def settings(self, *, session: AsyncSession | None = None) -> IntegrationSettings:
         async with postgres.session(session) as session:
@@ -98,6 +124,9 @@ class IntegrationStore:
                     select(SlackChannelBinding).order_by(SlackChannelBinding.channel_id)
                 )
             )
+            rules = list(
+                await session.scalars(select(SlackChannelRule).order_by(SlackChannelRule.prefix))
+            )
         return IntegrationSettings(
             repos=[RepositorySettings(repo=name) for name in repos],
             slack_channels=[
@@ -106,6 +135,10 @@ class IntegrationStore:
                     prompt=row.prompt,
                 )
                 for row in channels
+            ],
+            slack_channel_rules=[
+                ChannelRuleSettings(prefix=row.prefix, prompt=row.prompt, kickoff=row.kickoff)
+                for row in rules
             ],
         )
 
@@ -169,12 +202,40 @@ class IntegrationStore:
         await Topic.ROUTING.invalidate()
 
     async def channel_prompt(self, channel_id: str) -> str | None:
+        """The channel's listening instructions: its own binding's, else its name rule's."""
+        normalized = channel_id.strip().upper()
         async with postgres.session() as session:
-            return await session.scalar(
+            bound = await session.scalar(
                 select(SlackChannelBinding.prompt).where(
-                    SlackChannelBinding.channel_id == channel_id.strip().upper()
+                    SlackChannelBinding.channel_id == normalized
                 )
             )
+            if bound is not None:
+                return bound
+            matches = (
+                await session.execute(
+                    select(SlackChannelRule.prompt, SlackChannel)
+                    .join(
+                        SlackChannel, func.starts_with(SlackChannel.name, SlackChannelRule.prefix)
+                    )
+                    .where(SlackChannel.id == normalized, SlackChannel.listed)
+                    .order_by(func.length(SlackChannelRule.prefix).desc())
+                )
+            ).all()
+        return next((prompt for prompt, channel in matches if channel.public), None)
+
+    async def channel_rule(self, name: str) -> ChannelRuleSettings | None:
+        """The rule with the longest prefix of channel ``name``, if any."""
+        async with postgres.session() as session:
+            row = await session.scalar(
+                select(SlackChannelRule)
+                .where(func.starts_with(name.lower(), SlackChannelRule.prefix))
+                .order_by(func.length(SlackChannelRule.prefix).desc())
+                .limit(1)
+            )
+        if row is None:
+            return None
+        return ChannelRuleSettings(prefix=row.prefix, prompt=row.prompt, kickoff=row.kickoff)
 
     async def listens_to_channel(self, channel_id: str) -> bool:
         return await self.channel_prompt(channel_id) is not None
@@ -227,6 +288,48 @@ class IntegrationStore:
                 delete(SlackChannelBinding).where(SlackChannelBinding.channel_id == normalized)
             )
 
+        await Topic.ROUTING.invalidate()
+
+    async def configure_channel_rule(
+        self,
+        prefix: str,
+        *,
+        prompt: str,
+        kickoff: str,
+        actor: UUID | None,
+    ) -> ChannelRuleSettings:
+        settings = ChannelRuleSettings(
+            prefix=self.channel_prefix(prefix), prompt=prompt, kickoff=kickoff
+        )
+        async with postgres.session() as session:
+            upsert = insert(SlackChannelRule).values(
+                id=uuid7(),
+                prefix=settings.prefix,
+                prompt=prompt,
+                kickoff=kickoff,
+                created_by=actor,
+                updated_by=actor,
+            )
+            await session.execute(
+                upsert.on_conflict_do_update(
+                    index_elements=[SlackChannelRule.prefix],
+                    set_={
+                        "prompt": prompt,
+                        "kickoff": kickoff,
+                        "updated_by": actor,
+                        "updated_at": func.clock_timestamp(),
+                    },
+                )
+            )
+        await Topic.ROUTING.invalidate()
+        return settings
+
+    async def remove_channel_rule(self, prefix: str) -> None:
+        normalized = self.channel_prefix(prefix)
+        async with postgres.session() as session:
+            await session.execute(
+                delete(SlackChannelRule).where(SlackChannelRule.prefix == normalized)
+            )
         await Topic.ROUTING.invalidate()
 
 

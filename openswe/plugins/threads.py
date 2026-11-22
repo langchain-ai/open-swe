@@ -34,9 +34,9 @@ from openswe.transcript.snapshot import MAX_TURN_PAGE_SIZE, MessageView, load_sn
 from openswe.utils.dashboard_links import dashboard_thread_url
 
 INCIDENT_SOURCE = "incidents_agent"
-"""``openswe.incidents.channels.INCIDENT_SOURCE``, kept here so plugins don't import Slack."""
+"""``openswe.routing.channel_rules.KICKOFF_SOURCE``, kept here so plugins don't import Slack."""
 INCIDENT_CHANNEL_KEY = "incident_channel"
-"""Thread metadata naming the channel an incident investigation started in: ``{id, name}``."""
+"""Thread metadata naming the channel a kickoff run started in: ``{id, name}``."""
 
 ThreadSource = Literal[
     "dashboard",
@@ -223,14 +223,14 @@ class PluginThreads:
         """Whether this person's plugin may read a thread with ``metadata``.
 
         What the dashboard lets them read, and also public, system-owned incident
-        threads. The dashboard reads no incident thread, for anyone: their source is
-        not one it surfaces, and its lists and admin cancel skip them so they stay out
-        of people's sidebars. That is about clutter, not secrecy. Robin starts them only
-        in public, internal, unshared Slack channels (``incidents.service.channel_allowed``),
-        every member of the workspace reads them there, and the ``/incidents`` page they
-        used to appear on showed them to everyone signed in. A plugin reads one only once
-        the person approved ``threads:read``; a private or person-owned thread that
-        happens to carry the incident source is held to the dashboard's rules.
+        threads: the kickoff runs a channel name rule starts. The dashboard reads no
+        incident thread, for anyone: their source is not one it surfaces, and its lists
+        and admin cancel skip them so they stay out of people's sidebars. That is about
+        clutter, not secrecy. Robin starts them only in public, internal, unshared Slack
+        channels (``openswe.routing.channel_rules``), and every member of the workspace
+        reads them there. A plugin reads one only once the person approved
+        ``threads:read``; a private or person-owned thread that happens to carry the
+        incident source is held to the dashboard's rules.
         """
         if thread_is_readable(metadata, self.login, self.email):
             return True

@@ -2,7 +2,7 @@
 
 Off unless the person turns on ``concierge_mode`` in their own preferences. When
 it is on, the conversation is keyed with the same non-message timestamp code
-channels and incident channels use, so replies post into the DM instead of
+channels and channel kickoff runs use, so replies post into the DM instead of
 opening a thread and the channel's own history is the conversation transcript. That
 timestamp is also how the rest of the code recognizes the mode: only a DM the
 owner enabled ever reaches a run with it.

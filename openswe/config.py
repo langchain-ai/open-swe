@@ -323,7 +323,7 @@ ENV.var(
     "Public URL for Slack webhooks and the Sign in with Slack callback; defaults to "
     "DASHBOARD_API_BASE_URL. Use the ngrok URL when the dashboard runs on localhost.",
 )
-ENV.var("SLACK_APP_ID", "Slack app id (A...) whose event deliveries Incidents accepts.")
+ENV.var("SLACK_APP_ID", "Slack app id (A...) of the Robin Slack app.")
 
 # --- Dashboard ------------------------------------------------------------------------------
 ENV.var(

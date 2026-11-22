@@ -20,7 +20,6 @@ from openswe.dashboard.user_preferences import router as user_preferences_router
 from openswe.github.dashboard_routes import router as repos_router
 from openswe.github.pull_request_dashboard_routes import router as pull_requests_router
 from openswe.human_review.routes import router as human_review_router
-from openswe.incidents.routes import router as incidents_router
 from openswe.mcp.routes import router as mcp_router
 from openswe.merge_queue.routes import router as merge_queue_router
 from openswe.notifications.routes import router as notifications_router
@@ -46,7 +45,6 @@ router = APIRouter(
     tags=["dashboard"],
     dependencies=[Depends(require_same_origin_for_mutations)],
 )
-router.include_router(incidents_router)
 router.include_router(auth_router)
 router.include_router(client_errors_router)
 router.include_router(desktop_environments_router)

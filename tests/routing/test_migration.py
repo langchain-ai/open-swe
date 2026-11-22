@@ -224,3 +224,38 @@ async def test_routing_migrations_reset_channels_and_preserve_repositories_and_h
                 {"id": legacy_match},
             )
         ).one() == ("github", deleted_subscription, "deployment finished", legacy_config, True)
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_an_enabled_incident_policy_becomes_its_prefixs_channel_rule(enabled: bool) -> None:
+    migrations = postgres.load_migrations()
+    async with postgres.connection() as conn:
+        await conn.execute(text("CREATE SCHEMA incident_rules"))
+        await conn.commit()
+        for parent in (
+            "59c9a4be00db",
+            "758a156e43d0",
+            "5123042028cf",
+            "2d6d31428885",
+            "c9501de19ea1",
+        ):
+            await conn.run_sync(postgres.upgrade, migrations, "incident_rules", parent)
+        await conn.execute(text("SET LOCAL search_path TO incident_rules, public"))
+        await conn.execute(
+            text(
+                "INSERT INTO incident_policy (id, version, policy) VALUES (:id, 3, CAST(:policy AS jsonb))"
+            ),
+            {"id": uuid7(), "policy": json.dumps({"enabled": enabled, "channel_prefix": "sev-"})},
+        )
+        await conn.commit()
+        await conn.run_sync(postgres.upgrade, migrations, "incident_rules", "heads")
+        await conn.execute(text("SET LOCAL search_path TO incident_rules, public"))
+        rules = (
+            await conn.execute(text("SELECT prefix, kickoff FROM integration_slack_channel_rule"))
+        ).all()
+        retained = await conn.scalar(
+            text("SELECT count(*) FROM incident_policy WHERE policy->>'channel_prefix' = 'sev-'")
+        )
+    assert retained == 1
+    assert [prefix for prefix, _ in rules] == (["sev-"] if enabled else [])
+    assert all("Investigate the incident" in kickoff for _, kickoff in rules)

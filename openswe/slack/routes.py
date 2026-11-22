@@ -4,7 +4,7 @@ import asyncio
 import functools
 import re
 from collections.abc import Awaitable, Callable
-from typing import Literal, TypedDict, cast
+from typing import cast
 
 from fastapi import APIRouter, HTTPException
 
@@ -68,10 +68,6 @@ from openswe.webhooks import common
 from openswe.webhooks.event_log import EventLog, EventRefs
 
 router = APIRouter()
-
-
-class DuplicateIncidentResponse(TypedDict):
-    status: Literal["duplicate"]
 
 
 _MESSAGE_UPDATE_RETRY_DELAYS = (0.1, 0.2, 0.5, 1, 2, 4, 8, 14)
@@ -257,7 +253,7 @@ async def _retry_channel_verification(envelope: SlackEventEnvelope) -> bool:
 @router.post("/webhooks/slack")
 async def slack_webhook(
     request: common.Request, background_tasks: common.BackgroundTasks
-) -> WebhookResponse | ChallengeResponse | DuplicateIncidentResponse:
+) -> WebhookResponse | ChallengeResponse:
     """Handle Slack Event API webhooks for app mentions."""
     body = await request.body()
     _verify_signature(request, body, "events")
@@ -295,7 +291,7 @@ class SlackEventsDelivery:
         background_tasks: common.BackgroundTasks,
         *,
         from_mda: bool = False,
-    ) -> WebhookResponse | ChallengeResponse | DuplicateIncidentResponse:
+    ) -> WebhookResponse | ChallengeResponse:
         """Act on a verified request, as ``/webhooks/slack`` always has; ``from_mda`` for
         one MDA's channel handed back."""
         payload = parse_json_object(body)
@@ -330,11 +326,11 @@ class SlackEventsDelivery:
         if event.type in DIRECTORY_EVENTS and (listed_channel := event.resolve_channel_id()):
             background_tasks.add_task(SlackChannel.observe, event.type, listed_channel)
 
-        from openswe.incidents import channels as incidents
+        from openswe.routing import channel_rules
 
-        incident_response = await incidents.handle_slack_event(payload)
-        if incident_response is not None:
-            return cast(WebhookResponse | DuplicateIncidentResponse, incident_response)
+        rule_response = await channel_rules.handle_slack_event(raw_event)
+        if rule_response is not None:
+            return cast(WebhookResponse, rule_response)
 
         event_id = envelope.event_id
         team_id = envelope.team_id or event.team
