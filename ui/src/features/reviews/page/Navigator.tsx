@@ -113,7 +113,13 @@ function buildTree(files: ReadonlyArray<ReviewDiffFile>): Array<TreeNode> {
 }
 
 /** The left rail: the walkthrough's steps and every file with what's been read and what needs attention, behind tabs or stacked. */
-export function Navigator({ pr }: { pr: PullRequestRef }) {
+export function Navigator({
+  pr,
+  orderTabs = true,
+}: {
+  pr: PullRequestRef
+  orderTabs?: boolean
+}) {
   const files = useQuery(reviewQueries.diff(pr)).data?.files
   const walkthrough = useQuery(reviewQueries.detail(pr)).data?.walkthrough
   const order = useReviewPage((state) => state.order)
@@ -131,7 +137,7 @@ export function Navigator({ pr }: { pr: PullRequestRef }) {
       className="flex h-full min-h-0 flex-col"
     >
       <div className="flex flex-col gap-space-2 px-space-3 pt-space-3 pb-space-2">
-        {steps > 0 && (
+        {orderTabs && steps > 0 && (
           <div className="flex items-center gap-space-2">
             {stacked ? (
               <span className="flex-1 text-xs text-secondary">

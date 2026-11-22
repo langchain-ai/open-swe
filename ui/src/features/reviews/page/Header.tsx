@@ -22,6 +22,7 @@ import { KeyboardIcon } from "@phosphor-icons/react/dist/ssr/Keyboard"
 import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
 import { TreeStructureIcon } from "@phosphor-icons/react/dist/ssr/TreeStructure"
 import { useQuery } from "@tanstack/react-query"
+import type { ReactNode } from "react"
 
 import { DropdownMenuItem } from "@/components/MenuItem"
 import type { ReviewDetail } from "@/lib/api"
@@ -45,7 +46,7 @@ import { PullRequestTitle } from "./PullRequestTitle"
 import { RelativeTimestamp } from "./RelativeTimestamp"
 import { ReviewQueueControls, useReviewQueue } from "./ReviewQueue"
 import { NextStepAction, StandingDot, usePullRequestStanding } from "./Standing"
-import { useReviewPage } from "./store"
+import { INLINE_NAVIGATOR_QUERY, useReviewPage } from "./store"
 
 type PillState = ReviewDetail["pr"]["state"]
 
@@ -69,9 +70,15 @@ function pillState(
 export function Header({
   pr,
   leftInset,
+  titleBar = false,
+  leading,
+  trailing,
 }: {
   pr: PullRequestRef
   leftInset: string
+  titleBar?: boolean
+  leading?: ReactNode
+  trailing?: ReactNode
 }) {
   const refresh = useRefreshPullRequest(pr)
   const detailQuery = useQuery(reviewQueries.detail(pr))
@@ -89,6 +96,12 @@ export function Header({
   const setRailTab = useReviewPage((state) => state.setRailTab)
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const jumpToUnviewed = useReviewPage((state) => state.jumpToUnviewed)
+  const setNavigatorOpen = useReviewPage((state) => state.setNavigatorOpen)
+  // Below the inline breakpoint the desktop sidebar covers the PR, so actions that show PR content dismiss it.
+  const revealPullRequest = () => {
+    if (titleBar && !window.matchMedia?.(INLINE_NAVIGATOR_QUERY)?.matches)
+      setNavigatorOpen(false)
+  }
   const { openShortcutReference } = useAppCommandControls()
   const githubUrl = githubUrls.pullRequest(pr)
   const openInBrowser =
@@ -110,13 +123,22 @@ export function Header({
     <header
       data-desktop-drag-region=""
       className={cn(
-        // Top-aligned at 8px so the first row lines up with the app's floating sidebar button.
-        "flex shrink-0 flex-wrap items-start gap-space-3 border-b border-default bg-surface-level-1 pt-space-2 pr-space-3 pb-space-2",
+        "flex shrink-0 bg-surface-level-1 pr-space-3",
+        titleBar
+          ? "h-11 items-center gap-space-2 overflow-hidden border-b border-muted"
+          : // Top-aligned at 8px so the first row lines up with the app's floating sidebar button.
+            "flex-wrap items-start gap-space-3 border-b border-default pt-space-2 pb-space-2",
         leftInset
       )}
     >
+      {leading}
       <div className="min-w-0 flex-1">
-        <div className="flex min-h-7 min-w-0 items-center gap-space-2">
+        <div
+          className={cn(
+            "flex min-w-0 items-center gap-space-2",
+            titleBar ? "h-5" : "min-h-7"
+          )}
+        >
           {/* An open PR shows where it stands, in the PR list's own pills; GitHub's lifecycle only once it's settled. */}
           {live && status ? (
             <span className="flex shrink-0 items-center gap-space-1 max-sm:[&>*:not(:first-child)]:hidden">
@@ -142,7 +164,12 @@ export function Header({
               <Skeleton className="h-5 w-14 shrink-0 rounded-full" />
             )
           )}
-          <div className="flex min-w-0 flex-1 items-center gap-space-1 text-sm leading-6 font-semibold tracking-[-0.01em] max-sm:text-sm max-sm:leading-5">
+          <div
+            className={cn(
+              "flex min-w-0 flex-1 items-center gap-space-1 text-sm font-semibold tracking-[-0.01em] max-sm:text-sm max-sm:leading-5",
+              titleBar ? "leading-5" : "leading-6"
+            )}
+          >
             <a
               href={githubUrl}
               target="_blank"
@@ -160,7 +187,12 @@ export function Header({
         </div>
         {detail ? (
           // The meta line and the status sentence share one slot and cross-fade.
-          <div className="mt-0.5 grid min-w-0 max-sm:hidden">
+          <div
+            className={cn(
+              "grid min-w-0 max-sm:hidden",
+              titleBar ? "h-[18px] [&_p>*]:py-0!" : "mt-0.5"
+            )}
+          >
             <p
               inert={carrying}
               className={cn(
@@ -292,7 +324,12 @@ export function Header({
           <Skeleton className="mt-space-1 h-3.5 w-80 max-w-full max-sm:hidden" />
         )}
       </div>
-      <div className="flex min-h-7 max-w-full shrink-0 flex-wrap items-center gap-space-3">
+      <div
+        className={cn(
+          "flex min-h-7 shrink-0 items-center",
+          titleBar ? "gap-space-2" : "max-w-full flex-wrap gap-space-3"
+        )}
+      >
         {carrying && current?.status && (
           <div className="max-lg:hidden">
             <NextStepAction
@@ -310,7 +347,10 @@ export function Header({
             size="sm"
             aria-label={`${viewedCount} / ${files.length} viewed`}
             type="button"
-            onClick={jumpToUnviewed}
+            onClick={() => {
+              revealPullRequest()
+              jumpToUnviewed()
+            }}
             title="Go to the next file you haven't viewed"
             className="hidden shrink-0 gap-space-2 px-space-2 py-space-1 text-secondary tabular-nums hover:bg-surface-level-1-hover hover:text-primary md:flex"
           >
@@ -331,7 +371,10 @@ export function Header({
           variant="outlined"
           leftDecorator={ChatsCircleIcon}
           aria-label="Chat"
-          onClick={() => setRailTab("chat")}
+          onClick={() => {
+            revealPullRequest()
+            setRailTab("chat")
+          }}
         >
           <span className="max-sm:hidden">Chat</span>
         </Button>
@@ -420,6 +463,7 @@ export function Header({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {trailing}
       </div>
     </header>
   )

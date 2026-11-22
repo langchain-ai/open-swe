@@ -13,6 +13,7 @@ import { ReviewedPullRequests } from "@/features/reviews/ReviewedPullRequests"
 import { OpenPullRequestInput } from "@/features/reviews/OpenPullRequestInput"
 import { PullRequestWorkspace } from "@/features/reviews/PullRequestWorkspace"
 import { ReviewBookmarklet } from "@/features/reviews/ReviewBookmarklet"
+import { ReviewTabs } from "@/features/reviews/ReviewTabs"
 import {
   parsePullRequestSelection,
   validateReviewsSearch,
@@ -64,12 +65,6 @@ function storeRepos(repos: string[] | undefined) {
   else window.localStorage.removeItem(REPO_STORAGE_KEY)
 }
 
-const tabs = [
-  ["mine", "Mine"],
-  ["to-review", "To Review"],
-  ["all", "All Reviews"],
-] as const
-
 function ReviewsPage() {
   const session = useSession()
   const returnNavigation = useContextReturn("review-exit")
@@ -99,49 +94,52 @@ function ReviewsPage() {
   }, [filters.tab])
   const selection = parsePullRequestSelection(filters.pr)
 
-  const header = (
+  const back = (
+    <Button
+      size="sm"
+      color="secondary"
+      variant="plain"
+      leftDecorator={ArrowLeftIcon}
+      aria-label={returnNavigation.label}
+      className="border-0"
+      onClick={returnNavigation.returnToOrigin}
+    >
+      <span className={cn(isDesktop && "max-md:sr-only")}>
+        {returnNavigation.label}
+      </span>
+    </Button>
+  )
+  const heading = (
+    <Text as="h1" variant="h3" weight="medium" color="primary">
+      Pull Requests
+    </Text>
+  )
+
+  const header = isDesktop ? (
     <div
-      data-desktop-drag-region={isDesktop ? "" : undefined}
+      data-desktop-drag-region=""
+      className="flex h-11 shrink-0 items-center gap-space-3 border-b border-muted pr-space-3 pl-[80px] [.desktop-fullscreen_&]:pl-space-3 [.version-mismatch_&]:pl-space-3"
+    >
+      {back}
+      <div className="flex items-center gap-space-3 max-lg:hidden">
+        <span aria-hidden className="h-5 border-l border-muted" />
+        {heading}
+      </div>
+      <div className="flex-1" />
+      <ReviewTabs />
+      <div className="flex-1" />
+      <OpenPullRequestInput className="min-w-24 shrink" />
+    </div>
+  ) : (
+    <div
       className={cn(
         "flex flex-wrap items-center gap-space-3",
-        isDesktop
-          ? "min-h-11 border-b border-muted py-space-1 pr-space-3 pl-[80px] [.desktop-fullscreen_&]:pl-space-3 [.version-mismatch_&]:pl-space-3"
-          : selection && "border-b border-muted px-space-3 py-space-2"
+        selection && "border-b border-muted px-space-3 py-space-2"
       )}
     >
-      <Button
-        size="sm"
-        color="secondary"
-        variant="plain"
-        leftDecorator={ArrowLeftIcon}
-        className="border-0"
-        onClick={returnNavigation.returnToOrigin}
-      >
-        {returnNavigation.label}
-      </Button>
-      <Text as="h1" variant="h3" weight="medium" color="primary">
-        Pull Requests
-      </Text>
-      <div className="flex items-center gap-space-1">
-        {tabs.map(([value, label]) => (
-          <Button
-            key={value}
-            color="secondary"
-            variant={tab === value ? "normal" : "plain"}
-            aria-pressed={tab === value}
-            onClick={() => {
-              changeFilters({
-                tab: value,
-                page: undefined,
-                pr: undefined,
-                queue: undefined,
-              })
-            }}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
+      {back}
+      {heading}
+      <ReviewTabs />
       <OpenPullRequestInput />
       {!selection && (
         <>
@@ -156,7 +154,7 @@ function ReviewsPage() {
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      {isDesktop && header}
+      {isDesktop && !selection && header}
       <div
         className={cn(
           "flex min-h-0 w-full flex-1 flex-col",

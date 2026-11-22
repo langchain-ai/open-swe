@@ -2,10 +2,11 @@ import { Input } from "@langchain/macaw-components/Input"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 
+import { cn } from "@/lib/utils"
 import { parsePullRequestReference } from "@/features/reviews/search"
 
 /** Jumps to the review of a pasted GitHub pull request link. */
-export function OpenPullRequestInput() {
+export function OpenPullRequestInput({ className }: { className?: string }) {
   const navigate = useNavigate({ from: "/agents/reviews/" })
   const [value, setValue] = useState("")
   const [invalid, setInvalid] = useState(false)
@@ -32,7 +33,7 @@ export function OpenPullRequestInput() {
 
   return (
     <form
-      className="w-72"
+      className={cn("w-72", className)}
       onSubmit={(event) => {
         event.preventDefault()
         open(value)

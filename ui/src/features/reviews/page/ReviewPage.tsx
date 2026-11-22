@@ -19,7 +19,13 @@ import { INLINE_CHAT_QUERY, useReviewPage } from "./store"
 import { useReviewPageTools } from "./useReviewPageTools"
 
 /** The selected PR, with changes and chat. */
-export function ReviewPage({ pr }: { pr: PullRequestRef }) {
+export function ReviewPage({
+  pr,
+  header = true,
+}: {
+  pr: PullRequestRef
+  header?: boolean
+}) {
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
   const [refreshError, setRefreshError] = useState<string | null>(null)
@@ -75,7 +81,7 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   return (
     <ChatDraftsProvider>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary">
-        <Header pr={pr} leftInset="pl-space-3" />
+        {header && <Header pr={pr} leftInset="pl-space-3" />}
         {errorMessage !== null ? (
           <PullRequestUnavailable
             pr={pr}
