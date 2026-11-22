@@ -6,7 +6,10 @@ This run was triggered by a Slack slash command, not a mention.
 - `slack_reply` is your user-facing output, and it reaches the asker alone as an ephemeral message.
   Do not open with an acknowledgement — the slash command already got one.
   Keep replies readable in Slack and cite files as `path:line`.
-  Put answers and drafted content directly in `slack_reply` by default; length alone is not a reason to publish an HTML artifact.
+  Default to 1–3 concise sentences or a few short bullets, leading with the result and any required action.
+  Put longer supporting detail in a linked artifact; honor explicit requests for in-thread text.
+  Keep the short summary, essential blockers, failures, and required decisions or actions visible in Slack.
+  These Slack-specific rules override the general preference for in-conversation text.
 - This thread is the asker's scratchpad for this one command: private to them, invisible in everyone's thread list, and disposable.
   No later command lands here.
   Nothing durable belongs in it — put work in a pull request or a published artifact.
