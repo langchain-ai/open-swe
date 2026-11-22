@@ -1,3 +1,9 @@
+import type {
+  FrontendReviewRun,
+  FrontendScenario,
+  ScenarioShots,
+} from "./capture"
+
 /** Decoded RGBA pixels, as a canvas returns them. */
 export type Pixels = Pick<ImageData, "width" | "height" | "data">
 
@@ -17,6 +23,55 @@ export class PixelChange {
   /** The share of pixels that changed, from 0 to 1. */
   get ratio(): number {
     return this.changedPixels / this.totalPixels
+  }
+
+  static visible(
+    changes: readonly (PixelChange | null | undefined)[]
+  ): boolean {
+    return (
+      changes.length === 0 ||
+      changes.some((change) => change == null || change.ratio >= 0.001)
+    )
+  }
+
+  static shots(scenario: FrontendScenario): ScenarioShots[] {
+    return [
+      {
+        before: scenario.before_url,
+        after: scenario.after_url,
+        theme: "light",
+      },
+      ...(scenario.before_dark_url !== null || scenario.after_dark_url !== null
+        ? [
+            {
+              before: scenario.before_dark_url,
+              after: scenario.after_dark_url,
+              theme: "dark" as const,
+            },
+          ]
+        : []),
+    ]
+  }
+
+  static filter(
+    run: FrontendReviewRun,
+    changes: ReadonlyMap<
+      FrontendScenario,
+      readonly (PixelChange | null | undefined)[]
+    >
+  ): FrontendReviewRun {
+    if (!run.report) return run
+    const scenarios = run.report.scenarios.filter((scenario) => {
+      const compared = changes.get(scenario) ?? []
+      return (
+        scenario.status !== "complete" ||
+        compared.length !== PixelChange.shots(scenario).length ||
+        PixelChange.visible(compared)
+      )
+    })
+    return scenarios.length === run.report.scenarios.length
+      ? run
+      : { ...run, report: { ...run.report, scenarios } }
   }
 
   /** Compares two images pixel for pixel; null when their sizes differ. */

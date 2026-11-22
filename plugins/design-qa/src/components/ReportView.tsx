@@ -9,20 +9,18 @@ import { StatusBadge } from "@langchain/macaw-components/StatusBadge"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import { useHostContext, usePluginHost } from "@openswe/plugin-sdk/react"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
-import { ArrowBendDownRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowBendDownRight"
 import { CaretDownIcon } from "@phosphor-icons/react/dist/ssr/CaretDown"
 import { CaretUpIcon } from "@phosphor-icons/react/dist/ssr/CaretUp"
 import { MoonIcon } from "@phosphor-icons/react/dist/ssr/Moon"
 import { SunIcon } from "@phosphor-icons/react/dist/ssr/Sun"
-import { useRef, useState, type Ref } from "react"
+import { useState } from "react"
 
+import { MarkdownDescription } from "./MarkdownDescription"
 import { Assessment } from "../lib/assessment"
 import {
   CaptureAttempt,
   StoredCapture,
-  type DesignSystemFinding,
   type DesignSystemReview,
-  type FrontendAnnotation,
   type FrontendReviewRun,
   type FrontendRunStatus,
   type FrontendScenario,
@@ -66,16 +64,7 @@ export function ReportView({
   const report = run.report
   const scenarios = report?.scenarios ?? []
   const media = { repository: repositoryOf(pr), pull: pr.number, run: run.id }
-  const sections = useRef(new Map<string, HTMLElement>())
   const [expanded, setExpanded] = useState(false)
-  const [selection, setSelection] = useState<{
-    scenarioId: string
-    note?: FrontendAnnotation
-    finding?: DesignSystemFinding
-  } | null>(null)
-  const notes = scenarios.flatMap((scenario) =>
-    scenario.annotations.map((note) => ({ note, scenario }))
-  )
   const paired = pairedScenarios(scenarios)
   const routes = paired.filter((item) => !item.interaction).length
   const interactions = scenarios.filter((item) => item.interaction)
@@ -87,11 +76,6 @@ export function ReportView({
     reviewed && report.design_system
       ? Assessment.designSystem(report.design_system)
       : null
-  const show = (scenarioId: string) => {
-    const section = sections.current.get(scenarioId)
-    section?.focus({ preventScroll: true })
-    section?.scrollIntoView({ block: "start" })
-  }
   return (
     <div className="flex flex-col gap-space-5">
       {currentHeadSha && currentHeadSha !== run.head_sha && (
@@ -154,46 +138,9 @@ export function ReportView({
               </Badge>
             )}
           </div>
-          {report.summary && (
-            <Text as="p" variant="sm" className="whitespace-pre-wrap">
-              {report.summary}
-            </Text>
-          )}
-          {scenarios.length > 0 && (
-            <nav
-              aria-label="Jump to scenario"
-              className="flex flex-wrap gap-space-2"
-            >
-              {scenarios.map((scenario) => (
-                <Button
-                  key={scenario.id}
-                  size="sm"
-                  color="secondary"
-                  variant="plain"
-                  rightDecorator={ArrowBendDownRightIcon}
-                  aria-label={`Jump to ${scenario.title}`}
-                  onClick={() => {
-                    setSelection({
-                      scenarioId: scenario.id,
-                      note: scenario.annotations[0],
-                    })
-                    show(scenario.id)
-                  }}
-                >
-                  {scenario.title}
-                </Button>
-              ))}
-            </nav>
-          )}
           {expanded && (
             <div className="flex flex-col gap-space-3">
-              <Text
-                as="p"
-                variant="sm"
-                className="break-words whitespace-pre-wrap"
-              >
-                {description?.trim() || "No description provided."}
-              </Text>
+              <MarkdownDescription body={description} />
               {report.risk?.reason && (
                 <Text as="p" variant="sm" color="secondary">
                   {report.risk.reason}
@@ -205,45 +152,8 @@ export function ReportView({
                   <DesignSystemFindings
                     review={report.design_system}
                     scenarios={scenarios}
-                    onShow={(scenarioId, finding) => {
-                      const scenario = scenarios.find(
-                        ({ id }) => id === scenarioId
-                      )
-                      setSelection({
-                        scenarioId,
-                        finding,
-                        note: scenario?.annotations.find(
-                          (note) => note.title === finding.title
-                        ),
-                      })
-                      show(scenarioId)
-                    }}
                   />
                 )}
-              {reviewed && notes.length > 0 && (
-                <div className="flex flex-wrap gap-space-2">
-                  {notes.map(({ note, scenario }, index) => (
-                    <Button
-                      key={`${scenario.id}:${index}`}
-                      size="sm"
-                      color="secondary"
-                      variant="outlined"
-                      rightDecorator={ArrowBendDownRightIcon}
-                      aria-label={`Highlight ${note.title} on screenshots`}
-                      aria-pressed={
-                        selection?.scenarioId === scenario.id &&
-                        selection.note === note
-                      }
-                      onClick={() => {
-                        setSelection({ scenarioId: scenario.id, note })
-                        show(scenario.id)
-                      }}
-                    >
-                      {note.title}
-                    </Button>
-                  ))}
-                </div>
-              )}
             </div>
           )}
           {report.assessment_error && (
@@ -284,10 +194,6 @@ export function ReportView({
       {scenarios.map((scenario, index) => (
         <ScenarioCard
           key={scenario.id}
-          ref={(element) => {
-            if (element) sections.current.set(scenario.id, element)
-            else sections.current.delete(scenario.id)
-          }}
           pr={pr}
           run={run}
           scenario={scenario}
@@ -295,15 +201,6 @@ export function ReportView({
           media={media}
           designSystem={reviewed ? report.design_system : null}
           currentHeadSha={currentHeadSha}
-          annotation={
-            selection?.scenarioId === scenario.id ? selection.note : undefined
-          }
-          finding={
-            selection?.scenarioId === scenario.id
-              ? selection.finding
-              : undefined
-          }
-          onClearAnnotation={() => setSelection(null)}
           onAsk={onAsk}
         />
       ))}
@@ -319,9 +216,7 @@ export function ReportView({
               ? "Verified"
               : "Unverified"}
           </p>
-          <p>
-            Coverage: {routes}/{run.paths.length} routes captured
-          </p>
+          <p>Changed routes captured: {routes}</p>
           <p>
             Interactions: {pairedInteractions}/{interactions.length} states
             paired
@@ -361,7 +256,6 @@ export function ReportView({
  * switching it changes only this card.
  */
 function ScenarioCard({
-  ref,
   pr,
   run,
   scenario,
@@ -369,12 +263,8 @@ function ScenarioCard({
   media,
   designSystem,
   currentHeadSha,
-  annotation,
-  finding,
-  onClearAnnotation,
   onAsk,
 }: {
-  ref: Ref<HTMLElement>
   pr: PullRequestRef
   run: FrontendReviewRun
   scenario: FrontendScenario
@@ -383,9 +273,6 @@ function ScenarioCard({
   /** The run's design system check, once reviewed. */
   designSystem: DesignSystemReview | null
   currentHeadSha: string | null | undefined
-  annotation: FrontendAnnotation | undefined
-  finding: DesignSystemFinding | undefined
-  onClearAnnotation: () => void
   onAsk: (scenario: FrontendScenario, shots: ScenarioShots) => void
 }) {
   const host = usePluginHost()
@@ -397,7 +284,6 @@ function ScenarioCard({
   return (
     <section
       aria-label={scenario.title}
-      ref={ref}
       tabIndex={-1}
       className="scroll-mt-space-4 min-w-0 overflow-hidden rounded-lg border border-default bg-surface-level-2 outline-none focus-visible:ring-2 focus-visible:ring-focus"
     >
@@ -470,43 +356,9 @@ function ScenarioCard({
           ))}
         </div>
       ) : null}
-      {finding && (
-        <div
-          role="status"
-          className="flex flex-col gap-space-1 border-t border-default px-space-4 py-space-3"
-        >
-          <Text as="p" variant="sm" weight="semibold">
-            {finding.title}
-          </Text>
-          {finding.body && (
-            <Text as="p" variant="sm">
-              {finding.body}
-            </Text>
-          )}
-          {finding.location && (
-            <Text as="p" variant="xs" className="font-mono break-words">
-              {finding.location}
-            </Text>
-          )}
-          {finding.rule && (
-            <Text as="p" variant="xs" color="secondary">
-              {finding.rule}
-            </Text>
-          )}
-        </div>
-      )}
-      <EvidenceViewer
-        media={media}
-        scenario={scenario}
-        shots={shots}
-        annotation={annotation}
-        onClearAnnotation={onClearAnnotation}
-      />
+      <EvidenceViewer media={media} scenario={scenario} shots={shots} />
       {scenario.actions.length || scenario.annotations.length ? (
-        <details
-          open={Boolean(annotation || finding)}
-          className="border-t border-default px-space-4 py-space-2 text-xs text-secondary"
-        >
+        <details className="border-t border-default px-space-4 py-space-2 text-xs text-secondary">
           <summary className="w-fit cursor-pointer">
             {scenario.interaction ? "Interaction & notes" : "Review notes"}
           </summary>
@@ -565,11 +417,9 @@ function ChangedShare({
 function DesignSystemFindings({
   review,
   scenarios,
-  onShow,
 }: {
   review: DesignSystemReview
   scenarios: readonly FrontendScenario[]
-  onShow: (scenarioId: string, finding: DesignSystemFinding) => void
 }) {
   const ordered = [...review.findings].sort(
     (a, b) => Number(b.severity === "error") - Number(a.severity === "error")
@@ -614,17 +464,9 @@ function DesignSystemFindings({
               </span>
             )}
             {scenario && (
-              <Button
-                size="sm"
-                color="secondary"
-                variant="plain"
-                className="ml-auto"
-                rightDecorator={ArrowBendDownRightIcon}
-                aria-label={`Show ${finding.title} in ${scenario.title}`}
-                onClick={() => onShow(scenario.id, finding)}
-              >
+              <Text as="span" variant="xs" color="secondary">
                 {scenario.title}
-              </Button>
+              </Text>
             )}
             {finding.body && (
               <Text as="p" variant="sm" color="secondary" className="w-full">

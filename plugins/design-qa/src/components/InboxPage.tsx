@@ -43,6 +43,7 @@ import {
   useRepositories,
   useShareRepositories,
   useTitle,
+  useVisibleCaptures,
   type InboxItem,
   type RunMedia,
 } from "../lib/queries"
@@ -158,7 +159,7 @@ const DESCRIPTIONS: Record<InboxScope, string> = {
     "Open PRs with a GitHub review request for you or a team you belong to, in the repositories you shared. Comment mentions are not included.",
   mine: "Your open PRs and their capture status, in the repositories you shared.",
   pinned:
-    "Your pins are private. PRs with skipped or unsuccessful captures are left out.",
+    "Your pins are private. PRs with skipped or unsuccessful captures, or only changes below 0.1%, are left out.",
   people:
     "Anyone's open PRs and their capture status, in the repositories you shared. Search by name or GitHub handle.",
 }
@@ -225,11 +226,12 @@ function PullRequests({
   const index = search.more ? route.index : Math.min(route.index, pageCount - 1)
   const first = index * pageSize
   const shown = ordered.slice(first, first + pageSize)
+  const visibleCaptures = useVisibleCaptures(captures.byRepository, shown)
   const page = useInboxPage(
     scope,
     shown,
     ordered.slice(first + pageSize, first + 2 * pageSize),
-    captures.byRepository
+    visibleCaptures.byRepository
   )
   const items = page.items
   const people = usePeople(items.map(({ pull }) => pull.author))
@@ -238,7 +240,9 @@ function PullRequests({
   const loading =
     search.pulls === undefined
       ? !search.error
-      : captures.pending || (shown.length === 0 && search.more)
+      : captures.pending ||
+        visibleCaptures.pending ||
+        (shown.length === 0 && search.more)
   const fetching = search.fetching || page.fetching
   const failed = search.error ?? captures.error
   const turnTo = (next: number) => navigate({ ...route, index: next })
@@ -302,7 +306,7 @@ function PullRequests({
             <span className="text-xs text-secondary" aria-live="polite">
               {search.pulls === undefined
                 ? "Loading pull requests…"
-                : `${matching.length}${search.more ? "+" : ""} PR${matching.length === 1 && !search.more ? "" : "s"}${filter ? " match" : ""}${search.more ? " · loading more…" : ""}`}
+                : `${matching.length}${search.more ? "+" : ""} candidate PR${matching.length === 1 && !search.more ? "" : "s"}${filter ? " match" : ""}${search.more ? " · loading more…" : ""}`}
             </span>
             <Button
               size="sm"
@@ -359,7 +363,7 @@ function PullRequests({
             Search for anyone who uses Robin by name or GitHub handle.
           </p>
         </Card>
-      ) : shown.length === 0 && !failed ? (
+      ) : items.length === 0 && !failed ? (
         <Card className="flex flex-col items-center gap-space-2 p-space-8 text-center">
           <EyeIcon
             size={28}
@@ -367,18 +371,22 @@ function PullRequests({
             aria-hidden="true"
           />
           <h2 className="text-sm font-medium text-primary">
-            {filter
-              ? "No PRs match your filter"
-              : hidden.length > 0
-                ? "Nothing to check in Design QA"
-                : EMPTY[scope].title}
+            {shown.length > 0
+              ? "Nothing to check on this page"
+              : filter
+                ? "No PRs match your filter"
+                : hidden.length > 0
+                  ? "Nothing to check in Design QA"
+                  : EMPTY[scope].title}
           </h2>
           <p className="max-w-sm text-sm text-secondary">
-            {filter
-              ? "Try a different title, repository, or PR number."
-              : hidden.length > 0
-                ? "PRs with skipped or unsuccessful captures are left out. Open a PR above to request a new capture."
-                : EMPTY[scope].body}
+            {shown.length > 0
+              ? "This page's captures are left out of Design QA, including changes below 0.1%. Try another page or open a PR above to request a new capture."
+              : filter
+                ? "Try a different title, repository, or PR number."
+                : hidden.length > 0
+                  ? "PRs with skipped or unsuccessful captures are left out. Open a PR above to request a new capture."
+                  : EMPTY[scope].body}
           </p>
         </Card>
       ) : (
@@ -406,7 +414,7 @@ function PullRequests({
         >
           <div className="flex items-center gap-space-3 text-xs text-secondary">
             <span>
-              {first + 1}–{first + shown.length} of {ordered.length}
+              {first + 1}–{first + shown.length} of {ordered.length} candidates
             </span>
             <label className="flex items-center gap-space-2">
               Per page

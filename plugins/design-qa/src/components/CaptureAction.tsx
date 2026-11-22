@@ -4,7 +4,7 @@ import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwis
 import type { ReviewOutcome } from "@openswe/plugin-sdk"
 import { usePluginHost } from "@openswe/plugin-sdk/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 
 import { repositoryOf, type PullRequestRef } from "../lib/pullRequest"
 import { Usage } from "../lib/usage"
@@ -29,6 +29,7 @@ export function CaptureAction({
   disabled = false,
   currentHeadSha,
   showOutcome = true,
+  children,
 }: {
   pr: PullRequestRef
   outcome: ReviewOutcome | null
@@ -37,6 +38,7 @@ export function CaptureAction({
   disabled?: boolean
   currentHeadSha?: string
   showOutcome?: boolean
+  children?: ReactNode
 }) {
   const host = usePluginHost()
   const client = useQueryClient()
@@ -135,7 +137,7 @@ export function CaptureAction({
     capture.mutate()
   }
   return (
-    <div className="flex flex-col items-start gap-space-2">
+    <div className="flex max-w-full flex-col items-start gap-space-2">
       {showOutcome && outcome && outcome.status !== "complete" && (
         <p role="status" className="text-xs text-secondary">
           {stalled ? "Capture has not reported an outcome" : attempt.label}
@@ -143,37 +145,40 @@ export function CaptureAction({
           {outcome.reason ? `: ${outcome.reason}` : ""}
         </p>
       )}
-      {previewPending || capturing || queued ? (
-        <p role="status" className="text-xs text-secondary">
-          {previewPending
-            ? "Waiting for the preview to finish deploying."
-            : capturing
-              ? "Capturing screenshots…"
-              : "Capture queued"}
-        </p>
-      ) : hasCapture || outcome ? (
-        <IconButton
-          size="sm"
-          color="secondary"
-          variant="outlined"
-          icon={ArrowClockwiseIcon}
-          label="Retry capture"
-          loading={capture.isPending}
-          disabled={disabled}
-          onClick={request}
-        />
-      ) : (
-        <Button
-          size="sm"
-          color="secondary"
-          variant="outlined"
-          loading={capture.isPending}
-          disabled={disabled}
-          onClick={request}
-        >
-          Capture
-        </Button>
-      )}
+      <div className="flex max-w-full flex-wrap items-center gap-space-3">
+        {previewPending || capturing || queued ? (
+          <p role="status" className="text-xs text-secondary">
+            {previewPending
+              ? "Waiting for the preview to finish deploying."
+              : capturing
+                ? "Capturing screenshots…"
+                : "Capture queued"}
+          </p>
+        ) : hasCapture || outcome ? (
+          <IconButton
+            size="sm"
+            color="secondary"
+            variant="outlined"
+            icon={ArrowClockwiseIcon}
+            label="Retry capture"
+            loading={capture.isPending}
+            disabled={disabled}
+            onClick={request}
+          />
+        ) : (
+          <Button
+            size="sm"
+            color="secondary"
+            variant="outlined"
+            loading={capture.isPending}
+            disabled={disabled}
+            onClick={request}
+          >
+            Capture
+          </Button>
+        )}
+        {children}
+      </div>
       {capture.isError && (
         <p role="alert" className="text-xs text-error-secondary">
           {errorMessage(capture.error)}

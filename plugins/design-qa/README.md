@@ -40,9 +40,16 @@ Original screenshot colors stay independent of the app's theme; no pixel tint is
 A scenario the review also shot in dark mode gets a **Light**/**Dark** switch on its card; it starts on the dashboard's theme, changes only that card, and its comparison, pixel change and **Ask about this change** use the pair shown.
 Notes stay where the review placed them on the light screenshot, at the same viewport in both themes.
 Each card shows the share of pixels that differ between its two screenshots, which the app measures in the page once both load (`PixelChange`); it is the extent of a change, not its severity.
+Once every captured theme of a completed scenario compares below 0.1%, that scenario is omitted from scenario cards, counts and covers; an inbox entry with no remaining scenarios is hidden.
+The inbox compares only the current page and waits for its initial comparisons before showing cards.
+Its candidate counts, sorting and page boundaries use capture metadata before pixel filtering, so comparisons cannot move PRs between pages; a page can be empty without removing its navigation.
+Saved media and comparison verdicts are reused when another capture changes.
+Exactly 0.1%, incomplete captures and comparisons that cannot be measured stay visible.
+Saved capture documents are unchanged.
 A pull request's page names who opened it, and its title opens it on GitHub in a new tab, as does the **GitHub** link beside **Pin**; **Robin PR view** opens Robin's review of it.
-The **PR Description** card keeps the visual summary, scenario jump links, risk score from 1 to 5, and design system badge visible; its dropdown opens the actual PR description, risk reason, findings and screenshot highlights.
-Risk and design system badges open the same details; each finding includes its severity, title, file, explanation, rule and an internal jump to the scenario that shows it.
+The **PR Description** card keeps the risk score from 1 to 5 and design system badge visible; its dropdown opens the actual PR description as sanitized Markdown, the risk reason and findings.
+Risk and design system badges open the same details; each finding includes its severity, title, file, explanation, rule and scenario name.
+The header groups **Open preview**, capture retry and the review-run selector with compact controls; screenshot zoom is capped at 400%.
 Saved highlight boxes and notes show by default, and **Hide hints** turns them off per card without resetting zoom.
 Clicking a screenshot opens its unannotated original at natural pixel size in a Macaw Dialog; the swipe divider has a compact keyboard focus grip.
 The latest capture attempt's reason shows above the captures only when it didn't capture, such as a blocked or failed attempt.

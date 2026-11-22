@@ -20,6 +20,7 @@ import {
   useQueries,
   useQuery,
   useQueryClient,
+  type QueryClient,
 } from "@tanstack/react-query"
 import { useEffect } from "react"
 
@@ -30,10 +31,10 @@ import {
   capturePrefix,
   type CaptureKey,
   type FrontendReviewRun,
+  type FrontendScenario,
   type ScenarioShots,
   StoredCapture,
 } from "./capture"
-import { runOverview } from "./coverage"
 import { InboxSnapshot } from "./inboxSnapshot"
 import { Limiter } from "./limiter"
 import { Pins, type Pin, type PinKey } from "./pins"
@@ -156,6 +157,7 @@ export class DesignQa {
   private static readonly byHost = new WeakMap<PluginHost, DesignQa>()
 
   private readonly pullReads = new Limiter(PULL_READS)
+  private readonly comparisons = new Limiter(2)
 
   /** Whether `error` may pass on its own: a rate limit, a server error or a dropped connection. */
   static isTransient(error: unknown): boolean {
@@ -408,7 +410,8 @@ export class DesignQa {
         ? outcome
         : null
     if (current?.status === "skipped") return true
-    if (run?.status === "complete" && runOverview(run).paired > 0) return false
+    if (run?.status === "complete" && (run.report?.scenarios.length ?? 0) > 0)
+      return false
     if (current)
       return (
         current.status === "failed" ||
@@ -495,6 +498,35 @@ export class DesignQa {
     )
     if (!found) throw new Error("this run is no longer saved")
     return StoredCapture.settled(StoredCapture.read(found))
+  }
+
+  changeQuery(
+    queryClient: QueryClient,
+    target: RunMedia,
+    { before, after }: ScenarioShots,
+    enabled = true
+  ) {
+    return queryOptions({
+      queryKey: keys.change(target, before ?? "", after ?? ""),
+      queryFn: () =>
+        this.comparisons.run(async () => {
+          if (!before || !after) return null
+          const [first, second] = await Promise.all(
+            [before, after].map((name) =>
+              queryClient.fetchQuery({
+                queryKey: keys.media(target, name),
+                queryFn: () => this.media(target, name),
+                staleTime: Infinity,
+                gcTime: 60_000,
+              })
+            )
+          )
+          return first && second ? PixelChange.between(first, second) : null
+        }),
+      enabled: enabled && Boolean(before && after),
+      staleTime: Infinity,
+      gcTime: 60_000,
+    })
   }
 
   async media(target: RunMedia, name: string): Promise<Blob> {
@@ -954,27 +986,76 @@ export function usePixelChange(
 ) {
   const qa = useDesignQa()
   const queryClient = useQueryClient()
-  const { before, after } = shots
-  return useQuery({
-    queryKey: keys.change(target, before ?? "", after ?? ""),
-    queryFn: async () => {
-      if (!before || !after) return null
-      // The same cache the screenshots show from, so each downloads once.
-      const [first, second] = await Promise.all(
-        [before, after].map((name) =>
-          queryClient.fetchQuery({
-            queryKey: keys.media(target, name),
-            queryFn: () => qa.media(target, name),
-            staleTime: Infinity,
-          })
-        )
-      )
-      return first && second ? PixelChange.between(first, second) : null
-    },
-    enabled: enabled && before !== null && after !== null,
-    staleTime: Infinity,
-    gcTime: 60_000,
+  return useQuery(qa.changeQuery(queryClient, target, shots, enabled))
+}
+
+function useVisibleRuns(
+  entries: readonly { target: RunMedia; run: FrontendReviewRun }[]
+) {
+  const qa = useDesignQa()
+  const queryClient = useQueryClient()
+  const comparisons = entries.flatMap(({ target, run }, entry) =>
+    (run.report?.scenarios ?? []).flatMap((scenario) =>
+      scenario.status !== "complete"
+        ? []
+        : PixelChange.shots(scenario).map((shots) => ({
+            entry,
+            scenario,
+            query: qa.changeQuery(queryClient, target, shots),
+          }))
+    )
+  )
+  const results = useQueries({
+    queries: comparisons.map(({ query }) => query),
   })
+  const changes = entries.map(
+    () => new Map<FrontendScenario, (PixelChange | null | undefined)[]>()
+  )
+  comparisons.forEach(({ entry, scenario }, index) => {
+    const found = changes[entry]
+    const result = results[index]
+    if (!found) return
+    const values = found.get(scenario) ?? []
+    values.push(result?.data)
+    found.set(scenario, values)
+  })
+  return {
+    runs: entries.map(({ run }, index) =>
+      PixelChange.filter(run, changes[index] ?? new Map())
+    ),
+    pending: results.some((result) => result.isLoading),
+  }
+}
+
+export function useVisibleRun(
+  target: RunMedia,
+  run: FrontendReviewRun | null | undefined
+): FrontendReviewRun | null {
+  return useVisibleRuns(run ? [{ target, run }] : []).runs[0] ?? null
+}
+
+export function useVisibleCaptures(
+  byRepository: ReadonlyMap<string, RepositoryCaptures>,
+  pulls: readonly PullRequestSummary[]
+) {
+  const entries = pulls.flatMap(({ repository, number }) => {
+    const run = byRepository.get(repository)?.runs.get(number)
+    return run
+      ? [{ target: { repository, pull: number, run: run.id }, run }]
+      : []
+  })
+  const visible = useVisibleRuns(entries)
+  const filtered = new Map(
+    [...byRepository].map(([repository, captures]) => [
+      repository,
+      { ...captures, runs: new Map(captures.runs) },
+    ])
+  )
+  entries.forEach(({ target }, index) => {
+    const run = visible.runs[index]
+    if (run) filtered.get(target.repository)?.runs.set(target.pull, run)
+  })
+  return { byRepository: filtered, pending: visible.pending }
 }
 
 /** Names and pictures of GitHub `logins`, by lowercased login. */

@@ -76,7 +76,7 @@ export function ComparisonViewport({
   const canPan =
     width * scale > viewport.width + 1 || height * scale > viewport.height + 1
   const minimumScale = Math.min(fitScale, 0.1)
-  const maximumScale = Math.max(16, scale)
+  const maximumScale = 4
   const firstPaneId = panes[0]?.id
   const registerViewport = useCallback(
     (element: HTMLDivElement | null) => {
@@ -151,7 +151,10 @@ export function ComparisonViewport({
   const changeZoom = useCallback(
     (next: Zoom, element?: HTMLDivElement, point?: Point) => {
       const target = element ?? viewports.current.values().next().value
-      const nextScale = next === "fit" ? fitScale : Math.max(minimumScale, next)
+      const nextScale =
+        next === "fit"
+          ? fitScale
+          : Math.min(maximumScale, Math.max(minimumScale, next))
       if (!Number.isFinite(nextScale)) return
       if (target) {
         const source = target.firstElementChild
@@ -177,7 +180,7 @@ export function ComparisonViewport({
       requestedScale.current = nextScale
       setZoom(next === "fit" ? "fit" : nextScale)
     },
-    [fitScale, minimumScale, scale]
+    [fitScale, minimumScale, maximumScale, scale]
   )
 
   useEffect(() => {
@@ -281,7 +284,7 @@ export function ComparisonViewport({
             disabled={scale <= minimumScale}
             onClick={() => changeZoom(scale / 1.25)}
           />
-          <div className="w-24">
+          <div className="w-40 max-sm:w-32">
             <Slider
               aria-label="Comparison zoom"
               min={minimumScale * 100}
@@ -301,6 +304,7 @@ export function ComparisonViewport({
             variant="plain"
             icon={MagnifyingGlassPlusIcon}
             label="Zoom in"
+            disabled={scale >= maximumScale}
             onClick={() => changeZoom(scale * 1.25)}
           />
           <Text

@@ -1,6 +1,5 @@
 import { Accordion, AccordionItem } from "@langchain/macaw-components/Accordion"
 import { Button } from "@langchain/macaw-components/Button"
-import { Text } from "@langchain/macaw-components/Text"
 import { Card } from "@langchain/macaw-components/Card"
 import { Link } from "@langchain/macaw-components/Link"
 import { Select } from "@langchain/macaw-components/Select"
@@ -37,9 +36,11 @@ import {
   useRun,
   useRuns,
   useTitle,
+  useVisibleRun,
 } from "../lib/queries"
 import { useRouter } from "../lib/router"
 import { Usage } from "../lib/usage"
+import { MarkdownDescription } from "./MarkdownDescription"
 import { ReportView } from "./ReportView"
 import { Author } from "./Author"
 import { CaptureAction } from "./CaptureAction"
@@ -66,7 +67,11 @@ export function PullRequestPage({
   const current = runs.data?.pull
   const selectedId = runId ?? runs.data?.runs[0]?.id
   const detail = useRun(pr, selectedId)
-  const run = detail.data
+  const run =
+    useVisibleRun(
+      { repository: repositoryOf(pr), pull: pr.number, run: selectedId ?? "" },
+      detail.data
+    ) ?? undefined
   // The scenario last asked about, kept in the shared context until the person
   // asks about another or opens another run.
   const [asked, setAsked] = useState<{
@@ -150,16 +155,42 @@ export function PullRequestPage({
               </a>
             </h1>
           </div>
-          <div className="flex flex-wrap items-center gap-space-3">
+          <div className="flex max-w-full min-w-0 flex-wrap items-center gap-space-3">
             {run?.head_url && (
               <Button
-                size="md"
+                size="sm"
                 color="primary"
                 rightDecorator={ArrowSquareOutIcon}
                 onClick={() => void host.nav.openExternal(run.head_url)}
               >
                 Open preview
               </Button>
+            )}
+            {runs.isSuccess && (
+              <CaptureAction
+                pr={pr}
+                outcome={runs.data.outcome}
+                currentHeadSha={current?.headSha}
+                hasCapture={runs.data.runs.length > 0}
+                run={runs.data.runs[0]}
+                disabled={current?.state !== "open"}
+              >
+                {options.length > 1 && (
+                  <label className="flex max-w-full min-w-0 flex-wrap items-center gap-space-3 text-xs text-secondary">
+                    Review run
+                    <Select
+                      aria-label="Review run"
+                      size="sm"
+                      triggerClassName="w-auto min-w-0 max-w-full"
+                      value={selectedId}
+                      onChange={(id) => {
+                        if (id) navigate({ page: "pull", pr, run: id })
+                      }}
+                      options={options}
+                    />
+                  </label>
+                )}
+              </CaptureAction>
             )}
             <PinButton pr={pr} title={title} />
             <Link
@@ -201,15 +232,7 @@ export function PullRequestPage({
             key={github}
             title="PR Description"
             defaultExpanded={false}
-            contents={
-              <Text
-                as="p"
-                variant="sm"
-                className="break-words whitespace-pre-wrap"
-              >
-                {current.body?.trim() || "No description provided."}
-              </Text>
-            }
+            contents={<MarkdownDescription body={current.body} />}
           />
         </Accordion>
       )}
@@ -226,36 +249,11 @@ export function PullRequestPage({
               Loading Design QA reviews…
             </p>
           )}
-          {runs.isSuccess && (
-            <CaptureAction
-              pr={pr}
-              outcome={runs.data.outcome}
-              currentHeadSha={current?.headSha}
-              hasCapture={runs.data.runs.length > 0}
-              run={runs.data.runs[0]}
-              disabled={current?.state !== "open"}
-            />
-          )}
           {empty && (
             <Card role="status" className="p-space-4 text-sm text-secondary">
               No saved comparisons. Capture checks the deployed preview and the
               configured base site, then saves matching screenshots here.
             </Card>
-          )}
-          {options.length > 1 && (
-            <label className="flex items-center gap-space-3 text-xs text-secondary">
-              Review run
-              <Select
-                aria-label="Review run"
-                size="md"
-                triggerClassName="w-auto min-w-0 max-w-full"
-                value={selectedId}
-                onChange={(id) => {
-                  if (id) navigate({ page: "pull", pr, run: id })
-                }}
-                options={options}
-              />
-            </label>
           )}
           {selectedId && detail.isPending && (
             <p role="status" className="text-sm text-secondary">

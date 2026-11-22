@@ -66,11 +66,7 @@ function Screenshot({
           aria-label={`${label}: ${annotation.title}`}
           className={cn(
             "pointer-events-none absolute border-2",
-            annotation.severity === "error"
-              ? "border-error"
-              : annotation.severity === "warning"
-                ? "border-warning"
-                : "border-brand"
+            annotation.severity === "error" ? "border-error" : "border-warning"
           )}
           style={{
             left: `${(annotation.x / image.width) * 100}%`,
