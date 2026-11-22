@@ -37,6 +37,7 @@ class AskResponse:
     # A missed request costs more than a needless reply, so Robin replies well short of certainty:
     # on the eval this halves missed replies at the cost of about three times the needless ones.
     FOLLOW_UP_AT: ClassVar[float] = 0.4
+    HUMAN_FOLLOW_UP_AT: ClassVar[float] = 0.7
     # A reaction needs Jev's confident pick.
     CONFIDENT_AT: ClassVar[float] = 0.5
 
@@ -45,6 +46,7 @@ class AskResponse:
     confidence: float | None = None
     reaction: str | None = None
     unavailable: bool = False
+    follow_up_at: float = FOLLOW_UP_AT
 
     @property
     def follow_up(self) -> float:
@@ -54,7 +56,7 @@ class AskResponse:
     @property
     def follows_up(self) -> bool:
         # An unavailable classifier answers as Ask channels did before it.
-        return self.unavailable or round(self.follow_up, 4) >= self.FOLLOW_UP_AT
+        return self.unavailable or round(self.follow_up, 4) >= self.follow_up_at
 
     @property
     def reacts(self) -> bool:
@@ -187,7 +189,20 @@ class AskChannelMessage:
             )
             return AskResponse(unavailable=True)
         reaction = response.choices.get("reaction")
+        previous = messages[-2] if len(messages) > 1 else None
+        judged = messages[-1]
+        follows_human = (
+            bool(judged.thread_ts)
+            and judged.thread_ts != judged.ts
+            and previous is not None
+            and bool(previous.user)
+            and previous.user != common.SLACK_BOT_USER_ID
+            and not previous.is_from_bot
+        )
         return AskResponse(
+            follow_up_at=AskResponse.HUMAN_FOLLOW_UP_AT
+            if follows_human
+            else AskResponse.FOLLOW_UP_AT,
             probabilities=action.probabilities,
             action=action.choice,
             confidence=action.confidence,

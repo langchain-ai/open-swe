@@ -238,6 +238,56 @@ async def test_unknown_origin_blocks_followups_until_rechecked(
 
 
 @pytest.mark.parametrize(
+    ("previous", "thread_ts", "probability", "allowed"),
+    [
+        (None, "1.0", 0.4, True),
+        (SlackMessage(user="ROBIN"), "1.0", 0.4, True),
+        (SlackMessage(user="HUMAN"), "1.0", 0.6999, False),
+        (SlackMessage(user="HUMAN"), "1.0", 0.7, True),
+        (SlackMessage(user="OTHER_BOT", bot_id="B1"), "1.0", 0.4, True),
+        (SlackMessage(), "1.0", 0.4, True),
+        (SlackMessage(user="HUMAN"), "", 0.4, True),
+        (SlackMessage(user="HUMAN"), "2.0", 0.4, True),
+    ],
+)
+async def test_ask_follow_up_after_human_needs_more_confidence(
+    monkeypatch: pytest.MonkeyPatch,
+    previous: SlackMessage | None,
+    thread_ts: str,
+    probability: float,
+    allowed: bool,
+) -> None:
+    async def ask(*_args: object, **_kwargs: object) -> ClassifierResponse:
+        return ClassifierResponse.model_validate(
+            {
+                "model": "jev",
+                "answers": {
+                    "action": {
+                        "type": "choice",
+                        "choice": "follow_up_only",
+                        "confidence": probability,
+                        "probabilities": {
+                            "follow_up_only": probability,
+                            "do_nothing": 1 - probability,
+                        },
+                    }
+                },
+            }
+        )
+
+    monkeypatch.setattr(ask_messages, "JEV", SimpleNamespace(ask=ask))
+    monkeypatch.setattr(ask_messages.common, "SLACK_BOT_USER_ID", "ROBIN")
+    messages = [previous] if previous is not None else []
+    messages.append(
+        SlackMessage(ts="2.0", thread_ts=thread_ts, user="HUMAN", text="can you look at this?")
+    )
+
+    response = await AskChannelMessage.judge(messages, {}, SlackChannelContext(name="help"))
+
+    assert response.follows_up is allowed
+
+
+@pytest.mark.parametrize(
     ("message", "allowed"),
     [
         ({"files": [{"mimetype": "image/png"}]}, True),
