@@ -22,6 +22,16 @@ router = APIRouter(tags=["threads"])
 
 _CLOUD_TERMINAL_SLOTS = asyncio.Semaphore(20)
 _CLOUD_TERMINAL_SUBPROTOCOL = "open-swe-terminal"
+# The browser renderer is xterm-compatible with 24-bit color, so the shell is told so
+# instead of inheriting the PTY's `linux` default. `force_color_prompt` is the switch
+# Debian's stock .bashrc reads before giving up on a color prompt for anything but
+# `xterm-color`. Appending history at every prompt keeps commands from being lost
+# when a terminal is closed and makes them available to the other tabs.
+_CLOUD_TERMINAL_SHELL = (
+    "export TERM=xterm-256color COLORTERM=truecolor force_color_prompt=yes"
+    ' PROMPT_COMMAND="history -a; history -n${PROMPT_COMMAND:+; $PROMPT_COMMAND}";'
+    " exec ${SHELL:-/bin/bash} -l"
+)
 
 
 def _cloud_terminal_websocket_url(thread_id: str) -> str:
@@ -93,7 +103,7 @@ async def _cloud_terminal(websocket: WebSocket, thread_id: str, session: dict[st
         if not (await sandbox.run(f"test -d {shlex.quote(cwd)}")).success:
             cwd = "/workspace"
         handle = await sandbox.run(
-            "exec ${SHELL:-/bin/bash} -l",
+            _CLOUD_TERMINAL_SHELL,
             cwd=cwd,
             timeout=0,
             idle_timeout=-1,
