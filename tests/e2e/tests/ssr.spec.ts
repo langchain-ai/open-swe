@@ -14,6 +14,19 @@ test.describe("server rendering", () => {
     expect(res.headers()["location"]).toBe("/login?redirect=%2Fagents");
   });
 
+  test("queue control requests reach the backend without a dashboard session", async ({
+    request,
+  }) => {
+    const res = await request.post("/merge-queue/control", {
+      data: "x".repeat(4097),
+      maxRedirects: 0,
+    });
+    expect(res.status()).toBe(413);
+    expect(await res.json()).toEqual({
+      detail: "Queue control request is too large",
+    });
+  });
+
   test("the login page arrives server-rendered", async ({ request }) => {
     const html = await (await request.get("/login")).text();
     expect(html).toContain("Sign in to Robin");
