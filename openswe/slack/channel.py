@@ -238,7 +238,7 @@ async def _start_slack_turn(call: ChannelCall, turn: StartSlackTurn) -> SlackTur
         turn.bot_app_id and turn.bot_app_id == turn.app_id
     ):
         return SlackTurnStarted()
-    if turn.bot_id or turn.bot_app_id or turn.subtype == "bot_message":
+    if turn.bot_id or turn.subtype == "bot_message":
         if not turn.bot_id or not await BotTriggers.accepts(
             user_id=turn.user_id,
             app_id=turn.bot_app_id,

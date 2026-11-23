@@ -265,10 +265,12 @@ async def test_external_channel_refuses_without_starting_a_run(
         SlackChannelContext(is_ext_shared=False, lookup_retry_after=60),
     ],
 )
+@pytest.mark.parametrize("app_id", ["", "A2"])
 async def test_unverified_channel_retries_without_reply_or_run(
     monkeypatch: pytest.MonkeyPatch,
     context: SlackChannelContext,
     _patch_slack_webhook: _FakeClaims,
+    app_id: str,
 ) -> None:
     background_tasks = _FakeBackgroundTasks()
     post_reply = AsyncMock(return_value=True)
@@ -278,7 +280,7 @@ async def test_unverified_channel_retries_without_reply_or_run(
     monkeypatch.setattr(webhook_common, "post_slack_thread_reply", post_reply)
     monkeypatch.setattr(slack_routes, "is_listening_channel", AsyncMock(return_value=True))
     payload = _channel_message_payload()
-    payload["event"]["text"] = "open a feature request"
+    payload["event"].update({"text": "open a feature request", "app_id": app_id})
 
     with pytest.raises(HTTPException) as error:
         await _post(payload, background_tasks)
@@ -306,6 +308,7 @@ async def test_unverified_channel_retries_without_reply_or_run(
         {"type": "message", "subtype": "bot_message", "bot_id": "B1"},
         {"type": "message", "text": "ordinary channel chatter"},
         {"type": "message", "text": "<@OTHER> can you help?"},
+        {"type": "message", "text": "<@OTHER> can you help? <@BOT>", "app_id": "A2"},
     ],
 )
 async def test_transient_lookup_does_not_retry_irrelevant_events(

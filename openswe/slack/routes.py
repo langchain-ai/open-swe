@@ -207,11 +207,13 @@ async def _retry_channel_verification(envelope: SlackEventEnvelope) -> bool:
     ):
         return False
     leading = re.match(r"\s*<@([^>]+)>", event.text or "")
-    if event.user == bot_id or (
-        not (event.is_from_bot or event.app_id) and leading and leading.group(1) != bot_id
+    if (
+        event.user == bot_id
+        or (event.app_id and event.app_id == envelope.api_app_id)
+        or (not event.is_from_bot and leading and leading.group(1) != bot_id)
     ):
         return False
-    if event.is_from_bot or event.app_id:
+    if event.is_from_bot:
         if not event.bot_id or not await BotTriggers.accepts(
             user_id=event.user,
             app_id=event.app_id,
@@ -372,9 +374,8 @@ class SlackEventsDelivery:
         rejected_bot = False
         if updated_message is not None and (
             event.is_from_bot
-            or bool(event.app_id)
             or updated_message.is_from_bot
-            or bool(updated_message.app_id)
+            or (is_message_update and bool(event.app_id or updated_message.app_id))
             or (bot_user_id and updated_message.user == bot_user_id)
         ):
             rejected_bot = (

@@ -155,19 +155,32 @@ async def _webhook(
     return response, tasks, request
 
 
+@pytest.mark.parametrize(("app_id", "mentioned"), [("", True), ("A2", True), ("A2", False)])
 async def test_a_new_conversation_slack_delivers_here_is_answered_here(
     monkeypatch: pytest.MonkeyPatch,
+    app_id: str,
+    mentioned: bool,
 ) -> None:
     # An environment whose Slack app points at the backend: no Trigger Server takes it.
     process = AsyncMock()
     monkeypatch.setattr(slack_service, "process_slack_mention", process)
 
-    response, tasks, _request = await _webhook(_mention())
+    monkeypatch.setattr(slack_routes, "is_listening_channel", AsyncMock(return_value=True))
+    monkeypatch.setattr(slack_routes.AskChannelMessage, "for_robin", AsyncMock(return_value=True))
+    response, tasks, _request = await _webhook(
+        _mention(
+            app_id=app_id,
+            type="app_mention" if mentioned else "message",
+            text="<@BOT> help" if mentioned else "help",
+        )
+    )
 
     assert response == {"status": "accepted", "message": "Slack mention queued"}
     [(task, (request, repo))] = tasks.tasks
     assert task is process
-    assert cast(SlackRequest, request).thread_id == "backend-thread"
+    request = cast(SlackRequest, request)
+    assert request.thread_id == "backend-thread"
+    assert (request.user_id, request.triggering_bot_id) == ("U1", "")
     assert repo is None
 
 
@@ -975,9 +988,10 @@ async def test_an_unlinked_ask_sender_can_start_without_a_personal_owner(
     prompt.assert_not_awaited()
 
 
+@pytest.mark.parametrize("bot_app_id", ["", "A2"])
 @pytest.mark.parametrize("needed", ["unlinked", "revoked"])
 async def test_a_person_who_cant_run_is_prompted_privately_before_anything_is_claimed_once_per_call(
-    monkeypatch: pytest.MonkeyPatch, needed: str
+    monkeypatch: pytest.MonkeyPatch, needed: str, bot_app_id: str
 ) -> None:
     gate = slack_service.AccountLinkNeeded(
         "U1", None, cast(webhook_common.AccountLinkReason, needed)
@@ -988,9 +1002,9 @@ async def test_a_person_who_cant_run_is_prompted_privately_before_anything_is_cl
     prepare = _prepared(monkeypatch)
     app = _start_app(monkeypatch)
 
-    first = await _start(app)
-    again = await _start(app)
-    other_call = await _start(app, msg_id="msg_delivery-2")
+    first = await _start(app, bot_app_id=bot_app_id)
+    again = await _start(app, bot_app_id=bot_app_id)
+    other_call = await _start(app, msg_id="msg_delivery-2", bot_app_id=bot_app_id)
 
     assert first == _NO_RUN
     prompt.assert_awaited_once_with("C1", "1.2")
@@ -2334,16 +2348,34 @@ async def test_self_app_without_bot_id_is_recorded_without_starting_runs(
     context.assert_not_awaited()
 
 
-async def test_app_only_bot_start_is_rejected_before_credentials(
+@pytest.mark.parametrize("mentioned", [True, False])
+async def test_user_token_app_start_uses_the_humans_account(
     monkeypatch: pytest.MonkeyPatch,
+    mentioned: bool,
 ) -> None:
     prepare = _prepared(monkeypatch, prompt=_PROMPT)
-    resolve = AsyncMock(return_value=_BOT)
+    resolve = AsyncMock(return_value=None)
     monkeypatch.setattr(slack_channel, "resolve_allowed_slack_bot", resolve)
 
-    await _start(_start_app(monkeypatch), user_id="UBOT", bot_app_id="A2")
+    start = await _start(
+        _start_app(monkeypatch),
+        bot_app_id="A2",
+        explicit_mention=mentioned,
+        text="<@BOT> help" if mentioned else "help",
+        listening_channel=not mentioned,
+        treat_all_messages_as_mentions=not mentioned,
+    )
 
-    cast(AsyncMock, slack_service.account_link_needed).assert_not_awaited()
-    cast(AsyncMock, slack_service.slack_login).assert_not_awaited()
-    prepare.assert_not_awaited()
+    assert start["run"] is not None
+    cast(AsyncMock, slack_service.account_link_needed).assert_awaited_once_with("U1")
+    cast(AsyncMock, slack_service.slack_login).assert_awaited_with("U1")
+    assert (
+        cast(AsyncMock, mda_forwarding.claim_conversation).await_args.kwargs["owner_login"] == "ada"
+    )
+    request = prepare.await_args.args[0]
+    assert (request.user_id, request.source_message_ts, request.triggering_bot_id) == (
+        "U1",
+        "1.2",
+        "",
+    )
     resolve.assert_not_awaited()

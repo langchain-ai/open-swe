@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any, Literal, cast
 
 import pytest
@@ -606,6 +607,16 @@ def test_a_branch_whose_conversation_cant_be_read_is_still_answered(
     [
         # Addressed to another person.
         (_event("<@U9> can you look?", key="message"), SlackMessageFacts(conversation="mda")),
+        (
+            _event(
+                "<@U9> can you look?", key="message", payload={"type": "message", "app_id": "A9"}
+            ),
+            SlackMessageFacts(listening_channel=True, conversation="new"),
+        ),
+        (
+            _event(payload={"type": "app_mention", "app_id": "A1", "text": "<@UBOT> help"}),
+            SlackMessageFacts(conversation="new"),
+        ),
         # An untagged reply nobody asked the agent for.
         (_event("thanks!", key="message"), SlackMessageFacts(conversation="mda")),
         # The same in a conversation the backend holds: the backend's own checks (a solo
@@ -647,6 +658,8 @@ def test_a_branch_whose_conversation_cant_be_read_is_still_answered(
     ],
     ids=[
         "other-person",
+        "app-post-to-other-person",
+        "own-app-without-bot-id",
         "untagged",
         "backend-untagged",
         "mda-broadcast",
@@ -769,10 +782,12 @@ def test_other_pull_request_links_stay_unwatched(
     ],
     ids=["untagged", "mentioned-message", "app-mention"],
 )
+@pytest.mark.parametrize("app_id", ["", "A9"])
 @pytest.mark.usefixtures("slack_reads")
 def test_a_listening_channel_message_or_solo_followup_is_a_turn(
-    monkeypatch: pytest.MonkeyPatch, event: SlackMessageEvent
+    monkeypatch: pytest.MonkeyPatch, event: SlackMessageEvent, app_id: str
 ) -> None:
+    event = replace(event, payload={**event.payload, "app_id": app_id})
     for facts in (
         SlackMessageFacts(listening_channel=True, conversation="new"),
         SlackMessageFacts(solo_followup=True, conversation="mda"),
@@ -785,6 +800,7 @@ def test_a_listening_channel_message_or_solo_followup_is_a_turn(
             facts.solo_followup or not turn.explicit_mention
         )
         assert turn.listening_channel is facts.listening_channel
+        assert (turn.user_id, turn.bot_id) == ("U1", "")
 
 
 def test_the_channel_asks_its_handlers_for_every_message_and_click() -> None:

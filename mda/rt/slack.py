@@ -322,7 +322,7 @@ def _decide(
         )
         return EXTERNAL_CHANNEL if refused and message.user_id else None
 
-    bot = bool(message.bot_id or message.bot_app_id or message.subtype == "bot_message")
+    bot = bool(message.bot_id or message.subtype == "bot_message")
     if bot and not (
         message.bot_id
         and facts.allowed_bot
