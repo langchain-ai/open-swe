@@ -142,6 +142,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 for mcp_app in AGENT_MCP.apps:
                     await stack.enter_async_context(mcp_app.lifespan(mcp_app))
             GcPauses.freeze_startup_objects()
+            GcPauses.space_out_full_collections()
             yield
     finally:
         await asyncio.gather(SEGMENT_WORKER.stop(), JOB_WORKER.stop())

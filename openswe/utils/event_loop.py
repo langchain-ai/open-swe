@@ -9,7 +9,8 @@ The same loop serves every request, so one request running seconds of plain
 Python freezes all the others; ``watch_for_stalls`` logs what it was running.
 A garbage collection holds the loop the same way, whatever the loop was running
 when it began; ``GcPauses.watch`` logs each long one, and ``GcPauses.freeze_startup_objects``
-keeps everything startup made out of every later collection.
+keeps everything startup made out of every later collection;
+``GcPauses.space_out_full_collections`` makes the full ones that remain rarer.
 """
 
 import asyncio
@@ -247,3 +248,20 @@ class GcPauses:
         gc.collect()
         gc.freeze()
         logger.info("Froze startup objects", extra={"gc_frozen_objects": gc.get_freeze_count()})
+
+    @staticmethod
+    def space_out_full_collections() -> None:
+        """Run a full collection after ``GC_FULL_COLLECTION_EVERY`` middle ones, not Python's 10.
+
+        A full collection walks every live object to free a few thousand: its cost is the
+        size of the heap, not the garbage it finds. Running them a tenth as often cuts the
+        time the loop spends held by them about tenfold; cycles wait longer to be freed.
+        """
+        every = ENV.GC_FULL_COLLECTION_EVERY.get_int(100)
+        if every <= 0:
+            return
+        young, middle, _ = gc.get_threshold()
+        gc.set_threshold(young, middle, every)
+        logger.info(
+            "Spaced out full garbage collections", extra={"gc_thresholds": [young, middle, every]}
+        )

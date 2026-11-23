@@ -573,5 +573,11 @@ ENV.var(
     "Log every garbage collection that holds the process this many milliseconds; 0 disables.",
     default="200",
 )
+ENV.var(
+    "GC_FULL_COLLECTION_EVERY",
+    "Middle-generation collections between full garbage collections (Python's own is 10); "
+    "0 keeps Python's.",
+    default="100",
+)
 ENV.var("DEBUG_TRACEMALLOC", "Start tracemalloc to attribute unclosed-session warnings.")
 ENV.var("DEBUG_TRACEMALLOC_FRAMES", "Frames tracemalloc records per allocation.", default="25")

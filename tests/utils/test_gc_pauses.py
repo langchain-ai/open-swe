@@ -61,3 +61,31 @@ def test_startup_objects_are_frozen_out_of_later_collections() -> None:
     GcPauses.freeze_startup_objects()
 
     assert gc.get_freeze_count() - before >= len(kept)
+
+
+@pytest.fixture
+def _thresholds() -> Iterator[None]:
+    before = gc.get_threshold()
+    yield
+    gc.set_threshold(*before)
+
+
+@pytest.mark.usefixtures("_thresholds")
+def test_full_collections_run_a_tenth_as_often(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each walks the whole heap to free a few thousand objects, every ~25s per pod."""
+    monkeypatch.delenv("GC_FULL_COLLECTION_EVERY", raising=False)
+    young, middle, _ = gc.get_threshold()
+
+    GcPauses.space_out_full_collections()
+
+    assert gc.get_threshold() == (young, middle, 100)
+
+
+@pytest.mark.usefixtures("_thresholds")
+def test_python_keeps_its_own_spacing_at_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GC_FULL_COLLECTION_EVERY", "0")
+    before = gc.get_threshold()
+
+    GcPauses.space_out_full_collections()
+
+    assert gc.get_threshold() == before
