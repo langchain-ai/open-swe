@@ -204,7 +204,7 @@ function ServiceRow({
           href={href}
           connecting={false}
           onConnect={onConnect}
-          emphasis
+          look="primary"
         />
       )}
     </li>

@@ -2,19 +2,24 @@
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   renderHook,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 import type { ReactNode } from "react"
 
 import { api } from "@/lib/api"
+import type { ManagedToolsView } from "@/lib/api"
 import {
   BotToolsSection,
   MANAGED_TOOLS_KEY,
+  ManagedToolsSection,
   useConnectPopup,
 } from "./ManagedToolsSection"
 
@@ -158,5 +163,85 @@ it("hides the bot section when Robin has no bot kit", async () => {
   )
   await waitFor(() => expect(load).toHaveBeenCalled())
   await waitFor(() => expect(container.textContent).toBe(""))
+  client.clear()
+})
+
+it("lists available tools in a searchable table with connect links", async () => {
+  const base = {
+    enabled: true,
+    has_credential: false,
+    personal: false,
+  }
+  const client = new QueryClient({
+    defaultOptions: { queries: { staleTime: Infinity } },
+  })
+  client.setQueryData<ManagedToolsView>(MANAGED_TOOLS_KEY, {
+    configured: true,
+    langsmith_connected: true,
+    servers: [
+      {
+        ...base,
+        id: "s",
+        name: "Slack",
+        kind: "oauth",
+        connected: true,
+      },
+      {
+        ...base,
+        id: "e",
+        name: "excalidraw",
+        kind: "secret",
+        connected: false,
+      },
+      {
+        ...base,
+        id: "mine",
+        name: "Mine",
+        kind: "none",
+        connected: true,
+        personal: true,
+      },
+    ],
+  })
+  const removeServer = vi
+    .spyOn(api, "removeManagedServer")
+    .mockResolvedValue(undefined)
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <ManagedToolsSection />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  const available = within(
+    await screen.findByRole("region", { name: "Available Tools" })
+  )
+  const table = available.getByRole("table")
+  expect(table.textContent).toContain("Slack")
+  expect(table.textContent).not.toContain("Mine")
+  expect(available.getByText("2 tools")).toBeTruthy()
+  expect(
+    available
+      .getByRole("link", { name: "Connect excalidraw" })
+      .getAttribute("href")
+  ).toContain("/my-managed-tools/connect/e")
+  const custom = within(screen.getByRole("region", { name: "Custom Tools" }))
+  expect(custom.getByRole("table").textContent).toContain("Mine")
+
+  fireEvent.change(available.getByLabelText("Search tools"), {
+    target: { value: "exc" },
+  })
+  expect(available.getByText("1 tool")).toBeTruthy()
+  expect(table.textContent).not.toContain("Slack")
+
+  // Removing deletes the server from LangSmith, so it asks first.
+  fireEvent.keyDown(custom.getByRole("button", { name: "Actions for Mine" }), {
+    key: "Enter",
+  })
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }))
+  expect(await screen.findByText("Remove Mine?")).toBeTruthy()
+  expect(removeServer).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+  await waitFor(() => expect(removeServer.mock.calls[0]?.[0]).toBe("mine"))
   client.clear()
 })

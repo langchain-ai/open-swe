@@ -3,12 +3,25 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { QueryKey } from "@tanstack/react-query"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
-import { Card } from "@langchain/macaw-components/Card"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@langchain/macaw-components/DropdownMenu"
+import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
 import { Select } from "@langchain/macaw-components/Select"
 import { Text } from "@langchain/macaw-components/Text"
+import { CaretLeftIcon } from "@phosphor-icons/react/dist/ssr/CaretLeft"
+import { CaretRightIcon } from "@phosphor-icons/react/dist/ssr/CaretRight"
+import { CircleIcon } from "@phosphor-icons/react/dist/ssr/Circle"
+import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
+import { LinkIcon } from "@phosphor-icons/react/dist/ssr/Link"
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { PlusIcon } from "@phosphor-icons/react/dist/ssr/Plus"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
+import type { ReactNode } from "react"
 
 import {
   SettingsRow,
@@ -16,8 +29,11 @@ import {
   SettingsSection,
 } from "@/components/AppShell"
 import { ConnectorLogo } from "@/components/ConnectorLogo"
+import { ConfirmDialog } from "@/components/ConfirmDialog"
+import { DropdownMenuItem } from "@/components/MenuItem"
 import { api, managedToolConnectUrl } from "@/lib/api"
 import { optimisticUpdate } from "@/lib/optimistic"
+import { cn } from "@/lib/utils"
 import type {
   BotToolsView,
   ConnectableServer,
@@ -106,7 +122,7 @@ export function ConnectButton({
   label,
   connecting,
   onConnect,
-  emphasis = false,
+  look = "outlined",
 }: {
   server: Pick<ConnectableServer, "id" | "name"> &
     Partial<Pick<ConnectableServer, "kind">>
@@ -115,10 +131,11 @@ export function ConnectButton({
   label?: string
   connecting: boolean
   onConnect: (serverId: string) => void
-  /** The primary action where it is the one thing to do, as on a thread's connect card. */
-  emphasis?: boolean
+  /** `primary` where it is the one thing to do, as on a thread's connect card; `badge` in a table's status column. */
+  look?: "outlined" | "primary" | "badge"
 }) {
   const action = label ?? (server.kind === "secret" ? "Set up" : "Connect")
+  const text = connecting ? "Waiting…" : action
   return (
     <Button
       as={
@@ -126,14 +143,28 @@ export function ConnectButton({
           <a href={href} target="_blank" rel="noopener noreferrer" />
         )
       }
-      size={emphasis ? "sm" : "xs"}
-      color={emphasis ? "primary" : "secondary"}
-      variant={emphasis ? "normal" : "outlined"}
+      size={look === "primary" ? "sm" : "xs"}
+      color={look === "primary" ? "primary" : "secondary"}
+      variant={
+        look === "primary" ? "normal" : look === "badge" ? "plain" : "outlined"
+      }
+      className={cn(look === "badge" && "h-auto rounded-full border-0 p-0")}
       aria-label={`${action} ${server.name}`}
       disabled={connecting}
       onClick={() => onConnect(server.id)}
     >
-      {connecting ? "Waiting…" : action}
+      {look === "badge" ? (
+        <Badge
+          size="md"
+          color="primary"
+          leftDecorator={LinkIcon}
+          className="whitespace-nowrap"
+        >
+          {text}
+        </Badge>
+      ) : (
+        text
+      )}
     </Button>
   )
 }
@@ -170,7 +201,7 @@ function useDisconnect() {
 function useRemoveServer() {
   const qc = useQueryClient()
   const remove = useMutation({
-    meta: { errorTitle: "Couldn't remove the server" },
+    meta: { errorTitle: "Couldn't remove the tool" },
     mutationFn: api.removeManagedServer,
     onMutate: async (serverId) => ({
       undo: await optimisticUpdate<ManagedToolsView>(
@@ -190,7 +221,15 @@ function useRemoveServer() {
   return (serverId: string) => remove.mutate(serverId)
 }
 
-function ServerTile({
+const PAGE_SIZE = 25
+
+const AUTH_COLUMN_LABELS: Record<ManagedServer["kind"], string> = {
+  none: "Public",
+  oauth: "OAuth",
+  secret: "API key",
+}
+
+function ServerRow({
   server,
   connecting,
   onConnect,
@@ -201,67 +240,260 @@ function ServerTile({
   connecting: boolean
   onConnect: (serverId: string) => void
   onDisconnect: (serverId: string) => void
-  onRemove: (serverId: string) => void
+  onRemove?: (serverId: string) => void
 }) {
+  const canDisconnect = server.connected && server.has_credential
   return (
-    <div className="flex h-full min-w-0 flex-col justify-between gap-space-2 p-space-3">
-      <div className="flex min-w-0 items-center gap-space-2">
-        <ConnectorLogo name={server.name} icons={server} />
-        <Text
-          as="span"
-          variant="md"
-          weight="medium"
-          className="min-w-0 break-words"
-        >
-          {server.name}
-        </Text>
-      </div>
-      <Text as="span" variant="xs" color="secondary">
-        {AUTH_LABELS[server.kind]}
-      </Text>
-      <div className="flex flex-wrap items-center gap-space-2">
-        <Badge color={server.connected ? "primary" : "secondary"} size="xs">
-          {server.connected ? "Connected" : "Not connected"}
-        </Badge>
-        {server.connected && server.has_credential ? (
-          <Button
-            size="xs"
-            color="secondary"
-            variant="outlined"
-            aria-label={`Disconnect ${server.name}`}
-            onClick={() => onDisconnect(server.id)}
+    <tr className="border-b border-subtle last:border-b-0 hover:bg-surface-level-2">
+      <td className="max-w-0 py-space-3 pr-space-3 pl-space-5">
+        <div className="flex min-w-0 items-center gap-space-3">
+          <ConnectorLogo name={server.name} icons={server} />
+          <Text
+            as="span"
+            variant="sm"
+            weight="medium"
+            className="min-w-0 truncate"
           >
-            Disconnect
-          </Button>
-        ) : !server.connected && server.kind !== "none" ? (
+            {server.name}
+          </Text>
+        </div>
+      </td>
+      <td className="hidden w-28 py-space-3 pr-space-3 whitespace-nowrap sm:table-cell">
+        <Text as="span" variant="sm" color="secondary">
+          {AUTH_COLUMN_LABELS[server.kind]}
+        </Text>
+      </td>
+      <td className="w-36 py-space-3 text-center">
+        {!server.connected && server.kind !== "none" ? (
           <ConnectButton
             server={server}
             href={managedToolConnectUrl(server.id)}
-            label={server.kind === "secret" ? "Add API key" : undefined}
+            label="Connect"
             connecting={connecting}
             onConnect={onConnect}
+            look="badge"
           />
-        ) : null}
-        {server.personal ? (
-          <Button
-            size="xs"
-            color="secondary"
-            variant="outlined"
-            aria-label={`Remove ${server.name}`}
-            onClick={() => onRemove(server.id)}
+        ) : (
+          <Badge
+            size="md"
+            color={server.connected ? "success" : "secondary"}
+            leftDecorator={server.connected ? CircleIcon : undefined}
+            iconWeight="fill"
+            className="gap-space-2 whitespace-nowrap [&>svg]:size-1.5"
           >
-            Remove
-          </Button>
+            {server.connected ? "Connected" : "Not connected"}
+          </Badge>
+        )}
+      </td>
+      <td className="w-14 py-space-3 pr-space-5 text-right">
+        {canDisconnect || onRemove ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <IconButton
+                icon={DotsThreeIcon}
+                label={`Actions for ${server.name}`}
+                size="sm"
+                variant="plain"
+                color="secondary"
+              />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {canDisconnect ? (
+                <DropdownMenuItem onSelect={() => onDisconnect(server.id)}>
+                  Disconnect
+                </DropdownMenuItem>
+              ) : null}
+              {onRemove ? (
+                <DropdownMenuItem onSelect={() => onRemove(server.id)}>
+                  Remove
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
+      </td>
+    </tr>
+  )
+}
+
+/** The servers LangSmith lists for the caller, as LangSmith's Tools page shows them. */
+function ServerTable({
+  servers,
+  empty,
+  connecting,
+  onConnect,
+  onDisconnect,
+  onRemove,
+}: {
+  servers: ManagedServer[]
+  /** What the table says when nothing is listed and no search narrows it. */
+  empty: string
+  connecting: string | null
+  onConnect: (serverId: string) => void
+  onDisconnect: (serverId: string) => void
+  /** Removes a server the caller added; its rows offer Remove when set. */
+  onRemove?: (serverId: string) => void
+}) {
+  const [query, setQuery] = useState("")
+  const [page, setPage] = useState(1)
+
+  const needle = query.trim().toLowerCase()
+  const matches = servers
+    .filter((server) => server.name.toLowerCase().includes(needle))
+    .sort(
+      (a, b) =>
+        Number(b.connected) - Number(a.connected) ||
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+    )
+  const pageCount = Math.max(1, Math.ceil(matches.length / PAGE_SIZE))
+  const current = Math.min(page, pageCount)
+  const start = (current - 1) * PAGE_SIZE
+  const rows = matches.slice(start, start + PAGE_SIZE)
+  const emptyMessage = needle ? `No tools match “${query.trim()}”.` : empty
+
+  return (
+    <div className="overflow-clip rounded-md border border-subtle">
+      <div className="flex flex-wrap items-center gap-space-3 border-b border-subtle p-space-3">
+        <Input
+          size="sm"
+          className="w-64 max-w-full"
+          aria-label="Search tools"
+          placeholder="Search tools"
+          value={query}
+          debounceMs={0}
+          leftIcon={MagnifyingGlassIcon}
+          rightAction={
+            query
+              ? {
+                  icon: XIcon,
+                  label: "Clear search",
+                  onClick: () => {
+                    setQuery("")
+                    setPage(1)
+                  },
+                }
+              : undefined
+          }
+          onChange={(value) => {
+            setQuery(value)
+            setPage(1)
+          }}
+        />
+        <Text
+          as="span"
+          variant="sm"
+          color="secondary"
+          className="ml-auto whitespace-nowrap"
+          aria-live="polite"
+        >
+          {matches.length} {matches.length === 1 ? "tool" : "tools"}
+        </Text>
       </div>
+      <table className="w-full table-fixed text-left">
+        <thead className="bg-surface-level-2 text-xs text-tertiary">
+          <tr className={cn(rows.length > 0 && "border-b border-subtle")}>
+            <th
+              scope="col"
+              className="py-space-2 pr-space-3 pl-space-5 font-normal"
+            >
+              Name
+            </th>
+            <th
+              scope="col"
+              className="hidden w-28 py-space-2 pr-space-3 font-normal sm:table-cell"
+            >
+              Auth
+            </th>
+            <th scope="col" className="w-36 py-space-2 text-center font-normal">
+              Status
+            </th>
+            <th scope="col" className="w-14 py-space-2 pr-space-5">
+              <span className="sr-only">Actions</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length ? (
+            rows.map((server) => (
+              <ServerRow
+                key={server.id}
+                server={server}
+                connecting={connecting === server.id}
+                onConnect={onConnect}
+                onDisconnect={onDisconnect}
+                onRemove={onRemove}
+              />
+            ))
+          ) : (
+            <tr>
+              <td colSpan={4} className="h-32 text-center">
+                <Text as="span" role="status" variant="sm" color="tertiary">
+                  {emptyMessage}
+                </Text>
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      <nav
+        aria-label="Tools pagination"
+        className="flex flex-wrap items-center justify-between gap-space-2 border-t border-subtle px-space-4 py-space-2"
+      >
+        <Text as="span" variant="sm" color="secondary">
+          {matches.length
+            ? `${start + 1}–${start + rows.length} of ${matches.length} tools`
+            : "0 tools"}
+        </Text>
+        <div className="ml-auto flex items-center gap-space-2">
+          <Text as="span" variant="sm" color="secondary">
+            Page {current}
+          </Text>
+          <IconButton
+            icon={CaretLeftIcon}
+            label="Previous page"
+            variant="outlined"
+            color="secondary"
+            size="sm"
+            disabled={current === 1}
+            onClick={() => setPage(current - 1)}
+          />
+          <IconButton
+            icon={CaretRightIcon}
+            label="Next page"
+            variant="outlined"
+            color="secondary"
+            size="sm"
+            disabled={current >= pageCount}
+            onClick={() => setPage(current + 1)}
+          />
+        </div>
+      </nav>
     </div>
   )
 }
 
-const AUTH_LABELS: Record<ManagedServer["kind"], string> = {
-  oauth: "Sign-in (OAuth)",
-  secret: "API key",
-  none: "No sign-in required",
+function ToolsGroup({
+  id,
+  title,
+  control,
+  children,
+}: {
+  id: string
+  title: string
+  control?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <section aria-labelledby={id} className="flex flex-col gap-space-3">
+      <div className="flex flex-wrap items-center justify-between gap-space-3">
+        <Text as="h2" id={id} variant="h5" weight="medium">
+          {title}
+        </Text>
+        {control}
+      </div>
+      {children}
+    </section>
+  )
 }
 
 const SIGN_IN_TYPES: Array<{ value: NewManagedServer["kind"]; label: string }> =
@@ -296,8 +528,8 @@ function AddServerDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        title="Add MCP server"
-        description="Only you can see and use a server you add. Your private threads load its tools; any sign-in or API key is stored in LangSmith."
+        title="Add custom tool"
+        description="Connect any remote MCP server. Only you can see and use a tool you add. Your private threads load it; any sign-in or API key is stored in LangSmith."
         className="w-[min(30rem,calc(100vw-2rem))]"
       >
         <form
@@ -316,7 +548,7 @@ function AddServerDialog({ onClose }: { onClose: () => void }) {
           />
           <Input
             size="sm"
-            label="Server URL"
+            label="MCP server URL"
             value={server.url}
             placeholder="https://mcp.example.com/mcp"
             onChange={(url) => setServer({ ...server, url })}
@@ -334,7 +566,7 @@ function AddServerDialog({ onClose }: { onClose: () => void }) {
             <Input
               size="sm"
               label="Header name"
-              hintText="The key itself is entered in LangSmith after you add the server."
+              hintText="The key itself is entered in LangSmith after you add the tool."
               value={server.header ?? ""}
               placeholder="Authorization"
               onChange={(header) => setServer({ ...server, header })}
@@ -361,7 +593,7 @@ function AddServerDialog({ onClose }: { onClose: () => void }) {
               loading={add.isPending}
               disabled={!ready || add.isPending}
             >
-              Add server
+              Add tool
             </Button>
           </div>
         </form>
@@ -379,6 +611,7 @@ export function ManagedToolsSection({ query = "" }: { query?: string }) {
   const disconnect = useDisconnect()
   const remove = useRemoveServer()
   const [adding, setAdding] = useState(false)
+  const [removing, setRemoving] = useState<ManagedServer | null>(null)
 
   if (view.isPending) {
     return (
@@ -421,87 +654,68 @@ export function ManagedToolsSection({ query = "" }: { query?: string }) {
   }
 
   const search = query.trim().toLowerCase()
-  const sorted = view.data.servers
-    .filter((server) => server.name.toLowerCase().includes(search))
-    .sort((a, b) =>
-      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
-    )
-  const catalog = sorted.filter((server) => !server.personal)
-  const custom = sorted.filter((server) => server.personal)
-  const groups = [
-    {
-      id: "available-tools",
-      title: "Available Tools",
-      description: "LangSmith Managed Tools for your private threads.",
-      empty: "No tools are available.",
-      servers: catalog,
-    },
-    {
-      id: "custom-mcp-servers",
-      title: "Custom MCP Servers",
-      description: "Servers you add and only you can use in private threads.",
-      empty: "You haven't added any MCP servers yet.",
-      servers: custom,
-      control: (
-        <Button
-          size="sm"
-          color="secondary"
-          variant="outlined"
-          leftDecorator={PlusIcon}
-          onClick={() => setAdding(true)}
-        >
-          Add MCP server
-        </Button>
-      ),
-    },
-  ]
+  const listed = view.data.servers.filter((server) =>
+    server.name.toLowerCase().includes(search)
+  )
+  const catalog = listed.filter((server) => !server.personal)
+  const custom = listed.filter((server) => server.personal)
 
   return (
     <div className="flex flex-col gap-space-6">
-      {groups.map(({ id, title, description, control, empty, servers }) => (
-        <section
-          key={id}
-          aria-labelledby={id}
-          className="flex flex-col gap-space-3"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-space-3">
-            <div className="flex flex-col gap-space-1">
-              <Text as="h2" id={id} variant="h5" weight="medium">
-                {title}
-              </Text>
-              <Text as="p" variant="sm" color="secondary">
-                {description}
-              </Text>
-            </div>
-            {control}
-          </div>
-          {servers.length ? (
-            <Card className="overflow-hidden p-0">
-              <ul className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,13.5rem),1fr))] gap-px">
-                {servers.map((server) => (
-                  <li
-                    key={server.id}
-                    className="min-w-0 outline-1 outline-(--border-muted)"
-                  >
-                    <ServerTile
-                      server={server}
-                      connecting={popup.connecting === server.id}
-                      onConnect={popup.start}
-                      onDisconnect={disconnect}
-                      onRemove={remove}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          ) : (
-            <Text as="p" role="status" variant="sm" color="secondary">
-              {search ? "No matching connections." : empty}
-            </Text>
-          )}
-        </section>
-      ))}
+      <ToolsGroup id="available-tools" title="Available Tools">
+        <ServerTable
+          servers={catalog}
+          empty={
+            search ? "No matching connections." : "No tools are available."
+          }
+          connecting={popup.connecting}
+          onConnect={popup.start}
+          onDisconnect={disconnect}
+        />
+      </ToolsGroup>
+      <ToolsGroup
+        id="custom-tools"
+        title="Custom Tools"
+        control={
+          <Button
+            size="sm"
+            color="secondary"
+            variant="outlined"
+            leftDecorator={PlusIcon}
+            onClick={() => setAdding(true)}
+          >
+            Add Custom Tool
+          </Button>
+        }
+      >
+        <ServerTable
+          servers={custom}
+          empty={
+            search
+              ? "No matching connections."
+              : "You haven't added any custom tools yet."
+          }
+          connecting={popup.connecting}
+          onConnect={popup.start}
+          onDisconnect={disconnect}
+          onRemove={(serverId) =>
+            setRemoving(custom.find((server) => server.id === serverId) ?? null)
+          }
+        />
+      </ToolsGroup>
       {adding && <AddServerDialog onClose={() => setAdding(false)} />}
+      <ConfirmDialog
+        open={removing !== null}
+        onOpenChange={(open) => !open && setRemoving(null)}
+        title={`Remove ${removing?.name ?? "this tool"}?`}
+        description="It's deleted from LangSmith, and your private threads stop loading its tools. To use it again, add it again."
+        confirmLabel="Remove"
+        destructive
+        onConfirm={() => {
+          if (removing) remove(removing.id)
+          setRemoving(null)
+        }}
+      />
     </div>
   )
 }
