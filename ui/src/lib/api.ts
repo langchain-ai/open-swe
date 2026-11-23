@@ -677,7 +677,18 @@ export interface ReviewerStatsPayload {
   generated_at_ms: number | null
 }
 
+export interface BotActivity {
+  accounts: number
+  invocations: number
+  threads: number
+  total_tokens: number
+  total_cost_usd: number
+  invocations_without_cost: number
+  invocations_with_partial_cost: number
+}
+
 export interface UsageLeaderboardPayload extends AnalyticsMetadata {
+  bot_activity?: BotActivity
   period: UsageLeaderboardPeriod
   rows: Array<UsageLeaderboardRow>
   total_members: number

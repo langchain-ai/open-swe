@@ -549,6 +549,7 @@ WITH runs AS (
         row_number() OVER (
             ORDER BY merged_prs DESC, agent_loc DESC, prs_opened DESC, name, person_id
         ) AS rank FROM labeled
+    WHERE COALESCE(lower(github_login) NOT LIKE '%[bot]', true)
 ), keyed AS (
     SELECT *,
         -- One key per sortable type: the inactive key is NULL for every row, so it
@@ -610,12 +611,26 @@ WITH runs AS (
             'invocations_with_partial_cost', invocations_with_partial_cost
         ) AS row
     FROM ordered WHERE position > :offset AND position <= :offset + :limit
+), bot_totals AS (
+    SELECT jsonb_build_object(
+        'accounts', count(*),
+        'invocations', COALESCE(sum(invocations), 0),
+        'threads', COALESCE(sum(threads), 0),
+        'total_tokens', COALESCE(sum(total_tokens), 0),
+        'total_cost_usd', COALESCE(sum(total_cost_usd), 0),
+        'invocations_without_cost', COALESCE(sum(invocations_without_cost), 0),
+        'invocations_with_partial_cost', COALESCE(sum(invocations_with_partial_cost), 0)
+    ) AS activity
+    FROM labeled WHERE lower(github_login) LIKE '%[bot]'
 )
 SELECT (SELECT COALESCE(jsonb_agg(row ORDER BY position), '[]'::jsonb) FROM selected) AS rows,
+    (SELECT activity FROM bot_totals) AS bot_activity,
     count(*) AS total_members,
     min(rank) FILTER (WHERE is_current) AS current_user_rank,
-    COALESCE(sum(invocations_without_cost), 0)::bigint AS invocations_without_cost,
-    COALESCE(sum(invocations_with_partial_cost), 0)::bigint AS invocations_with_partial_cost
+    (SELECT COALESCE(sum(invocations_without_cost), 0)::bigint FROM labeled)
+        AS invocations_without_cost,
+    (SELECT COALESCE(sum(invocations_with_partial_cost), 0)::bigint FROM labeled)
+        AS invocations_with_partial_cost
 FROM ranked
 """
 

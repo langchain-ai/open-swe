@@ -210,6 +210,53 @@ async def test_usage_ranks_run_and_pr_cohorts_with_cost_coverage(usage_db):
     assert [row["rank"] for row in (await report(limit=1, offset=1))["rows"]] == [2]
 
 
+async def test_usage_separates_bot_activity_before_ranking_and_pagination(usage_db):
+    alice = await person("alice")
+    bot = await person("robin-agent[bot]")
+    await run(alice, tokens=10, thread_id=uuid4())
+    bot_run = await run(bot, tokens=100, thread_id=uuid4())
+    await pr(bot, state="merged", additions=500)
+    await feedback(bot)
+    await insert(
+        "latest_cost_projection",
+        run_id=bot_run,
+        observation_revision=1,
+        observed_at=NOW,
+        status="partial",
+        cost_usd=2.5,
+        source="langsmith",
+        event_id=uuid4(),
+    )
+
+    result = await report(limit=1, current_login="alice", sort="total_tokens", direction="desc")
+    assert result["total_members"] == 1
+    assert result["current_user_rank"] == 1
+    assert result["next_cursor"] is None
+    assert result["rows"][0]["user"]["github_login"] == "alice"
+    assert result["rows"][0]["rank"] == 1
+    assert not result["rows"][0]["is_top_feedback_contributor"]
+    assert result["bot_activity"] == {
+        "accounts": 1,
+        "invocations": 1,
+        "threads": 1,
+        "total_tokens": 100,
+        "total_cost_usd": 2.5,
+        "invocations_without_cost": 0,
+        "invocations_with_partial_cost": 1,
+    }
+    assert result["invocations_without_cost"] == 1
+    assert result["invocations_with_partial_cost"] == 1
+
+    async with postgres.transaction() as conn:
+        await conn.execute(
+            text("DELETE FROM run_projection WHERE user_id = :user"), {"user": alice}
+        )
+    bots_only = await report()
+    assert bots_only["rows"] == []
+    assert bots_only["total_members"] == 0
+    assert bots_only["bot_activity"] == result["bot_activity"]
+
+
 async def test_usage_sorting_happens_before_pagination(usage_db):
     alice = await person("alice", display_name="Alice")
     bob = await person("bob", display_name="bob")
@@ -636,8 +683,10 @@ class TestUsageHealth:
 async def test_own_usage_filters_before_totals_rank_and_pagination(usage_db):
     own = await person("own", "own@example.com")
     other = await person("other", "other@example.com")
+    bot = await person("robin-agent[bot]")
     own_run = await run(own, tokens=12)
     await run(other, tokens=9000)
+    await run(bot, tokens=100)
     await pr(other, state="merged", additions=1000)
     await insert(
         "latest_cost_projection",
@@ -656,14 +705,21 @@ async def test_own_usage_filters_before_totals_rank_and_pagination(usage_db):
     assert result["rows"][0]["rank"] == 1
     assert result["rows"][0]["total_tokens"] == 12
     assert result["rows"][0]["total_cost_usd"] == 2.5
+    assert result["bot_activity"]["accounts"] == 0
+    assert result["invocations_without_cost"] == 0
+    assert result["invocations_with_partial_cost"] == 0
     assert result["next_cursor"] is None
     assert "reviewer_stats" not in result
     assert "other" not in str(result)
     empty = await report(own_user_id=uuid4())
     assert empty["rows"] == []
     assert empty["total_members"] == 0
+    assert empty["bot_activity"]["accounts"] == 0
+    assert empty["invocations_without_cost"] == 0
     all_users = await report(admin=True)
     assert all_users["total_members"] == 2
+    assert all_users["bot_activity"]["accounts"] == 1
+    assert all_users["invocations_without_cost"] == 2
 
 
 async def test_own_usage_resolves_identity_alias_without_cross_person_leak(usage_db):

@@ -64,6 +64,15 @@ const emptyUsage: UsageLeaderboardPayload = {
   total_members: 0,
   current_user_rank: null,
   generated_at_ms: null,
+  bot_activity: {
+    accounts: 0,
+    invocations: 0,
+    threads: 0,
+    total_tokens: 0,
+    total_cost_usd: 0,
+    invocations_without_cost: 0,
+    invocations_with_partial_cost: 0,
+  },
   reviewer_stats: {
     period: "30d",
     reviewed_prs: 0,
@@ -1240,6 +1249,30 @@ it("defaults usage counts and duration to threads and can switch to invocations"
   client.clear()
 })
 
+it("keeps bot usage visible when the people's leaderboard is empty", async () => {
+  vi.spyOn(api, "prMergeRateByModel").mockResolvedValue(report(captured))
+  vi.mocked(api.usageLeaderboard).mockResolvedValue({
+    ...emptyUsage,
+    bot_activity: {
+      accounts: 1,
+      invocations: 4,
+      threads: 2,
+      total_tokens: 109461393,
+      total_cost_usd: 820.86,
+      invocations_without_cost: 1,
+      invocations_with_partial_cost: 0,
+    },
+  })
+  const client = mountReport()
+  expect(await screen.findByText("109,461,393")).toBeTruthy()
+  expect(screen.getByText("$820.86")).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Cost incomplete" })).toBeTruthy()
+  expect(screen.getByText("Bot Activity")).toBeTruthy()
+  expect(screen.getByText(/No Robin Agent usage/)).toBeTruthy()
+  expect(screen.queryByRole("columnheader", { name: "PRs Opened" })).toBeNull()
+  client.clear()
+})
+
 it("distinguishes unavailable usage from empty usage and recovers without duplicate coverage notices", async () => {
   vi.mocked(api.usageHealth).mockRejectedValue(new ApiError(503, "unavailable"))
   vi.mocked(api.usageLeaderboard).mockRejectedValue(
@@ -1272,6 +1305,7 @@ it("distinguishes unavailable usage from empty usage and recovers without duplic
     screen.getAllByText(/still waiting to be processed/).length
   ).toBeGreaterThan(0)
   expect(screen.getByText("Reviewed PRs")).toBeTruthy()
+  expect(screen.queryByText("Bot Activity")).toBeNull()
   expect(
     screen.queryByText("Usage analytics is unavailable on this deployment.")
   ).toBeNull()

@@ -27,6 +27,7 @@ import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 
 import type {
   AnalyticsMetadata,
+  BotActivity,
   PRMergeRateCohort,
   PRMergeRateEffort,
   PRMergeRatePayload,
@@ -312,7 +313,7 @@ function UsageAnalyticsPeriod({
 
       <SettingsSection
         title="Agent Leaderboard"
-        description="Ranked by merged PRs, then agent lines of code and PRs opened."
+        description="People ranked by merged PRs, then agent lines of code and PRs opened. Bot activity is reported separately."
         action={
           <div className="flex items-center gap-space-2">
             <div
@@ -387,7 +388,7 @@ function UsageAnalyticsPeriod({
           </div>
         ) : !leaderboard.data?.total_members ? (
           <div className="p-space-5 text-center text-xs text-secondary">
-            No Robin Agent usage has been recorded for{" "}
+            No Robin Agent usage by people has been recorded for{" "}
             {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
           </div>
         ) : (
@@ -436,6 +437,15 @@ function UsageAnalyticsPeriod({
           />
         )}
       </SettingsSection>
+
+      {!leaderboard.isError && leaderboard.data?.bot_activity?.accounts ? (
+        <SettingsSection
+          title="Bot Activity"
+          description="Usage attributed to GitHub bot accounts, including automated review triggers. Excluded from people's rankings; PR and human-review attribution is unchanged."
+        >
+          <BotUsage activity={leaderboard.data.bot_activity} />
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection
         title="Reviewer Stats"
@@ -1655,6 +1665,42 @@ function UsageTable({
   )
 }
 
+function BotUsage({ activity }: { activity: BotActivity }) {
+  const cards = [
+    { label: "Bot accounts", value: formatNumber(activity.accounts) },
+    { label: "Invocations", value: formatNumber(activity.invocations) },
+    { label: "Threads", value: formatNumber(activity.threads) },
+    { label: "Tokens", value: formatNumber(activity.total_tokens) },
+  ]
+
+  return (
+    <div className="grid gap-space-3 p-space-4 sm:grid-cols-2 lg:grid-cols-5">
+      {cards.map((card) => (
+        <Card key={card.label} className="bg-surface-level-3 p-space-3">
+          <Text variant="xs" color="secondary">
+            {card.label}
+          </Text>
+          <Text
+            variant="h2"
+            weight="medium"
+            className="mt-space-1 tabular-nums"
+          >
+            {card.value}
+          </Text>
+        </Card>
+      ))}
+      <Card className="bg-surface-level-3 p-space-3">
+        <Text variant="xs" color="secondary">
+          Cost
+        </Text>
+        <div className="mt-space-1 flex justify-end text-lg font-medium tabular-nums">
+          <UsageCost row={activity} />
+        </div>
+      </Card>
+    </div>
+  )
+}
+
 function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
   const cards = [
     {
@@ -1832,7 +1878,17 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value)
 }
 
-function UsageCost({ row }: { row: UsageLeaderboardRow }) {
+function UsageCost({
+  row,
+}: {
+  row: Pick<
+    UsageLeaderboardRow,
+    | "invocations"
+    | "total_cost_usd"
+    | "invocations_without_cost"
+    | "invocations_with_partial_cost"
+  >
+}) {
   if (row.invocations === 0) return <span>—</span>
 
   const missing = row.invocations_without_cost
