@@ -8,12 +8,7 @@ export function SidebarGroupHeading({
   className?: string
 }) {
   return (
-    <span
-      className={cn(
-        "mb-0.5 min-w-0 truncate text-sm text-quaternary [font-variant-caps:all-small-caps]",
-        className
-      )}
-    >
+    <span className={cn("min-w-0 truncate text-quaternary", className)}>
       {label}
     </span>
   )

@@ -11,6 +11,7 @@ import {
 import { CpuIcon } from "@phosphor-icons/react/dist/ssr/Cpu"
 
 import type { ModelOption } from "@/lib/api"
+import { cn } from "@/lib/utils"
 
 const PROVIDERS = new Map([
   [
@@ -32,6 +33,7 @@ export function ModelSelect({
   models,
   leadingOption,
   requireImageSupport = false,
+  contentClassName,
   ...props
 }: ModelSelectProps) {
   const options = models.map((model): ChatComposerModelOption => {
@@ -49,6 +51,10 @@ export function ModelSelect({
     <ChatComposerModelSelect
       options={leadingOption ? [leadingOption, ...options] : options}
       searchThreshold={0}
+      contentClassName={cn(
+        "[&_[cmdk-group-heading]]:normal-case",
+        contentClassName
+      )}
       {...props}
     />
   )

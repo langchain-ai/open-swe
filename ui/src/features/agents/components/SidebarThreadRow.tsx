@@ -789,17 +789,18 @@ export function SidebarThreadRow({
                     <IconButton
                       data-thread-rename="actions"
                       icon={DotsThreeIcon}
+                      iconWeight="bold"
                       label="Thread actions"
                       style={
                         {
                           "--thread-actions-z-index": actionsZIndex,
                         } as React.CSSProperties
                       }
-                      size="xs"
+                      size="sm"
                       color="secondary"
                       variant="plain"
                       className={cn(
-                        "absolute top-1/2 right-1 -translate-y-1/2 text-tertiary opacity-0 transition-opacity group-hover/row:opacity-100 group-has-data-[hover-preview=open]/row:z-(--thread-actions-z-index) group-has-data-[hover-preview=open]/row:opacity-100 hover:bg-surface-level-4 hover:text-primary focus-visible:bg-surface-level-4 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-surface-level-4 [@media(hover:none)]:opacity-100",
+                        "absolute top-1/2 right-1 -translate-y-1/2 text-secondary opacity-0 transition-opacity group-hover/row:opacity-100 group-has-data-[hover-preview=open]/row:z-(--thread-actions-z-index) group-has-data-[hover-preview=open]/row:opacity-100 hover:bg-surface-level-4 hover:text-primary focus-visible:bg-surface-level-4 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-surface-level-4 [@media(hover:none)]:opacity-100",
                         moreMenuOpen && "opacity-100"
                       )}
                     />

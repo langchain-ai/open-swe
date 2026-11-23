@@ -177,7 +177,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         {NAV.filter((group) => !group.adminOnly || user.is_admin).map(
           (group) => (
             <div key={group.heading} className="flex flex-col gap-0.5">
-              <span className="px-space-2 pb-space-1 text-xxs font-medium tracking-wide text-tertiary uppercase">
+              <span className="px-space-2 pb-space-1 text-xs font-medium text-quaternary">
                 {group.heading}
               </span>
               {group.items.map((item) => {
