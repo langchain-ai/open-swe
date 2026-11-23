@@ -25,9 +25,12 @@ const STATUS_LABELS: Record<AgentStatus, string> = {
 
 export function AutomationRuns({
   automationId,
+  owned,
   limit = 25,
 }: {
   automationId?: string
+  /** Only runs of the viewer's own automations, not the public runs of system ones. */
+  owned?: boolean
   limit?: number
 }) {
   const [offset, setOffset] = useState(0)
@@ -36,6 +39,7 @@ export function AutomationRuns({
     offset,
     scope: "automation",
     automationId,
+    owned,
   })
   const runs = runsQuery.data?.items ?? []
   const grouped = groupAutomationRuns(runs)

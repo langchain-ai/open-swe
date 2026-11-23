@@ -71,7 +71,7 @@ function TestAutomations({
   const [owner, setOwner] = useState(initialOwner)
   return (
     <AutomationsList
-      tab="overview"
+      tab="automations"
       onTabChange={vi.fn()}
       chosenFilter={filter}
       onFilterChange={(nextFilter) => {
@@ -107,11 +107,17 @@ describe("AutomationsList", () => {
     expect(screen.queryByText("My automation")).toBeNull()
     expect(screen.getByText("Their automation")).toBeTruthy()
     expect(screen.queryByText("System automation")).toBeNull()
-    expect(screen.getByText("1 automation")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("combobox", { name: "Filter by user" }))
     fireEvent.click(screen.getByRole("option", { name: "All users" }))
-    expect(screen.getByText("3 automations")).toBeTruthy()
+    expect(screen.getAllByRole("listitem")).toHaveLength(3)
+
+    fireEvent.change(screen.getByLabelText("Search automations"), {
+      target: { value: "their" },
+    })
+    expect(screen.getAllByRole("listitem")).toHaveLength(1)
+    expect(screen.getByText("Their automation")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }))
 
     fireEvent.click(screen.getByRole("button", { name: "Mine" }))
     expect(
@@ -125,7 +131,6 @@ describe("AutomationsList", () => {
       wrapper: TooltipProvider,
     })
     expect(screen.getByText("No automations for this user")).toBeTruthy()
-    expect(screen.getByText("0 automations")).toBeTruthy()
   })
 
   it("keeps member views scoped to their own automations", () => {

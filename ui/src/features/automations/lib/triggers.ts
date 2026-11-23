@@ -8,8 +8,10 @@ import type {
 } from "@/features/agents/lib/types"
 import { AUTOMATION_EVENT_PROVIDERS } from "@/features/agents/lib/types"
 import {
+  DEFAULT_SCHEDULE,
+  ScheduleSpec,
   describeCron,
-  isDescribableCron,
+  localTimeZone,
 } from "@/features/automations/lib/cron"
 
 /** A trigger being edited: its required fields may still be empty. */
@@ -78,13 +80,31 @@ export class BranchPatterns {
 let nextKey = 0
 const draftKey = () => `trigger-${++nextKey}`
 
-export function scheduleDraft(cron: string, timezone = "UTC") {
+/** A new schedule runs in the viewer's own time zone; a saved one keeps its own. */
+export function scheduleDraft(
+  cron: string = DEFAULT_SCHEDULE.cron,
+  timezone: string = localTimeZone()
+) {
   return {
     key: draftKey(),
     kind: "schedule" as const,
     cron,
     timezone,
-    custom: !isDescribableCron(cron),
+    custom: ScheduleSpec.parse(cron) === null,
+  }
+}
+
+/** A fresh trigger of `kind`, as the trigger's kind menu switches to it. */
+export function draftOfKind(kind: TriggerDraft["kind"]): TriggerDraft {
+  switch (kind) {
+    case "schedule":
+      return scheduleDraft()
+    case "github":
+      return githubDraft()
+    case "slack":
+      return slackDraft()
+    case "linear":
+      return linearDraft()
   }
 }
 
@@ -134,11 +154,11 @@ export function draftsFor(
   schedule?: AgentSchedule,
   templateCron?: string | null
 ): Array<TriggerDraft> {
-  if (!schedule) return templateCron ? [scheduleDraft(templateCron)] : []
+  if (!schedule) return [scheduleDraft(templateCron ?? undefined)]
   return schedule.triggers.map((trigger): TriggerDraft => {
     switch (trigger.kind) {
       case "schedule":
-        return scheduleDraft(trigger.cron, trigger.timezone)
+        return scheduleDraft(trigger.cron, trigger.timezone ?? "UTC")
       case "github":
         return githubDraft(trigger)
       case "slack":

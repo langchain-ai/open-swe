@@ -28,12 +28,12 @@ function AutomationsIndexPage() {
   const navigate = Route.useNavigate()
   return (
     <AutomationsList
-      tab={tab ?? "overview"}
+      tab={tab ?? "automations"}
       onTabChange={(nextTab) =>
         navigate({
           search: (previous) => ({
             ...previous,
-            tab: nextTab === "runs" ? "runs" : undefined,
+            tab: nextTab === "automations" ? undefined : nextTab,
           }),
           replace: true,
         })

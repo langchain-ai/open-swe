@@ -6,18 +6,12 @@ import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
-import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { Textarea } from "@langchain/macaw-components/Textarea"
-import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
-import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
-import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
-import { PencilSimpleIcon } from "@phosphor-icons/react/dist/ssr/PencilSimple"
-import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
 import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
 
 import type { ModelOption } from "@/lib/api"
@@ -33,19 +27,20 @@ import type { AutomationTemplate } from "@/features/automations/lib/automation-t
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { RepoSelector } from "@/features/settings/components/RepoSelector"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
-import { TriggerMenu } from "@/features/automations/components/TriggerMenu"
+import {
+  ScheduleFields,
+  TriggerKindMenu,
+  scheduleHint,
+} from "@/features/automations/components/TriggerFields"
 import { SlackChannelCombobox } from "@/components/SlackChannelCombobox"
 import { SlackChannelTextarea } from "@/components/SlackChannelTextarea"
-import { DEFAULT_CRON, describeCron } from "@/features/automations/lib/cron"
 import type { TriggerDraft } from "@/features/automations/lib/triggers"
 import {
   BranchPatterns,
+  draftOfKind,
   draftProblem,
   draftsFor,
-  githubDraft,
-  linearDraft,
   scheduleDraft,
-  slackDraft,
   toTriggers,
 } from "@/features/automations/lib/triggers"
 import {
@@ -195,24 +190,6 @@ export function AutomationEditor({
     )
   const removeDraft = (key: string) =>
     setDrafts((current) => current.filter((draft) => draft.key !== key))
-  // A preset sets the cron; Custom (null) keeps it and switches to text editing.
-  const pickSchedule = (key: string | null, cron: string | null) => {
-    if (key === null) {
-      const draft = scheduleDraft(cron ?? DEFAULT_CRON)
-      setDrafts((current) => [
-        ...current,
-        cron === null ? { ...draft, custom: true } : draft,
-      ])
-      return
-    }
-    updateDraft(key, (draft) =>
-      draft.kind === "schedule"
-        ? cron === null
-          ? { ...draft, custom: true }
-          : { ...draft, cron, custom: false }
-        : draft
-    )
-  }
   const toggleEvent = (key: string, event: string) =>
     updateDraft(key, (draft) => {
       switch (draft.kind) {
@@ -428,90 +405,64 @@ export function AutomationEditor({
           )}
         </div>
 
-        <SectionLabel>Triggers</SectionLabel>
-        <div className="flex flex-col gap-space-2">
+        <div className="mt-space-6 mb-space-2 flex items-center justify-between">
+          <Text as="h2" variant="sm" weight="medium" color="secondary">
+            Triggers
+          </Text>
+          {canManage && (
+            <IconButton
+              icon={PlusIcon}
+              label="Add trigger"
+              color="secondary"
+              variant="plain"
+              size="md"
+              onClick={() =>
+                setDrafts((current) => [...current, scheduleDraft()])
+              }
+            />
+          )}
+        </div>
+        <div className="flex flex-col gap-space-5">
           {drafts.map((draft) => {
             const problem = draftProblem(draft, isPublicRepo)
-            const hint = (fallback: string) => (
-              <p
-                className={cn(
-                  "mt-space-2 text-xs",
-                  problem ? "text-error-secondary" : "text-tertiary"
-                )}
-              >
-                {problem ?? fallback}
-              </p>
-            )
+            const hint = (fallback: string | null) =>
+              (problem ?? fallback) && (
+                <p
+                  className={cn(
+                    "mt-space-2 text-xs",
+                    problem ? "text-error-secondary" : "text-tertiary"
+                  )}
+                >
+                  {problem ?? fallback}
+                </p>
+              )
             const set = (change: Partial<TriggerDraft>) =>
               updateDraft(
                 draft.key,
                 (current) => ({ ...current, ...change }) as TriggerDraft
               )
-            if (draft.kind === "schedule") {
-              return (
-                <TriggerCard
-                  key={draft.key}
-                  icon={ClockIcon}
-                  removeLabel="Remove schedule"
-                  onRemove={() => removeDraft(draft.key)}
-                  canManage={canManage}
-                  actions={
-                    canManage && (
-                      <TriggerMenu
-                        onSchedule={(cron) => pickSchedule(draft.key, cron)}
-                        aria-label="Change schedule"
-                        className={CARD_ACTION}
-                      >
-                        <PencilSimpleIcon size={16} weight="regular" />
-                      </TriggerMenu>
-                    )
-                  }
-                >
-                  <div className="-my-0.5 flex items-center gap-space-2">
-                    {draft.custom ? (
-                      <Input
-                        size="md"
-                        debounceMs={0}
-                        value={draft.cron}
-                        onChange={(cron) => set({ cron })}
-                        disabled={!canManage}
-                        placeholder={DEFAULT_CRON}
-                        aria-label="Cron schedule"
-                        className="min-w-0 flex-1"
-                        inputContainerClassName="font-mono border-strong/70 [&:hover:not(:focus-within)]:border-strong"
-                      />
-                    ) : (
-                      <p className="min-w-0 flex-1 text-sm text-primary">
-                        {describeCron(draft.cron, draft.timezone)}{" "}
-                        <span className="font-mono text-xs text-tertiary">
-                          {draft.cron}
-                        </span>
-                      </p>
-                    )}
-                    <TimeZoneToggle
-                      value={draft.timezone}
-                      onChange={(timezone) => set({ timezone })}
+            return (
+              <div key={draft.key} className="flex flex-col">
+                <div className="flex flex-wrap items-center gap-space-2">
+                  <TriggerKindMenu
+                    value={draft.kind}
+                    onChange={(kind) =>
+                      setDrafts((current) =>
+                        current.map((each) =>
+                          each.key === draft.key ? draftOfKind(kind) : each
+                        )
+                      )
+                    }
+                    disabled={!canManage}
+                  />
+                  {draft.kind === "schedule" && (
+                    <ScheduleFields
+                      draft={draft}
+                      onChange={set}
                       disabled={!canManage}
                     />
-                  </div>
-                  {problem && (
-                    <p className="mt-space-1 text-xs text-error-secondary">
-                      {problem}
-                    </p>
                   )}
-                </TriggerCard>
-              )
-            }
-            if (draft.kind === "github") {
-              return (
-                <TriggerCard
-                  key={draft.key}
-                  icon={GithubLogoIcon}
-                  removeLabel="Remove GitHub trigger"
-                  onRemove={() => removeDraft(draft.key)}
-                  canManage={canManage}
-                >
-                  <div className="text-sm text-primary">
+                  {draft.kind === "github" && (
                     <RepoSelector
                       repos={reposQuery.data?.repositories}
                       selectedRepo={draft.repo}
@@ -522,192 +473,186 @@ export function AutomationEditor({
                       triggerClassName="text-secondary"
                       disabled={!canManage}
                     />
-                  </div>
-                  <EventChips
-                    items={GITHUB_EVENT_ITEMS}
-                    selected={draft.events}
-                    onToggle={(event) => toggleEvent(draft.key, event)}
-                    disabled={!canManage}
-                  />
-                  {draft.events.some((event) =>
-                    event.startsWith("pull_request.")
-                  ) && (
-                    <div className="mt-space-2 grid gap-space-2 sm:grid-cols-2">
-                      <BranchPatternsInput
-                        label="Skip head branches"
-                        patterns={draft.headBranchesExclude}
-                        onChange={(headBranchesExclude) =>
-                          set({ headBranchesExclude })
-                        }
-                        placeholder={"None; one per line, e.g.\nactions/*"}
+                  )}
+                  {draft.kind === "slack" && (
+                    <div className="w-64 max-w-full">
+                      <SlackChannelCombobox
+                        value={draft.channel}
+                        onValueChange={(channel) => set({ channel })}
                         disabled={!canManage}
-                      />
-                      <BranchPatternsInput
-                        label="Base branches"
-                        patterns={draft.baseBranches}
-                        onChange={(baseBranches) => set({ baseBranches })}
-                        placeholder={"Any; one per line, e.g.\nmain"}
-                        disabled={!canManage}
+                        placeholder="Choose a channel to watch"
+                        aria-label="Slack channel to watch"
+                        className="w-full"
                       />
                     </div>
                   )}
-                  {draft.repo && isPublicRepo(draft.repo) && (
-                    <div className="mt-space-2 rounded-md border border-default px-space-2 py-space-2">
-                      <Checkbox
-                        checked={draft.allowPublicRepo}
-                        onCheckedChange={(checked) =>
-                          set({ allowPublicRepo: checked === true })
-                        }
-                        disabled={!canManage}
-                        label="Allow on this public repository"
-                        labelClassName="text-xs font-medium text-primary"
-                        aria-describedby={`${draft.key}-public-repo`}
-                      />
-                      <p
-                        id={`${draft.key}-public-repo`}
-                        className="mt-0.5 pl-space-5 text-xs text-tertiary"
-                      >
-                        Anyone on the internet can open issues and pull requests
-                        here, and what they write becomes part of this
-                        automation&apos;s prompt. Its runs act as you.
-                      </p>
-                    </div>
-                  )}
-                  {hint(
-                    draft.events.includes("pull_request.closed")
-                      ? "PR closed also fires when a pull request is merged."
-                      : "Event details reach the run as untrusted context."
-                  )}
-                </TriggerCard>
-              )
-            }
-            if (draft.kind === "slack") {
-              return (
-                <TriggerCard
-                  key={draft.key}
-                  icon={SlackLogoIcon}
-                  removeLabel="Remove Slack trigger"
-                  onRemove={() => removeDraft(draft.key)}
-                  canManage={canManage}
-                >
-                  <SlackChannelCombobox
-                    value={draft.channel}
-                    onValueChange={(channel) => set({ channel })}
-                    disabled={!canManage}
-                    placeholder="Choose a channel to watch"
-                    aria-label="Slack channel to watch"
-                    className="w-full"
-                  />
-                  <EventChips
-                    items={SLACK_EVENT_ITEMS}
-                    selected={draft.events}
-                    onToggle={(event) => toggleEvent(draft.key, event)}
-                    disabled={!canManage}
-                  />
-                  <div className="mt-space-2 flex flex-wrap items-center gap-space-2 text-xs text-secondary">
-                    <span>From</span>
-                    <GroupedTabs
-                      size="xs"
-                      value={draft.senders}
-                      onChange={(senders) => set({ senders })}
-                      options={SENDER_OPTIONS}
+                  {draft.kind === "linear" && (
+                    <Input
+                      size="md"
+                      debounceMs={0}
+                      aria-label="Team key"
+                      value={draft.team}
+                      onChange={(team) => set({ team: team.toUpperCase() })}
+                      placeholder="Team key, e.g. ENG"
                       disabled={!canManage}
+                      className="w-44"
                     />
-                  </div>
-                  <div className="mt-space-2 grid gap-space-2 sm:grid-cols-[1fr_9rem]">
-                    <FilterInput
-                      label="Text matches"
-                      value={draft.match}
-                      onChange={(match) => set({ match })}
-                      placeholder="Regular expression, e.g. FIRING|SEV-?1"
-                      disabled={!canManage}
-                    />
-                    <FilterInput
-                      label="Max runs per hour"
-                      value={draft.maxRunsPerHour}
-                      onChange={(maxRunsPerHour) => set({ maxRunsPerHour })}
-                      placeholder="No limit"
-                      inputMode="numeric"
-                      disabled={!canManage}
-                    />
-                  </div>
-                  {hint(
-                    "Top-level messages only. Robin must be in the channel; messages reach the run as untrusted context."
                   )}
-                </TriggerCard>
-              )
-            }
-            return (
-              <TriggerCard
-                key={draft.key}
-                icon={KanbanIcon}
-                removeLabel="Remove Linear trigger"
-                onRemove={() => removeDraft(draft.key)}
-                canManage={canManage}
-              >
-                <FilterInput
-                  label="Team key"
-                  value={draft.team}
-                  onChange={(team) => set({ team: team.toUpperCase() })}
-                  placeholder="ENG"
-                  disabled={!canManage}
-                />
-                <EventChips
-                  items={LINEAR_EVENT_ITEMS}
-                  selected={draft.events}
-                  onToggle={(event) => toggleEvent(draft.key, event)}
-                  disabled={!canManage}
-                />
-                <div className="mt-space-2 grid gap-space-2 sm:grid-cols-[1fr_1fr_9rem]">
-                  <FilterInput
-                    label="Labels"
-                    value={draft.labels}
-                    onChange={(labels) => set({ labels })}
-                    placeholder="Any; comma-separated"
-                    disabled={!canManage}
-                  />
-                  <FilterInput
-                    label="Project"
-                    value={draft.project}
-                    onChange={(project) => set({ project })}
-                    placeholder="Any"
-                    disabled={!canManage}
-                  />
-                  <FilterInput
-                    label="Max runs per hour"
-                    value={draft.maxRunsPerHour}
-                    onChange={(maxRunsPerHour) => set({ maxRunsPerHour })}
-                    placeholder="No limit"
-                    inputMode="numeric"
-                    disabled={!canManage}
-                  />
+                  {canManage && drafts.length > 1 && (
+                    <IconButton
+                      icon={TrashIcon}
+                      label="Remove trigger"
+                      color="secondary"
+                      variant="plain"
+                      size="md"
+                      onClick={() => removeDraft(draft.key)}
+                      className="ml-auto"
+                    />
+                  )}
                 </div>
-                {hint(
-                  draft.events.includes("issue.labeled")
-                    ? "Label added fires when the issue gains one of these labels, or any label when none are listed."
-                    : "Issue details reach the run as untrusted context."
+                {draft.kind === "schedule" && hint(scheduleHint(draft))}
+                {draft.kind === "github" && (
+                  <>
+                    <EventChips
+                      items={GITHUB_EVENT_ITEMS}
+                      selected={draft.events}
+                      onToggle={(event) => toggleEvent(draft.key, event)}
+                      disabled={!canManage}
+                    />
+                    {draft.events.some((event) =>
+                      event.startsWith("pull_request.")
+                    ) && (
+                      <div className="mt-space-2 grid gap-space-2 sm:grid-cols-2">
+                        <BranchPatternsInput
+                          label="Skip head branches"
+                          patterns={draft.headBranchesExclude}
+                          onChange={(headBranchesExclude) =>
+                            set({ headBranchesExclude })
+                          }
+                          placeholder={"None; one per line, e.g.\nactions/*"}
+                          disabled={!canManage}
+                        />
+                        <BranchPatternsInput
+                          label="Base branches"
+                          patterns={draft.baseBranches}
+                          onChange={(baseBranches) => set({ baseBranches })}
+                          placeholder={"Any; one per line, e.g.\nmain"}
+                          disabled={!canManage}
+                        />
+                      </div>
+                    )}
+                    {draft.repo && isPublicRepo(draft.repo) && (
+                      <div className="mt-space-2 rounded-md border border-default px-space-2 py-space-2">
+                        <Checkbox
+                          checked={draft.allowPublicRepo}
+                          onCheckedChange={(checked) =>
+                            set({ allowPublicRepo: checked === true })
+                          }
+                          disabled={!canManage}
+                          label="Allow on this public repository"
+                          labelClassName="text-xs font-medium text-primary"
+                          aria-describedby={`${draft.key}-public-repo`}
+                        />
+                        <p
+                          id={`${draft.key}-public-repo`}
+                          className="mt-0.5 pl-space-5 text-xs text-tertiary"
+                        >
+                          Anyone on the internet can open issues and pull
+                          requests here, and what they write becomes part of
+                          this automation&apos;s prompt. Its runs act as you.
+                        </p>
+                      </div>
+                    )}
+                    {hint(
+                      draft.events.includes("pull_request.closed")
+                        ? "PR closed also fires when a pull request is merged."
+                        : "Event details reach the run as untrusted context."
+                    )}
+                  </>
                 )}
-              </TriggerCard>
+                {draft.kind === "slack" && (
+                  <>
+                    <EventChips
+                      items={SLACK_EVENT_ITEMS}
+                      selected={draft.events}
+                      onToggle={(event) => toggleEvent(draft.key, event)}
+                      disabled={!canManage}
+                    />
+                    <div className="mt-space-2 flex flex-wrap items-center gap-space-2 text-xs text-secondary">
+                      <span>From</span>
+                      <GroupedTabs
+                        size="xs"
+                        value={draft.senders}
+                        onChange={(senders) => set({ senders })}
+                        options={SENDER_OPTIONS}
+                        disabled={!canManage}
+                      />
+                    </div>
+                    <div className="mt-space-2 grid gap-space-2 sm:grid-cols-[1fr_9rem]">
+                      <FilterInput
+                        label="Text matches"
+                        value={draft.match}
+                        onChange={(match) => set({ match })}
+                        placeholder="Regular expression, e.g. FIRING|SEV-?1"
+                        disabled={!canManage}
+                      />
+                      <FilterInput
+                        label="Max runs per hour"
+                        value={draft.maxRunsPerHour}
+                        onChange={(maxRunsPerHour) => set({ maxRunsPerHour })}
+                        placeholder="No limit"
+                        inputMode="numeric"
+                        disabled={!canManage}
+                      />
+                    </div>
+                    {hint(
+                      "Top-level messages only. Robin must be in the channel; messages reach the run as untrusted context."
+                    )}
+                  </>
+                )}
+                {draft.kind === "linear" && (
+                  <>
+                    <EventChips
+                      items={LINEAR_EVENT_ITEMS}
+                      selected={draft.events}
+                      onToggle={(event) => toggleEvent(draft.key, event)}
+                      disabled={!canManage}
+                    />
+                    <div className="mt-space-2 grid gap-space-2 sm:grid-cols-[1fr_1fr_9rem]">
+                      <FilterInput
+                        label="Labels"
+                        value={draft.labels}
+                        onChange={(labels) => set({ labels })}
+                        placeholder="Any; comma-separated"
+                        disabled={!canManage}
+                      />
+                      <FilterInput
+                        label="Project"
+                        value={draft.project}
+                        onChange={(project) => set({ project })}
+                        placeholder="Any"
+                        disabled={!canManage}
+                      />
+                      <FilterInput
+                        label="Max runs per hour"
+                        value={draft.maxRunsPerHour}
+                        onChange={(maxRunsPerHour) => set({ maxRunsPerHour })}
+                        placeholder="No limit"
+                        inputMode="numeric"
+                        disabled={!canManage}
+                      />
+                    </div>
+                    {hint(
+                      draft.events.includes("issue.labeled")
+                        ? "Label added fires when the issue gains one of these labels, or any label when none are listed."
+                        : "Issue details reach the run as untrusted context."
+                    )}
+                  </>
+                )}
+              </div>
             )
           })}
-          {canManage && (
-            <TriggerMenu
-              onSchedule={(cron) => pickSchedule(null, cron)}
-              onGitHub={() =>
-                setDrafts((current) => [...current, githubDraft()])
-              }
-              onSlack={() => setDrafts((current) => [...current, slackDraft()])}
-              onLinear={() =>
-                setDrafts((current) => [...current, linearDraft()])
-              }
-              aria-label="Add trigger"
-              className="flex h-auto items-center gap-space-2 self-start rounded-lg border border-dashed border-default px-space-3 py-space-2 text-xs text-secondary transition-colors hover:bg-surface-level-1-hover hover:text-primary dark:hover:bg-surface-level-1-hover"
-            >
-              <PlusIcon size={14} weight="regular" />
-              Add trigger
-            </TriggerMenu>
-          )}
-          {!canManage && drafts.length === 0 && (
+          {drafts.length === 0 && (
             <p className="text-xs text-tertiary">No triggers.</p>
           )}
         </div>
@@ -832,70 +777,6 @@ export function AutomationEditor({
   )
 }
 
-// Every action on a trigger's card: one box and one icon size, as tall as the
-// schedule's controls.
-const CARD_ACTION =
-  "size-8 justify-center rounded-md p-0 text-tertiary hover:bg-surface-level-1-hover hover:text-primary [&_svg]:shrink-0"
-
-/**
- * A schedule runs in UTC or in the viewer's own zone. A zone saved elsewhere, such
- * as by the agent, stays a third choice so opening the editor never changes it.
- */
-function TimeZoneToggle({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: string
-  onChange: (timezone: string) => void
-  disabled: boolean
-}) {
-  // The viewer's own IANA time zone; UTC where the browser can't say.
-  const local = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-  const zones = [
-    { value: "UTC", label: "UTC", name: "UTC" },
-    ...(local === "UTC"
-      ? []
-      : [{ value: local, label: "Local", name: `Local time (${local})` }]),
-    ...(value === "UTC" || value === local
-      ? []
-      : [{ value, label: value, name: value }]),
-  ]
-  return (
-    <div
-      role="group"
-      aria-label="Time zone"
-      className="inline-flex h-8 shrink-0 items-center gap-0.5 rounded-lg border border-strong/70 p-0.5"
-    >
-      {zones.map((zone) => {
-        const on = zone.value === value
-        return (
-          <Button
-            color="secondary"
-            variant="plain"
-            size="sm"
-            key={zone.value}
-            type="button"
-            aria-label={zone.name}
-            aria-pressed={on}
-            title={zone.name}
-            onClick={() => onChange(zone.value)}
-            disabled={disabled}
-            className={cn(
-              "h-full min-w-13 rounded-md px-space-2 text-xs font-medium disabled:pointer-events-none",
-              on
-                ? "bg-brand-subtle text-primary hover:bg-brand-subtle disabled:bg-brand-subtle dark:hover:bg-brand-subtle"
-                : "text-secondary hover:bg-surface-level-1-hover hover:text-primary disabled:bg-transparent"
-            )}
-          >
-            {zone.label}
-          </Button>
-        )
-      })}
-    </div>
-  )
-}
-
 function EventChips<E extends string>({
   items,
   selected,
@@ -994,47 +875,6 @@ function BranchPatternsInput({
       isError={patterns.problem(label) !== null}
       disabled={disabled}
     />
-  )
-}
-
-function TriggerCard({
-  icon: Icon,
-  children,
-  actions,
-  removeLabel,
-  onRemove,
-  canManage,
-}: {
-  icon: IconComponent
-  children: React.ReactNode
-  actions?: React.ReactNode
-  removeLabel: string
-  onRemove: () => void
-  canManage: boolean
-}) {
-  return (
-    <div className="flex items-start gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-3 py-space-2">
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-level-2 text-secondary">
-        <Icon size={16} weight="regular" />
-      </div>
-      <div className="min-w-0 flex-1 py-0.5">{children}</div>
-      {canManage && (
-        <div className="flex shrink-0 items-center gap-0.5">
-          {actions}
-          <Button
-            color="secondary"
-            variant="plain"
-            size="sm"
-            type="button"
-            aria-label={removeLabel}
-            onClick={onRemove}
-            className={CARD_ACTION}
-          >
-            <TrashIcon size={16} weight="regular" />
-          </Button>
-        </div>
-      )}
-    </div>
   )
 }
 

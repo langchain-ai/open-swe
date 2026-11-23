@@ -3,21 +3,33 @@ import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { Text } from "@langchain/macaw-components/Text"
 import { Select } from "@langchain/macaw-components/Select"
 import { Link, useNavigate } from "@tanstack/react-router"
+import { useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
-import { Card } from "@langchain/macaw-components/Card"
+import { Divider } from "@langchain/macaw-components/Divider"
 import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
+import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
+import { Input } from "@langchain/macaw-components/Input"
+import { StatusBadge } from "@langchain/macaw-components/StatusBadge"
 import { Skeleton } from "@/components/Skeleton"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
+import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
+import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { PauseIcon } from "@phosphor-icons/react/dist/ssr/Pause"
 import { PlayIcon } from "@phosphor-icons/react/dist/ssr/Play"
-import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
+import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 
-import type { AgentSchedule } from "@/features/agents/lib/types"
+import type {
+  AgentSchedule,
+  AutomationTriggerConfig,
+} from "@/features/agents/lib/types"
+import { AutomationIconTile } from "@/features/automations/components/AutomationIconTile"
 import { AutomationRuns } from "@/features/automations/components/AutomationRuns"
 import { AutomationTemplates } from "@/features/automations/components/AutomationTemplates"
 import { describeTriggers } from "@/features/automations/lib/triggers"
@@ -29,24 +41,12 @@ import {
 } from "@/features/agents/lib/queries"
 import { usePendingVariables } from "@/lib/optimistic"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
+import { cn, formatRelativeTime } from "@/lib/utils"
 
-function formatDate(value?: string | null): string {
-  if (!value) return "Never run"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "Never run"
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  })
-}
-
-export type AutomationsTab = "overview" | "runs"
+export type AutomationsTab = "automations" | "runs"
 
 const TAB_OPTIONS = [
-  { value: "overview", display: "Overview" },
+  { value: "automations", display: "Automations" },
   { value: "runs", display: "Runs" },
 ] as const
 
@@ -59,10 +59,24 @@ const FILTER_OPTIONS = [
   { value: "all", display: "All" },
 ] as const
 
+// Other people's personal runs are private even to admins, so runs split only into
+// the viewer's own and every run they can read, system automations' included.
+const RUNS_FILTER_OPTIONS = [
+  { value: "mine", display: "Mine" },
+  { value: "all", display: "All" },
+] as const
+
 const EMPTY_TITLES: Record<AutomationsFilter, string> = {
   mine: "No automations yet",
   system: "No system automations",
   all: "No automations yet",
+}
+
+const TRIGGER_ICONS: Record<AutomationTriggerConfig["kind"], IconComponent> = {
+  schedule: ClockIcon,
+  github: GithubLogoIcon,
+  slack: SlackLogoIcon,
+  linear: KanbanIcon,
 }
 
 export function AutomationsList({
@@ -87,6 +101,7 @@ export function AutomationsList({
   const schedulesQuery = useAgentSchedules({
     allUsers: isAdmin && filter === "all",
   })
+  const [query, setQuery] = useState("")
   const canManage = Boolean(session)
   const allSchedules = schedulesQuery.data ?? []
   const owners = new Map<string, string>()
@@ -112,107 +127,138 @@ export function AutomationsList({
       schedule.ownerId === session.user_id
     )
   })
+  const needle = query.trim().toLowerCase()
+  const matches = needle
+    ? schedules.filter((schedule) =>
+        schedule.name.toLowerCase().includes(needle)
+      )
+    : schedules
 
   const loading = schedulesQuery.isLoading
-  const total = schedules.length
-  const active = schedules.filter((schedule) => schedule.enabled).length
-  const paused = total - active
-  const issues = schedules.filter((schedule) => !!schedule.lastError).length
+  const failed = schedulesQuery.isError && !schedulesQuery.data
+  const isEmpty = !loading && !failed && schedules.length === 0
+  const offerTemplates =
+    !loading && canManage && filter === "mine" && tab === "automations"
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-4xl px-space-5 py-space-6 max-md:pt-space-9">
-        <Text as="h1" variant="h3" weight="medium" color="primary">
+      <div className="mx-auto w-full max-w-4xl px-space-5 pt-space-8 pb-space-9 max-md:pt-space-9">
+        <Text as="h1" variant="h2" weight="medium" color="primary">
           Automations
         </Text>
-        <p className="mt-space-1 text-xs text-secondary">
-          Run Robin on a schedule or on GitHub, Slack, and Linear events. Each
-          run starts a fresh agent thread. Your automations run as you, on Auto.
-        </p>
-        {canManage && (
-          <Banner intent="neutral" className="mt-space-3">
-            Automations can also be listed and managed through Robin. Start a
-            private thread and ask the agent to make the change.
-          </Banner>
-        )}
-        <GroupedTabs
-          className="mt-space-4"
-          value={tab}
-          onChange={onTabChange}
-          options={TAB_OPTIONS}
-        />
 
-        {tab === "runs" ? (
-          <div className="mt-space-5">
-            <AutomationRuns />
-          </div>
-        ) : (
-          <>
-            <div className="mt-space-5 grid grid-cols-2 gap-space-3 sm:grid-cols-4">
-              <StatCard label="Total" value={total} loading={loading} />
-              <StatCard label="Active" value={active} loading={loading} />
-              <StatCard label="Paused" value={paused} loading={loading} />
-              <StatCard
-                label="Needs attention"
-                value={issues}
-                loading={loading}
-                highlight={issues > 0}
+        <div className="mt-space-5 flex flex-wrap items-center justify-between gap-space-3">
+          <GroupedTabs
+            value={tab}
+            onChange={onTabChange}
+            options={TAB_OPTIONS}
+          />
+          <div className="flex items-center gap-space-2">
+            {tab === "automations" && schedules.length > 0 && (
+              <Input
+                size="sm"
+                debounceMs={0}
+                aria-label="Search automations"
+                placeholder="Search…"
+                leftIcon={MagnifyingGlassIcon}
+                value={query}
+                onChange={setQuery}
+                className="w-48 max-sm:w-36"
+                rightAction={
+                  query
+                    ? {
+                        icon: XIcon,
+                        label: "Clear search",
+                        onClick: () => setQuery(""),
+                      }
+                    : undefined
+                }
               />
-            </div>
+            )}
+            {canManage && (
+              <Button
+                as={<Link to="/agents/automations/new" />}
+                leftDecorator={PlusIcon}
+              >
+                New automation
+              </Button>
+            )}
+          </div>
+        </div>
 
-            <div className="mt-space-6 flex min-h-8 flex-wrap items-center justify-between gap-space-3">
-              <div className="flex flex-wrap items-center gap-space-3">
-                {loading ? (
-                  <Skeleton className="h-3 w-20" />
-                ) : (
-                  <span className="text-xs font-medium text-secondary">
-                    {total} {total === 1 ? "automation" : "automations"}
-                  </span>
-                )}
-                {isAdmin && (
-                  <GroupedTabs
-                    value={filter}
-                    onChange={onFilterChange}
-                    options={FILTER_OPTIONS}
-                  />
-                )}
-                {isAdmin && filter === "all" && (
-                  <Select
-                    aria-label="Filter by user"
-                    value={ownerId ?? "all"}
-                    onChange={(value) =>
-                      onOwnerChange(value === "all" ? undefined : value)
-                    }
-                    options={ownerOptions}
-                    hideSearch={false}
-                    searchPlaceholder="Search users…"
-                    emptyText="No users found"
-                    placeholder="Select user"
-                    loading={schedulesQuery.isLoading}
-                    size="sm"
-                    triggerClassName="w-44"
-                  />
-                )}
-              </div>
-              {/* The empty state carries its own button, so this one is for adding more. */}
-              {canManage && !loading && total > 0 && <NewAutomationButton />}
-            </div>
+        {isAdmin && (
+          <div className="mt-space-4 flex flex-wrap items-center gap-space-2">
+            {tab === "runs" ? (
+              <GroupedTabs
+                value={filter === "mine" ? "mine" : "all"}
+                onChange={onFilterChange}
+                options={RUNS_FILTER_OPTIONS}
+              />
+            ) : (
+              <GroupedTabs
+                value={filter}
+                onChange={onFilterChange}
+                options={FILTER_OPTIONS}
+              />
+            )}
+            {tab === "automations" && filter === "all" && (
+              <Select
+                aria-label="Filter by user"
+                value={ownerId ?? "all"}
+                onChange={(value) =>
+                  onOwnerChange(value === "all" ? undefined : value)
+                }
+                options={ownerOptions}
+                hideSearch={false}
+                searchPlaceholder="Search users…"
+                emptyText="No users found"
+                placeholder="Select user"
+                loading={schedulesQuery.isLoading}
+                size="sm"
+                triggerClassName="w-44"
+              />
+            )}
+          </div>
+        )}
 
-            <div className="mt-space-3">
+        {tab === "runs" && (
+          <div className="mt-space-6">
+            <AutomationRuns
+              key={filter === "mine" ? "mine" : "all"}
+              owned={filter === "mine"}
+            />
+          </div>
+        )}
+
+        {tab === "automations" && (
+          <>
+            <div className="mt-space-4">
               {loading ? (
-                <div
-                  role="status"
-                  aria-label="Loading automations"
-                  className="space-y-space-2"
-                >
+                <div role="status" aria-label="Loading automations">
                   <AutomationRowSkeleton />
                   <AutomationRowSkeleton />
                   <AutomationRowSkeleton />
                 </div>
-              ) : total === 0 ? (
+              ) : failed ? (
+                <Banner
+                  intent="error"
+                  action={
+                    <Button
+                      color="secondary"
+                      variant="outlined"
+                      onClick={() => void schedulesQuery.refetch()}
+                      disabled={schedulesQuery.isFetching}
+                    >
+                      {schedulesQuery.isFetching ? "Retrying…" : "Retry"}
+                    </Button>
+                  }
+                >
+                  Automations could not be loaded.
+                </Banner>
+              ) : isEmpty ? (
                 <EmptyState
-                  className="rounded-xl border border-dashed border-default bg-surface-level-1"
-                  icon={LightningIcon}
+                  className="py-space-6"
+                  icon={ClockIcon}
                   title={
                     filter === "all" && ownerId
                       ? "No automations for this user"
@@ -221,16 +267,25 @@ export function AutomationsList({
                   description={
                     filter === "all" && ownerId
                       ? "Choose another user or All users to see more automations."
-                      : "Run Robin on a schedule or on GitHub, Slack, and Linear events — review code, triage new issues, or investigate an alert."
+                      : "Get a daily briefing, a weekly review, or a heads-up when something changes, without asking each time."
                   }
-                  action={canManage && <NewAutomationButton />}
                 />
+              ) : matches.length === 0 ? (
+                <Text
+                  as="p"
+                  variant="sm"
+                  color="tertiary"
+                  className="py-space-6 text-center"
+                >
+                  No automations match “{query.trim()}”.
+                </Text>
               ) : (
-                <div className="space-y-space-2">
-                  {schedules.map((schedule) => (
+                <ul aria-label="Automations" className="flex flex-col">
+                  {matches.map((schedule) => (
                     <AutomationRow
                       key={schedule.id}
                       schedule={schedule}
+                      showOwner={filter !== "mine"}
                       canManage={
                         isAdmin ||
                         (!schedule.system &&
@@ -239,11 +294,19 @@ export function AutomationsList({
                       }
                     />
                   ))}
-                </div>
+                </ul>
               )}
             </div>
 
-            {canManage && <AutomationTemplates />}
+            {offerTemplates && (
+              <>
+                <Divider className="my-space-7" />
+                <Text as="h2" variant="sm" weight="medium" color="secondary">
+                  Start from a template
+                </Text>
+                <AutomationTemplates className="mt-space-3" />
+              </>
+            )}
           </>
         )}
       </div>
@@ -251,67 +314,33 @@ export function AutomationsList({
   )
 }
 
-function NewAutomationButton() {
-  return (
-    <Button as={<Link to="/agents/automations/new" />} leftDecorator={PlusIcon}>
-      New automation
-    </Button>
-  )
-}
-
-function StatCard({
-  label,
-  value,
-  loading,
-  highlight,
-}: {
-  label: string
-  value: number
-  loading: boolean
-  highlight?: boolean
-}) {
-  return (
-    <Card className="px-space-4 py-space-3">
-      <div className="text-xs text-tertiary">{label}</div>
-      {loading ? (
-        <div className="mt-space-1 flex h-7 items-center">
-          <Skeleton className="h-5 w-8" />
-        </div>
-      ) : (
-        <div
-          className={cn(
-            "mt-space-1 text-lg font-medium",
-            highlight ? "text-error-secondary" : "text-primary"
-          )}
-        >
-          {value}
-        </div>
-      )}
-    </Card>
-  )
-}
-
-/** The shape of an `AutomationRow`: status dot, name, trigger line, actions. */
+/** The shape of an `AutomationRow`: icon tile, name, trigger line. */
 function AutomationRowSkeleton() {
   return (
-    <div className="flex items-center gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3">
-      <Skeleton className="size-2 shrink-0 rounded-full" />
-      <div className="min-w-0 flex-1 space-y-space-2 py-space-1">
+    <div className="flex items-center gap-space-3 px-space-3 py-space-3">
+      <Skeleton className="size-9 shrink-0 rounded-lg" />
+      <div className="min-w-0 flex-1 space-y-space-2">
         <Skeleton className="h-3.5 w-48 max-w-full" />
         <Skeleton className="h-3 w-72 max-w-full" />
-        <Skeleton className="h-3 w-56 max-w-full" />
       </div>
-      <Skeleton className="h-8 w-24 shrink-0 rounded-md" />
-      <Skeleton className="size-8 shrink-0 rounded-md" />
     </div>
   )
 }
 
+function lastRunLabel(value?: string | null): string {
+  const time = value ? new Date(value).getTime() : Number.NaN
+  return Number.isNaN(time)
+    ? "Never run"
+    : `Last run ${formatRelativeTime(time)}`
+}
+
 function AutomationRow({
   schedule,
+  showOwner,
   canManage,
 }: {
   schedule: AgentSchedule
+  showOwner: boolean
   canManage: boolean
 }) {
   const navigate = useNavigate()
@@ -322,11 +351,11 @@ function AutomationRow({
   ).some((vars) => vars.scheduleId === schedule.id)
   const isStarting =
     triggerSchedule.isPending && triggerSchedule.variables === schedule.id
+  const busy = isStarting || isToggling
+  const firstTrigger = schedule.triggers[0]
 
-  const onRun = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (isStarting || isToggling) return
+  const onRun = () => {
+    if (busy) return
     triggerSchedule.mutate(schedule.id, {
       onSuccess: (result) => {
         void navigate({
@@ -337,130 +366,128 @@ function AutomationRow({
     })
   }
 
-  const onToggle = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (isStarting || isToggling) return
+  const onToggle = () => {
+    if (busy) return
     updateSchedule.mutate({
       scheduleId: schedule.id,
       body: { enabled: !schedule.enabled },
     })
   }
 
+  const creator = schedule.createdBy
+    ? schedule.system
+      ? `System · created by ${schedule.createdBy}`
+      : `By ${schedule.createdBy}`
+    : schedule.system
+      ? "System"
+      : null
+  const editor =
+    schedule.updatedBy && schedule.updatedBy !== schedule.createdBy
+      ? `edited by ${schedule.updatedBy}`
+      : null
+  const owner = [creator, editor].filter(Boolean).join(" · ")
+
   return (
-    <div className="flex items-center gap-space-3 rounded-xl border border-default bg-surface-level-1 px-space-4 py-space-3 transition-colors hover:bg-surface-level-1-hover">
+    <li className="group flex items-start gap-space-3 rounded-lg px-space-3 py-space-3 transition-colors hover:bg-surface-level-1-hover">
       <div className="min-w-0 flex-1">
         <Link
           to="/agents/automations/$scheduleId"
           params={{ scheduleId: schedule.id }}
-          className="flex min-w-0 items-center gap-space-3"
+          className="flex min-w-0 items-start gap-space-3"
         >
-          <span
-            className={cn(
-              "size-2 shrink-0 rounded-full",
-              schedule.enabled ? "bg-success-strong" : "bg-surface-level-4"
-            )}
+          <AutomationIconTile
+            icon={
+              firstTrigger ? TRIGGER_ICONS[firstTrigger.kind] : LightningIcon
+            }
           />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-space-2">
               <span className="truncate text-sm font-medium text-primary">
                 {schedule.name}
               </span>
-              {schedule.lastError && (
-                <WarningCircleIcon
-                  size={14}
-                  weight="regular"
-                  className="shrink-0 text-icon-error"
-                  aria-label="Last run failed"
-                >
-                  <title>Last run failed</title>
-                </WarningCircleIcon>
+              {!schedule.enabled && <StatusBadge>Paused</StatusBadge>}
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-space-2 text-xs text-tertiary">
+              <span className="break-all">{describeTriggers(schedule)}</span>
+              <span aria-hidden>·</span>
+              <span>{lastRunLabel(schedule.lastTriggeredAt)}</span>
+              {showOwner && owner && (
+                <>
+                  <span aria-hidden>·</span>
+                  <span className="break-all">{owner}</span>
+                </>
               )}
-            </div>
-            <div className="mt-space-1 flex flex-wrap items-center gap-x-space-3 gap-y-space-1 text-xs text-tertiary">
-              <span className="flex items-center gap-space-1">
-                <ClockIcon size={14} weight="regular" />
-                {describeTriggers(schedule)}
-              </span>
-              <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
-            </div>
-            <div className="mt-space-1 flex flex-wrap gap-x-space-3 gap-y-space-1 text-xs break-all text-tertiary">
-              <span>
-                {schedule.system ? "System · created by" : "Created by"}:{" "}
-                {schedule.createdBy || "Unknown"}
-              </span>
-              <span>
-                Last edited by:{" "}
-                {schedule.updatedBy || schedule.createdBy || "Unknown"}
-              </span>
             </div>
           </div>
         </Link>
         {schedule.lastError && (
-          <div className="mt-space-1 flex min-w-0 items-center gap-space-3">
-            <span aria-hidden className="size-2 shrink-0" />
-            <div className="flex min-w-0 items-center gap-space-1">
-              <Link
-                to="/agents/automations/$scheduleId"
-                params={{ scheduleId: schedule.id }}
-                className="truncate text-xs text-error-secondary"
-              >
-                Last run failed: {schedule.lastError.trim().split("\n", 1)[0]}
-              </Link>
-              <CopyErrorButton
-                error={schedule.lastError}
-                details={{
-                  Automation: `${schedule.name} (${schedule.id})`,
-                  "Failed at": schedule.lastErrorAt,
-                  "Last thread": schedule.lastThreadId,
-                }}
-                className="shrink-0"
-              />
-            </div>
+          <div className="mt-space-1 flex min-w-0 items-center gap-space-1 pl-space-8">
+            <Link
+              to="/agents/automations/$scheduleId"
+              params={{ scheduleId: schedule.id }}
+              className="truncate text-xs text-error-secondary"
+            >
+              Last run failed: {schedule.lastError.trim().split("\n", 1)[0]}
+            </Link>
+            <CopyErrorButton
+              error={schedule.lastError}
+              details={{
+                Automation: `${schedule.name} (${schedule.id})`,
+                "Failed at": schedule.lastErrorAt,
+                "Last thread": schedule.lastThreadId,
+              }}
+              className="shrink-0"
+            />
           </div>
         )}
       </div>
-      {schedule.lastThreadId && (
-        <IconButton
-          asChild
-          icon={ArrowSquareOutIcon}
-          label="Open latest automation run"
-          color="secondary"
-          variant="plain"
-          size="md"
-          className="shrink-0"
-        >
-          <Link
-            to="/agents/$threadId"
-            params={{ threadId: schedule.lastThreadId }}
-          />
-        </IconButton>
-      )}
-      {canManage && (
-        <>
-          <Button
-            color="secondary"
-            variant="outlined"
-            leftDecorator={LightningIcon}
-            onClick={onRun}
-            disabled={isStarting || isToggling}
-            aria-label="Run automation now"
-            className="shrink-0"
-          >
-            {isStarting ? "Starting…" : "Run now"}
-          </Button>
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-0.5 self-center transition-opacity",
+          // Revealed on hover where there is one; a touch screen always shows them.
+          "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+        )}
+      >
+        {schedule.lastThreadId && (
           <IconButton
-            icon={schedule.enabled ? PauseIcon : PlayIcon}
-            label={schedule.enabled ? "Pause automation" : "Resume automation"}
+            asChild
+            icon={ArrowSquareOutIcon}
+            label="Open latest run"
             color="secondary"
             variant="plain"
             size="md"
-            onClick={onToggle}
-            disabled={isStarting || isToggling}
-            className="shrink-0"
-          />
-        </>
-      )}
-    </div>
+          >
+            <Link
+              to="/agents/$threadId"
+              params={{ threadId: schedule.lastThreadId }}
+            />
+          </IconButton>
+        )}
+        {canManage && (
+          <>
+            <IconButton
+              icon={LightningIcon}
+              label={isStarting ? "Starting…" : "Run now"}
+              color="secondary"
+              variant="plain"
+              size="md"
+              onClick={onRun}
+              disabled={busy}
+              className="disabled:bg-transparent"
+            />
+            <IconButton
+              icon={schedule.enabled ? PauseIcon : PlayIcon}
+              label={schedule.enabled ? "Pause" : "Resume"}
+              color="secondary"
+              variant="plain"
+              size="md"
+              onClick={onToggle}
+              disabled={busy}
+              className="disabled:bg-transparent"
+            />
+          </>
+        )}
+      </div>
+    </li>
   )
 }

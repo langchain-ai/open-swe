@@ -963,7 +963,7 @@ test.describe("automation run history", () => {
       await route.continue();
     });
 
-    await page.goto("/agents/automations?tab=runs");
+    await page.goto("/agents/automations?tab=runs&view=all");
     const automations = page
       .getByRole("heading", { name: "Automations", level: 1 })
       .locator("..");
@@ -1010,7 +1010,7 @@ test.describe("automation run history", () => {
     await expect(weekly).toContainText("Running");
     await expect(automations).not.toContainText(TITLES.attention);
 
-    await automations.getByRole("button", { name: "Overview" }).click();
+    await automations.getByRole("button", { name: "Automations" }).click();
     const scheduleLink = automations.getByRole("link", {
       name: /E2E Daily Health/,
     });

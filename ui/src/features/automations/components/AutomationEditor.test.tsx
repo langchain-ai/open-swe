@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AutomationEditor } from "./AutomationEditor"
+import { localTimeZone } from "@/features/automations/lib/cron"
 import { useSession } from "@/lib/session"
 
 const mocks = vi.hoisted(() => ({
@@ -91,25 +92,45 @@ vi.mock("@/features/settings/components/RepoSelector", () => ({
 vi.mock("@/features/automations/components/AutomationRuns", () => ({
   AutomationRuns: () => <div />,
 }))
-vi.mock("@/features/automations/components/TriggerMenu", () => ({
-  TriggerMenu: ({
-    onGitHub,
-    onLinear,
-  }: {
-    onGitHub?: () => void
-    onLinear?: () => void
-  }) =>
-    onGitHub ? (
+vi.mock(
+  "@/features/automations/components/TriggerFields",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/features/automations/components/TriggerFields")
+    >()),
+    TriggerKindMenu: ({
+      onChange,
+    }: {
+      onChange: (kind: "github" | "linear") => void
+    }) => (
       <>
-        <button onClick={onGitHub}>Add GitHub trigger</button>
-        <button onClick={onLinear}>Add Linear trigger</button>
+        <button onClick={() => onChange("github")}>Use GitHub event</button>
+        <button onClick={() => onChange("linear")}>Use Linear issue</button>
       </>
-    ) : null,
-}))
+    ),
+  })
+)
+
+/** Adds a trigger with the + button and switches it to `kind` in its type menu. */
+function addTrigger(kind: "GitHub event" | "Linear issue") {
+  fireEvent.click(screen.getByRole("button", { name: "Add trigger" }))
+  fireEvent.click(
+    screen.getAllByRole("button", { name: `Use ${kind}` }).at(-1)!
+  )
+}
 vi.mock("@/features/agents/components/ModelPicker", () => ({
   ModelPicker: () => <div />,
 }))
+const ORIGINAL_TZ = process.env.TZ
+
+/** Runs the test as a viewer whose browser is in `timezone`. */
+function viewInTimeZone(timezone: string) {
+  process.env.TZ = timezone
+}
+
 afterEach(() => {
+  if (ORIGINAL_TZ === undefined) delete process.env.TZ
+  else process.env.TZ = ORIGINAL_TZ
   cleanup()
   vi.restoreAllMocks()
   vi.clearAllMocks()
@@ -146,14 +167,15 @@ const SCHEDULE = {
 
 describe("AutomationEditor", () => {
   it("keeps legacy schedules in UTC when another field is edited", () => {
+    viewInTimeZone("Europe/London")
     signInAsAdmin()
     render(<AutomationEditor mode="edit" schedule={SCHEDULE} />, {
       wrapper: TooltipProvider,
     })
 
     expect(
-      screen.getByRole("button", { name: "UTC" }).getAttribute("aria-pressed")
-    ).toBe("true")
+      screen.getByRole("combobox", { name: "Time zone" }).textContent
+    ).toContain("UTC")
     fireEvent.change(screen.getByLabelText("Automation name"), {
       target: { value: "Renamed" },
     })
@@ -165,10 +187,7 @@ describe("AutomationEditor", () => {
   })
 
   it("edits one schedule's time zone without changing another trigger's zone or cron", () => {
-    vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({
-      ...new Intl.DateTimeFormat().resolvedOptions(),
-      timeZone: "Europe/London",
-    })
+    viewInTimeZone("Europe/London")
     signInAsAdmin()
     render(
       <AutomationEditor
@@ -194,23 +213,54 @@ describe("AutomationEditor", () => {
       { wrapper: TooltipProvider }
     )
 
-    expect(screen.getByText("Daily at 09:00 America/New_York")).toBeTruthy()
     // A zone saved elsewhere stays selected, and offered, until the viewer picks another.
-    expect(
-      screen
-        .getByRole("button", { name: "America/New_York" })
-        .getAttribute("aria-pressed")
-    ).toBe("true")
-    const [local] = screen.getAllByRole("button", {
-      name: "Local time (Europe/London)",
-    })
-    fireEvent.click(local!)
-    expect(screen.getByText("Daily at 09:00 Europe/London")).toBeTruthy()
+    const [morning] = screen.getAllByRole("combobox", { name: "Time zone" })
+    expect(morning!.textContent).toMatch(/E[SD]T/)
+    fireEvent.click(morning!)
+    fireEvent.click(
+      screen.getByRole("option", { name: /Your time zone \(Europe\/London\)/ })
+    )
+    // Picking their own zone leaves the picker in place, so it can be changed back.
+    expect(morning!.textContent).toMatch(/GMT|BST/)
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
 
     expect(mocks.updateMutate.mock.calls[0]?.[0].body.triggers).toEqual([
       { kind: "schedule", cron: "0 9 * * *", timezone: "Europe/London" },
       { kind: "schedule", cron: "30 2 1 * *", timezone: "Asia/Kolkata" },
+    ])
+  })
+
+  it("keeps a schedule's time when its frequency changes and back", () => {
+    signInAsAdmin()
+    render(
+      <AutomationEditor
+        mode="edit"
+        schedule={{
+          ...SCHEDULE,
+          triggers: [
+            {
+              id: "afternoon",
+              kind: "schedule",
+              cron: "30 14 * * *",
+              timezone: "UTC",
+            },
+          ],
+        }}
+      />,
+      { wrapper: TooltipProvider }
+    )
+
+    const repeats = screen.getByRole("combobox", { name: "Repeats" })
+    fireEvent.click(repeats)
+    fireEvent.click(screen.getByRole("option", { name: "Hourly" }))
+    fireEvent.click(repeats)
+    fireEvent.click(screen.getByRole("option", { name: "Custom (cron)" }))
+    fireEvent.click(repeats)
+    fireEvent.click(screen.getByRole("option", { name: "Daily" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+
+    expect(mocks.updateMutate.mock.calls[0]?.[0].body.triggers).toEqual([
+      { kind: "schedule", cron: "30 14 * * *", timezone: "UTC" },
     ])
   })
 
@@ -268,7 +318,11 @@ describe("AutomationEditor", () => {
       data: { is_admin: true },
     } as unknown as ReturnType<typeof useSession>)
 
-    const adminMarkup = renderToStaticMarkup(<AutomationEditor mode="create" />)
+    const adminMarkup = renderToStaticMarkup(
+      <TooltipProvider>
+        <AutomationEditor mode="create" />
+      </TooltipProvider>
+    )
 
     // An admin's own automation may be an admin thread too, not only a system one.
     expect(adminMarkup).toContain("System automation")
@@ -279,7 +333,9 @@ describe("AutomationEditor", () => {
     } as unknown as ReturnType<typeof useSession>)
 
     const memberMarkup = renderToStaticMarkup(
-      <AutomationEditor mode="create" />
+      <TooltipProvider>
+        <AutomationEditor mode="create" />
+      </TooltipProvider>
     )
 
     expect(memberMarkup).not.toContain("System automation")
@@ -345,7 +401,7 @@ describe("AutomationEditor", () => {
       { wrapper: TooltipProvider }
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Add GitHub trigger" }))
+    addTrigger("GitHub event")
     fireEvent.click(screen.getByRole("button", { name: "Choose repository" }))
     // Branch filters are for pull requests, so they show once a PR event is picked.
     expect(screen.queryByLabelText("Base branches")).toBeNull()
@@ -380,7 +436,7 @@ describe("AutomationEditor", () => {
       wrapper: TooltipProvider,
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Add GitHub trigger" }))
+    addTrigger("GitHub event")
     fireEvent.click(screen.getByRole("button", { name: "Choose repository" }))
     fireEvent.click(screen.getByRole("button", { name: "Issue opened" }))
     // Anyone can write a public repository's issues, so it can't be saved unconfirmed.
@@ -501,7 +557,7 @@ describe("AutomationEditor", () => {
       wrapper: TooltipProvider,
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Add Linear trigger" }))
+    addTrigger("Linear issue")
     fireEvent.change(screen.getByLabelText("Team key"), {
       target: { value: "eng" },
     })
@@ -511,8 +567,9 @@ describe("AutomationEditor", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Create" }))
 
+    // A new automation's schedule runs in its creator's own time zone.
     expect(mocks.createMutate.mock.calls[0]?.[0].triggers).toEqual([
-      { kind: "schedule", cron: "0 9 * * *", timezone: "UTC" },
+      { kind: "schedule", cron: "0 9 * * *", timezone: localTimeZone() },
       {
         kind: "linear",
         team: "ENG",
