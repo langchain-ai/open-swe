@@ -836,8 +836,9 @@ async def assign(
     if not replace:
         if user.id not in await request.recent_channel_posters():
             return _failure(
-                f"@{github_login} has not recently posted in this review request's Slack channel. "
-                "Only pick recent posters from that channel; if none qualify, leave it unassigned."
+                f"@{github_login} has not authored a top-level message in this review request's "
+                "Slack channel within the last 7 days. Thread replies do not qualify; "
+                "if no eligible poster qualifies, leave it unassigned."
             )
         if not await PROFILES.allows_auto_human_review(user.github_login or github_login):
             return _failure(

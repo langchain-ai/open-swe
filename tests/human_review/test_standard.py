@@ -410,7 +410,7 @@ async def test_assignment_enforces_availability_before_contacting_reviewer(
         assert dm.await_count == int(dms)
     else:
         expected = (
-            "has not recently posted"
+            "has not authored a top-level message"
             if not recent_poster
             else "out of office"
             if out_of_office

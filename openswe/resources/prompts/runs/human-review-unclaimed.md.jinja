@@ -14,8 +14,9 @@ If it refuses them, pick someone yourself:
 {% endfor %}
 The first reviewer comes from the code owners of most of the changed files; reviewers for the other code owners are added only after that reviewer approves.
 {% endif %}
-Only choose people who posted within the last 30 days in the Slack channel where this review request was posted, including thread replies in its latest 100 top-level messages.
-Read that channel and its threads to identify them before considering code expertise.
+Only choose people who authored a top-level message within the last 7 days in the Slack channel where this review request was posted.
+Thread replies, including replies broadcast to the channel, do not qualify.
+Read that channel’s recent top-level messages to identify them before considering code expertise.
 If nobody qualifies or history cannot be read, leave the request unassigned; never fall back to unrelated people.
 A code owner is not exempt.
 

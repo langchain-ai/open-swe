@@ -298,7 +298,8 @@ async def test_rejected_screenshot_retries_as_text_without_a_second_ping(
 
 
 @pytest.mark.parametrize(
-    "ineligible", ["", "author", "reviewed", "optedout", "missing", "no-write", "no-slack"]
+    "ineligible",
+    ["", "author", "reviewed", "optedout", "missing", "no-write", "no-slack", "not-recent"],
 )
 async def test_mapped_owner_waits_only_for_temporary_unavailability(
     review: HumanReviewRequest,
@@ -346,7 +347,13 @@ async def test_mapped_owner_waits_only_for_temporary_unavailability(
         patch.object(
             HumanReviewRequest,
             "recent_channel_posters",
-            AsyncMock(return_value={user.id for user in users.values()}),
+            AsyncMock(
+                return_value={
+                    user.id
+                    for user in users.values()
+                    if user.id != owner.id or ineligible != "not-recent"
+                }
+            ),
         ),
         patch.object(supplementary, "team_members", AsyncMock(return_value=list(users))),
         patch.object(User, "for_login", find_user),

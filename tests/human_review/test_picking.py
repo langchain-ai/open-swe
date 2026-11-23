@@ -202,26 +202,34 @@ async def test_auto_picks_skip_unavailable_owners_and_recent_authors(
 
 
 @pytest.mark.parametrize("readable", [True, False])
-async def test_recent_channel_posters_include_replies_but_not_stale_posts_or_bots(
+async def test_recent_channel_posters_require_top_level_posts_within_seven_days(
     readable: bool,
 ) -> None:
     from datetime import timedelta
 
+    from openswe.human_review import requests
     from openswe.slack.channels import SlackChannel
     from openswe.slack.payloads import SlackMessage
 
     now = datetime.now(UTC)
     fresh = str(now.timestamp())
-    stale = str((now - timedelta(days=31)).timestamp())
-    ada = User(identities=[UserIdentity(provider="slack", external_id="U_ADA")])
-    grace = User(identities=[UserIdentity(provider="slack", external_id="U_GRACE")])
+    boundary = str((now - timedelta(days=7)).timestamp())
+    stale = str((now - timedelta(days=8)).timestamp())
+    users = {
+        name: User(identities=[UserIdentity(provider="slack", external_id=name)])
+        for name in ("U_ADA", "U_GRACE", "U_STALE", "U_REPLY", "U_BROADCAST", "U_BOT", "U_NOISE")
+    }
     channel = MagicMock(spec=SlackChannel)
     channel.id = "C_REVIEW"
     channel.messages = AsyncMock(
         return_value=[
-            SlackMessage(ts=fresh, user="U_ADA"),
+            SlackMessage(ts=fresh, user="U_ADA", thread_ts=fresh, reply_count=1),
+            SlackMessage(ts=boundary, user="U_GRACE"),
             SlackMessage(ts=stale, user="U_STALE", reply_count=1),
+            SlackMessage(ts=fresh, thread_ts=stale, user="U_REPLY"),
+            SlackMessage(ts=fresh, thread_ts=stale, user="U_BROADCAST", subtype="thread_broadcast"),
             SlackMessage(ts=fresh, user="U_BOT", bot_id="B1"),
+            SlackMessage(ts=fresh, user="U_NOISE", subtype="channel_join"),
         ]
         if readable
         else []
@@ -230,20 +238,19 @@ async def test_recent_channel_posters_include_replies_but_not_stale_posts_or_bot
     request = HumanReviewRequest(
         pull_request_id=pr.id, head_sha="abc", kind="standard", slack_channel_id=channel.id
     )
-    users = {"U_ADA": ada, "U_GRACE": grace}
     with (
         patch.object(SlackChannel, "load", AsyncMock(return_value=channel)),
-        patch(
-            "openswe.human_review.requests.fetch_slack_thread_messages",
-            AsyncMock(return_value=[{"ts": fresh, "user": "U_GRACE"}]),
-        ),
+        patch.object(requests, "datetime", wraps=datetime) as clock,
         patch.object(
             User,
             "for_identities",
             AsyncMock(side_effect=lambda _, ids: {key: users[key] for key in ids}),
         ),
     ):
-        assert await request.recent_channel_posters() == ({ada.id, grace.id} if readable else set())
+        clock.now.return_value = now
+        assert await request.recent_channel_posters() == (
+            {users["U_ADA"].id, users["U_GRACE"].id} if readable else set()
+        )
 
 
 async def test_remaining_owner_suggestions_exclude_already_assigned_areas() -> None:
