@@ -89,10 +89,7 @@ class RuleChannel:
         kickoff was queued, and reuses the notice that join posted.
         """
         channel = cls.of(job)
-        info = await SlackChannel.fetch(channel.channel_id, use_cache=False)
-        if not info:
-            raise RuntimeError("Slack did not describe the channel")
-        details = SlackChannelPayload.of(info)
+        details = await channel.details()
         rule = await INTEGRATIONS.channel_rule(details.name)
         if rule is None or not details.is_public or details.is_archived is True:
             logger.info("Skipping a channel no rule matches", extra=channel.log_extra)
@@ -121,6 +118,13 @@ class RuleChannel:
             key=f"{KICKOFF_JOB}:{channel.channel_id}",
             replace=False,
         )
+
+    async def details(self) -> SlackChannelPayload:
+        """What Slack says about the channel now; raises, so the job retries, when it says nothing."""
+        info = await SlackChannel.fetch(self.channel_id, use_cache=False)
+        if not info:
+            raise RuntimeError("Slack did not describe the channel")
+        return SlackChannelPayload.of(info)
 
     async def posted_notice(self, since: datetime) -> str:
         """The timestamp of the kickoff notice Robin posted here since ``since``, or ""."""
@@ -153,8 +157,20 @@ class RuleChannel:
             kickoff = rule.kickoff if rule else ""
         if not kickoff.strip():
             return
+        # The run's channel context is what its Slack history, search and memory check
+        # the channel is internal by; without it they treat the channel as external.
+        details = await channel.details()
+        if not details.is_public:
+            logger.info(
+                "Skipping the kickoff of a channel no longer public", extra=channel.log_extra
+            )
+            return
         thread_id = await resolve_slack_thread_id(channel.channel_id, thread_ts)
-        slack_thread = SlackThreadRef(channel_id=channel.channel_id, thread_ts=thread_ts)
+        slack_thread = SlackThreadRef(
+            channel_id=channel.channel_id,
+            thread_ts=thread_ts,
+            channel_context=details.to_context(channel.channel_id),
+        )
         if not await upsert_agent_thread_metadata(
             thread_id,
             source=KICKOFF_SOURCE,
@@ -198,7 +214,7 @@ class RuleChannel:
                 "configurable": {
                     "thread_id": thread_id,
                     "source": KICKOFF_SOURCE,
-                    "slack_thread": {"channel_id": channel.channel_id, "thread_ts": thread_ts},
+                    "slack_thread": slack_thread.dump(),
                 }
             },
             metadata={"source": KICKOFF_SOURCE},

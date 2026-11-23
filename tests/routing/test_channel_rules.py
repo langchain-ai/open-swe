@@ -8,9 +8,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from openswe.agent_api.memory_scope import RunMemoryScope
 from openswe.jobs.queue import Job
 from openswe.routing import channel_rules as channels
 from openswe.routing.store import ChannelRuleSettings
+from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
 
 CHANNEL = {
@@ -88,10 +90,13 @@ async def test_a_new_matching_channel_is_joined_and_kicked_off_in_a_thread(slack
         "incident_channel": {"id": "C1", "name": "inc-api"}
     }
     run = channels.create_durable_run.await_args
-    assert run.kwargs["config"]["configurable"]["slack_thread"] == {
-        "channel_id": "C1",
-        "thread_ts": "5.0",
-    }
+    # Without the channel's sharing flags the run treats the channel as external.
+    slack_thread = run.kwargs["config"]["configurable"]["slack_thread"]
+    assert (slack_thread["channel_id"], slack_thread["thread_ts"]) == ("C1", "5.0")
+    assert RunConfig.parse(
+        run.kwargs["config"]["configurable"]
+    ).slack_thread.channel_context.allows_operations
+    assert RunMemoryScope.for_run(run.kwargs["config"]).internal
     task = str(run.kwargs["input"]["messages"][-1]["content"])
     assert "#inc-api" in task
     assert "Investigate the incident." in task

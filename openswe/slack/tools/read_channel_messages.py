@@ -24,9 +24,9 @@ async def readable_public_channel(
 ) -> SlackChannel:
     """The public channel this run may read with the bot's own access, else ``ChannelNotReadable``."""
     if not current_access.private:
-        if current_access.slack_bot_channel is not None:
-            if current_access.slack_bot_channel != channel_id:
-                raise ChannelNotReadable("Bot-triggered runs can read only their current channel.")
+        if current_access.slack_own_channel is not None:
+            if current_access.slack_own_channel != channel_id:
+                raise ChannelNotReadable("This run can read only its own channel.")
         elif current_access.slack_public_channel is not None:
             destination = await SlackChannel.load(
                 current_access.slack_public_channel, use_cache=False
