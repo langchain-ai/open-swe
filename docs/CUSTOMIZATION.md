@@ -128,6 +128,7 @@ surface.models = SurfaceModels(main=main, subagent=main)
 Eligible Auto turns use Jev through `langchain-typesafe`'s `TypeSafeClassifier`.
 A LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH_API_KEY`) calls `typesafe/jev-1.13.0` through the [Gateway System One API](https://docs.langchain.com/langsmith/llm-gateway-decision-models); this requires a TypeSafe workspace provider secret and respects `LANGSMITH_GATEWAY_BASE_URL`.
 Adaptive model routing is optional; provider calls always use the gateway.
+With Adaptive routing on, half of eligible threads, by a stable hash of the thread id, run on Performance as a control and the other half go through the classifier; traces tag the arm as `model_experiment:performance` or `model_experiment:router`.
 The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
 Jev answers whether the request needs an unknown answer, cause or approach found, and whether it is a well-scoped kind of work (a known-location fix, an ops or PR action, a lookup or status check, or a specified build); an open-ended request runs on Performance unless it is a known-location fix, an ops or PR action, or a specified build, and the rest runs on Balanced.

@@ -282,7 +282,7 @@ export function ModelRoutingSection({
       <div className="divide-y divide-default">
         <SettingsRow
           label="Routing"
-          description="Off runs the Robin Agent model. Adaptive has the classifier pick a tier for each thread. The 50/50 split runs half of threads on Balanced and half on Performance, by thread."
+          description="Off runs the Robin Agent model. Adaptive runs half of threads on Performance and has the classifier pick a tier for the other half, by thread. The 50/50 split runs half of threads on Balanced and half on Performance, by thread."
           control={
             <Select
               aria-label="Routing"

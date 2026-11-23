@@ -275,6 +275,8 @@ class ReplyRules(Nudging):
 # A route a run's model calls take: the classifier picks one of ``ROUTES``; ``default``
 # is the run's own model.
 RouteName = Literal["fast", "balanced", "performance", "default"]
+# A model experiment's arm: a fixed tier, or the classifier ("router").
+ModelExperiment = Literal["balanced", "performance", "router"]
 ROUTES: Final[tuple[RouteName, ...]] = ("fast", "balanced", "performance")
 
 
@@ -351,8 +353,8 @@ class LoopRules(BaseModel):
     offload_conversation: bool = False
     # What the run's end does besides recording it.
     at_end: list[Literal["settle_review_check", "finish_scout_plan"]] = []
-    # The model experiment's tier the run's model stands for; None outside the experiment.
-    model_experiment: Literal["balanced", "performance"] | None = None
+    # The model experiment's arm the run is on; None outside the experiment.
+    model_experiment: ModelExperiment | None = None
 
     @property
     def routing_arm(self) -> Literal["active", "inactive"]:

@@ -30,6 +30,7 @@ from runtime_api.catalog import (
     SEARCH_TOOLS,
     InboxSpec,
     LoopRules,
+    ModelExperiment,
     ReplyRules,
     RoutingRules,
 )
@@ -121,7 +122,7 @@ from openswe.model_request import (
     infer_requested_model,
     model_selection_trace,
 )
-from openswe.model_routing import RoutingArm
+from openswe.model_routing import ModelTier, RoutingArm
 from openswe.prompt import SystemPrompt, TurnContext, construct_system_prompt
 from openswe.prompts import apply_tool_descriptions, prompt, warm_tool_schemas
 from openswe.routing.tools import (
@@ -1814,8 +1815,8 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     logger.info("Using Robin default agent model: model=%s effort=%s", model_id, profile_effort)
 
     adaptive_model_routing = settings.model_routing_enabled if settings else False
-    # A thread a person runs on Auto is routed: by the classifier, or with routing v2 on
-    # half of them run on the Balanced model and half on Performance, by thread. A model a
+    # A thread a person runs on Auto is routed: half of them, by thread, run on Performance
+    # and the other half go through the classifier, or with routing v2 on run on Balanced. A model a
     # person picks (in the composer, by a command, or by asking for it in a message) is
     # always run, and system automations, API clients and Slack bots keep the model they
     # would run without routing. A person's own automation runs on Auto, as their threads
@@ -1878,9 +1879,15 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             subagent_model_id, subagent_effort = routing_defaults["performance"]
 
     routed = routes_enabled and adaptive_model_routing
-    model_tier = (
-        RoutingArm.tier(thread_id) if routed and settings and settings.model_routing_split else None
-    )
+    model_experiment: ModelExperiment | None = None
+    model_tier: ModelTier | None = None
+    if routed and settings and settings.model_routing_split:
+        model_tier = RoutingArm.tier(thread_id)
+        model_experiment = model_tier
+    elif routed:
+        model_experiment = RoutingArm.adaptive(thread_id)
+        if model_experiment == "performance":
+            model_tier = "performance"
     routing_mode: RoutingMode | None = "auto" if routed and model_tier is None else None
     # The classifier routes from Balanced: an uncertain route never falls back outside the
     # tiers.
@@ -2205,7 +2212,7 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
             route_model_ids=route_model_ids,
             route_efforts={route: effort for route, (_, effort) in routing_defaults.items()},
         ),
-        model_experiment=model_tier,
+        model_experiment=model_experiment,
         reply=ReplyRules(
             tool=reply_tool,
             no_reply_tool=no_reply_tool,

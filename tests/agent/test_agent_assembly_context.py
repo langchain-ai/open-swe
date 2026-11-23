@@ -302,7 +302,10 @@ async def test_an_auto_thread_runs_on_its_experiment_tier_not_profile_default(
     assert loop.trace_tags == ["model_routing:inactive", f"model_experiment:{tier}"]
 
 
-async def test_adaptive_routing_sends_every_auto_thread_through_the_classifier() -> None:
+async def test_adaptive_routing_sends_the_router_arm_through_the_classifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("openswe.server.RoutingArm.adaptive", lambda _: "router")
     config = _base_config()
     config["configurable"].update(source="dashboard", model_selection="auto")
     agent = await _agent_catalog(
@@ -312,14 +315,39 @@ async def test_adaptive_routing_sends_every_auto_thread_through_the_classifier()
 
     loop = cast(ToolSurface, agent["surface"]).loop
     assert loop.routing is not None and loop.routing.mode == "auto"
-    assert loop.model_experiment is None
-    assert loop.trace_tags == ["model_routing:active"]
+    assert loop.trace_tags == ["model_routing:active", "model_experiment:router"]
     assert cast(dict[str, object], config["metadata"])["model_routing_mode"] == "auto"
+
+
+async def test_adaptive_routing_runs_its_control_arm_on_performance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("openswe.server.RoutingArm.adaptive", lambda _: "performance")
+    config = _base_config()
+    config["configurable"].update(source="dashboard", model_selection="auto")
+    agent = await _agent_catalog(
+        config,
+        settings=Settings(
+            {
+                **_MODEL_DEFAULTS,
+                "default_agent_routing_performance_model": "anthropic:claude-opus-5-5",
+                "default_agent_routing_performance_reasoning_effort": "high",
+                "model_routing_split": False,
+            }
+        ),
+    )
+
+    assert _main_model(agent).model_id == "anthropic:claude-opus-5-5"
+    loop = cast(ToolSurface, agent["surface"]).loop
+    assert loop.routing is not None and loop.routing.mode is None
+    assert loop.trace_tags == ["model_routing:inactive", "model_experiment:performance"]
+    assert "model_routing_mode" not in cast(dict[str, object], config["metadata"])
 
 
 async def test_a_personal_automation_runs_on_auto_without_limits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("openswe.server.RoutingArm.adaptive", lambda _: "router")
     monkeypatch.setattr(
         AutomationPolicy, "for_schedule", AsyncMock(return_value=AutomationPolicy(None))
     )
