@@ -348,7 +348,8 @@ async def test_shutdown_hands_off_only_after_the_handler_stops(
 ) -> None:
     from openswe.jobs import worker as worker_module
 
-    monkeypatch.setattr(worker_module, "_DRAIN_SECONDS", 0.01)
+    if not finish_during_drain:
+        monkeypatch.setattr(worker_module, "_DRAIN_SECONDS", 0.01)
     started, completing, stopped = asyncio.Event(), asyncio.Event(), asyncio.Event()
     worker = JobWorker()
 
