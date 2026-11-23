@@ -13,8 +13,9 @@ from openswe.prompts import prompt
 
 _MDA_PROMPTS = Path(__file__).parents[2] / "mda" / "prompts" / "model-selection"
 _NAMES = [
-    *(f"task-type/{name}" for name in ("instructions", *TaskRoute.TASK_TYPES)),
-    *(f"complexity/{name}" for name in ("instructions", *TaskRoute.COMPLEXITIES)),
+    f"{folder}/{name}"
+    for _, folder, choices in TaskRoute.QUESTIONS
+    for name in ("instructions", *choices)
 ]
 
 

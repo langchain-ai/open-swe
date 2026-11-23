@@ -130,8 +130,12 @@ A LangSmith gateway key (`LANGSMITH_GATEWAY_API_KEY`, falling back to `LANGSMITH
 Adaptive model routing is optional; provider calls always use the gateway.
 The classifier is tagged `nostream` to keep its run out of the user-facing transcript.
 
+Jev answers whether the request needs an unknown answer, cause or approach found, and whether it is a well-scoped kind of work (a known-location fix, an ops or PR action, a lookup or status check, or a specified build); an open-ended request runs on Performance unless it is a known-location fix, an ops or PR action, or a specified build, and the rest runs on Balanced.
+It routes on Jev's choices even below the confidence cutoff, but keeps an unsure route for that run only, so a later turn classifies again.
+Jev also labels the task type; the trace records every answer as `jev_*` metadata.
+
 Jev receives the latest human task text (up to 8,000 characters).
-Missing API credentials, API errors, a three-second classification deadline, malformed responses, or confidence below `0.6` use the resolved agent default (thread override or global default), the same model used when routing is off.
+Missing API credentials, API errors, a three-second classification deadline, or malformed responses use the resolved agent default (thread override or global default), the same model used when routing is off.
 The confidence cutoff is an initial heuristic, not a calibrated correctness probability.
 Existing Auto eligibility, fast-mode control, and persisted routes are unchanged.
 

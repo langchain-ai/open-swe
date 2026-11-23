@@ -26,20 +26,23 @@ class Route:
     # False when the classifier could not decide; the run uses the route for this run
     # only, so a later turn classifies again instead of keeping a fallback.
     persist: bool = True
-    # What Jev said the request is, which the trace records; None where it gave nothing.
-    # Not part of the route itself, so two routes compare equal without them.
-    task_type: str | None = field(default=None, compare=False)
-    complexity: str | None = field(default=None, compare=False)
+    # What Jev said the request is, by question, which the trace records. Not part of the
+    # route itself, so two routes compare equal without them.
+    answers: dict[str, str] = field(default_factory=dict, compare=False)
+
+    @property
+    def task_type(self) -> str | None:
+        """What kind of task Jev said the request is; None where it was not asked or gave none."""
+        return self.answers.get("task_type")
 
     @property
     def trace_metadata(self) -> dict[str, str]:
         """Jev's answers, for the turn's trace."""
-        answers = {"jev_task_type": self.task_type, "jev_complexity": self.complexity}
-        return {key: value for key, value in answers.items() if value is not None}
+        return {f"jev_{question}": choice for question, choice in self.answers.items()}
 
 
 class RouteClassifier:
-    """Routes the person's latest request by what kind of task it is."""
+    """Routes the person's latest request by how open-ended it is."""
 
     @staticmethod
     def latest_task(messages: Sequence[object]) -> str:
@@ -75,7 +78,6 @@ class RouteClassifier:
         """The route the person's latest request takes; ``default`` for this run alone when
         the classifier cannot say."""
         decision = await TaskRoute.decide(self.latest_task(messages), prompt=prompt)
-        answers = {"task_type": decision.task_type, "complexity": decision.complexity}
         if decision.route is None:
-            return Route("default", persist=False, **answers)
-        return Route(decision.route, persist=decision.persist, **answers)
+            return Route("default", persist=False, answers=decision.answers)
+        return Route(decision.route, persist=decision.persist, answers=decision.answers)

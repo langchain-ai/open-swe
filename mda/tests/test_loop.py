@@ -351,7 +351,7 @@ async def test_a_new_threads_route_is_classified_while_the_run_prepares(
         # Answers only once preparing has begun: the two run side by side.
         await asyncio.wait_for(preparing.wait(), timeout=1)
         classified.append(RouteClassifier.latest_task(messages))
-        return Route("fast", task_type="lookup", complexity="routine")
+        return Route("fast", answers={"task_type": "lookup", "investigate": "no"})
 
     monkeypatch.setattr(RouteClassifier, "classify", classify)
     rules = LoopRules(
@@ -410,7 +410,7 @@ async def test_a_new_threads_route_is_classified_while_the_run_prepares(
     assert classified == ["Rename the flag"]
     # The trace records the route the classifier chose, and what Jev said the request is.
     assert {"model_route": "fast"} in traced
-    assert {"jev_task_type": "lookup", "jev_complexity": "routine"} in traced
+    assert {"jev_task_type": "lookup", "jev_investigate": "no"} in traced
     started = next(body for name, body in calls if name == "run_started")
     assert (started["model_route"], started["model_id"], started["effort"]) == (
         "fast",
@@ -468,7 +468,7 @@ async def test_the_thread_classifies_its_first_request_for_the_trace_alone(
 
     async def classify(_self: RouteClassifier, messages: list[BaseMessage]) -> Route:
         classified.append(RouteClassifier.latest_task(messages))
-        return Route("performance", task_type="design", complexity="involved")
+        return Route("performance", answers={"task_type": "design", "investigate": "yes"})
 
     monkeypatch.setattr(RouteClassifier, "classify", classify)
     backend, calls = _backend(monkeypatch, {}, LoopRules(routing=RoutingRules(shadow=True)))
@@ -483,7 +483,7 @@ async def test_the_thread_classifies_its_first_request_for_the_trace_alone(
     update = await loop.routed(held, [human], classifying)
 
     # The trace gets Jev's answers; the run keeps its own model.
-    assert backend.run.classified == {"jev_task_type": "design", "jev_complexity": "involved"}
+    assert backend.run.classified == {"jev_task_type": "design", "jev_investigate": "yes"}
     assert update == {"jev_shadowed": True, "model_route": "default"}
     assert backend.run.route == "default"
     assert classified == ["Design the cache"]
@@ -516,13 +516,13 @@ async def test_a_failed_shadow_classification_leaves_the_run_alone(
         # What the classifier returns when Jev is unavailable: no task type.
         Route("default", persist=False),
         # A message that asks for nothing yet, such as a greeting.
-        Route("balanced", task_type="no_task"),
+        Route("balanced", answers={"task_type": "no_task"}),
     ],
 )
 async def test_the_thread_is_classified_again_until_it_asks_for_something(
     first: Route, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    answers = iter([first, Route("balanced", task_type="lookup")])
+    answers = iter([first, Route("balanced", answers={"task_type": "lookup"})])
 
     async def classify(_self: RouteClassifier, _messages: list[BaseMessage]) -> Route:
         return next(answers)

@@ -117,20 +117,31 @@ def test_an_attachment_only_turn_does_not_reuse_an_older_request() -> None:
     assert RouteClassifier.latest_task(messages) == ""
 
 
-async def test_a_confident_choice_is_kept_for_the_thread() -> None:
+async def test_a_confident_choice_is_kept_for_the_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        _Classifier,
+        "answers",
+        {"investigate": _Answer("no", 0.9), "carve_out": _Answer("specified_design", 0.9)},
+    )
+
     route = await RouteClassifier().classify([HumanMessage(content="Rename the flag")])
 
-    # A quick question runs on Balanced, and the trace records what Jev said it is: here
-    # its task type, since "lookup" is no complexity.
+    # A specified change runs on Balanced, and the trace records what Jev said about it.
     assert route == Route("balanced")
-    assert route.trace_metadata == {"jev_task_type": "lookup"}
+    assert route.trace_metadata == {
+        "jev_task_type": "lookup",
+        "jev_investigate": "no",
+        "jev_carve_out": "specified_design",
+    }
     [asked] = _Classifier.asked
     assert asked["state"] == "Rename the flag"
     assert asked["config"] == {"tags": ["nostream"]}
     assert asked["base_url"] == "https://gateway.invalid"
     questions = asked["questions"]
     assert isinstance(questions, dict)
-    assert sorted(questions) == ["complexity", "task_type"]
+    assert sorted(questions) == ["carve_out", "investigate", "task_type"]
 
 
 @pytest.mark.parametrize(
@@ -166,43 +177,27 @@ async def test_without_a_gateway_key_the_classifier_is_not_asked(
 
 
 @pytest.mark.parametrize(
-    ("task_type", "complexity", "expected"),
+    ("investigate", "carve_out", "expected"),
     [
-        ("design", "routine", "performance"),
-        ("explain", "routine", "performance"),
-        ("feature", "open_ended", "performance"),
-        ("bugfix", "open_ended", "performance"),
-        ("feature", "involved", "balanced"),
-        ("pr_maintenance", "open_ended", "balanced"),
-        ("lookup", "open_ended", "balanced"),
+        (_Answer("yes", 0.9), _Answer("none", 0.9), Route("performance")),
+        (_Answer("yes", 0.9), _Answer("lookup_status", 0.9), Route("performance")),
+        (_Answer("yes", 0.9), _Answer("specified_design", 0.9), Route("balanced")),
+        (_Answer("yes", 0.9), _Answer("debug_known", 0.9), Route("balanced")),
+        (_Answer("no", 0.9), _Answer("none", 0.9), Route("balanced")),
+        (_Answer("yes", 0.4), _Answer("none", 0.9), Route("performance", persist=False)),
     ],
+    ids=["open-ended", "open-lookup", "specified", "known-fix", "known-answer", "unsure"],
 )
-async def test_the_task_type_and_complexity_pick_the_route(
-    monkeypatch: pytest.MonkeyPatch, task_type: str, complexity: str, expected: str
+async def test_only_open_ended_investigation_runs_on_performance(
+    monkeypatch: pytest.MonkeyPatch, investigate: _Answer, carve_out: _Answer, expected: Route
 ) -> None:
     monkeypatch.setattr(
-        _Classifier,
-        "answers",
-        {"task_type": _Answer(task_type, 0.9), "complexity": _Answer(complexity, 0.9)},
+        _Classifier, "answers", {"investigate": investigate, "carve_out": carve_out}
     )
 
-    route = await RouteClassifier().classify([HumanMessage(content="Do the thing")])
+    route = await RouteClassifier().classify([HumanMessage(content="Why are the evals slower?")])
 
-    assert route == Route(expected)
-
-
-async def test_an_unsure_complexity_keeps_a_feature_on_balanced_for_this_run_alone(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        _Classifier,
-        "answers",
-        {"task_type": _Answer("feature", 0.9), "complexity": _Answer("open_ended", 0.3)},
-    )
-
-    route = await RouteClassifier().classify([HumanMessage(content="Add a flag")])
-
-    assert route == Route("balanced", persist=False)
+    assert route == expected
 
 
 async def test_a_long_request_is_read_from_its_start_and_its_end() -> None:
