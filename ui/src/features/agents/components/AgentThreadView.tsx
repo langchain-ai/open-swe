@@ -1,6 +1,6 @@
 import { useRightPanelStore } from "@/features/agents/lib/rightPanelStore"
 import { productAnalytics } from "@/lib/analytics"
-import { CopyErrorButton } from "@/components/CopyErrorButton"
+import { RunErrorBanner } from "@/features/agents/components/RunErrorBanner"
 import {
   ReviewChatActionsContext,
   ReviewExcerptChips,
@@ -18,8 +18,6 @@ import {
   useState,
 } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
-import { Button } from "@langchain/macaw-components/Button"
-import { Text } from "@langchain/macaw-components/Text"
 import { ConversationLoading } from "@/features/agents/components/ConversationLoading"
 import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 
@@ -797,41 +795,20 @@ export function AgentThreadView({
         <LocalAccessGrantBanner threadId={thread.id} />
         {thread.status === "error" && !reconnect.label && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3 empty:hidden">
-            <Banner
+            <RunErrorBanner
               key={`${thread.id}:${thread.latestRunId ?? ""}`}
-              intent="error"
-              icon={null}
-              dismissible
-              className="gap-space-4"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-x-space-4 gap-y-space-2">
-                <Text as="p" variant="sm" color="secondary">
-                  The run failed. Send a message to retry.
-                </Text>
-                <div className="flex items-center gap-space-4">
-                  <CopyErrorButton
-                    error="The last run hit an error before it could finish."
-                    details={{ Thread: thread.id, Trace: thread.traceUrl }}
-                  />
-                  {thread.traceUrl && (
-                    <Button
-                      as={
-                        <a
-                          href={thread.traceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        />
-                      }
-                      color="secondary"
-                      variant="plain"
-                      size="xs"
-                    >
-                      Open trace
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </Banner>
+              threadId={thread.id}
+              traceUrl={thread.traceUrl}
+              retry={
+                canPost
+                  ? () =>
+                      submitText(
+                        "Retry the failed run. Continue from where you left off."
+                      )
+                  : undefined
+              }
+              disabled={isStreaming || modelsLoading || source.isHydrating}
+            />
           </div>
         )}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
