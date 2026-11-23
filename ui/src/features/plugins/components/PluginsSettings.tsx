@@ -7,7 +7,6 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@langchain/macaw-components/Dialog"
-import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@/components/Skeleton"
 import { Switch } from "@langchain/macaw-components/Switch"
 import { ArrowsClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowsClockwise"
@@ -89,7 +88,7 @@ export function PluginsSettings() {
             <AppRow
               key={app.id}
               app={app}
-              installed={installedApps.has(app.id)}
+              installed={installedApps.get(app.id)}
               onAdd={setAdding}
             />
           ))
@@ -115,7 +114,6 @@ function InstalledAppRow({
   latest: AppVersion | null
 }) {
   const unshare = useUnsharePluginRepository()
-  const uninstall = useUninstallPlugin()
   const upgrade = useUpgradePlugin()
   const [reviewing, setReviewing] = useState(false)
   const newer = latest && latest.number > plugin.version.number ? latest : null
@@ -148,7 +146,7 @@ function InstalledAppRow({
 
   return (
     <div className={ROW}>
-      <div className="flex items-start gap-space-3">
+      <div className="flex flex-wrap items-start gap-space-3">
         <PluginIcon
           icon={plugin.manifest.sidebar.icon}
           size={20}
@@ -181,7 +179,7 @@ function InstalledAppRow({
             </p>
           )}
         </div>
-        <div className="flex shrink-0 gap-space-1">
+        <div className="flex w-full flex-wrap gap-space-2 sm:w-auto sm:shrink-0">
           {newer && (
             <Button
               size="xs"
@@ -195,16 +193,7 @@ function InstalledAppRow({
               Update to #{newer.number}
             </Button>
           )}
-          {plugin.featured ? (
-            <span className="text-xs text-secondary">Added for everyone</span>
-          ) : (
-            <IconButton
-              icon={TrashIcon}
-              label={`Remove ${plugin.manifest.displayName}`}
-              size="xs"
-              onClick={() => uninstall.mutate(plugin.id)}
-            />
-          )}
+          <RemoveApp plugin={plugin} />
         </div>
       </div>
       <PermissionList permissions={plugin.manifest.permissions} />
@@ -250,13 +239,36 @@ function InstalledAppRow({
   )
 }
 
+function RemoveApp({ plugin }: { plugin: InstalledPlugin }) {
+  const uninstall = useUninstallPlugin()
+  if (plugin.featured)
+    return (
+      <div className="flex max-w-48 flex-col gap-space-1 text-xs text-secondary">
+        <span className="font-medium">Added for everyone</span>
+        <span>An admin manages this app, so it can't be removed.</span>
+      </div>
+    )
+  return (
+    <Button
+      size="sm"
+      variant="outlined"
+      leftDecorator={TrashIcon}
+      aria-label={`Remove ${plugin.manifest.displayName}`}
+      loading={uninstall.isPending}
+      onClick={() => uninstall.mutate(plugin.id)}
+    >
+      Remove
+    </Button>
+  )
+}
+
 function AppRow({
   app,
   installed,
   onAdd,
 }: {
   app: App
-  installed: boolean
+  installed: InstalledPlugin | undefined
   onAdd: (version: AppVersion) => void
 }) {
   const setListed = useSetAppListed()
@@ -295,14 +307,17 @@ function AppRow({
             />
           </label>
         )}
-        <Button
-          size="sm"
-          variant={installed ? "outlined" : "normal"}
-          disabled={installed || !app.latest}
-          onClick={() => app.latest && onAdd(app.latest)}
-        >
-          {installed ? "Added" : "Add"}
-        </Button>
+        {installed ? (
+          <RemoveApp plugin={installed} />
+        ) : (
+          <Button
+            size="sm"
+            disabled={!app.latest}
+            onClick={() => app.latest && onAdd(app.latest)}
+          >
+            Add
+          </Button>
+        )}
       </div>
     </div>
   )

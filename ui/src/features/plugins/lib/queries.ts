@@ -236,7 +236,7 @@ export function useUninstallPlugin() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => pluginsApi.uninstall(id),
-    meta: { errorTitle: "Couldn't uninstall plugin" },
+    meta: { errorTitle: "Couldn't remove app" },
     onMutate: async (id) => ({
       undo: await optimisticUpdate<Array<InstalledPlugin>>(
         queryClient,
