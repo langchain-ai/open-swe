@@ -181,19 +181,23 @@ class TestRecoveryDelivery:
             action="defer",
             reason="Assertion introduced by this PR. <@UNTRUSTED>",
             suggested_fix="Restore the prior expected behavior.",
+            evidence="test_total failed: 1500 != 1549.",
             member=RecoveryMember(entry_id="entry-7", number=7, head_sha="b" * 40),
+            additional_members=(RecoveryMember(entry_id="entry-8", number=8, head_sha="c" * 40),),
         )
         decision = RecoveryDecision(
             proposal=proposal,
             thread_id=state.thread_id,
-            members=(proposal.member,),
+            members=await proposal.targets(),
             generation=None,
             status="pending",
         )
         row = Mock(id=uuid7(), plan=decision.model_dump(mode="json"))
         history = Mock(
             decisions=[row],
-            evidence=[],
+            evidence=[
+                Mock(attempt_id=proposal.attempt_id, key="validation-run", reference={"run_id": 42})
+            ],
             attempts=[],
             batch=Mock(
                 id=proposal.batch_id,
@@ -240,8 +244,15 @@ class TestRecoveryDelivery:
         assert ("<@UAUTHOR>" if mapped_author else "<@UOPERATOR>") in message
         assert "<@UNTRUSTED>" not in message
         assert "github.com/acme/widgets/pull/7" in message
-        assert "The PR remains open" in message
-        assert proposal.suggested_fix in message
+        assert "github.com/acme/widgets/pull/8" in message
+        assert message.splitlines()[0].startswith("Merge queue batch update:")
+        assert [line.split(":", 1)[0] for line in message.splitlines()[1:]] == [
+            "Issue",
+            "Evidence",
+            "Suggested fix",
+        ]
+        assert proposal.evidence in message and proposal.suggested_fix in message
+        assert message.count("actions/runs/42") == 1
 
     async def test_exception_notice_waits_for_publication_and_tags_owner(self, monkeypatch):
         service, state, _ = await self.setup(monkeypatch)

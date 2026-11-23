@@ -79,8 +79,10 @@ class BatchStatus(BaseModel):
             if decision.status == "escalated":
                 message = "Robin escalated an unconfirmed PR removal for operator review"
             elif proposal.action == "defer":
-                assert proposal.member is not None
-                message = f"Robin dequeued PR #{proposal.member.number}"
+                actions.setdefault(proposal.attempt_id, []).extend(
+                    f"Robin dequeued PR #{member.number}" for member in await proposal.targets()
+                )
+                continue
             else:
                 message = {
                     "retry": "Robin requested a retry",

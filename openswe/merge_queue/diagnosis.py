@@ -337,14 +337,12 @@ class QueueRecovery:
                 continue
             reason = escape(proposal.reason)
             fix = escape(proposal.suggested_fix)
-            prefix = f"Merge queue batch `{history.batch.id}`: "
+            prefix = "Merge queue batch update: "
             if decision.status == "superseded":
-                member = proposal.member
-                assert member is not None
+                numbers = ", ".join(f"#{member.number}" for member in await proposal.targets())
                 text = (
-                    f"{prefix}cancelled the planned removal of PR #{member.number} because main "
-                    "advanced before removal. Robin did not dequeue it. The current candidate "
-                    "must be validated before diagnosing its PRs; the decision budget is unchanged."
+                    f"{prefix}cancelled planned removals of {numbers} because main advanced. "
+                    "Robin did not dequeue them; validating the current candidate first."
                 )
             elif decision.status == "escalated" or proposal.action == "escalate":
                 next_step = (
@@ -389,34 +387,34 @@ class QueueRecovery:
                 )
                 text = f"{prefix}paused for a shared outage.\n{reason}\n{impact}"
             else:
-                member = proposal.member
-                assert member is not None
+                owners = []
                 owner, repo_name = self.config.repository.split("/", 1)
                 async with GitHubClient.as_app(
                     owner,
                     repo_name,
-                    permissions={
-                        "metadata": "read",
-                        "pull_requests": "read",
-                    },
+                    permissions={"metadata": "read", "pull_requests": "read"},
                 ) as github:
-                    info = await github.repo(owner, repo_name).pull_request(member.number).pull()
-                author = info.get("user")
-                login = author.get("login") if isinstance(author, dict) else None
-                user = await User.for_login("github", login) if isinstance(login, str) else None
-                who = (
-                    f"<@{user.slack_user_id}>"
-                    if user and user.slack_user_id
-                    else f"{escape(str(login or 'PR author'))} (Slack identity unavailable; "
-                    f"<@{operator.slack_user_id}> please route this notice)"
-                )
-                text = (
-                    f"{prefix}{who} deferred <https://github.com/{self.config.repository}/pull/"
-                    f"{member.number}|#{member.number}> at `{member.head_sha}`.\n"
-                    f"{reason}\nSuggested fix: {fix or 'Investigate the linked failure evidence.'}\n"
-                    "The PR remains open. After fixing it and passing review/checks, add it back "
-                    "to GitHub's merge queue; Robin does not automatically requeue it."
-                )
+                    for member in await proposal.targets():
+                        info = (
+                            await github.repo(owner, repo_name).pull_request(member.number).pull()
+                        )
+                        author = info.get("user")
+                        login = author.get("login") if isinstance(author, dict) else None
+                        user = (
+                            await User.for_login("github", login)
+                            if isinstance(login, str)
+                            else None
+                        )
+                        who = (
+                            f"<@{user.slack_user_id}>"
+                            if user and user.slack_user_id
+                            else f"{escape(str(login or 'PR author'))} (<@{operator.slack_user_id}> please route)"
+                        )
+                        owners.append(
+                            f"{who} dequeued <https://github.com/{self.config.repository}/pull/"
+                            f"{member.number}|#{member.number}>"
+                        )
+                text = f"{prefix}{'; '.join(owners)}.\nIssue: {reason}"
             run_id = next(
                 (
                     e.reference.get("run_id")
@@ -426,9 +424,13 @@ class QueueRecovery:
                 None,
             )
             if type(run_id) is int:
-                text += (
-                    f"\nEvidence: https://github.com/{self.config.repository}/actions/runs/{run_id}"
-                )
+                text += f"\nEvidence: <https://github.com/{self.config.repository}/actions/runs/{run_id}|Run>"
+                if proposal.evidence:
+                    text += f" - {escape(proposal.evidence)}"
+            elif proposal.evidence:
+                text += f"\nEvidence: {escape(proposal.evidence)}"
+            if proposal.action == "defer" and decision.status == "applied":
+                text += f"\nSuggested fix: {fix}"
             pending[key] = text
         resumed = history.batch.policy.get("recovery_resumes", {})
         if isinstance(resumed, dict):
@@ -436,17 +438,14 @@ class QueueRecovery:
                 key = f"resume:{pause_id}"
                 if key in keys:
                     pending[key] = (
-                        f"Robin cleared its outage pause: {escape(str(reason))}\n"
-                        f"The queue is currently {'paused' if self.queue.paused else 'enabled'}. "
-                        "Eligible candidates will receive normal validation. Expired or ejected PRs "
-                        "must re-enter the GitHub queue; their deadlines were not extended."
+                        f"Merge queue batch update: Robin cleared its outage pause; "
+                        f"the queue is {'paused' if self.queue.paused else 'enabled'}.\n"
+                        f"{escape(str(reason))}"
                     )
         if history.batch.state in keys:
             pending[history.batch.state] = (
-                f"Merge queue batch `{history.batch.id}` is {history.batch.state}. "
-                f"{escape(history.batch.candidate_error or '')}\n"
-                "Check GitHub for each PR's current queue position. Ejected PRs are not "
-                "automatically requeued."
+                f"Merge queue batch update: {history.batch.state}. "
+                f"{escape(history.batch.candidate_error or '')}"
             )
         return pending
 

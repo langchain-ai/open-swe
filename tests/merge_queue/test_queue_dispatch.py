@@ -177,7 +177,17 @@ def test_service_suite_policy_requires_new_revision_and_changes_validation_trust
 
 @pytest.mark.parametrize(
     "outcome",
-    ["ok", "timeout", "gateway", "redirect", "rejected", "forbidden", "unsigned", "wrong-request"],
+    [
+        "ok",
+        "multiple",
+        "timeout",
+        "gateway",
+        "redirect",
+        "rejected",
+        "forbidden",
+        "unsigned",
+        "wrong-request",
+    ],
 )
 async def test_deferral_uses_gateway_without_replaying_uncertain_removal(monkeypatch, outcome):
     envelope = DispatchEnvelope(
@@ -192,6 +202,11 @@ async def test_deferral_uses_gateway_without_replaying_uncertain_removal(monkeyp
         expires_at=datetime.now(UTC) + timedelta(minutes=5),
     )
     member = RecoveryMember(entry_id="entry-2", number=2, head_sha="c" * 40)
+    additional = (
+        (RecoveryMember(entry_id="entry-3", number=3, head_sha="d" * 40),)
+        if outcome == "multiple"
+        else ()
+    )
     key = uuid7()
     sent = []
 
@@ -207,6 +222,11 @@ async def test_deferral_uses_gateway_without_replaying_uncertain_removal(monkeyp
             "request_key": str(key),
             "expires_at": envelope.model_dump(mode="json")["expires_at"],
             **member.model_dump(mode="json"),
+            **(
+                {"additional_members": [m.model_dump(mode="json") for m in additional]}
+                if additional
+                else {}
+            ),
         }
         if outcome == "timeout":
             raise httpx2.ReadTimeout("Response lost", request=request)
@@ -218,7 +238,9 @@ async def test_deferral_uses_gateway_without_replaying_uncertain_removal(monkeyp
                 "sha256",
             ).hex()
         return httpx2.Response(
-            {"ok": 204, "gateway": 502, "redirect": 307, "rejected": 409}.get(outcome, 403),
+            {"ok": 204, "multiple": 204, "gateway": 502, "redirect": 307, "rejected": 409}.get(
+                outcome, 403
+            ),
             headers=headers,
         )
 
@@ -226,8 +248,10 @@ async def test_deferral_uses_gateway_without_replaying_uncertain_removal(monkeyp
     gateway = DispatchGateway(
         "https://dispatcher.example/merge-queue/dispatch", SecretStr("s" * 32)
     )
-    if outcome == "ok":
-        await gateway.defer(envelope, key, member, expires_at=envelope.expires_at)
+    if outcome in {"ok", "multiple"}:
+        await gateway.defer(
+            envelope, key, member, additional_members=additional, expires_at=envelope.expires_at
+        )
     else:
         with pytest.raises((httpx2.HTTPError, ValueError)) as error:
             await gateway.defer(envelope, key, member, expires_at=envelope.expires_at)

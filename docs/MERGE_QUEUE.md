@@ -154,7 +154,7 @@ The check records both tested and accepted SHAs; failed old runs retry on curren
 Deferral sends a `POST` to the sibling `deferrals` endpoint of the configured `dispatch_url`.
 The request includes the exact original dispatch body, recovery request key, queue entry ID, PR number/head SHA, and persisted batch deadline.
 Its signature is HMAC-SHA256 over `b"deferral:" + body` with the existing dispatch secret.
-The gateway verifies the original dispatch receipt and current workflow policy, repository, candidate lineage, and selected member before recording a single durable deferral intent for that attempt.
+The gateway verifies the original dispatch receipt and current workflow policy, repository, candidate lineage, and selected member before recording a single durable deferral intent for that attempt; it can include multiple exact members via `additional_members`.
 The recovery deadline remains bounded to one day after the original attempt deadline, allowing a timed-out attempt to be diagnosed within the batch's remaining budget.
 The gateway uses its configured App with repository-scoped `merge_queues: write`, plus read-only contents, metadata, and pull requests.
 Neither the gateway nor Robin repeats an uncertain removal: Robin reads GitHub to confirm the outcome and requires a fresh validation attempt for the surviving candidate.
@@ -243,5 +243,5 @@ Keep deployment identifiers, credentials, rulesets and live evidence in private 
 Native mode delegates eventual merging to GitHub and must not enable a custom promotion executor.
 Neither mode grants the agent-accessible App queue bypass.
 
-When `allow_test_exceptions` is enabled, Robin can authorize the original failed candidate after diagnosing a test-only failure.
-The existing recovery Slack thread reports the reasoning, suspected owner and suggested fix after queue acceptance.
+Robin's recovery instructions prohibit accepting failing workflows, including test defects and flakes.
+The backend exception capability remains flag-gated and disabled by default; keep `allow_test_exceptions` disabled.

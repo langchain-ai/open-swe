@@ -420,10 +420,12 @@ class MergeQueue(Record):
             return updated
 
     @asynccontextmanager
-    async def native_publication(self, lease: Lease) -> AsyncIterator[None]:
+    async def native_publication(
+        self, lease: Lease, *, timeout_seconds: int = 5
+    ) -> AsyncIterator[None]:
         """Serialize check publication with configuration changes and queue pauses."""
         # Bound lock waits and network I/O so a slow gateway cannot stall routing writes.
-        async with asyncio.timeout(5), self._locked(lease) as (_, queue, _):
+        async with asyncio.timeout(timeout_seconds), self._locked(lease) as (_, queue, _):
             if queue.paused or queue.mode != "native":
                 raise LeaseLost("Native queue is paused or disabled")
             yield
@@ -1761,12 +1763,12 @@ class MergeQueue(Record):
             raise ValueError("Recovery does not match the current failed candidate")
         if proposal.action in {"retry", "defer"} and latest.number >= batch.max_attempts:
             raise ValueError("Validation attempt budget exhausted")
-        if proposal.member is not None:
+        for member in await proposal.targets():
             selected = NativeSelection.model_validate(batch.candidate)
             current = snapshot.queue.entries.nodes if snapshot.queue else ()
-            if not any(
-                [await proposal.member.matches(entry) for entry in selected.entries]
-            ) or not any([await proposal.member.matches(entry) for entry in current]):
+            if not any([await member.matches(entry) for entry in selected.entries]) or not any(
+                [await member.matches(entry) for entry in current]
+            ):
                 raise ValueError("Deferral does not match a current selected PR head")
         return batch, latest
 
@@ -1851,7 +1853,7 @@ class MergeQueue(Record):
                     attempt,
                     "test-exception",
                     {
-                        "summary": f"{proposal.reason}\nTests: {', '.join(proposal.tests)}\nSuggested fix: {proposal.suggested_fix}"
+                        "summary": f"{proposal.reason}\nEvidence: {proposal.evidence}\nTests: {', '.join(proposal.tests)}\nSuggested fix: {proposal.suggested_fix}"
                     },
                 )
                 attempt.state = "succeeded"
@@ -1937,20 +1939,21 @@ class MergeQueue(Record):
                 return result
             if saved.status not in {"pending", "applying"}:
                 return saved
-            member = saved.proposal.member
-            assert member is not None
+            members = await saved.proposal.targets()
+            removed_ids = {member.entry_id for member in members}
+            removed_numbers = {member.number for member in members}
             entries = snapshot.queue.entries.nodes if snapshot.queue else ()
             original = {
                 entry.entry_id: entry
                 for entry in saved.members
-                if entry.entry_id != member.entry_id
+                if entry.entry_id not in removed_ids
             }
             survivors = [entry for entry in entries if entry.id in original]
             if error is None:
                 target = [
                     entry
                     for entry in entries
-                    if entry.id == member.entry_id or entry.pull.number == member.number
+                    if entry.id in removed_ids or entry.pull.number in removed_numbers
                 ]
                 if (
                     saved.status != "applying"
@@ -1969,11 +1972,12 @@ class MergeQueue(Record):
                 ):
                     error = "Surviving membership or authority changed; operator review required"
                 elif target:
-                    if (
-                        len(target) == 1
-                        and await member.matches(target[0])
-                        and now < min(batch.deadline, row.updated_at + timedelta(minutes=2))
-                    ):
+                    if all(
+                        [
+                            any([await member.matches(entry) for member in members])
+                            for entry in target
+                        ]
+                    ) and now < min(batch.deadline, row.updated_at + timedelta(minutes=2)):
                         # GitHub can lag a dequeue. Reconcile again without rewriting the
                         # applying timestamp or resending the mutation, including after restart.
                         return saved
@@ -1983,7 +1987,7 @@ class MergeQueue(Record):
                     "status": "escalated" if error is not None else "applied",
                     "detail": (error or "Deferral outcome could not be verified")
                     if error is not None
-                    else "Selected queue entry is absent; replacement must pass validation",
+                    else "Selected queue entries are absent; replacement must pass validation",
                 }
             )
             row.plan = result.model_dump(mode="json")

@@ -55,6 +55,10 @@ class RecoveryProposal(BaseModel):
     reason: str = Field(min_length=1, max_length=4000)
     suggested_fix: str = Field(default="", max_length=2000)
     member: RecoveryMember | None = None
+    additional_members: tuple[RecoveryMember, ...] = Field(
+        default=(), max_length=99, exclude_if=lambda value: not value
+    )
+    evidence: str = Field(default="", max_length=2000, exclude_if=lambda value: not value)
     tests: tuple[Annotated[str, Field(min_length=1, max_length=500)], ...] = Field(
         default=(), max_length=20
     )
@@ -64,9 +68,19 @@ class RecoveryProposal(BaseModel):
     def member_required_only_for_deferral(self) -> Self:
         if (self.action == "defer") != (self.member is not None):
             raise ValueError("Only deferral requires an exact queue member")
+        if self.additional_members and self.member is None:
+            raise ValueError("Additional deferrals require a primary member")
+        members = (self.member, *self.additional_members) if self.member else ()
+        if len({m.entry_id for m in members}) != len(members) or len(
+            {m.number for m in members}
+        ) != len(members):
+            raise ValueError("Deferral members must be distinct")
         if (self.action == "except_tests") != bool(self.tests):
             raise ValueError("Only test exceptions require affected tests")
         return self
+
+    async def targets(self) -> tuple[RecoveryMember, ...]:
+        return (self.member, *self.additional_members) if self.member else ()
 
 
 class RecoveryDecision(BaseModel):
@@ -82,18 +96,19 @@ class RecoveryDecision(BaseModel):
 
     async def check_dependencies(self, repo: RepoClient, snapshot: NativeQueueSnapshot) -> None:
         """Shared unmerged ancestry makes automatic removal unsafe, including later arrivals."""
-        member = self.proposal.member
-        assert member is not None
+        members = await self.proposal.targets()
         if snapshot.queue is None:
             raise ValueError("Native queue disappeared")
+        removed = {member.entry_id for member in members}
         ancestors = {snapshot.main_sha}
-        for entry in snapshot.queue.entries.nodes:
-            if await member.matches(entry):
-                continue
-            common = await repo.merge_base(member.head_sha, entry.pull.head_sha)
-            if common not in ancestors:
-                if await repo.merge_base(common, snapshot.main_sha) != common:
-                    raise ValueError(
-                        "PRs share unmerged commits; operator must resolve dependencies"
-                    )
-                ancestors.add(common)
+        for member in members:
+            for entry in snapshot.queue.entries.nodes:
+                if entry.id in removed:
+                    continue
+                common = await repo.merge_base(member.head_sha, entry.pull.head_sha)
+                if common not in ancestors:
+                    if await repo.merge_base(common, snapshot.main_sha) != common:
+                        raise ValueError(
+                            "PRs share unmerged commits; operator must resolve dependencies"
+                        )
+                    ancestors.add(common)

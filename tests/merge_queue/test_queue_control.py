@@ -135,7 +135,8 @@ async def test_control_rejects_other_repositories(monkeypatch):
         ("escalated", ["Robin escalated an unconfirmed PR removal for operator review"]),
     ],
 )
-async def test_batch_history_only_reports_confirmed_removals(status, actions):
+@pytest.mark.parametrize("multiple", [False, True])
+async def test_batch_history_only_reports_confirmed_removals(status, actions, multiple):
     from uuid import uuid7
 
     from openswe.github.queue import NativeQueueSnapshot
@@ -194,11 +195,18 @@ async def test_batch_history_only_reports_confirmed_removals(status, actions):
                         "action": "defer",
                         "reason": "This PR introduced the regression",
                         "member": {"entry_id": "entry-103", "number": 103, "head_sha": "c" * 40},
+                        "additional_members": [
+                            {"entry_id": "entry-104", "number": 104, "head_sha": "d" * 40}
+                        ]
+                        if multiple
+                        else [],
                     },
                 },
             )
         ],
     )
+    if multiple and status == "applied":
+        actions = [*actions, "Robin dequeued PR #104"]
     result = await control.BatchStatus.from_history(history, "acme/widgets")
     assert result.model_dump() == {
         "members": [

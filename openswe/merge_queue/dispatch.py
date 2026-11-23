@@ -115,6 +115,7 @@ class DispatchGateway:
         request_key: UUID,
         member: RecoveryMember,
         *,
+        additional_members: tuple[RecoveryMember, ...] = (),
         expires_at: datetime,
     ) -> None:
         request = DeferralRequest(
@@ -124,6 +125,7 @@ class DispatchGateway:
             entry_id=member.entry_id,
             number=member.number,
             head_sha=member.head_sha,
+            additional_members=additional_members,
         )
         body = request.model_dump_json().encode()
         async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30) as client:
@@ -254,6 +256,9 @@ class CheckReport(BaseModel):
 
 
 class DeferralRequest(RecoveryMember):
+    additional_members: tuple[RecoveryMember, ...] = Field(
+        default=(), max_length=99, exclude_if=lambda value: not value
+    )
     dispatch_body: str
     expires_at: AwareDatetime
     request_key: UUID

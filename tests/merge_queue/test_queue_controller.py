@@ -237,7 +237,8 @@ async def test_controller_rejects_changed_trusted_inputs(
 
 class TestNativeDeferral:
     @pytest.mark.parametrize("shared_unmerged", [False, True])
-    async def test_deferral_refuses_shared_unmerged_ancestry(self, shared_unmerged):
+    @pytest.mark.parametrize("multiple", [False, True])
+    async def test_deferral_refuses_shared_unmerged_ancestry(self, shared_unmerged, multiple):
         snapshot = NativeQueueSnapshot.model_validate(native_response())
         assert snapshot.queue is not None
         members = tuple(
@@ -252,6 +253,7 @@ class TestNativeDeferral:
                 candidate_sha=list(snapshot.candidates)[-1],
                 action="defer",
                 member=members[1],
+                additional_members=(members[2],) if multiple else (),
                 reason="PR introduces the regression",
             ),
             members=members,

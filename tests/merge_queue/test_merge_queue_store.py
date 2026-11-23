@@ -2572,6 +2572,8 @@ class TestNativeRecovery:
             "candidate",
             "attempt",
             "head",
+            "additional_head",
+            "additional_outside",
             "base",
             "attempt_budget",
             "plan_budget",
@@ -2591,6 +2593,21 @@ class TestNativeRecovery:
                 update={
                     "action": "defer",
                     "member": RecoveryMember(entry_id="entry-2", number=2, head_sha="f" * 40),
+                }
+            )
+        elif fault in {"additional_head", "additional_outside"}:
+            number = 3 if fault == "additional_head" else 4
+            proposal = proposal.model_copy(
+                update={
+                    "action": "defer",
+                    "member": RecoveryMember(entry_id="entry-2", number=2, head_sha=f"{2:040x}"),
+                    "additional_members": (
+                        RecoveryMember(
+                            entry_id=f"entry-{number}",
+                            number=number,
+                            head_sha="f" * 40 if fault == "additional_head" else f"{number:040x}",
+                        ),
+                    ),
                 }
             )
         elif fault == "base":
@@ -2631,6 +2648,8 @@ class TestNativeRecovery:
         "outcome",
         [
             "removed",
+            "multi_removed",
+            "multi_partial",
             "lost_response",
             "publication_timeout",
             "rejected",
@@ -2658,10 +2677,21 @@ class TestNativeRecovery:
                 "member": RecoveryMember(entry_id="entry-2", number=2, head_sha=f"{2:040x}"),
             }
         )
+        if outcome.startswith("multi_"):
+            proposal = proposal.model_copy(
+                update={
+                    "additional_members": (
+                        RecoveryMember(entry_id="entry-3", number=3, head_sha=f"{3:040x}"),
+                    )
+                }
+            )
         await queue.decide_native_recovery(
             proposal, "recovery-thread", snapshot, lease, trust="trusted-policy"
         )
-        after = native_snapshot((1, 3, 4, 5, 6), main="d" * 40 if advancing else snapshot.main_sha)
+        after = native_snapshot(
+            (1, 4, 5, 6) if outcome == "multi_removed" else (1, 3, 4, 5, 6),
+            main="d" * 40 if advancing else snapshot.main_sha,
+        )
         repo = Mock(spec=RepoClient)
         repo.native_queue = AsyncMock(
             side_effect=[snapshot, snapshot if outcome == "publication_timeout" else after]
@@ -2783,7 +2813,10 @@ class TestNativeRecovery:
         assert args[0].contract == work.request
         assert args[0].expires_at == work.attempt.deadline
         assert args[1:] == (proposal.request_key, proposal.member)
-        assert kwargs == {"expires_at": work.batch.deadline}
+        assert kwargs == {
+            "expires_at": work.batch.deadline,
+            "additional_members": proposal.additional_members,
+        }
         history = await queue.history(work.batch.id)
         if outcome in {"rejected", "forbidden"}:
             assert history.decisions[0].plan["status"] == "escalated"
@@ -2792,6 +2825,19 @@ class TestNativeRecovery:
             ) in history.decisions[0].plan["detail"]
             assert (await queue.snapshot(limit=1))[0]
             assert await queue.pending_native_recovery(lease) is None
+            return
+        if outcome == "multi_partial":
+            assert history.decisions[0].plan["status"] == "applying"
+            async with postgres.session() as session:
+                await session.execute(
+                    update(Decision)
+                    .where(Decision.id == history.decisions[0].id)
+                    .values(updated_at=datetime.now(UTC) - timedelta(minutes=3))
+                )
+            assert await runner._recover(queue, repo, after, lease)
+            gateway.defer.assert_awaited_once()
+            assert (await queue.history(work.batch.id)).decisions[0].plan["status"] == "escalated"
+            assert (await queue.snapshot(limit=1))[0]
             return
         if outcome == "publication_timeout":
             assert history.decisions[0].plan["status"] == "applying"

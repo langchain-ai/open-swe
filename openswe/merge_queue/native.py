@@ -318,11 +318,15 @@ class NativeQueueRuntime:
             member = decision.proposal.member
             assert member is not None
             try:
-                async with queue.native_publication(lease):
+                async with queue.native_publication(
+                    lease,
+                    timeout_seconds=30 if decision.proposal.additional_members else 5,
+                ):
                     await self.dispatcher.defer(
                         envelope,
                         decision.proposal.request_key,
                         member,
+                        additional_members=decision.proposal.additional_members,
                         expires_at=history.batch.deadline,
                     )
             except (httpx2.HTTPError, TimeoutError) as exc:
