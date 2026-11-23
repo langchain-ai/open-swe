@@ -1395,7 +1395,7 @@ wheels = [
 [[package]]
 name = "managed-deepagents"
 version = "0.10.4"
-source = { git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=fe64cf81524d28e8fcea2bbb92f218c753d4cdb4#fe64cf81524d28e8fcea2bbb92f218c753d4cdb4" }
+source = { git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=ce54e2e03a7d903b5450f059e5551cff17c1cf71#ce54e2e03a7d903b5450f059e5551cff17c1cf71" }
 dependencies = [
     { name = "deepagents" },
     { name = "httpx" },
@@ -1704,7 +1704,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.8.5,<2.0.0" },
     { name = "langchain-quickjs", editable = "../vendor/langchain-quickjs" },
     { name = "langsmith", specifier = ">=0.16.0" },
-    { name = "managed-deepagents", git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=fe64cf81524d28e8fcea2bbb92f218c753d4cdb4" },
+    { name = "managed-deepagents", git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=ce54e2e03a7d903b5450f059e5551cff17c1cf71" },
     { name = "markdownify", specifier = "==1.2.3" },
     { name = "mcp", specifier = ">=2.2.0" },
     { name = "open-swe-runtime-api", editable = "../packages/runtime-api" },

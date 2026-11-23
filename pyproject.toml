@@ -63,7 +63,7 @@ dev = [
 [tool.uv.sources]
 open-swe-runtime-api = { path = "packages/runtime-api", editable = true }
 # The same commit mda/pyproject.toml pins.
-managed-deepagents = { git = "https://github.com/langchain-ai/langchainplus", rev = "fe64cf81524d28e8fcea2bbb92f218c753d4cdb4", subdirectory = "sdks/managed-deepagents/packages/pypi" }
+managed-deepagents = { git = "https://github.com/langchain-ai/langchainplus", rev = "ce54e2e03a7d903b5450f059e5551cff17c1cf71", subdirectory = "sdks/managed-deepagents/packages/pypi" }
 
 [tool.uv]
 constraint-dependencies = [
