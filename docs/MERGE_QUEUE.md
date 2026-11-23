@@ -40,7 +40,7 @@ The persisted transition requires a paused queue without a live lease, active re
 Switching back to custom mode is rejected.
 Updated custom workers also reject native queues; this does not fence an older binary that predates the mode field, so stopping those replicas is required.
 Observation continues while paused.
-The old dashboard controls return 409 in native mode; use GitHub for queue controls until the native UI integration is available.
+Use GitHub or the authenticated control gateway for native queue operations; the old dashboard membership controls reject native mode.
 
 Before enabling native validation, independently verify enqueue/dequeue and trusted check-reporting authority under the intended App or relay.
 Read access and webhook receipt do not prove write permissions.
@@ -118,6 +118,9 @@ An accepted request is not successful validation: Robin independently verifies G
 Failed delivery can consume an attempt without starting a run; discovery and the saved deadline handle that case.
 
 ## Human controls
+
+The signed `/merge-queue/control` endpoint delegates human authorization to the configured gateway; a matching Robin user identity is required, but `operator_emails` and personal GitHub write access do not restrict this path.
+The existing Robin pause route still requires both, and automatic recovery still requires its configured operator.
 
 ### Automatic diagnosis and recovery
 

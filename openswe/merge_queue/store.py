@@ -25,7 +25,7 @@ from openswe.database import postgres
 from openswe.github.pull_requests import PullRequest
 from openswe.github.queue import NativeCandidate, NativeEntry, NativeQueueSnapshot
 from openswe.github.repositories import Repository
-from openswe.merge_queue.admission import ADMISSION_MAX_AGE, Admission, QueuePolicy
+from openswe.merge_queue.admission import ADMISSION_MAX_AGE, Admission, QueuePolicy, digest
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.dispatch import CandidateAcceptance, DispatchEnvelope, WorkflowPolicy
 from openswe.merge_queue.git import Candidate
@@ -1099,6 +1099,64 @@ class MergeQueue(Record):
             if request.state not in ("waiting_for_review", "queued"):
                 raise ValueError("Only unbatched requests can be reordered")
             request.priority, request.updated_by = priority, actor
+
+    async def control_version(self, config: QueueConfiguration) -> str:
+        return digest(
+            {
+                "configuration": config.generation,
+                "paused": self.paused,
+                "recovery_pause_id": str(self.recovery_pause_id),
+            }
+        )
+
+    async def operator_update(
+        self,
+        config: QueueConfiguration,
+        *,
+        expected_version: str,
+        actor: UUID,
+        paused: bool | None = None,
+        max_batch_size: int | None = None,
+    ) -> None:
+        if (paused is None) == (max_batch_size is None):
+            raise ValueError("Choose one queue setting to change")
+        async with self._locked(generation=config.generation) as (session, queue, now):
+            if queue.mode != "native" or await queue.control_version(config) != expected_version:
+                raise ValueError("Queue changed; refresh before trying again")
+            if max_batch_size is not None:
+                pending = await session.scalar(
+                    select(Decision.id)
+                    .join(Batch)
+                    .where(
+                        Batch.queue_id == queue.id,
+                        Decision.plan["kind"].astext == "native-recovery",
+                        Decision.plan["status"].astext.in_(("pending", "applying")),
+                    )
+                    .limit(1)
+                )
+                if pending is not None:
+                    raise ValueError("A recovery action is still settling; retry after it finishes")
+                updated = QueueConfiguration.model_validate(
+                    {
+                        **config.model_dump(),
+                        "policy": {**config.policy.model_dump(), "max_batch_size": max_batch_size},
+                    }
+                )
+                await session.execute(
+                    update(RepositoryBinding)
+                    .where(
+                        RepositoryBinding.id == queue.routing_id,
+                        RepositoryBinding.repository_id == queue.repository_id,
+                    )
+                    .values(
+                        merge_queue_config=updated.model_dump(mode="json", exclude={"routing_id"}),
+                        updated_at=now,
+                        updated_by=actor,
+                    )
+                )
+            if paused is not None:
+                queue.paused, queue.recovery_pause_id = paused, None
+            queue.updated_by = actor
 
     async def set_paused(self, paused: bool, *, actor: UUID, manual_hold: bool = False) -> None:
         async with self._locked() as (_, queue, _):

@@ -26,6 +26,7 @@ from openswe.mda_channels.api import router as mda_channel_api_router
 from openswe.mda_channels.github_deliveries import router as mda_github_deliveries_router
 from openswe.mda_channels.resolve_user import router as mda_resolve_user_router
 from openswe.mda_channels.slack_channel_events import router as mda_slack_channel_events_router
+from openswe.merge_queue.control import router as queue_control_router
 from openswe.rollout_events import router as rollout_webhook_router
 from openswe.sandboxes.proxy_callback_routes import router as sandbox_proxy_callback_router
 from openswe.sandboxes.tool_routes import router as sandbox_tool_router
@@ -211,6 +212,7 @@ def create_app() -> FastAPI:
     app.include_router(mda_github_deliveries_router)
     app.include_router(slack_webhook_router)
     app.include_router(health_router)
+    app.include_router(queue_control_router)
     app.include_router(rollout_webhook_router)
     app.include_router(sandbox_tool_router)
     app.include_router(sandbox_proxy_callback_router)

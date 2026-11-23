@@ -3191,3 +3191,64 @@ class TestNativeRecovery:
         retained = await jobs.get(key)
         assert retained is not None and retained.id == requested.id
         assert retained.due_at == requested.due_at and retained.payload["investigate"] is True
+
+
+async def test_operator_controls_preserve_active_batch_and_reject_stale_changes(queue_controller):
+    queue = queue_controller.queue
+    policy, old_lease, operator = await enable_native_validation(queue)
+    await queue.release(old_lease)
+    config = queue_controller.config.model_copy(
+        update={"mode": "native", "check_app_id": 456, "policy": policy}
+    )
+    await save_configuration(config)
+    lease = await queue.claim(uuid7(), timedelta(minutes=1), config=config)
+    work = await queue.prepare_native_validation(
+        native_snapshot(), 600, lease, policy=policy, trust=config.native_trust
+    )
+    assert work is not None
+    current = await MergeQueue.load(queue.id, queue.bound_routing_id)
+    version = await current.control_version(config)
+    await queue.operator_update(
+        config,
+        expected_version=version,
+        actor=operator.id,
+        max_batch_size=1,
+    )
+    with pytest.raises(LeaseLost):
+        await queue.operator_update(
+            config,
+            expected_version=version,
+            actor=operator.id,
+            paused=True,
+        )
+    changed = await QueueConfiguration.load(queue.bound_routing_id)
+    assert changed.policy.max_batch_size == 1
+    assert changed.native_trust == config.native_trust
+    assert (await queue.history(work.batch.id)).batch.policy["policy"]["max_batch_size"] == 3
+    await queue.release(lease)
+    current = await MergeQueue.load(queue.id, queue.bound_routing_id)
+    async with postgres.session() as session:
+        session.add(
+            Decision(
+                batch_id=work.batch.id,
+                request_key="operator-control-pending",
+                plan={"kind": "native-recovery", "status": "pending"},
+                lease_owner=lease.owner,
+                fence=lease.fence,
+            )
+        )
+    with pytest.raises(ValueError, match="still settling"):
+        await queue.operator_update(
+            changed,
+            expected_version=await current.control_version(changed),
+            actor=operator.id,
+            max_batch_size=2,
+        )
+    await queue.operator_update(
+        changed,
+        expected_version=await current.control_version(changed),
+        actor=operator.id,
+        paused=True,
+    )
+    current = await MergeQueue.load(queue.id, queue.bound_routing_id)
+    assert current.paused and current.recovery_pause_id is None
