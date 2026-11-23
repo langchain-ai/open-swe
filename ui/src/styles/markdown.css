@@ -212,11 +212,8 @@
    characters, which the root's `overflow-wrap: anywhere` would otherwise do. */
 .chat-markdown .chat-markdown-table {
   margin: 0.65rem 0;
+  max-width: 100%;
   min-width: 0;
-}
-
-[data-transcript-scroll] .chat-markdown-table {
-  width: max(100%, calc(50cqw + 50% - 1.25rem));
 }
 
 .chat-markdown-table [data-table-scroll-edge] {
