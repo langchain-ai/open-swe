@@ -58,11 +58,14 @@ _CI = CommitCI([{"name": "test", "status": "completed", "conclusion": "success"}
 def _answers(
     monkeypatch: pytest.MonkeyPatch,
     load: Callable[[PullRequestClient], Awaitable[OpenPullRequest | None]],
+    ci: CommitCI | None = _CI,
 ) -> None:
-    """Have the full read answer ``load``'s status, read beside ``_CI``."""
+    """Have the full read answer ``load``'s status, read beside ``ci``."""
 
-    async def load_with_ci(pull: PullRequestClient) -> tuple[OpenPullRequest | None, CommitCI]:
-        return await load(pull), _CI
+    async def load_with_ci(
+        pull: PullRequestClient,
+    ) -> tuple[OpenPullRequest | None, CommitCI | None]:
+        return await load(pull), ci
 
     monkeypatch.setattr(PullRequestClient, "load_with_ci", load_with_ci)
 
@@ -148,12 +151,12 @@ def test_only_deliveries_that_can_change_a_pull_requests_status_refresh_it(
 
 
 @pytest.mark.parametrize(
-    "unread",
+    ("unread", "ci"),
     [
-        {"status_available": False},
-        {"ci": "unknown"},
-        {"reviewers": None},
-        {"unresolved_threads": None},
+        ({"status_available": False}, _CI),
+        ({"ci": "unknown"}, None),
+        ({"reviewers": None}, _CI),
+        ({"unresolved_threads": None}, _CI),
     ],
 )
 async def test_a_read_github_did_not_fully_answer_is_not_shared(
@@ -161,15 +164,32 @@ async def test_a_read_github_did_not_fully_answer_is_not_shared(
     shared_cache: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
     unread: dict[str, object],
+    ci: CommitCI | None,
 ) -> None:
     load = AsyncMock(return_value=_read().model_copy(update=unread))
-    _answers(monkeypatch, load)
+    _answers(monkeypatch, load, ci)
 
     await SharedPullRequestStatus.read(_pull())
     await SharedPullRequestStatus.read(_pull())
 
     assert load.await_count == 2
     assert _statuses(shared_cache) == {}
+
+
+async def test_a_cancelled_run_is_an_answer_shared_like_any_other(
+    registry_db: None, shared_cache: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # CI a newer push cancelled reads as inconclusive, which is what GitHub says; a
+    # pull request like that was read in full from GitHub on every refetch.
+    cancelled = CommitCI([{"name": "test", "status": "completed", "conclusion": "cancelled"}], [])
+    load = AsyncMock(return_value=_read().model_copy(update={"ci": "unknown"}))
+    _answers(monkeypatch, load, cancelled)
+
+    await SharedPullRequestStatus.read(_pull())
+    status = await SharedPullRequestStatus.read(_pull())
+
+    assert status is not None and status.ci == "unknown"
+    assert load.await_count == 1
 
 
 async def test_viewers_waiting_on_a_degraded_read_make_their_own(

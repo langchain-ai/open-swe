@@ -111,9 +111,17 @@ class _Claim:
 
 
 @dataclass(frozen=True, slots=True)
+class _Read:
+    """A status, and whether every part of it was read, so it is worth handing to others."""
+
+    status: OpenPullRequest | None
+    complete: bool
+
+
+@dataclass(frozen=True, slots=True)
 class _Loading:
     started_at: datetime
-    task: asyncio.Task[OpenPullRequest | None]
+    task: asyncio.Task[_Read]
 
 
 class SharedPullRequestStatus:
@@ -166,17 +174,17 @@ class SharedPullRequestStatus:
             task = asyncio.ensure_future(cls._read_once(pull, key, changed_at, now, kept))
             cls._loading[flight] = _Loading(now, task)
             task.add_done_callback(lambda _: cls._forget(flight, task))
-            return await asyncio.shield(task)
+            return (await asyncio.shield(task)).status
         try:
-            status = await asyncio.shield(loading.task)
+            read = await asyncio.shield(loading.task)
         except Exception:
             logger.debug("A shared status read failed", extra=cls._log_extra(key), exc_info=True)
         else:
-            if cls._shareable(status):
-                return status
+            if read.complete:
+                return read.status
         # Another viewer's read failed or came back partial, perhaps for their own token
         # or because their request went away; ours may do better, and is shared if so.
-        return await cls._load_now(pull, key)
+        return (await cls._load_now(pull, key)).status
 
     @classmethod
     async def _read_once(
@@ -186,13 +194,13 @@ class SharedPullRequestStatus:
         changed_at: datetime | None,
         now: datetime,
         kept: _Kept | None,
-    ) -> OpenPullRequest | None:
+    ) -> _Read:
         """This replica's one read for the change: another replica's, or its own."""
         claim = await cls._live_claim(key, changed_at, now)
         if claim is None:
             return await cls._claimed(pull, key, now, kept)
         kept = await cls._wait_for(key, claim, changed_at, now)
-        return kept.status if kept is not None else await cls._load_now(pull, key)
+        return _Read(kept.status, True) if kept is not None else await cls._load_now(pull, key)
 
     @classmethod
     async def _live_claim(
@@ -253,7 +261,7 @@ class SharedPullRequestStatus:
         key: PullRequestKey,
         started_at: datetime,
         kept: _Kept | None,
-    ) -> OpenPullRequest | None:
+    ) -> _Read:
         """Read under a claim other replicas wait on, marked done however it ends."""
         from langgraph_api.cache import cache_get, cache_set
 
@@ -283,9 +291,7 @@ class SharedPullRequestStatus:
                 )
 
     @classmethod
-    async def _load_now(
-        cls, pull: PullRequestClient, key: PullRequestKey
-    ) -> OpenPullRequest | None:
+    async def _load_now(cls, pull: PullRequestClient, key: PullRequestKey) -> _Read:
         """A read stamped when it begins, not when its caller started waiting: the pull
         request may have changed meanwhile, and a stamp from before that is never served."""
         try:
@@ -296,7 +302,7 @@ class SharedPullRequestStatus:
                 extra=cls._log_extra(key),
                 exc_info=True,
             )
-            return await pull.load()
+            return _Read(await pull.load(), False)
         return await cls._load(pull, key, started_at)
 
     @classmethod
@@ -312,14 +318,14 @@ class SharedPullRequestStatus:
         key: PullRequestKey,
         started_at: datetime,
         kept: _Kept | None = None,
-    ) -> OpenPullRequest | None:
+    ) -> _Read:
         if kept is not None and await cls._recheck(pull, key, kept, started_at):
-            return kept.status
+            return _Read(kept.status, True)
         status, ci = await pull.load_with_ci()
-        if status is None or not cls._shareable(status):
-            return status
+        if status is None or not cls._complete(status, ci):
+            return _Read(status, False)
         await cls._keep(key, _Kept(started_at, started_at, cls._fingerprint(ci), status))
-        return status
+        return _Read(status, True)
 
     @classmethod
     async def _recheck(
@@ -367,16 +373,17 @@ class SharedPullRequestStatus:
         return hashlib.sha256(json.dumps([runs, statuses]).encode()).hexdigest()
 
     @staticmethod
-    def _shareable(status: OpenPullRequest | None) -> bool:
+    def _complete(status: OpenPullRequest, ci: CommitCI | None) -> bool:
         """Whether every part of ``status`` was read, so it is worth handing to others.
 
         ``load`` degrades rather than fails: a sub-read GitHub refused leaves its part
-        unknown, which one viewer's next refetch fixes but a shared copy would not.
+        unknown, which one viewer's next refetch fixes but a shared copy would not. Its CI
+        was read when ``ci`` came back, even if ``status.ci`` says ``"unknown"``: a
+        cancelled or stale run leaves CI inconclusive, and that is an answer to share.
         """
         return (
-            status is not None
-            and status.status_available
-            and status.ci != "unknown"
+            status.status_available
+            and ci is not None
             and status.reviewers is not None
             and status.unresolved_threads is not None
         )
