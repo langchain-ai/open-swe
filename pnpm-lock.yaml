@@ -429,8 +429,8 @@ importers:
         specifier: ^1.3.2
         version: 1.4.1(ws@8.21.3)
       '@langchain/langgraph-sdk':
-        specifier: 1.17.1-rc.3
-        version: 1.17.1-rc.3(@langchain/core@1.4.1(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 1.17.1-rc.4
+        version: 1.17.1-rc.4(@langchain/core@1.4.1(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@langchain/macaw-components':
         specifier: 1.7.18
         version: 1.7.18(@babel/runtime@7.29.7)(@codemirror/autocomplete@6.20.3)(@codemirror/search@6.7.2)(@codemirror/theme-one-dark@6.1.3)(@shikijs/themes@4.4.3)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(codemirror@6.0.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@10.2.2)(tailwindcss@4.3.3)
@@ -438,8 +438,8 @@ importers:
         specifier: 1.7.18
         version: 1.7.18
       '@langchain/react':
-        specifier: 2.0.0-rc.3
-        version: 2.0.0-rc.3(@langchain/core@1.4.1(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 2.0.0-rc.4
+        version: 2.0.0-rc.4(@langchain/core@1.4.1(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@lexical/react':
         specifier: ^0.49.0
         version: 0.49.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@5.9.3)(yjs@13.6.33)
@@ -1737,8 +1737,8 @@ packages:
     resolution: {integrity: sha512-dHY2boSPhbOrguEcFxhR+uPjI21pKiuLO19Q4Wa5wbAPPa9pGr6vaSXM9iDyRbZfI+coadeH6fMWTMdplgszJg==}
     engines: {node: '>=20'}
 
-  '@langchain/langgraph-sdk@1.17.1-rc.3':
-    resolution: {integrity: sha512-aneK6Dqr9pc2qLYFy1IlUepSTyeYKmNzFI9r82dEyF7ST7WCcwVU6VSYmBaYC74t7/Xm/zrw4uXgjjJsBzI1qA==}
+  '@langchain/langgraph-sdk@1.17.1-rc.4':
+    resolution: {integrity: sha512-2O5KuY5c1NFyigVgZFD5e6pJI4Dx0T62SesyJ5XdA6a6usN8vjgKe0hyYFSVCvmlOCOuVXEYGRC169C8E4uqaw==}
     peerDependencies:
       '@langchain/core': ^1.3.2
       react: ^18 || ^19
@@ -1787,8 +1787,8 @@ packages:
   '@langchain/protocol@0.0.21':
     resolution: {integrity: sha512-HJS8Cd5GJ437MIrCnbrPHx0FJcluyOk5HdZzD081ap4SBzfWpAj/6AtI7fqpNSMo6VZEoEdaN9fIts8R0XR1AQ==}
 
-  '@langchain/react@2.0.0-rc.3':
-    resolution: {integrity: sha512-49AXUu04DzGmzFOIlYN4wdYqMOe0KlrNHN9tchfYvB3kL1BDCHE7V83pzVL+1ZxHTOpl6X8mVi331QC/KmMx0w==}
+  '@langchain/react@2.0.0-rc.4':
+    resolution: {integrity: sha512-y8wVw7g0H+B33gjb8Sc42h4pNTIaQu6luOqfeVR03p7yGnbKYxeQiLtKsiPEXNt6SUVposmRxAkaoHqnExFNQw==}
     peerDependencies:
       '@langchain/core': ^1.1.48
       react: ^18 || ^19
@@ -10705,7 +10705,7 @@ snapshots:
       - openai
       - ws
 
-  '@langchain/langgraph-sdk@1.17.1-rc.3(@langchain/core@1.4.1(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@langchain/langgraph-sdk@1.17.1-rc.4(@langchain/core@1.4.1(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@langchain/core': 1.4.1(ws@8.21.3)
       '@langchain/protocol': 0.0.21
@@ -10890,10 +10890,10 @@ snapshots:
 
   '@langchain/protocol@0.0.21': {}
 
-  '@langchain/react@2.0.0-rc.3(@langchain/core@1.4.1(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@langchain/react@2.0.0-rc.4(@langchain/core@1.4.1(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@langchain/core': 1.4.1(ws@8.21.3)
-      '@langchain/langgraph-sdk': 1.17.1-rc.3(@langchain/core@1.4.1(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@langchain/langgraph-sdk': 1.17.1-rc.4(@langchain/core@1.4.1(ws@8.21.3))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react: 19.2.8
     transitivePeerDependencies:
       - react-dom
