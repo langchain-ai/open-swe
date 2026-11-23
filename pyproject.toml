@@ -24,7 +24,7 @@ dependencies = [
     "markdownify>=1.2.3",
     "markdown-it-py==4.3.0",
     "langchain-anthropic>=1.7.12",
-    "langsmith[sandbox-auth]>=0.15.1",
+    "langsmith[sandbox-auth]>=0.16.0",
     "langchain-openai>=1.8.5,<2.0.0",
     "openai>=3.10.0",
     "langchain-fireworks>=1.7.3",
@@ -68,7 +68,7 @@ managed-deepagents = { git = "https://github.com/langchain-ai/langchainplus", re
 [tool.uv]
 constraint-dependencies = [
     "langgraph-api==0.19.0.dev3",
-    "langgraph-runtime-inmem==0.39.0rc7",
+    "langgraph-runtime-inmem==0.39.0rc8",
 ]
 
 [build-system]
