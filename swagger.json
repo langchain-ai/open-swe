@@ -4176,6 +4176,11 @@
             "title": "Auto Merge",
             "type": "boolean"
           },
+          "bypass_rules": {
+            "default": false,
+            "title": "Bypass Rules",
+            "type": "boolean"
+          },
           "merge_method": {
             "enum": [
               "squash",

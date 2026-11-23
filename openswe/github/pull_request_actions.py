@@ -130,6 +130,7 @@ class MergeAction(_PullRequestActionBase):
     merge_method: MergeMethod
     auto_merge: bool = False
     resolve_conversations: bool = False
+    bypass_rules: bool = False
 
     transport_failure: ClassVar[str] = (
         "Could not confirm merge. Refresh to check the PR before retrying."
@@ -142,7 +143,7 @@ class MergeAction(_PullRequestActionBase):
     async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> bool:
         pull = GitHubClient(client).repo(owner, repo).pull_request(number)
         resolved: list[str] = []
-        if self.resolve_conversations:
+        if self.resolve_conversations and not self.bypass_rules:
             current = await pull.pull()
             head = current.get("head")
             if not isinstance(head, dict) or head.get("sha") != self.sha:
@@ -189,6 +190,9 @@ class MergeAction(_PullRequestActionBase):
             if self.merge_method == "squash"
             else None
         )
+        if self.bypass_rules:
+            await self._merge_now(client, owner, repo, number, message)
+            return False
         if self.auto_merge:
             try:
                 await self._enable_auto_merge(pull, message)

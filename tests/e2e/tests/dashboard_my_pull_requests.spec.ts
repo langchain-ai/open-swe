@@ -549,7 +549,14 @@ test.describe("my pull requests", () => {
     const method = card(page, mine).getByLabel(
       `Merge method for PR #${mine.number}`,
     );
-    await expect(method).toBeHidden();
+    await method.click();
+    const menu = page.getByRole("menu");
+    await expect(
+      menu.getByRole("menuitem", { name: /Merge without waiting/ }),
+    ).toBeVisible();
+    await expect(menu.getByRole("menuitemradio")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
     await card(page, mine)
       .getByRole("button", { name: "Rebase and merge", exact: true })
       .click();

@@ -349,6 +349,7 @@ describe("My PRs", () => {
         expect.objectContaining({ number: 1, headSha: "a".repeat(40) }),
         "squash",
         false,
+        false,
         false
       )
       finish({ action: "merge", done: true })
@@ -404,11 +405,91 @@ describe("My PRs", () => {
           expect.objectContaining({ number: 1 }),
           "squash",
           mergeState === "blocked",
+          false,
           false
         )
       )
     }
   )
+
+  it("confirms bypassing rules without enabling auto-merge or resolving conversations", async () => {
+    vi.mocked(api.openPullRequests).mockResolvedValue({
+      ...payload,
+      pullRequests: [
+        pull(1, {
+          ci: "pending",
+          requiredChecksPassing: false,
+          autoMerge: true,
+          unresolvedThreads: 2,
+          conversationResolutionRequired: true,
+        }),
+      ],
+    })
+    vi.mocked(api.getPullRequestLabels).mockResolvedValue({
+      selected: [{ name: "do-not-merge", color: "ff0000", description: null }],
+      available: [],
+    })
+    let finish!: (result: PullRequestActionResult) => void
+    vi.mocked(api.mergePullRequest).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        })
+    )
+    const client = makeQueryClient()
+    mount(client)
+    const card = (await screen.findByText("Change 1")).closest("li")!
+    await chooseMergeMethod(1, "Squash merge")
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "Merge method for PR #1" }),
+      { key: "Enter", code: "Enter" }
+    )
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /Merge without waiting/ })
+    )
+    const dialog = await screen.findByRole("dialog")
+    expect(
+      within(dialog).getByText(/This PR is labeled do-not-merge/)
+    ).toBeTruthy()
+    expect(
+      within(dialog).getByText(/Conversations will not be resolved/)
+    ).toBeTruthy()
+    expect(api.mergePullRequest).not.toHaveBeenCalled()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    expect(api.mergePullRequest).not.toHaveBeenCalled()
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "Merge method for PR #1" }),
+      { key: "Enter", code: "Enter" }
+    )
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /Merge without waiting/ })
+    )
+    fireEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Bypass rules and merge",
+      })
+    )
+    await waitFor(() =>
+      expect(api.mergePullRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ number: 1, headSha: "a".repeat(40) }),
+        "squash",
+        false,
+        false,
+        true
+      )
+    )
+    expect(within(card).queryByText(/^Merged ·/)).toBeNull()
+    finish({ action: "merge", done: true })
+    expect(await within(card).findByText(/^Merged ·/)).toBeTruthy()
+    await act(async () => {
+      client.setQueryData(
+        pullRequestStatusQuery("octocat", pull(1)).queryKey,
+        pull(1, { state: "closed" })
+      )
+    })
+    expect(within(card).getByText(/^Merged ·/)).toBeTruthy()
+    expect(api.disablePullRequestAutoMerge).not.toHaveBeenCalled()
+  })
 
   it.each([false, true])(
     "asks to resolve required conversations before merging (auto-merge: %s)",
@@ -452,7 +533,8 @@ describe("My PRs", () => {
           expect.objectContaining({ number: 1 }),
           "squash",
           true,
-          autoMerge
+          autoMerge,
+          false
         )
       )
     }
@@ -515,7 +597,8 @@ describe("My PRs", () => {
           expect.objectContaining({ number: 1 }),
           method,
           unresolvedThreads > 0,
-          autoMerge
+          autoMerge,
+          false
         )
       )
     }
@@ -564,7 +647,8 @@ describe("My PRs", () => {
           expect.objectContaining({ number: 1 }),
           "squash",
           false,
-          autoMerge
+          autoMerge,
+          false
         )
       )
     }
@@ -1348,13 +1432,20 @@ describe("My PRs", () => {
     mount()
     await screen.findByText("Change 2")
     const card = screen.getByText("Change 1").closest("li")!
-    // The only allowed method needs no menu; the button already names it.
     const only = await within(card).findByRole("button", {
       name: "Squash and merge",
     })
+    fireEvent.keyDown(
+      within(card).getByRole("button", { name: "Merge method for PR #1" }),
+      { key: "Enter", code: "Enter" }
+    )
+    const menu = await screen.findByRole("menu")
+    expect(within(menu).queryAllByRole("menuitemradio")).toHaveLength(0)
     expect(
-      within(card).queryByRole("button", { name: "Merge method for PR #1" })
-    ).toBeNull()
+      within(menu).getByRole("menuitem", { name: /Merge without waiting/ })
+    ).toBeTruthy()
+    fireEvent.keyDown(menu, { key: "Escape", code: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull())
     expect(await mergeOptions(2)).toEqual(["Squash merge", "Merge commit"])
     const pair = screen.getByText("Change 2").closest("li")!
     expect(
@@ -1365,6 +1456,7 @@ describe("My PRs", () => {
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
         "squash",
+        false,
         false,
         false
       )
@@ -1397,6 +1489,7 @@ describe("My PRs", () => {
       expect(api.mergePullRequest).toHaveBeenCalledWith(
         expect.objectContaining({ number: 1 }),
         "rebase",
+        false,
         false,
         false
       )

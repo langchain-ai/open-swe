@@ -1091,6 +1091,8 @@ export type PullRequestActionRequest =
       sha: string | null
       merge_method: MergeMethod
       auto_merge?: boolean
+      resolve_conversations?: boolean
+      bypass_rules?: boolean
     }
   | { action: "disable-auto-merge" }
   | { action: "close"; reason?: string }
@@ -1749,13 +1751,18 @@ export const api = {
     pr: OpenPullRequest,
     method: MergeMethod,
     resolveConversations = false,
-    autoMerge = false
+    autoMerge = false,
+    bypassRules = false
   ): Promise<PullRequestActionResult> =>
     pullRequestAction(pr, {
       action: "merge",
       sha: pr.headSha,
       merge_method: method,
-      ...(autoMerge ? { auto_merge: true } : {}),
+      ...(bypassRules
+        ? { bypass_rules: true }
+        : autoMerge
+          ? { auto_merge: true }
+          : {}),
       ...(resolveConversations ? { resolve_conversations: true } : {}),
     }),
   disablePullRequestAutoMerge: (

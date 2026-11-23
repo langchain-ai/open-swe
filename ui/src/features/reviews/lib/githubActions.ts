@@ -29,6 +29,7 @@ export interface GithubActionInput {
   reason?: string
   /** Resolve every open conversation before merging. */
   resolveConversations?: boolean
+  bypassRules?: boolean
 }
 
 export const githubActions: Record<PullRequestActionName, GithubAction> = {
@@ -42,13 +43,14 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     succeeded: (subject, queued) =>
       queued ? `Auto-merge enabled for ${subject}` : `Merged ${subject}`,
     failed: (subject) => `Could not merge ${subject}`,
-    run: async (pr, { method, resolveConversations = false }) => {
+    run: async (pr, { method, resolveConversations = false, bypassRules }) => {
       if (!method) throw new Error("Choose a merge method.")
       const result = await api.mergePullRequest(
         pr,
         method,
-        resolveConversations,
-        mergesLater(pr)
+        resolveConversations && !bypassRules,
+        !bypassRules && mergesLater(pr),
+        bypassRules ?? false
       )
       return result.auto_merge === true
     },

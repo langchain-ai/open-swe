@@ -155,6 +155,35 @@ async def test_merge_requires_github_confirmation(github, status, merged):
     }
 
 
+@pytest.mark.parametrize("status", [200, 403, 405, 409])
+async def test_explicit_bypass_merges_immediately_or_reports_refusal(status: int) -> None:
+    requests: list[dict[str, object]] = []
+
+    def github(request: httpx2.Request) -> httpx2.Response:
+        assert request.method == "PUT"
+        requests.append(json.loads(request.content))
+        return response({"merged": status == 200, "message": "Merge refused"}, status)
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        action = actions.MergeAction(
+            action="merge",
+            sha="a" * 40,
+            merge_method="merge",
+            auto_merge=True,
+            resolve_conversations=True,
+            bypass_rules=True,
+        )
+        if status == 200:
+            result = await actions.act_on_pull_request(pull, action)
+            assert result.done and not result.auto_merge
+        else:
+            with pytest.raises(HTTPException, match="Merge refused") as error:
+                await actions.act_on_pull_request(pull, action)
+            assert error.value.status_code == status
+    assert requests == [{"sha": "a" * 40, "merge_method": "merge"}]
+
+
 async def test_pending_merge_enables_github_auto_merge() -> None:
     requests: list[dict[str, object]] = []
 

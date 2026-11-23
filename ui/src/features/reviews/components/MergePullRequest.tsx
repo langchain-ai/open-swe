@@ -1,4 +1,5 @@
 import { CheckIcon } from "@langchain/macaw-components/icons"
+import { DropdownMenuSeparator } from "@langchain/macaw-components/DropdownMenu"
 import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRef, useState } from "react"
 
@@ -33,8 +34,9 @@ export function MergePullRequest({
   const [choice, setChoice] = useState<MergeMethod | null>(null)
   const [preferred] = useState(readPreferredMergeMethod)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [bypassRules, setBypassRules] = useState(false)
   const [confirmation, setConfirmation] = useState<
-    "label" | "unknown" | "conversations" | null
+    "label" | "unknown" | "conversations" | "bypass" | null
   >(null)
   const [checkingLabels, setCheckingLabels] = useState(false)
   const checking = useRef(false)
@@ -74,13 +76,16 @@ export function MergePullRequest({
     action: "merge",
     mutationKey,
     method: method ?? undefined,
-    apply: autoMerge ? undefined : apply,
+    apply: autoMerge || bypassRules ? undefined : apply,
     onDone: (queued) => {
       if (method) writePreferredMergeMethod(method)
       if (queued) {
         setAutoMergeOverride(true)
         cache.setAutoMerge(true)
-      } else onMerged?.()
+      } else {
+        if (bypassRules) apply?.()
+        onMerged?.()
+      }
     },
   })
   const autoMergeEnabled = autoMergeOverride ?? pr.autoMerge === true
@@ -128,17 +133,24 @@ export function MergePullRequest({
       : 0
   const [owner, repo] = pr.repo.split("/")
   const conversations = `${blocking} unresolved conversation${blocking === 1 ? "" : "s"}`
-  const action = autoMerge ? "enable auto-merge" : "merge"
+  const action = bypassRules
+    ? "bypass rules and merge"
+    : autoMerge
+      ? "enable auto-merge"
+      : "merge"
+  const bypassWarning =
+    "Merge immediately without waiting for required checks or approvals. Conversations will not be resolved. GitHub still requires your account to have permission to bypass the repository’s rules."
   const conversationWarning = `${rulesUnknown ? `Could not confirm whether ${pr.repo} requires conversations to be resolved before merging.` : `${pr.repo} requires every conversation to be resolved before merging.`} Resolve ${blocking === 1 ? "it" : `all ${blocking}`} and ${action}?`
-  const confirmationLabel =
-    blocking > 0
+  const confirmationLabel = bypassRules
+    ? "Bypass rules and merge"
+    : blocking > 0
       ? `Resolve and ${action}`
       : autoMerge
         ? "Enable auto-merge anyway"
         : "Merge anyway"
-  const start = async () => {
+  const start = async (bypass = false) => {
     if (checking.current || queryClient.isMutating({ mutationKey }) > 0) return
-    if (autoMergeEnabled) {
+    if (autoMergeEnabled && !bypass) {
       disable.mutate()
       return
     }
@@ -146,6 +158,7 @@ export function MergePullRequest({
       setMenuOpen(true)
       return
     }
+    setBypassRules(bypass)
     checking.current = true
     setCheckingLabels(true)
     let reason: "label" | "unknown" | "conversations" | null = null
@@ -167,7 +180,8 @@ export function MergePullRequest({
     }
     checking.current = false
     setCheckingLabels(false)
-    if (reason || blocking > 0) setConfirmation(reason ?? "conversations")
+    if (bypass || reason || blocking > 0)
+      setConfirmation(reason ?? (bypass ? "bypass" : "conversations"))
     else if (queryClient.isMutating({ mutationKey }) === 0) merge.mutate()
   }
   return (
@@ -180,72 +194,98 @@ export function MergePullRequest({
         }
         onClick={() => void start()}
         menuLabel={`Merge method for PR #${pr.number}`}
-        menuDisabled={busy || checkingLabels || autoMergeEnabled}
+        menuDisabled={busy || checkingLabels}
         menuOpen={menuOpen}
         onMenuOpenChange={setMenuOpen}
         menu={
-          options.length > 1 &&
-          options.map((option) => (
+          <>
+            {options.length > 1 &&
+              options.map((option) => (
+                <DropdownMenuItem
+                  key={option}
+                  role="menuitemradio"
+                  aria-checked={option === method}
+                  onSelect={() => setChoice(option)}
+                  className="w-72 items-start"
+                >
+                  <CheckIcon
+                    aria-hidden
+                    size={14}
+                    weight="bold"
+                    className={
+                      option === method ? "mt-0.5" : "invisible mt-0.5"
+                    }
+                  />
+                  <span>
+                    <span className="block font-medium">
+                      {mergeMethodCopy[option].label}
+                    </span>
+                    <span className="block text-secondary">
+                      {mergeMethodCopy[option].description}
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            {options.length > 1 && <DropdownMenuSeparator />}
             <DropdownMenuItem
-              key={option}
-              role="menuitemradio"
-              aria-checked={option === method}
-              onSelect={() => setChoice(option)}
-              className="w-72 items-start"
+              disabled={!method || !pr.headSha || allowed.isPending}
+              onSelect={() => void start(true)}
+              className="w-72 whitespace-normal"
             >
-              <CheckIcon
-                aria-hidden
-                size={14}
-                weight="bold"
-                className={option === method ? "mt-0.5" : "invisible mt-0.5"}
-              />
-              <span>
-                <span className="block font-medium">
-                  {mergeMethodCopy[option].label}
-                </span>
-                <span className="block text-secondary">
-                  {mergeMethodCopy[option].description}
-                </span>
-              </span>
+              Merge without waiting for requirements to be met (bypass rules)
             </DropdownMenuItem>
-          ))
+          </>
         }
       >
         {checkingLabels
           ? "Checking labels…"
-          : autoMergeEnabled
-            ? "Disable auto-merge"
-            : disable.isPending
-              ? "Disabling auto-merge…"
-              : allowed.isPending
-                ? "Merge"
-                : !method
-                  ? "Choose how to merge"
-                  : !autoMerge && state === labels.idle
-                    ? mergeMethodCopy[method].button
-                    : state}
+          : bypassRules && merge.isPending
+            ? "Merging…"
+            : autoMergeEnabled
+              ? "Disable auto-merge"
+              : disable.isPending
+                ? "Disabling auto-merge…"
+                : allowed.isPending
+                  ? "Merge"
+                  : !method
+                    ? "Choose how to merge"
+                    : !autoMerge && state === labels.idle
+                      ? mergeMethodCopy[method].button
+                      : state}
       </SplitButton>
       <ConfirmDialog
         open={confirmation !== null}
-        onOpenChange={(open) => !open && setConfirmation(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConfirmation(null)
+            setBypassRules(false)
+          }
+        }}
         title={
           confirmation === "label"
             ? `PR #${pr.number} is labeled do-not-merge`
             : confirmation === "unknown"
               ? `Could not check labels on PR #${pr.number}`
-              : `${conversations} on PR #${pr.number}`
+              : bypassRules
+                ? `Bypass rules for PR #${pr.number}?`
+                : `${conversations} on PR #${pr.number}`
         }
         description={
-          confirmation === "conversations"
-            ? conversationWarning
-            : `${confirmation === "label" ? "This PR is labeled do-not-merge." : "Could not check whether this PR is labeled do-not-merge."} ${blocking > 0 ? `${conversations}. ${conversationWarning}` : `Are you sure you want to ${action} anyway?`}`
+          bypassRules
+            ? `${confirmation === "label" ? "This PR is labeled do-not-merge. " : confirmation === "unknown" ? "Could not check whether this PR is labeled do-not-merge. " : ""}${bypassWarning}`
+            : confirmation === "conversations"
+              ? conversationWarning
+              : `${confirmation === "label" ? "This PR is labeled do-not-merge." : "Could not check whether this PR is labeled do-not-merge."} ${blocking > 0 ? `${conversations}. ${conversationWarning}` : `Are you sure you want to ${action} anyway?`}`
         }
         confirmLabel={confirmationLabel}
         destructive={confirmation !== "conversations"}
         onConfirm={() => {
           setConfirmation(null)
           if (queryClient.isMutating({ mutationKey }) === 0)
-            merge.mutate({ resolveConversations: blocking > 0 })
+            merge.mutate({
+              resolveConversations: !bypassRules && blocking > 0,
+              bypassRules,
+            })
         }}
       />
     </>
