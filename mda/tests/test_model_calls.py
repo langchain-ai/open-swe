@@ -33,7 +33,7 @@ from langchain_core.messages import (
 from langchain_core.tools import tool
 from langchain_fireworks import ChatFireworks
 from langchain_openai import ChatOpenAI
-from langchain_openai.chat_models.base import OpenAIStreamServerError
+from langchain_openai.chat_models.base import OpenAIInvalidRequestError, OpenAIStreamServerError
 from langsmith.run_trees import RunTree
 from pydantic import SecretStr
 from rt.backend import Run, RunContext
@@ -61,7 +61,7 @@ from runtime_api.catalog import (
     SandboxSpec,
 )
 from runtime_api.loop import GatewayCredential
-from runtime_api.model_errors import is_model_failure_reply
+from runtime_api.model_errors import classify_exception, is_model_failure_reply
 from runtime_api.provenance import Provenance
 
 _ANTHROPIC = ChatAnthropic(model_name="claude-opus-5-5", api_key=SecretStr("test"))
@@ -582,7 +582,41 @@ async def test_attempts_wait_out_the_backoff_with_jitter(monkeypatch: pytest.Mon
     sleep.assert_awaited_once_with(10.0)
 
 
-@pytest.mark.parametrize("error", [ValueError("not transient"), _status_error(400)])
+_CYBER_FLAG = (
+    "This content was flagged for possible cybersecurity risk. If this seems wrong, try "
+    "rephrasing your request. Otherwise, confirm that the access_programs.cyber parameter "
+    "is set to the appropriate tier, and note that some cybersecurity requests are still "
+    "limited, even when Daybreak is on."
+)
+
+
+def _invalid_request(message: str, body: object = None) -> OpenAIInvalidRequestError:
+    request = httpx2.Request("POST", "https://api.openai.com/v1/responses")
+    response = httpx2.Response(400, request=request, text=message)
+    return OpenAIInvalidRequestError(message, response=response, body=body)
+
+
+# As production raises them: a 400 for the request, or an error event in a stream it
+# accepted; and a block identified by its code alone.
+_POLICY_BLOCKS = [
+    _invalid_request(f"Error code: 400 - {_CYBER_FLAG}", _CYBER_FLAG),
+    openai.APIError(
+        _CYBER_FLAG,
+        request=httpx2.Request("POST", "https://api.openai.com/v1/responses"),
+        body={"message": _CYBER_FLAG},
+    ),
+    _invalid_request("flagged", {"code": "cyber_policy", "message": "flagged"}),
+]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("not transient"),
+        _status_error(400),
+        _invalid_request("Error code: 400 - Invalid value for 'input'.", {"code": "invalid_value"}),
+    ],
+)
 async def test_an_error_another_attempt_would_repeat_raises_at_once(error: BaseException) -> None:
     attempts = _Attempts(error)
 
@@ -613,8 +647,9 @@ def _refusal(written: str) -> ModelRefusalError:
     )
 
 
-async def test_a_refused_reply_goes_once_to_the_fallback() -> None:
-    attempts = _Attempts(_refusal(""))
+@pytest.mark.parametrize("refusal", [_refusal(""), *_POLICY_BLOCKS])
+async def test_a_refused_reply_goes_once_to_the_fallback(refusal: BaseException) -> None:
+    attempts = _Attempts(refusal)
 
     response = await _fallback_call(attempts)
 
@@ -641,6 +676,42 @@ async def test_a_refused_reply_ends_the_run_saying_so_and_keeps_what_was_written
     assert "provider blocked" in reply.text
     assert reply.text.startswith(written)
     assert attempts.models == ([_ANTHROPIC] if fallback is None else [_ANTHROPIC, _OPENAI])
+
+
+@pytest.mark.parametrize("fallback", [None, lambda: _OPENAI])
+async def test_a_blocked_request_ends_the_run_saying_so(
+    fallback: Callable[[], BaseChatModel] | None,
+) -> None:
+    attempts = _Attempts(*_POLICY_BLOCKS)
+
+    answer = await call_with_fallback(
+        ModelRequest(model=_OPENAI, messages=[]),
+        attempts,
+        fallback,
+        backoff_schedule=(0.0, 0.0, 0.0),
+    )
+
+    reply = answer.result[0]
+    assert is_model_failure_reply(reply)
+    assert reply.text.startswith("The model provider blocked this reply.")
+    assert attempts.models == ([_OPENAI] if fallback is None else [_OPENAI, _OPENAI])
+
+
+@pytest.mark.parametrize("error", _POLICY_BLOCKS)
+def test_a_policy_block_reports_the_provider_refused(error: BaseException) -> None:
+    assert classify_exception(error) == "model_refused"
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (_status_error(400), "provider_unavailable"),
+        (_invalid_request("Error code: 400 - Invalid value for 'input'."), None),
+        (_status_error(429), "provider_rate_limited"),
+    ],
+)
+def test_other_errors_keep_their_classification(error: BaseException, code: str | None) -> None:
+    assert classify_exception(error) == code
 
 
 async def test_a_refused_reply_survives_a_transient_failure_on_failover() -> None:

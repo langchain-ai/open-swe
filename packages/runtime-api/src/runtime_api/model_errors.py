@@ -46,6 +46,15 @@ _ERROR_TYPE_CODES: Final = {
     "RunStalledError": "run_stalled",
 }
 
+# A provider's policy block of the request, raised as an error rather than answered as a
+# refusal: OpenAI fails a flagged request with a 400, or with an error event mid-stream.
+# Its structured code where the provider gives one, else its wording.
+_POLICY_BLOCK_CODES: Final = frozenset({"cyber_policy", "content_policy_violation"})
+_POLICY_BLOCK_MESSAGES: Final = (
+    "flagged for possible cybersecurity risk",
+    "flagged as potentially violating our usage policy",
+)
+
 
 def is_model_failure_reply(message: object) -> bool:
     """Whether ``message`` is the runtime's answer for a model call it could not make."""
@@ -67,12 +76,19 @@ def classify_exception(exc: BaseException) -> str | None:
     status = getattr(exc, "status_code", None)
     body = getattr(exc, "body", None)
     provider_code = ""
+    codes = [getattr(exc, "code", None)]
     if isinstance(body, dict):
+        codes.append(body.get("code"))
         inner = body.get("error")
         if isinstance(inner, dict):
             provider_code = str(inner.get("type") or inner.get("code") or "")
+            codes.append(inner.get("code"))
     haystack = f"{provider_code} {exc}".lower()
 
+    if any(isinstance(code, str) and code in _POLICY_BLOCK_CODES for code in codes) or any(
+        flag in haystack for flag in _POLICY_BLOCK_MESSAGES
+    ):
+        return "model_refused"
     if status == 429 or "rate_limit" in haystack:
         return "provider_rate_limited"
     if status == 529 or "overloaded" in haystack:

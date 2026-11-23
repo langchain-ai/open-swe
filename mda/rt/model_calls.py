@@ -16,8 +16,9 @@ every attempt failed, the run ends with a message saying so instead of a crash: 
 progress is checkpointed, so the person can start it again.
 
 A provider can also refuse a reply or cut it off at its output limit, both as an
-answer rather than an error. A refusal goes once to the other provider, then ends
-the run with a reply saying so that keeps what the model wrote; a reply cut off at
+answer rather than an error, or block the request by policy with an error (OpenAI's
+cybersecurity flag is a 400). A refusal or block goes once to the other provider, then
+ends the run with a reply saying so that keeps what the model wrote; a reply cut off at
 the output limit is logged, and a subagent's says so to the agent that delegated.
 """
 
@@ -263,9 +264,9 @@ async def call_with_fallback(
     after the first whether it goes to the fallback; a fallback that cannot be built
     leaves the retries to the call's own model. A provider that refuses the workspace
     the model answers with why; any other error that is not transient raises at once.
-    A refused reply goes once to the other model, then answers with what the model wrote
-    and that the provider blocked the rest. Once the attempts or ``budget`` run out, the
-    outage message answers instead.
+    A refused reply or a request the provider blocks by policy goes once to the other
+    model, then answers with what the model wrote and that the provider blocked the rest.
+    Once the attempts or ``budget`` run out, the outage message answers instead.
     """
     if (unavailable := await RUN_GATEWAY.unavailable()) is not None:
         return _failure_reply(unavailable, "model_access")
@@ -314,13 +315,18 @@ async def call_with_fallback(
                     extra={"model_access_error": exception_fields(exc)},
                 )
                 return _failure_reply(message, "model_access")
-            if isinstance(exc, ModelRefusalError):
+            refusal = exc if isinstance(exc, ModelRefusalError) else None
+            if refusal is None and classify_exception(exc) == "model_refused":
+                # A policy block of the request is handled as a refusal of its reply.
+                refusal = ModelRefusalError(str(exc))
+                refusal.__cause__ = exc
+            if refusal is not None:
                 logger.warning(
                     "Model refused the reply",
                     extra={"model_refusal": {"attempt": made, **exception_fields(exc)}},
                 )
                 refused = isinstance(last, ModelRefusalError)
-                last = exc
+                last = refusal
                 # The reply that answers instead keeps what the model wrote.
                 output.supersede()
                 if fallback is None or refused:
