@@ -42,6 +42,7 @@ class AuditLogEnrichments(BaseModel):
     response_status_code: int | None = None
     resource_ids: list[str] = Field(default_factory=list)
     thread_id: str | None = None
+    run_id: str | None = None
     delegated_from_sandbox_id: str | None = None
     settings_scope: Literal["instance", "workspace", "execution"] | None = None
     settings_changes: dict[str, SettingsChange] | None = None
@@ -82,6 +83,7 @@ class AuditLog(BaseModel):
 
         cfg = configurable()
         self.enrichments.thread_id = cfg.thread_id
+        self.enrichments.run_id = cfg.run_id or None
         backend = SANDBOX_BACKENDS.get(cfg.thread_id) if cfg.thread_id else None
         if backend is not None and backend.has_backend:
             self.enrichments.delegated_from_sandbox_id = backend.id

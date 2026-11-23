@@ -3,9 +3,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from openswe import tools
+from openswe.audit_logs.models import AuditLog, AuditLogRow
 from openswe.database import postgres
 from openswe.run_config import RunConfig
 from openswe.slack.channels import SlackChannel
@@ -301,6 +302,12 @@ async def test_post_channel_message_requires_active_channel_membership(
     result = await tools.slack_post_message("C123", "hello")
     assert result == {"success": False, "error": "not_in_channel"}
     assert [method for method, _ in slack_api.calls] == ["users.conversations"]
+    async with postgres.session() as session:
+        entry = AuditLog.model_validate((await session.scalars(select(AuditLogRow))).one())
+    assert entry.operation_name == "slack_post_message"
+    assert entry.operation_succeeded is False
+    assert "hello" not in entry.model_dump_json()
+    assert "not_in_channel" not in entry.model_dump_json()
 
 
 @pytest.mark.parametrize("source_channel", ["C123", "C456", ""])
@@ -311,7 +318,9 @@ async def test_post_channel_message_finds_membership_after_empty_page(
 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
     monkeypatch.setattr(
-        RunConfig, "from_runtime", lambda: RunConfig.parse({"thread_id": "agent-thread"})
+        RunConfig,
+        "from_runtime",
+        lambda: RunConfig(thread_id="agent-thread", run_id="posting-run"),
     )
     monkeypatch.setattr(
         channels, "run_slack_location", AsyncMock(return_value=(source_channel, "1.0"))
@@ -333,6 +342,15 @@ async def test_post_channel_message_finds_membership_after_empty_page(
     for payload in (str(blocks), slack_api.calls[-1][1]["text"]):
         assert "https://openswe.example.com/agents/agent-thread" in payload
         assert ("https://example.slack.com/archives/source/p10" in payload) is bool(source_channel)
+    async with postgres.session() as session:
+        entry = AuditLog.model_validate((await session.scalars(select(AuditLogRow))).one())
+    assert entry.operation_name == "slack_post_message"
+    assert entry.operation_succeeded is True
+    assert entry.enrichments.actor_kind == "agent"
+    assert entry.enrichments.thread_id == "agent-thread"
+    assert entry.enrichments.run_id == "posting-run"
+    for payload in ("hello", "C123", "1700000000.000123"):
+        assert payload not in entry.model_dump_json()
 
 
 async def test_post_channel_message_stops_on_repeated_membership_cursor(
@@ -358,7 +376,9 @@ async def test_post_channel_message_reports_slack_failure_without_retry(
 
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example.com")
     monkeypatch.setattr(
-        RunConfig, "from_runtime", lambda: RunConfig.parse({"thread_id": "agent-thread"})
+        RunConfig,
+        "from_runtime",
+        lambda: RunConfig(thread_id="agent-thread", run_id="posting-run"),
     )
     monkeypatch.setattr(channels, "run_slack_location", AsyncMock(return_value=("", "")))
     slack_api.respond(
@@ -368,6 +388,11 @@ async def test_post_channel_message_reports_slack_failure_without_retry(
     result = await tools.slack_post_message("C123", "hello")
     assert result == {"success": False, "error": expected}
     assert len(slack_api.calls) == 2
+    async with postgres.session() as session:
+        entry = AuditLog.model_validate((await session.scalars(select(AuditLogRow))).one())
+    assert entry.operation_succeeded is False
+    assert entry.enrichments.run_id == "posting-run"
+    assert expected not in entry.model_dump_json()
 
 
 @pytest.mark.parametrize("thread_id", ["", "agent-thread"])

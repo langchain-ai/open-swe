@@ -5,6 +5,7 @@ from typing import Final, Literal, NotRequired, TypedDict
 
 from fastapi import HTTPException
 
+from openswe.audit_logs.tools import audit_tool
 from openswe.run_config import RunConfig
 from openswe.schedules.delivery import CreatorDelivery, DeliveryRefused
 from openswe.slack.availability import SlackUserInfo
@@ -273,6 +274,7 @@ async def _dm_automation_creator(
     return {"success": True, "channel_id": dm_channel_id, "message_ts": message_ts}
 
 
+@audit_tool()
 async def slack_post_message(
     channel_id: str, message: str, details: str | None = None
 ) -> SlackMessageReceipt | SlackChannelError:

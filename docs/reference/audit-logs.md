@@ -10,20 +10,25 @@ Time, workspace/time, and operation/time indexes support queries.
 
 ## Coverage
 
-- Authenticated dashboard `POST`, `PUT`, `PATCH`, and `DELETE` requests, including API-key thread requests.
+- Authenticated dashboard `POST`, `PUT`, `PATCH`, and `DELETE` requests to endpoints explicitly opted in with `audit_endpoint`, including selected API-key thread requests.
   Operation names use the endpoint name without its `api_` prefix.
-  This is **API activity**, not proof of a committed business mutation: some POST endpoints are reads, and HTTP success follows the response status.
-- The `save_user_settings`, `save_user_instructions`, `manage_feature_flags`, and `manage_review_approval_mode` tools, whether called by the agent directly or from code mode.
-  Read actions are excluded.
+  This is **API activity**, not proof of a committed business mutation: HTTP success follows the response status.
+- Tools explicitly opted in with `audit_tool`, whether called directly or from code mode.
+  Coverage includes settings and instructions, skills, review configuration and publication, PR creation and expedited merging, human-review requests, integration bindings and automation administration, projects, and thread management.
+  `slack_post_message` records channel-post and automation-creator DM attempts, including membership refusals and Slack failures, without retaining the destination or message.
+  Declared read actions are excluded.
   Exceptions and returned `ok: false`, `success: false`, or errors count as failures.
+  Success describes the tool's result, not necessarily every side effect; for example, a successful Slack headline can have a failed details reply.
 - Integration-binding and global-settings mutations record their verified actor and target resource metadata.
   Shared defaults and image operations have no Robin execution-environment scope.
   Historical workspace IDs remain audit data, not routing configuration.
 
 Human IDs come from verified sessions.
 API-key actors use the key ID, not its creator.
-Tool records identify an agent, with the initiating user only for a direct user run, and include thread/sandbox provenance where available.
-A saved requester context is not evidence of a fresh human action.
+Tool records identify an agent, with the initiating user only for a direct user run or a direct remote MCP caller, and include thread/sandbox provenance where available.
+`enrichments.run_id` correlates opted-in tool events with the executing MDA run when available; it comes from server-side runtime context, never tool arguments or a tracing callback's ID.
+It is omitted when unavailable, including remote MCP calls outside a run, without substituting a preparation ID.
+A saved requester context is not evidence of a fresh human action; scheduled and background runs can carry run correlation without acquiring human attribution.
 Historical `workspace_id` values remain available for audit queries; global operations do not infer a Robin environment from a thread or binding.
 
 Enrichments allowlist actor and execution metadata, HTTP method, route **template**, status, and UUID path resource IDs.
@@ -39,7 +44,9 @@ Request/response bodies, tool arguments/results, query strings, headers, credent
 No IP address is inferred from untrusted forwarded headers.
 Production and preview installations retain their own audit history.
 
-Unauthenticated failures, failures before an actor is bound (including CSRF), GET/read access, login/logout, webhook-driven actions, arbitrary shell commands, and tools not listed above are not covered.
+Unauthenticated failures, failures before an actor is bound (including CSRF), GET/read access, login/logout, webhook-driven actions, arbitrary shell commands, and HTTP endpoints or tools without an explicit audit opt-in are not covered.
+In particular, this is not a complete outbound-action ledger: arbitrary HTTP requests, managed integration tools, and other Slack delivery paths such as `slack_reply` are not captured here.
+Classifier policy verdicts and runtime turn traces are separate from this mutation audit history.
 There is no historical backfill.
 
 ## Querying

@@ -28,7 +28,9 @@ async def test_tool_audit_outcome_without_payloads(
     monkeypatch.setattr(
         admin_gate,
         "configurable",
-        lambda: RunConfig(source="dashboard", github_login="alice", thread_id="thread-id"),
+        lambda: RunConfig(
+            source="dashboard", github_login="alice", thread_id="thread-id", run_id="runtime-run-id"
+        ),
     )
 
     async def lookup(*_args: object) -> User:
@@ -44,12 +46,13 @@ async def test_tool_audit_outcome_without_payloads(
     async def mutate(settings: dict[str, str]) -> dict[str, object]:
         return result
 
-    assert await mutate({"token": "argument-secret"}) == result
+    assert await mutate({"token": "argument-secret", "run_id": "argument-secret"}) == result
     (entry,) = entries
     assert entry.operation_succeeded is succeeded
     assert entry.user_id == user.id
     assert entry.enrichments.actor_kind == "agent"
     assert entry.enrichments.thread_id == "thread-id"
+    assert entry.enrichments.run_id == "runtime-run-id"
     assert "argument-secret" not in entry.model_dump_json()
     assert "returned-secret" not in entry.model_dump_json()
 
@@ -81,6 +84,8 @@ async def test_mcp_caller_writes_are_attributed_without_payloads(
     await control("edit", "core")
     (entry,) = entries
     assert entry.user_id == user.id
+    assert entry.enrichments.run_id is None
+    assert "run_id" not in entry.enrichments.model_dump(exclude_none=True)
     assert "core" not in entry.model_dump_json()
 
 
@@ -91,7 +96,9 @@ async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
     monkeypatch.setattr(
         admin_gate,
         "configurable",
-        lambda: RunConfig(source="schedule", github_login="schedule-owner"),
+        lambda: RunConfig(
+            source="schedule", github_login="schedule-owner", run_id="scheduled-run-id"
+        ),
     )
 
     async def append(entry: AuditLog) -> None:
@@ -113,6 +120,7 @@ async def test_tool_audit_records_exception_but_not_reads_or_background_owner(
     assert entry.operation_succeeded is False
     assert entry.user_id is None
     assert entry.enrichments.actor_login is None
+    assert entry.enrichments.run_id == "scheduled-run-id"
     assert "exception-secret" not in entry.model_dump_json()
 
 

@@ -816,6 +816,17 @@
             ],
             "title": "Response Status Code"
           },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
           "settings_changes": {
             "anyOf": [
               {
