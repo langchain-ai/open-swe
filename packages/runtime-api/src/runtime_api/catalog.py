@@ -196,9 +196,6 @@ FileCheck = Literal["image_reads", "agents_md"]
 class FilesSpec(BaseModel):
     """Where the run's file and shell tools act, and what is checked around them."""
 
-    # Paths under these prefixes are the backend's (skills, offloaded images): the
-    # runtime's file tools reach them through the files API rather than the sandbox.
-    backend_paths: list[str] = []
     # Shell commands the backend checks before they run: its push and pull request guards.
     guards: list[ShellGuard] = []
     # Checks on what ``read_file`` returns.
@@ -443,8 +440,8 @@ class Catalog(BaseModel):
     # Where the run was asked from, for its memory; None uses no memory.
     memory: MemoryScope | None = None
     # The digest the backend keeps every tool the run may call by, which the run reads
-    # once per process to search and resolve them itself (``runtime_api.tool_search``);
-    # None searches on the backend.
+    # once per process to search and resolve them itself (``runtime_api.tool_search``).
+    # Every backend names one; a run with none finds nothing.
     tool_set: str | None = None
 
     def names_only(self) -> Catalog:

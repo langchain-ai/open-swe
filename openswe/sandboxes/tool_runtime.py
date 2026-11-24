@@ -114,8 +114,6 @@ class ToolSurface:
     browser: BrowserSpec | None = None
     models: SurfaceModels | None = None
     subagents: Sequence[SurfaceSubagent] = ()
-    # Paths in the thread's files this deployment serves rather than the sandbox.
-    backend_paths: tuple[str, ...] = ()
     # Where the run's skills are in the thread's files, a later source's skill taking the
     # place of an earlier one's of the same name.
     skill_sources: tuple[str, ...] = ()

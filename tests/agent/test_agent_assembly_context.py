@@ -99,8 +99,6 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
 
     personal = next(f for f in listed.files if f.path == "/skills/personal-workflow/SKILL.md")
     assert "Do it." in personal.content
-    # The runtime answers reads of skills itself; the files API serves none of them.
-    assert not set(surface.skill_sources) & set(surface.backend_paths)
     assert BUNDLED_SKILLS in surface.skill_sources
     assert not any(f.path.startswith(BUNDLED_SKILLS) for f in listed.files)
 
@@ -116,23 +114,6 @@ async def test_monitor_is_available_without_opt_in(profile: dict[str, object] | 
     tools = captured["tools"]
     assert isinstance(tools, list)
     assert "monitor" in {_registered_tool_name(tool) for tool in tools}
-
-
-async def test_offloaded_images_are_served_from_a_thread_scoped_store() -> None:
-    from deepagents.backends.store import StoreBackend
-
-    from openswe.run_config import RunConfig
-    from openswe.server import ThreadFiles
-    from openswe.skill_store.run_skills import RunSkillStores
-
-    config = _base_config()
-    captured = await _agent_catalog(config)
-    files = ThreadFiles("thread-ctx", RunConfig.from_config(config), skills=RunSkillStores(None))
-    blobs = files.routes["/blobs/"]
-    assert isinstance(blobs, StoreBackend)
-    assert blobs._namespace(MagicMock()) == ("thread_blobs", "thread-ctx")
-    surface = cast(ToolSurface, captured["surface"])
-    assert "/blobs/" in surface.backend_paths
 
 
 @pytest.mark.asyncio
@@ -178,11 +159,6 @@ async def _agent_catalog(
             return_value=("ghp", None),
         ),
         patch("openswe.server.resolve_triggering_user_identity", return_value=None),
-        patch(
-            "openswe.server.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
         patch(
             "openswe.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,

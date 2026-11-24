@@ -1,9 +1,7 @@
 """The run's file and shell tools, with the checks around them.
 
-They run in the thread's sandbox, which MDA owns, but on the paths the backend serves
-(``FilesSpec.backend_paths``), which they reach through the files API
-(``rt.remote_files``). Reads of the run's skills are answered from the skills this
-runtime keeps (``rt.skills``).
+They run in the thread's sandbox, which MDA owns. Reads of the run's skills are
+answered from the skills this runtime keeps (``rt.skills``).
 
 Around every call: a command that may push or open a pull request is first put to
 the backend's guards, which inspect the push and may need a person's approval, so
@@ -27,6 +25,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from functools import partial, wraps
 from typing import Final
 
+from deepagents.middleware.filesystem import FilesystemMiddleware
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 from langchain.tools import ToolRuntime
@@ -43,12 +42,11 @@ from runtime_api.endpoint import call
 from runtime_api.operations import CHECK_SHELL, ShellCheck
 
 from rt.auto_review import PATH_ARGUMENTS
-from rt.backend import OpenSweBackend, RunLocal
+from rt.backend import OpenSweBackend
 from rt.git_evidence import OBSERVED_TOOLS, turn_git
 from rt.memory_policy import MemoryPolicy
 from rt.middleware import reported
 from rt.prompts import prompt
-from rt.remote_files import FILE_TOOLS, RemoteFiles, remote_file_tools
 from rt.sandbox_setup import sandbox_setup
 from rt.subdir_agents import SubdirAgentsReadMiddleware
 from rt.tool_errors import ToolErrorMiddleware
@@ -58,6 +56,10 @@ from rt.validate_image_reads import ValidateImageReadsMiddleware
 
 logger = logging.getLogger(__name__)
 
+# deepagents' file and shell tools.
+FILE_TOOLS: Final = frozenset(
+    {"ls", "read_file", "write_file", "edit_file", "delete", "glob", "grep", "execute"}
+)
 # A command the push and pull request guards may stop: one naming a push, the GitHub
 # CLI or the pulls API, or nesting shells as deep as the pull request guard reads.
 _GUARDED_WORDS: Final = re.compile(r"\b(?:push|gh|pulls)\b")
@@ -91,13 +93,9 @@ class FileToolsMiddleware(AgentMiddleware):
         backend: OpenSweBackend,
         execute_timeout: int,
         *,
-        remote_files: RemoteFiles,
         skills: Mapping[str, BaseTool] | None = None,
     ) -> None:
         self._backend = backend
-        self._remote_files = remote_files
-        # Each run's view of the backend's files as deepagents' own tools.
-        self._remote_by_run = RunLocal(lambda: remote_file_tools(self._remote_files))
         # The run's skills, which this runtime keeps itself (``rt.skills``).
         self._skills = dict(skills or {})
         # The sandbox's own tools, as the model is offered them; code mode runs them from here.
@@ -110,10 +108,6 @@ class FileToolsMiddleware(AgentMiddleware):
     @property
     def _spec(self) -> FilesSpec:
         return self._backend.run.catalog.files
-
-    @property
-    def _remote(self) -> dict[str, BaseTool]:
-        return self._remote_by_run.get(self._backend.run)
 
     @property
     def _shell_search(self) -> bool:
@@ -136,7 +130,8 @@ class FileToolsMiddleware(AgentMiddleware):
 
     def code_tools(self, names: Iterable[str]) -> list[StructuredTool]:
         """The file and shell tools among ``names``, for code mode, each call checked."""
-        templates = remote_file_tools(self._remote_files)
+        # Only their names, descriptions and schemas: each call runs the sandbox's own tool.
+        templates = {tool.name: tool for tool in FilesystemMiddleware().tools}
         return [
             self._code_tool(self._described_tool(templates[name]))
             for name in sorted({*names} & {*templates})
@@ -188,13 +183,10 @@ class FileToolsMiddleware(AgentMiddleware):
             return await handler(request)
         if request.tool is not None:
             request = request.override(tool=self._skill_tool(request, request.tool))
-        spec = self._spec
         if _under(("/memories/",), call_["name"], call_["args"]):
             run: Handler = handler
         elif _under(self._backend.run.catalog.skill_sources, call_["name"], call_["args"]):
             run = self._run_skill
-        elif _under(spec.backend_paths, call_["name"], call_["args"]):
-            run = self._run_remote
         else:
             run = partial(
                 self._observed,
@@ -308,11 +300,6 @@ class FileToolsMiddleware(AgentMiddleware):
             return result
 
         return tool.model_copy(update={"coroutine": read_skill})
-
-    async def _run_remote(self, request: ToolCallRequest) -> ToolMessage | Command:
-        """The call against the backend's files, as the sandbox's own tool would run it."""
-        tool = self._skill_tool(request, self._remote[request.tool_call["name"]])
-        return await _invoked(tool, request)
 
     async def _run_skill(self, request: ToolCallRequest) -> ToolMessage | Command:
         """The call against the run's skills, as the sandbox's own tool would run it."""

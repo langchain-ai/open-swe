@@ -4,14 +4,13 @@ request reviewer and the review scout, each named by the run token's assistant i
 MDA plays every kind with its one graph. Each kind names, for the backend: the catalog
 it resolves from the backend's data as a run starts, what readies each turn and what
 its start records, the recorders that hear of its replies and tool calls, the guards on
-its shell commands, and how it reaches its tools by name, the thread's files, its
-skills and its GitHub credentials.
+its shell commands, and how it reaches its tools by name, its skills and its GitHub
+credentials.
 """
 
 from collections.abc import Sequence
 from typing import ClassVar
 
-from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -79,10 +78,6 @@ class RunKind:
         """Make the run's GitHub token ready in this process for its tools."""
 
     async def skills(self, config: RunnableConfig) -> RunSkillStores | None:  # noqa: ARG002
-        return None
-
-    async def files(self, config: RunnableConfig) -> BackendProtocol | None:  # noqa: ARG002
-        """The thread's files as the run's tools reach them; None when it has none here."""
         return None
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002

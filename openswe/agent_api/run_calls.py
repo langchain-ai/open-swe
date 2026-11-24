@@ -16,8 +16,8 @@ them; the backend answers the typed API both sides import (``runtime_api``):
   ``step_limit_reached``, ``settle_review_check``, ``finish_scout_plan``)
 - the reports of each reply and tool call, which arrive with those notices in ordered
   batches (``reports``) and are recorded once per key
-- the work of the run's tools (``operation``, ``check_shell``, the ``files``
-  calls), and the sandbox MDA keeps
+- the work of the run's tools (``operation``, ``check_shell``), and the sandbox MDA
+  keeps
 
 None of the run's tool calls is a tool call here: no tools node, no tool-call
 middleware. A call made from inside a subagent names the namespace of its ``task``
@@ -26,14 +26,12 @@ calls, so its tool calls and replies land under the subagent.
 
 import asyncio
 import logging
-import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from functools import partial
 from typing import Final, Protocol, cast, runtime_checkable
 from uuid import UUID, uuid4
 
-from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware.types import (
     AgentMiddleware,
     AgentState,
@@ -51,7 +49,6 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
-from runtime_api import files as file_api
 from runtime_api.catalog import JOINED_TASK_CONTEXT
 from runtime_api.endpoint import Handlers
 from runtime_api.loop import (
@@ -116,20 +113,15 @@ from runtime_api.slack import (
 )
 from runtime_api.tool_search import (
     RESOLVE,
-    SEARCH,
     TOOL_SET,
     TOOL_SPECS,
     KeptTools,
     ResolvedTool,
-    ToolIndex,
     ToolLookup,
-    ToolMatches,
     ToolNames,
-    ToolSearch,
     ToolSpecs,
 )
 
-from openswe.agent_api import file_calls
 from openswe.agent_api.caller_trace import traced_under
 from openswe.agent_api.operations import Operation
 from openswe.agent_api.report_receipts import (
@@ -190,37 +182,6 @@ _batch_flushes: ContextVar[dict[str | None, RunnableConfig] | None] = ContextVar
 # Operations that can make the run's thread a task's coordinator mid-run, after its catalog
 # was planned without the task: their answer hands the run the task's context.
 _JOINS_TASK: Final = frozenset({"manage_baby_sit"})
-# Each run's thread files, by its thread and grant, until they expire: building them reads
-# the thread and the run's skill stores, which every files call did.
-_FILES_TTL_SECONDS: Final = 6 * 60 * 60
-_FILES_LIMIT: Final = 512
-_files: dict[tuple[str, str], tuple[float, BackendProtocol]] = {}
-
-
-async def _run_files(
-    kind: RunKind, run: RemoteRun, config: RunnableConfig
-) -> BackendProtocol | None:
-    """The thread's files as ``run``'s tools reach them, built once per run."""
-    global _files
-    key = (run.thread_id, run.grant_id)
-    now = time.monotonic()
-    kept = _files.get(key)
-    if kept is not None and now < kept[0]:
-        return kept[1]
-    files = await kind.files(config)
-    if files is None:
-        return None
-    if len(_files) >= _FILES_LIMIT:
-        _files = {k: kept for k, kept in _files.items() if kept[0] > now}
-        while len(_files) >= _FILES_LIMIT:
-            del _files[next(iter(_files))]
-    _files[key] = (now + _FILES_TTL_SECONDS, files)
-    return files
-
-
-def _forget_files(run: RemoteRun) -> None:
-    """Build ``run``'s files again on its next call: its sandbox changed."""
-    _files.pop((run.thread_id, run.grant_id), None)
 
 
 class _CarriedEvents(BaseModel):
@@ -357,12 +318,6 @@ class TokenRun:
             return await work()
 
         return await in_graph_context({**self.config, "run_name": name}, run)
-
-    async def thread_files(self) -> BackendProtocol:
-        files = await _run_files(self.kind, self.run, self.config)
-        if files is None:
-            raise RuntimeError("This run has no files on the backend")
-        return files
 
     async def skills(self, request: SkillsRequest) -> RunSkills:
         """Every skill the run may load but those the runtime serves itself: each store's
@@ -662,11 +617,6 @@ class TokenRun:
         digest = cast(str, self.run.settings.tools)
         return KeptTools(digest=digest, tools=kept.tools, excluded=kept.excluded)
 
-    async def search_tools(self, request: ToolSearch) -> ToolMatches:
-        """The run's tools that best match what the model looks for."""
-        matches = (await self._tool_set()).search(request.query)
-        return ToolMatches(matches=[ToolIndex.match(tool) for tool in matches])
-
     async def resolve_tool(self, request: ToolLookup) -> ResolvedTool:
         """The tool the run calls as ``request.name``, with the run's grant of it."""
         tool = (await self._tool_set()).resolve(request.name)
@@ -681,7 +631,6 @@ class TokenRun:
 
     async def sandbox_unreachable(self, request: SandboxGone) -> Done:
         """A tool MDA ran in the sandbox found it gone; the run ends once the person knows."""
-        _forget_files(self.run)
         await self._sandbox.tell_gone(sandbox_id=request.sandbox_id, reason=request.reason)
         return Done()
 
@@ -855,7 +804,6 @@ CALLS.serve(BIND_SANDBOX, TokenRun.bind_sandbox)
 CALLS.serve(BROWSER, TokenRun.browser)
 CALLS.serve(SKILLS, TokenRun.skills)
 CALLS.serve(TOOL_SPECS, TokenRun.tool_specs)
-CALLS.serve(SEARCH, TokenRun.search_tools)
 CALLS.serve(RESOLVE, TokenRun.resolve_tool)
 CALLS.serve(TOOL_SET, TokenRun.tool_set)
 CALLS.serve(INBOX, TokenRun.inbox)
@@ -877,12 +825,3 @@ CALLS.serve(REPORTS, TokenRun.reports)
 CALLS.serve(OPERATION, TokenRun.operation)
 CALLS.serve(CHECK_SHELL, TokenRun.check_shell)
 CALLS.serve(SANDBOX_UNREACHABLE, TokenRun.sandbox_unreachable)
-CALLS.serve(file_api.LS, file_calls.files_ls)
-CALLS.serve(file_api.READ, file_calls.files_read)
-CALLS.serve(file_api.WRITE, file_calls.files_write)
-CALLS.serve(file_api.EDIT, file_calls.files_edit)
-CALLS.serve(file_api.DELETE, file_calls.files_delete)
-CALLS.serve(file_api.GLOB, file_calls.files_glob)
-CALLS.serve(file_api.GREP, file_calls.files_grep)
-CALLS.serve(file_api.UPLOAD, file_calls.files_upload)
-CALLS.serve(file_api.DOWNLOAD, file_calls.files_download)

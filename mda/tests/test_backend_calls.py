@@ -1418,38 +1418,31 @@ async def test_a_failing_backend_hook_fails_the_run_with_what_it_raised(
 
 
 @pytest.mark.parametrize(
-    ("name", "arguments", "checked", "remote"),
+    ("name", "arguments", "checked"),
     [
-        ("execute", {"command": "cd /workspace/repo && git push origin HEAD"}, True, False),
-        ("execute", {"command": "bash -c 'gh pr create --fill'"}, True, False),
-        (
-            "execute",
-            {"command": "curl -X POST https://api.github.com/repos/o/r/pulls"},
-            True,
-            False,
-        ),
-        ("execute", {"command": 'g"h" pr create --fill'}, True, False),
-        ("execute", {"command": "git pu''sh origin HEAD"}, True, False),
-        ("execute", {"command": "git pu\\\nsh origin HEAD"}, True, False),
-        ("read_file", {"file_path": "/skills/deploy/SKILL.md"}, False, True),
-        ("execute", {"command": "uv run pytest -q tests/unit"}, False, False),
-        ("read_file", {"file_path": "/workspace/repo/README.md"}, False, False),
+        ("execute", {"command": "cd /workspace/repo && git push origin HEAD"}, True),
+        ("execute", {"command": "bash -c 'gh pr create --fill'"}, True),
+        ("execute", {"command": "curl -X POST https://api.github.com/repos/o/r/pulls"}, True),
+        ("execute", {"command": 'g"h" pr create --fill'}, True),
+        ("execute", {"command": "git pu''sh origin HEAD"}, True),
+        ("execute", {"command": "git pu\\\nsh origin HEAD"}, True),
+        ("execute", {"command": "uv run pytest -q tests/unit"}, False),
+        ("read_file", {"file_path": "/workspace/repo/README.md"}, False),
     ],
 )
-async def test_sandbox_tools_ask_the_guards_and_reach_the_backends_paths(
+async def test_sandbox_tools_ask_the_guards_first(
     monkeypatch: pytest.MonkeyPatch,
     name: str,
     arguments: dict[str, str],
     checked: bool,
-    remote: bool,
 ) -> None:
-    """A command the push guards may stop is put to them first; a backend path is read there."""
+    """A command the push guards may stop is put to them first, then runs in the sandbox."""
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
     backend = _run_backend(
         catalog=Catalog(
-            files=FilesSpec(backend_paths=["/skills/"], guards=["shell_commands"]),
+            files=FilesSpec(guards=["shell_commands"]),
             sandbox=_IN_SANDBOX,
         )
     )
@@ -1457,9 +1450,6 @@ async def test_sandbox_tools_ask_the_guards_and_reach_the_backends_paths(
     monkeypatch.setattr(backend, "post", checks)
     monkeypatch.setattr(backend.outbox, "started", MagicMock())
     monkeypatch.setattr(backend.outbox, "finished", MagicMock())
-    served = MagicMock()
-    served.name = "read_file"
-    served.ainvoke = AsyncMock(return_value=ToolMessage(content="skill", tool_call_id="call-1"))
     runtime = ToolRuntime(
         state={"messages": []},
         context=None,
@@ -1475,15 +1465,13 @@ async def test_sandbox_tools_ask_the_guards_and_reach_the_backends_paths(
         runtime=runtime,
     )
     in_sandbox = AsyncMock(return_value=ToolMessage(content="ran", tool_call_id="call-1"))
-    monkeypatch.setattr("rt.file_tools.remote_file_tools", lambda *_: {"read_file": served})
-    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+    files = FileToolsMiddleware(backend, 300)
 
     await files.awrap_tool_call(request, in_sandbox)
     await backend.outbox.drain()
 
     assert checks.await_count == int(checked)
-    assert served.ainvoke.await_count == int(remote)
-    assert in_sandbox.await_count == int(not remote)
+    in_sandbox.assert_awaited_once()
 
 
 @pytest.mark.parametrize("launched_worker", [False, True])
@@ -1912,7 +1900,7 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
         runtime=runtime,
     )
     in_sandbox = AsyncMock()
-    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+    files = FileToolsMiddleware(backend, 300)
 
     refused = await files.awrap_tool_call(request, in_sandbox)
     await backend.outbox.drain()
@@ -1953,7 +1941,7 @@ async def test_a_foreground_command_past_the_limit_is_sent_to_the_background(
         ),
     )
     in_sandbox = AsyncMock()
-    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+    files = FileToolsMiddleware(backend, 300)
 
     refused = await files.awrap_tool_call(request, in_sandbox)
     await backend.outbox.drain()
@@ -1969,16 +1957,15 @@ async def test_execute_searches_through_the_shell_where_grep_and_glob_are_exclud
 ) -> None:
     """The model and code mode see an ``execute`` that sends searches to the shell, not
     to the ``grep`` and ``glob`` tools the run's catalog keeps from them."""
+    from deepagents.middleware.filesystem import FilesystemMiddleware
     from langchain.agents.middleware.types import ModelRequest
-    from rt.remote_files import RemoteFiles, remote_file_tools
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     backend = _run_backend(catalog=Catalog(excluded=excluded))
-    remote = RemoteFiles(backend, lambda: "run-1")
-    tools = remote_file_tools(remote)
+    tools = {tool.name: tool for tool in FilesystemMiddleware().tools}
     original = tools["execute"].description
     assert "Instead use the grep, glob tools" in original
-    files = FileToolsMiddleware(backend, 300, remote_files=remote)
+    files = FileToolsMiddleware(backend, 300)
     request = ModelRequest(
         model=FakeListChatModel(responses=["done"]),
         messages=[],
@@ -2009,7 +1996,6 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
 ) -> None:
     """Code mode calls tools past the tool-call chain, so its shell tool checks each call itself."""
     from langchain.agents.middleware.types import ModelRequest
-    from rt.remote_files import RemoteFiles
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
@@ -2028,8 +2014,7 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
         """Run a command in the sandbox."""
         return await ran(command)
 
-    remote = RemoteFiles(backend, lambda: "run-1")
-    files = FileToolsMiddleware(backend, 300, remote_files=remote)
+    files = FileToolsMiddleware(backend, 300)
     model_request = MagicMock(spec=ModelRequest)
     model_request.tools = [sandbox_execute]
     await files.awrap_model_call(model_request, AsyncMock())
@@ -2048,59 +2033,6 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
 
     assert isinstance(refused, ToolMessage) and refused.content == "pr_creation_fallback_blocked"
     ran.assert_not_awaited()
-
-
-async def test_a_read_file_the_backend_serves_gets_the_read_checks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A /blobs/ file with an image's extension but not its bytes never reaches the model as one."""
-    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    for module in ("rt.middleware", "rt.tools"):
-        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
-    backend = _run_backend(
-        catalog=Catalog(
-            files=FilesSpec(backend_paths=["/blobs/"], checks=["image_reads"]), sandbox=_IN_SANDBOX
-        )
-    )
-    monkeypatch.setattr(backend.outbox, "started", MagicMock())
-    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
-    fake = ToolMessage(
-        content=[
-            {"type": "image", "base64": "eyJlcnJvciI6ICJleHBpcmVkIn0=", "mime_type": "image/png"}
-        ],
-        tool_call_id="call-1",
-        name="read_file",
-    )
-    served = MagicMock()
-    served.name = "read_file"
-    served.ainvoke = AsyncMock(return_value=fake)
-    runtime = ToolRuntime(
-        state={"messages": []},
-        context=None,
-        config={},
-        stream_writer=lambda event: None,
-        tool_call_id="call-1",
-        store=None,
-    )
-    request = ToolCallRequest(
-        tool_call={
-            "name": "read_file",
-            "args": {"file_path": "/blobs/shot.png"},
-            "id": "call-1",
-            "type": "tool_call",
-        },
-        tool=None,
-        state={"messages": []},
-        runtime=runtime,
-    )
-    monkeypatch.setattr("rt.file_tools.remote_file_tools", lambda *_: {"read_file": served})
-    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
-
-    message = await files.awrap_tool_call(request, AsyncMock())
-
-    assert isinstance(message, ToolMessage)
-    assert message.status == "error"
-    assert "not a valid image" in message.content
 
 
 @pytest.mark.parametrize("bundled", [True, False])
@@ -2155,7 +2087,7 @@ async def test_memory_files_stay_in_mda_without_a_sandbox(
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
     backend = _run_backend(
         catalog=Catalog(
-            files=FilesSpec(backend_paths=["/memories/"], checks=["agents_md"]),
+            files=FilesSpec(checks=["agents_md"]),
             memory=MemoryScope(),
         )
     )
@@ -2163,7 +2095,7 @@ async def test_memory_files_stay_in_mda_without_a_sandbox(
     monkeypatch.setattr(backend.outbox, "finished", MagicMock())
     filesystem = FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
     tools = {tool.name: tool for tool in FilesystemMiddleware(backend=filesystem).tools}
-    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+    files = FileToolsMiddleware(backend, 300)
     model_request = MagicMock(spec=ModelRequest)
     model_request.tools = list(tools.values())
     await files.awrap_model_call(model_request, AsyncMock())
@@ -2251,7 +2183,6 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
     files = FileToolsMiddleware(
         backend,
         300,
-        remote_files=MagicMock(),
         skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
     )
     runtime = ToolRuntime(
@@ -2346,7 +2277,7 @@ async def test_repository_skill_reads_are_tagged_without_changing_the_shared_too
             return "Error: not found"
         return file_path
 
-    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+    files = FileToolsMiddleware(backend, 300)
     model = _ToolCallingModel(
         messages=iter(
             [

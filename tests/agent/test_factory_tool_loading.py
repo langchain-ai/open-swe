@@ -76,11 +76,6 @@ async def test_mcp_tools_load_for_non_admins_with_legacy_plan_state(
         ),
         patch("openswe.server.resolve_triggering_user_identity", return_value=None),
         patch(
-            "openswe.server.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
-        patch(
             "openswe.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",

@@ -49,7 +49,7 @@ Every call is authenticated with the run token.
   Tools the graph hides from the model are dropped from each request.
 - **`search_tools`, `resolve_tool`:** the catalog leaves the run's integrations (MCP tools) out: hundreds of them would put about a megabyte in each run's context, which the Agent Server copies into every checkpoint.
   The backend keeps every tool the run started with in PostgreSQL by digest (`run_tool_sets`), which the run token signs and the catalog names (`tool_set`).
-  The deployment reads each set once per process (`tool_set`) and `search_tools` searches it here, with the backend's own BM25 index (`runtime_api.tool_search.ToolIndex`); a run whose catalog names no set searches on the backend.
+  The deployment reads each set once per process (`tool_set`) and `search_tools` searches it here, with the BM25 index in `runtime_api.tool_search.ToolIndex`; the backend serves no search.
   The run calls a tool by the name a search gave it: `tools.<name>` in code mode for a tool it has none for, or a direct call by a name its tools don't have, is looked up in the set here, and only a name it has asks `resolve_tool` for the run's grant of it (`BackendTools` in `rt/run_tools.py`, through the vendored code mode's `resolve_tool`).
   A name that is none throws `TypeError` in code mode.
 - **MCP servers:** the backend serves the LangSmith Managed Tools kits' tools as operations.
@@ -59,7 +59,6 @@ Every call is authenticated with the run token.
   `ConnectionRef.for_mcp_server` lets a server receive only an `open-swe-mcp-<server>` connection, or `mda/linear-token` on Linear's MCP origin, `https://mcp.linear.app`, so no server gets a credential Robin or a channel reads for itself, such as `mda/github-token`.
 - **File and shell tools:** this runtime's own (`ls`, `read_file`, `write_file`, `edit_file`, `delete`, `glob`, `grep`, `execute`), run by `FileToolsMiddleware` (`rt/file_tools.py`).
   They run in the thread's sandbox.
-  On the paths the backend serves (`files.backend_paths`: offloaded images), deepagents' own file tools run against the backend's files through the typed files API (`rt/remote_files.py`).
   Around every call: an `execute` whose command names `push`, `gh` or `pulls` or nests three shells is first put to the backend's push and pull request guards (`check_shell`), a match wider than what they block; they may refuse it, or let an approved push run as they fixed it.
   The backend's `background_execute` and `monitor` operations put their commands to the same guards.
   Tool errors become results.

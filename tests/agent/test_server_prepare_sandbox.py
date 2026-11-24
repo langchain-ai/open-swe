@@ -44,8 +44,6 @@ async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
     monkeypatch.setattr(task_coordination.TaskDelegation, "get", AsyncMock(return_value=delegation))
     monkeypatch.setattr(server, "resolve_github_login", AsyncMock(return_value="owner"))
     monkeypatch.setattr(server, "private_credential_login", AsyncMock(return_value="owner"))
-    backend = MagicMock(side_effect=AssertionError("Cancelled worker reached sandbox startup"))
-    monkeypatch.setattr(server, "get_cached_sandbox_backend", backend)
 
     with pytest.raises(PermissionError, match="cancelled"):
         await server.agent_catalog(
@@ -55,5 +53,3 @@ async def test_cancelled_worker_wakeup_cannot_reconnect_or_start_work(
             },
             ToolSurface(),
         )
-
-    backend.assert_not_called()

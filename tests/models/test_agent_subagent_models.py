@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import langgraph_sdk
 import pytest
@@ -60,11 +60,6 @@ async def test_agent_subagent_uses_global_defaults_despite_profile_override() ->
         ),
         patch("openswe.server.resolve_triggering_user_identity", return_value=None),
         patch(
-            "openswe.server.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
-        patch(
             "openswe.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,
             return_value="/workspace",
@@ -111,11 +106,6 @@ async def test_agent_ignores_disabled_fable_profile() -> None:
             return_value=("ghp", None),
         ),
         patch("openswe.server.resolve_triggering_user_identity", return_value=None),
-        patch(
-            "openswe.server.ensure_sandbox_for_thread",
-            new_callable=AsyncMock,
-            return_value=MagicMock(),
-        ),
         patch(
             "openswe.server.resolve_sandbox_work_dir",
             new_callable=AsyncMock,

@@ -45,7 +45,7 @@ from pydantic import BaseModel, ConfigDict
 from rt.backend import OpenSweBackend, RunContext
 from rt.browser import ReportedBrowserMiddleware
 from rt.factory_timing import FactoryTiming
-from rt.file_tools import FileToolsMiddleware
+from rt.file_tools import FILE_TOOLS, FileToolsMiddleware
 from rt.gateway import RUN_GATEWAY
 from rt.kinds import Graph
 from rt.managed_sandbox import (
@@ -64,7 +64,6 @@ from rt.middleware import (
 )
 from rt.model_calls import model_call_guards
 from rt.models import build_model
-from rt.remote_files import FILE_TOOLS, RemoteFiles
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from rt.run_tools import (
     BackendTools,
@@ -219,13 +218,11 @@ def _parts(graph: Graph) -> _Parts:
     timing = FactoryTiming()
     # Called as the run in progress: the graph serves every run.
     backend = OpenSweBackend()
-    remote = RemoteFiles(backend, run_id)
     # The run's skills, listed for the agent and its subagents and read from here.
     skill_files = SkillFiles(backend, run_id)
     files = FileToolsMiddleware(
         backend,
         EXECUTE_TIMEOUT_SECONDS,
-        remote_files=remote,
         skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
     )
     toolsets = RunToolsets(backend, files)

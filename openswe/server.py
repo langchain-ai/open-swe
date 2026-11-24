@@ -11,8 +11,8 @@ import logging
 import time
 import warnings
 from collections.abc import Awaitable, Mapping, Sequence
-from functools import cache, cached_property, partial
-from typing import Any, Final, Self
+from functools import cache, cached_property
+from typing import Any, Final
 from uuid import UUID
 
 from runtime_api.provenance import Provenance
@@ -46,9 +46,7 @@ from dataclasses import replace
 # Suppress Pydantic v1 compatibility warnings from langchain on Python 3.14+
 warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarning)
 
-from deepagents.backends.composite import CompositeBackend
-from deepagents.backends.protocol import BackendProtocol, SandboxBackendProtocol
-from deepagents.backends.store import StoreBackend
+from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
@@ -140,8 +138,6 @@ from openswe.runtime.constants import (
 )
 from openswe.runtime.constants import MODEL_CALL_RECURSION_LIMIT
 from openswe.sandboxes.lifecycle import (
-    ensure_sandbox_for_thread,
-    get_cached_sandbox_backend,
     take_stale_boot,
 )
 from openswe.sandboxes.paths import resolve_sandbox_work_dir
@@ -174,7 +170,6 @@ from openswe.thread_title import (
     TITLE_GENERATION_MAX_TOKENS,
     schedule_thread_title_generation,
 )
-from openswe.threads.blobs import ThreadBlobs, blob_namespace
 from openswe.threads.recent_context import RecentContextAudience, recent_thread_context_section
 from openswe.threads.store import THREADS
 from openswe.threads.summary import DASHBOARD_SOURCE
@@ -900,40 +895,6 @@ async def integration_tools(
     by_name: dict[str, BaseTool] = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
     _keep_integrations(login, by_name)
     return by_name
-
-
-async def _reconnect_agent_sandbox(thread_id: str) -> SandboxBackendProtocol:
-    return await ensure_sandbox_for_thread(thread_id)
-
-
-class ThreadFiles:
-    """The thread's files as the agent's tools reach them: its sandbox, with the paths this
-    deployment serves routed in.
-
-    Those are the run's skill stores, and the images it offloaded, which PostgreSQL
-    keeps so they can be read without the sandbox.
-    """
-
-    def __init__(self, thread_id: str, cfg: RunConfig, *, skills: RunSkillStores) -> None:
-        self.routes: dict[str, BackendProtocol] = {
-            **skills.routes,
-            "/blobs/": StoreBackend(
-                store=ThreadBlobs(thread_id),
-                namespace=lambda _runtime: blob_namespace(thread_id),
-            ),
-        }
-        cached = get_cached_sandbox_backend(
-            thread_id, reconnect=partial(_reconnect_agent_sandbox, thread_id)
-        )
-        self.backend = CompositeBackend(default=cached, routes=self.routes)
-
-    @classmethod
-    async def for_run(cls, config: RunnableConfig) -> Self:
-        """The thread's files for a call answered without the run's plan."""
-        cfg = RunConfig.from_config(config)
-        if cfg.thread_id is None:
-            raise ValueError("An agent run needs a thread")
-        return cls(cfg.thread_id, cfg, skills=await RunSkillStores.for_run(config))
 
 
 async def _mcp_tools_for(credential_login: str | None, *, unattended: bool = False) -> MCPTools:
@@ -2125,7 +2086,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
     skill_stores = RunSkillStores(credential_login)
-    files = ThreadFiles(thread_id, cfg, skills=skill_stores)
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
         if (adaptive_model_routing or source == "slack")
@@ -2282,9 +2242,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     surface.dynamic = dynamic_tool_middleware
     # The runtime lists the skills and answers reads of them itself (``runtime_api.skills``).
     surface.skill_sources = skill_stores.sources
-    surface.backend_paths = tuple(
-        route for route in files.routes if route not in skill_stores.sources
-    )
     surface.code_mode = True
     surface.always_offered = {
         _registered_tool_name(tool): tool

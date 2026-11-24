@@ -1574,7 +1574,8 @@ async def test_code_only_search_and_files_are_hidden_but_callable(
     await _run(InMemoryStore(), "forced", _context("agent", "forced", catalog))
     assert offered and all(not names & {"lookup", "search_tools", "ls"} for names in offered)
     assert all("eval" in names for names in offered)
-    assert any(hook == "search_tools" for hook, _, _ in backend_calls)
+    # A catalog naming no tool set finds nothing, and asks the backend nothing.
+    assert not any(hook == "search_tools" for hook, _, _ in backend_calls)
     assert outputs and not any(
         "TypeError" in output or "ReferenceError" in output for output in outputs
     )

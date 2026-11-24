@@ -105,7 +105,7 @@ async def test_the_file_tools_refuse_before_mda_sees_the_call(
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
-    catalog = Catalog(files=FilesSpec(backend_paths=["/memories/"]), memory=DM)
+    catalog = Catalog(files=FilesSpec(), memory=DM)
     context = RunContext.model_validate(
         {"__run_token": "token", "__catalog": catalog.model_dump(mode="json")}
     )
@@ -114,7 +114,7 @@ async def test_the_file_tools_refuse_before_mda_sees_the_call(
     monkeypatch.setattr(backend.outbox, "finished", MagicMock())
     filesystem = FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
     tools = {tool.name: tool for tool in FilesystemMiddleware(backend=filesystem).tools}
-    files = FileToolsMiddleware(backend, 300, remote_files=MagicMock())
+    files = FileToolsMiddleware(backend, 300)
     model_request = MagicMock(spec=ModelRequest)
     model_request.tools = list(tools.values())
     await files.awrap_model_call(model_request, AsyncMock())

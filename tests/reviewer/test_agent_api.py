@@ -179,42 +179,6 @@ async def test_each_backend_operation_compiles_its_graph_once_and_runs_its_own_w
     assert runs._graph.cache_info().currsize == 1
 
 
-async def test_a_runs_thread_files_are_built_once() -> None:
-    """Reaching the thread's files reads the thread and the run's skill stores; the run's
-    later files calls reach the same files."""
-    from deepagents.backends.protocol import BackendProtocol, FileInfo, LsResult
-
-    from openswe.agent_api import run_calls
-
-    class Blobs(BackendProtocol):
-        async def als(self, path: str) -> LsResult:
-            return LsResult(entries=[FileInfo(path=f"{path}shot.png")])
-
-    built: list[str | None] = []
-
-    class Kind(RunKind):
-        async def files(self, config: RunnableConfig) -> Blobs:
-            built.append(config["configurable"].get("run_id"))
-            return Blobs()
-
-    run_calls._files.clear()
-    kind = Kind()
-    run = RUN.model_copy(update={"grant_id": "grant-1"})
-    other = RUN.model_copy(update={"grant_id": "grant-2"})
-
-    for run_id in ("run-1", "run-1", "run-2"):
-        reply = await TokenRun.answer(kind, run, "files.ls", {"path": "/blobs/", "run_id": run_id})
-        assert reply["entries"] == [
-            {"path": "/blobs/shot.png", "is_dir": None, "size": None, "modified_at": None}
-        ]
-    assert built == ["run-1"]
-    # Another run on the thread reaches its files as itself.
-    await TokenRun.answer(kind, other, "files.ls", {"path": "/blobs/", "run_id": "run-3"})
-    assert built == ["run-1", "run-3"]
-
-    run_calls._files.clear()
-
-
 def test_a_tools_parameters_are_worked_out_once_while_it_lives() -> None:
     import gc
 
@@ -1381,7 +1345,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     )
 
     # The run's context names its operations; it reads their specs and grants by its token.
-    from runtime_api.tool_search import ResolvedTool, ToolMatches, ToolSpecs
+    from runtime_api.tool_search import KeptTools, ResolvedTool, ToolIndex, ToolSpecs
 
     started_run = RUN.model_copy(update={"settings": started.settings})
     names = [str(op["name"]) for op in operations if isinstance(op, dict)]
@@ -1390,11 +1354,15 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     )
     assert sorted(spec.name for spec in listed.tools) == sorted(names)
     assert all(RUN.granted(spec.name, spec.grant) for spec in listed.tools)
-    # The run's search and code mode reach what its catalog leaves out, by its token.
-    found = ToolMatches.model_validate(
-        await TokenRun.answer(parts, started_run, "search_tools", {"query": "mcp search"})
-    )
-    match = found.matches[0]
+    # The catalog names the set its token does, which the run reads to search it itself,
+    # without grants, which stay the backend's to give.
+    assert catalog["tool_set"] == started.settings.tools
+    kept = KeptTools.model_validate(await TokenRun.answer(parts, started_run, "tool_set", {}))
+    assert kept.digest == started.settings.tools
+    assert all(tool.grant is None for tool in kept.tools)
+    index = ToolIndex(kept.tools, kept.excluded)
+    # The run's search and code mode reach what its catalog leaves out.
+    [match, *_] = [ToolIndex.match(tool) for tool in index.search("mcp search")]
     assert (match.name, match.code_name) == ("mcp_search", "mcpSearch")
     expected = {
         "connection_name": "lmt",
@@ -1413,10 +1381,8 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     )
     assert by_name.tool == looked_up.tool
     # One code cannot call is found too, to be called directly by its own name.
-    uuid_found = ToolMatches.model_validate(
-        await TokenRun.answer(parts, started_run, "search_tools", {"query": _UUID_NAMED})
-    )
-    assert (uuid_found.matches[0].name, uuid_found.matches[0].code_name) == (_UUID_NAMED, None)
+    [uuid_match, *_] = [ToolIndex.match(tool) for tool in index.search(_UUID_NAMED)]
+    assert (uuid_match.name, uuid_match.code_name) == (_UUID_NAMED, None)
     uuid_resolved = ResolvedTool.model_validate(
         await TokenRun.answer(parts, started_run, "resolve_tool", {"name": _UUID_NAMED})
     )
@@ -1425,16 +1391,6 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     # What the graph excludes is never found, so the run cannot call it either.
     assert ResolvedTool.model_validate(unknown).tool is None
 
-    # The catalog names the set its token does, which the run reads to search it itself,
-    # finding what the backend finds, without grants, which stay the backend's to give.
-    from runtime_api.tool_search import KeptTools, ToolIndex
-
-    assert catalog["tool_set"] == started.settings.tools
-    kept = KeptTools.model_validate(await TokenRun.answer(parts, started_run, "tool_set", {}))
-    assert kept.digest == started.settings.tools
-    assert all(tool.grant is None for tool in kept.tools)
-    index = ToolIndex(kept.tools, kept.excluded)
-    assert [ToolIndex.match(tool) for tool in index.search("mcp search")] == found.matches
     resolved = index.resolve("mcpSearch")
     assert resolved is not None and resolved.name == "mcp_search"
     assert index.resolve("excluded_tool") is None
@@ -1559,30 +1515,6 @@ async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_cha
     assert not reads.reads_all
     assert result.content == "switched"
     assert result.state == {"requested_model": "after-fast"}
-
-
-async def test_the_files_api_reaches_the_threads_files_as_the_run() -> None:
-    """A backend the files API reaches may check who the run is for, which it reads from the
-    run's own config."""
-    from deepagents.backends.protocol import BackendProtocol, LsResult
-
-    from openswe.run_config import RunConfig
-
-    seen: list[str | None] = []
-
-    class Blobs(BackendProtocol):
-        async def als(self, path: str) -> LsResult:  # noqa: ARG002
-            seen.append(RunConfig.from_runtime().thread_id)
-            return LsResult(entries=[])
-
-    class OfTheThread(RunKind):
-        async def files(self, config: RunnableConfig) -> BackendProtocol:  # noqa: ARG002
-            return Blobs()
-
-    reply = await TokenRun.answer(OfTheThread(), RUN, "files.ls", {"path": "/blobs/"})
-
-    assert reply == {"error": None, "entries": []}
-    assert seen == ["thread-1"]
 
 
 async def test_a_cancelled_operation_ends_the_call_rather_than_answering() -> None:

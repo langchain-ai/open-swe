@@ -1,15 +1,11 @@
 """The run's tools, which the backend keeps and reads to it.
 
 A run's context names the tools its catalog lists, and the run reads their specs as
-it starts (``TOOL_SPECS``). The rest, such as every connected integration's, stay on
-the backend: the run's ``search_tools`` finds them by what they do (``SEARCH``), and
-the run calls one by the name a search gave it, from code mode or directly, once the
-backend has said what it is (``RESOLVE``).
-
-A run whose catalog names its set (``Catalog.tool_set``) reads the set once per
-process (``TOOL_SET``) and searches and resolves it where it runs, with the same
-``ToolIndex`` the backend searches; only the grant of a tool it calls still comes
-from the backend.
+it starts (``TOOL_SPECS``). The rest, such as every connected integration's, stay out
+of it: the run reads its set once per process (``TOOL_SET``, ``Catalog.tool_set``),
+and its ``search_tools`` finds them there by what they do with ``ToolIndex``. The run
+calls one by the name a search gave it, from code mode or directly; only the grant of
+a tool it calls comes from the backend (``RESOLVE``).
 """
 
 import math
@@ -72,7 +68,7 @@ class ToolIndex:
     """A run's tools as ``search_tools`` and code mode reach them: all but those the
     graph excludes, which the model calls neither from code nor after a search.
 
-    Built once per set and searched for every query, on the backend or in the run.
+    Built once per set and searched for every query in the run.
     """
 
     def __init__(self, tools: Sequence[ToolSpec], excluded: Iterable[str] = ()) -> None:
@@ -122,10 +118,6 @@ class ToolIndex:
         )
 
 
-class ToolSearch(RunRequest):
-    query: str
-
-
 class ToolMatch(BaseModel):
     """One tool a search found, as the model reads it."""
 
@@ -134,10 +126,6 @@ class ToolMatch(BaseModel):
     parameters: dict[str, JsonValue]
     # How code mode calls it, as ``tools.<code_name>``; None when code cannot call it.
     code_name: str | None = None
-
-
-class ToolMatches(BaseModel):
-    matches: list[ToolMatch] = []
 
 
 class ToolLookup(RunRequest):
@@ -171,9 +159,6 @@ class KeptTools(BaseModel):
 # Each only reads, so it is safe to send again.
 TOOL_SPECS = Endpoint(
     "tool_specs", ToolNames, ToolSpecs, seconds=QUICK_CALL_SECONDS, delivery="idempotent"
-)
-SEARCH = Endpoint(
-    "search_tools", ToolSearch, ToolMatches, seconds=QUICK_CALL_SECONDS, delivery="idempotent"
 )
 RESOLVE = Endpoint(
     "resolve_tool", ToolLookup, ResolvedTool, seconds=QUICK_CALL_SECONDS, delivery="idempotent"

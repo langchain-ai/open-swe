@@ -3,7 +3,6 @@
 import logging
 from typing import Final
 
-from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -22,7 +21,6 @@ from openswe.run_config import RunConfig
 from openswe.sandboxes.tool_runtime import ToolSurface
 from openswe.server import (
     PrepareAgentRunMiddleware,
-    ThreadFiles,
     agent_catalog,
     agent_sender,
     agent_tools_by_name,
@@ -111,9 +109,6 @@ class AgentKind(RunKind):
 
     async def skills(self, config: RunnableConfig) -> RunSkillStores:
         return await RunSkillStores.for_run(config)
-
-    async def files(self, config: RunnableConfig) -> BackendProtocol:
-        return (await ThreadFiles.for_run(config)).backend
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:
         cfg = RunConfig.from_config(config)

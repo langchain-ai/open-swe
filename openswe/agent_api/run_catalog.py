@@ -4,7 +4,7 @@ Both are resolved once, as the backend starts the run, from what only the backen
 the run's kind resolves its tools, models, subagents and loop rules (``RunKind.catalog``),
 and the backend adds the sandbox MDA keeps for the thread and a grant of each operation. The catalog lists every tool but the run's integrations, which
 the context names only: every tool is kept by digest (``run_tool_sets``), which
-``tool_specs``, ``search_tools`` and ``resolve_tool`` read.
+``tool_specs``, ``tool_set`` and ``resolve_tool`` read.
 """
 
 import asyncio
@@ -273,7 +273,6 @@ class RunCatalog:
             disabled=sorted(disabled),
             described={name: prompt("tools/display-description") for name in _DESCRIBED_TOOLS},
             files=FilesSpec(
-                backend_paths=list(surface.backend_paths),
                 checks=list(surface.file_checks),
             ),
             browser=surface.browser,

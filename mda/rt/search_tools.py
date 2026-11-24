@@ -2,10 +2,9 @@
 
 Code mode keeps most tools off the model's list, so the model finds them here, with
 the schemas it needs to call them and the name code mode calls them by. The run's
-catalog leaves its integrations out; the backend keeps every tool, and a run whose
-catalog names the set (``Catalog.tool_set``) reads it once per process and searches
-it here, as the backend would (``runtime_api.tool_search``). A run without one
-searches on the backend.
+catalog leaves its integrations out; the backend keeps every tool, and the run reads
+the set its catalog names (``Catalog.tool_set``) once per process and searches it
+here (``runtime_api.tool_search``).
 """
 
 import threading
@@ -17,7 +16,7 @@ from pydantic import JsonValue
 from runtime_api.catalog import SEARCH_TOOLS, ToolSpec
 from runtime_api.endpoint import call
 from runtime_api.operations import RunRequest
-from runtime_api.tool_search import RESOLVE, SEARCH, TOOL_SET, ToolIndex, ToolLookup, ToolSearch
+from runtime_api.tool_search import RESOLVE, TOOL_SET, ToolIndex, ToolLookup
 
 from rt.backend import OpenSweBackend, current_run
 from rt.tools import run_id
@@ -32,7 +31,7 @@ _reading = threading.Lock()
 
 async def run_tool_index(backend: OpenSweBackend) -> ToolIndex | None:
     """Every tool the calling run may call, to search and resolve here; None when its
-    catalog names no set, and the backend searches."""
+    catalog names no set, which no backend sends any more."""
     digest = current_run().catalog.tool_set
     if digest is None:
         return None
@@ -68,12 +67,9 @@ def search_tools_tool(backend: OpenSweBackend, description: str | None = None) -
 
     async def search_tools(query: str) -> list[dict[str, JsonValue]]:
         index = await run_tool_index(backend)
-        if index is not None:
-            found = [ToolIndex.match(tool) for tool in index.search(query)]
-        else:
-            request = ToolSearch(run_id=run_id(), query=query)
-            found = (await call(backend, SEARCH, request)).matches
-        return [match.model_dump(mode="json") for match in found]
+        if index is None:
+            return []
+        return [ToolIndex.match(tool).model_dump(mode="json") for tool in index.search(query)]
 
     return StructuredTool.from_function(
         coroutine=search_tools,
