@@ -4,8 +4,9 @@ The gates are size and visibility: every file the two voters have to read has
 to arrive as a readable text diff, and those files together have to fit in
 ``MAX_CHANGED_LINES``, so all of it is on the card. Test files are outside both
 gates — CI judges them — which is what lets a two-line fix arrive with the
-tests that prove it. So are hunks the agent excludes as qualifying under the
-target repository's ``.open-swe/auto-approve-rules/``; the card summarizes them. When
+tests that prove it. So are lockfiles paired with a changed manifest in the same
+directory. The manifest is drawn and counted like any other code. So are hunks the agent
+excludes as qualifying under the target repository's ``.open-swe/auto-approve-rules/``; the card summarizes them. When
 Open SWE's review would approve the PR subject to human approval of a stated condition,
 the card shows that condition instead of the diff, so a PR of any size qualifies.
 """
@@ -15,6 +16,7 @@ import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import NotRequired, TypedDict
 
 import httpx2
@@ -34,16 +36,33 @@ MAX_FILES = 3000
 FILE_PAGES = MAX_FILES // 100
 
 # Kinds of change that must be read, so no auto-approve rule can hide them.
-_UNEXCLUDABLE_PATH = re.compile(
+_SENSITIVE_PATH = re.compile(
     r"(?:^|/)\.github/"
     r"|(?:^|/)(?:migrations|alembic)/"
-    r"|(?:^|/)(?:package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|pyproject\.toml|uv\.lock"
-    r"|poetry\.lock|Pipfile(?:\.lock)?|requirements[^/]*\.txt|go\.(?:mod|sum)"
-    r"|Cargo\.(?:toml|lock)|Gemfile(?:\.lock)?|composer\.(?:json|lock))$"
     r"|(?:^|/)\.env(?:\.[^/]*)?$"
     r"|(?:^|/)[^/]*(?:auth|credential|secret|password|token)[^/]*(?:/|$)",
     re.IGNORECASE,
 )
+
+_DEPENDENCY_PATH = re.compile(
+    r"(?:^|/)(?:package(?:-lock)?\.json|pnpm-(?:lock|workspace)\.yaml|yarn\.lock|pyproject\.toml|uv\.lock"
+    r"|poetry\.lock|Pipfile(?:\.lock)?|requirements[^/]*\.txt|go\.(?:mod|sum)"
+    r"|Cargo\.(?:toml|lock)|Gemfile(?:\.lock)?|composer\.(?:json|lock))$",
+    re.IGNORECASE,
+)
+
+_LOCKFILE_MANIFESTS = {
+    "package-lock.json": ("package.json",),
+    "pnpm-lock.yaml": ("package.json", "pnpm-workspace.yaml"),
+    "yarn.lock": ("package.json",),
+    "uv.lock": ("pyproject.toml",),
+    "poetry.lock": ("pyproject.toml",),
+    "Pipfile.lock": ("Pipfile",),
+    "go.sum": ("go.mod",),
+    "Cargo.lock": ("Cargo.toml",),
+    "Gemfile.lock": ("Gemfile",),
+    "composer.lock": ("composer.json",),
+}
 
 _TEST_PATH = re.compile(
     r"(?:^|/)(?:tests?|__tests__|testdata|e2e)/"
@@ -137,7 +156,9 @@ class ChangedFile(BaseModel):
 
     @property
     def is_test(self) -> bool:
-        return self._stays_within(_TEST_PATH)
+        return self._stays_within(_TEST_PATH) and not any(
+            _SENSITIVE_PATH.search(path) and _DEPENDENCY_PATH.search(path) for path in self.paths
+        )
 
     @property
     def is_generated(self) -> bool:
@@ -146,8 +167,7 @@ class ChangedFile(BaseModel):
     @property
     def must_be_read(self) -> bool:
         return any(
-            _UNEXCLUDABLE_PATH.search(name)
-            for name in (self.filename, self.previous_filename or "")
+            _SENSITIVE_PATH.search(path) or _DEPENDENCY_PATH.search(path) for path in self.paths
         )
 
     @property
@@ -174,14 +194,45 @@ class ChangedFile(BaseModel):
         ).hexdigest()
 
     @classmethod
+    def voted_on(cls, files: list[ChangedFile]) -> list[ChangedFile]:
+        """Everything but tests and generated files, so changing any of it voids the votes."""
+        return [file for file in files if not file.is_test and not file.is_generated]
+
+    def has_matching_manifest(self, changed_paths: set[str]) -> bool:
+        if self.previous_filename or _SENSITIVE_PATH.search(self.filename):
+            return False
+        path = PurePosixPath(self.filename)
+        return any(
+            str(path.with_name(name)) in changed_paths
+            for name in _LOCKFILE_MANIFESTS.get(path.name, ())
+        )
+
+    @classmethod
     def split(
         cls, files: list[ChangedFile]
-    ) -> tuple[list[ChangedFile], list[ChangedFile], list[ChangedFile]]:
-        """``(files the voters have to read, test files, generated files)``."""
+    ) -> tuple[list[ChangedFile], list[ChangedFile], list[ChangedFile], list[ChangedFile]]:
+        """``(files the voters have to read, test files, generated files, lockfiles)``."""
+        voted = cls.voted_on(files)
+        changed_paths = {
+            file.filename
+            for file in voted
+            if file.patch
+            and file.changed_lines
+            and not file.previous_filename
+            and file.status != "removed"
+        }
+        shown: list[ChangedFile] = []
+        lockfiles: list[ChangedFile] = []
+        for file in voted:
+            if file.has_matching_manifest(changed_paths):
+                lockfiles.append(file)
+            else:
+                shown.append(file)
         return (
-            [file for file in files if not file.is_test and not file.is_generated],
-            [file for file in files if file.is_test],
-            [file for file in files if file.is_generated],
+            shown,
+            [f for f in files if f.is_test],
+            [f for f in files if f.is_generated],
+            lockfiles,
         )
 
     @classmethod
@@ -246,7 +297,7 @@ class Exclusion(BaseModel):
         file = next((file for file in files if file.filename == self.path), None)
         if file is None:
             raise ValueError(f"`{self.path}` is not changed by the pull request")
-        if file.is_test or file.is_generated:
+        if file not in ChangedFile.split(files)[0]:
             return []
         if file.must_be_read:
             raise ValueError(
@@ -320,15 +371,24 @@ class ApprovalCondition:
 
 
 class ExpeditedDiff:
-    """The diff as the card splits it: drawn, tests, generated, and still-present exclusions.
+    """The diff as the card splits it: drawn, tests, generated, lockfiles, and still-present
+    exclusions.
 
     An exclusion whose content changed no longer matches, so its hunk is drawn again.
     """
 
-    __slots__ = ("excluded", "generated", "partially_shown", "shown", "tests", "total_lines")
+    __slots__ = (
+        "excluded",
+        "generated",
+        "lockfiles",
+        "partially_shown",
+        "shown",
+        "tests",
+        "total_lines",
+    )
 
     def __init__(self, files: list[ChangedFile], exclusions: Sequence[ExcludedHunk] = ()) -> None:
-        reviewed, self.tests, self.generated = ChangedFile.split(files)
+        reviewed, self.tests, self.generated, self.lockfiles = ChangedFile.split(files)
         self.total_lines = ChangedFile.total_lines(files)
         by_path: dict[str, list[ExcludedHunk]] = {}
         for entry in exclusions:
@@ -391,12 +451,14 @@ class ExpeditedDiff:
 
     @property
     def accounted_lines(self) -> int:
-        """Drawn, excluded, test and generated lines; anything short of the total fell through."""
+        """Drawn, excluded, test, generated and lockfile lines; anything short of the total fell
+        through."""
         return (
             ChangedFile.total_lines(self.shown)
             + self.excluded_lines
             + ChangedFile.total_lines(self.tests)
             + ChangedFile.total_lines(self.generated)
+            + ChangedFile.total_lines(self.lockfiles)
         )
 
 
@@ -406,6 +468,7 @@ class EligibleDiff:
     changed_lines: int
     test_lines: int
     generated_lines: int
+    lockfile_lines: int
     excluded_lines: int
     fingerprint: str
 
@@ -416,10 +479,10 @@ class Ineligible:
 
 
 def diff_fingerprint(files: list[ChangedFile]) -> str:
-    """A hash of the reviewed diff, excluded hunks included, so a commit touching only tests or
-    generated files keeps the votes."""
+    """A hash of the reviewed diff, excluded hunks and lockfiles included, so a commit touching
+    only tests or generated files keeps the votes."""
     digest = hashlib.sha256()
-    for file in sorted(ChangedFile.split(files)[0], key=lambda f: f.filename):
+    for file in sorted(ChangedFile.voted_on(files), key=lambda f: f.filename):
         digest.update(file.filename.encode())
         digest.update(b"\0")
         digest.update((file.patch if file.patch is not None else file.digest).encode())
@@ -453,14 +516,14 @@ def assess_eligibility(
     changed = ChangedFile.total_lines(diff.shown)
     test_lines = ChangedFile.total_lines(diff.tests)
     generated_lines = ChangedFile.total_lines(diff.generated)
+    lockfile_lines = ChangedFile.total_lines(diff.lockfiles)
     if diff.total_lines < 1:
         return Ineligible("the pull request changes no lines")
     if changed > ACCEPTED_CHANGED_LINES:
-        outside = (
-            "tests, generated files and exclusions"
-            if diff.excluded
-            else "tests and generated files"
-        )
+        skipped = ["tests", "generated files", *(["lockfiles"] if diff.lockfiles else [])]
+        if diff.excluded:
+            skipped.append("exclusions")
+        outside = f"{', '.join(skipped[:-1])} and {skipped[-1]}"
         return Ineligible(
             f"the pull request changes {changed} lines outside {outside}; the limit is "
             f"{MAX_CHANGED_LINES}"
@@ -470,6 +533,7 @@ def assess_eligibility(
         changed_lines=changed,
         test_lines=test_lines,
         generated_lines=generated_lines,
+        lockfile_lines=lockfile_lines,
         excluded_lines=diff.excluded_lines,
         fingerprint=diff_fingerprint(files),
     )

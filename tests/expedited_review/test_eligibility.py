@@ -132,6 +132,45 @@ def test_generated_files_never_count_and_regenerating_them_keeps_the_votes() -> 
     assert not ChangedFile(filename="dist/app.min.js").is_generated
 
 
+def test_lockfiles_only_leave_the_count_beside_a_drawn_manifest_and_still_void_votes() -> None:
+    manifest = _file("web/package.json", patch='+    "vite": "8.0.0"')
+    lock = ChangedFile(filename="web/pnpm-lock.yaml", additions=300, deletions=200, patch=None)
+    card = assess_eligibility([manifest, lock])
+
+    assert isinstance(card, EligibleDiff)
+    assert (card.changed_lines, card.lockfile_lines) == (1, 500)
+    assert ExpeditedDiff([manifest, lock]).shown == [manifest]
+    relocked = lock.model_copy(update={"sha": "2" * 40})
+    assert not fingerprint_matches([manifest, relocked], card.fingerprint)
+    assert isinstance(assess_eligibility([_file("src/app.py", patch="+a"), lock]), Ineligible)
+
+
+@pytest.mark.parametrize(
+    "unpaired", ["web/uv.lock", "other/pnpm-lock.yaml", "web/nested/yarn.lock"]
+)
+def test_only_the_paired_lockfile_leaves_the_card(unpaired: str) -> None:
+    manifest = _file("web/pnpm-workspace.yaml", patch="@@ -1 +1,2 @@\n overrides:\n+  vite: 8.0.0")
+    paired = _file("web/pnpm-lock.yaml", additions=300)
+    unrelated = _file(unpaired, additions=30)
+    files = [manifest, paired, unrelated]
+    covered = ApprovalCondition("Approve the update", "Dependency change", "f" * 40).cover(files)
+
+    diff = ExpeditedDiff(files, covered)
+    assert diff.shown == [manifest, unrelated]
+    assert diff.lockfiles == [paired]
+    assert isinstance(assess_eligibility(files, covered), Ineligible)
+
+
+@pytest.mark.parametrize("directory", [".github/actions/setup", "src/auth", ".github/tests"])
+def test_protected_lockfile_stays_visible_with_its_manifest(directory: str) -> None:
+    manifest = _file(f"{directory}/package.json")
+    lock = _file(f"{directory}/package-lock.json", additions=300)
+    files = [manifest, lock]
+
+    assert ExpeditedDiff(files).shown == files
+    assert isinstance(assess_eligibility(files), Ineligible)
+
+
 def test_a_condition_hides_everything_but_paths_that_must_be_read() -> None:
     app = ChangedFile(
         filename="src/app.py",

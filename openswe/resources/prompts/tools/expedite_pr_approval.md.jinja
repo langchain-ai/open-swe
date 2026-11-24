@@ -5,7 +5,11 @@ Never nominate a pull request already fully approved on GitHub, including all of
 Use it only when what the reviewer sees is at most 20 lines in ordinary text files that they can judge from the diff alone.
 Test files do not count toward that limit, so send the tests along with the change.
 Neither do generated files such as `swagger.json` or `openapi.yaml`, whatever the auto-approve rules say; never list them in `excluded`.
-Never for auth, secrets, CI workflows, dependency manifests, migrations, or binaries, whether shown or excluded; those are refused.
+The card lists a lockfile with its line count when its own manifest changes in the same directory (for example, `pnpm-lock.yaml` with `package.json` or `pnpm-workspace.yaml`).
+The manifest is shown and counts toward the limit.
+Renamed lockfiles, unpaired lockfiles, and lockfiles in protected paths such as `.github/` are also shown and counted.
+Always leave manifests and lockfiles out of `excluded`.
+Never nominate changes to auth, secrets, CI workflows, migrations, or binaries.
 
 The pull request itself can be any size when the rest qualifies under a rule in the target repository's `.open-swe/auto-approve-rules/` (the repository the pull request is in, read from its default branch, not Robin's own).
 A rule file whose frontmatter lists `match-all-files` applies only when every file the pull request changes matches one of those globs; one with `match-any-files` applies when at least one does.

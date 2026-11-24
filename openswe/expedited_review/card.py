@@ -76,6 +76,7 @@ def _diff_sections(
     trailer = [
         *_diffstat("Tests", "test files", diff.tests),
         *_diffstat("Generated", "generated files", diff.generated),
+        *_diffstat("Lockfiles", "lockfiles", diff.lockfiles),
         *_condition_summary(diff),
         *_excluded_summary(diff),
         context(f"<{approval.pull_request.url}/files|Review the full diff and omitted files>"),
@@ -90,7 +91,7 @@ def _diff_sections(
 
 
 def _diffstat(title: str, noun: str, files: list[ChangedFile]) -> list[Block]:
-    """Test and generated files are never drawn; the card lists them with line counts instead."""
+    """List files whose diffs were omitted from the card, with their line counts."""
     if not files:
         return []
     heading = f"*{title} (not shown)*\n"
