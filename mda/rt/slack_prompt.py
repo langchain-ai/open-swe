@@ -906,19 +906,35 @@ async def _api(method: str, params: Mapping[str, object]) -> Mapping[str, object
         return None
 
 
-async def slack_history(channel_id: str, thread_ts: str) -> list[SlackMessage]:
-    """A Slack thread's messages, oldest first, keeping the most recent window.
+async def slack_history(
+    channel_id: str,
+    thread_ts: str,
+    *,
+    max_pages: int | None = None,
+    oldest: str | None = None,
+    latest: str | None = None,
+) -> list[SlackMessage]:
+    """A Slack thread or concierge DM's messages, oldest first, within the history window.
 
     A page that fails ends the read with the pages read so far.
     """
     messages: list[SlackMessage] = []
     cursor = ""
     truncated = False
-    while True:
-        params: dict[str, object] = {"channel": channel_id, "limit": 200, "ts": thread_ts}
+    pages = 0
+    while max_pages is None or pages < max_pages:
+        params: dict[str, object] = {"channel": channel_id, "limit": 200}
+        if thread_ts != "0":
+            params["ts"] = thread_ts
+        if oldest is not None:
+            params["oldest"] = oldest
+        if latest is not None:
+            params["latest"] = latest
         if cursor:
             params["cursor"] = cursor
-        payload = await _api("conversations.replies", params)
+        method = "conversations.history" if thread_ts == "0" else "conversations.replies"
+        payload = await _api(method, params)
+        pages += 1
         if payload is None:
             break
         batch = payload.get("messages")

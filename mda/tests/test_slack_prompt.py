@@ -318,15 +318,29 @@ def slack(monkeypatch: pytest.MonkeyPatch) -> Any:
     return install
 
 
-async def test_reads_every_page_of_a_thread_oldest_first(slack: Any) -> None:
+@pytest.mark.parametrize("thread_ts", ["1.0", "0"])
+@pytest.mark.parametrize("max_pages", [None, 1])
+async def test_reads_thread_history_oldest_first_with_an_optional_page_budget(
+    slack: Any, thread_ts: str, max_pages: int | None
+) -> None:
     pages = {
         "": {"messages": [{"ts": "2.0"}], "response_metadata": {"next_cursor": "c2"}},
         "c2": {"messages": [{"ts": "1.0"}, "junk"], "response_metadata": {"next_cursor": ""}},
     }
-    api = slack({"conversations.replies": lambda body: pages[str(body.get("cursor", ""))]})
+    method = "conversations.history" if thread_ts == "0" else "conversations.replies"
+    api = slack({method: lambda body: pages[str(body.get("cursor", ""))]})
+    params = {"channel": "C1", "limit": 200}
+    if thread_ts != "0":
+        params["ts"] = thread_ts
 
-    assert await slack_prompt.slack_history("C1", "1.0") == [{"ts": "1.0"}, {"ts": "2.0"}]
-    assert api.calls[0] == ("conversations.replies", {"channel": "C1", "limit": 200, "ts": "1.0"})
+    assert await slack_prompt.slack_history("C1", thread_ts, max_pages=max_pages) == (
+        [{"ts": "2.0"}] if max_pages == 1 else [{"ts": "1.0"}, {"ts": "2.0"}]
+    )
+    assert api.calls == (
+        [(method, params)]
+        if max_pages == 1
+        else [(method, params), (method, {**params, "cursor": "c2"})]
+    )
 
 
 async def test_a_failed_read_keeps_what_it_read(slack: Any) -> None:

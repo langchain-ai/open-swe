@@ -58,6 +58,7 @@ from rt import slack_prompt
 from rt.input_messages import ChannelIdentity
 from rt.intake import ask_backend
 from rt.send_trace import SlackSendTrace
+from rt.slack_choices import SlackChoiceMessage
 from rt.slack_message import Breakout, ParsedSlackMessage, SlackAction
 
 EXTERNAL_CHANNEL: Final = "Robin does not operate in channels with external participants."
@@ -523,6 +524,15 @@ async def _start_turn(
     if start.run is None or start.prompt is None:
         send.no_run("no run")
         return None
+    if message.user_id and not (message.bot_id or message.bot_app_id):
+        await SlackChoiceMessage.expire(
+            history,
+            channel_id=message.channel_id,
+            bot_user_id=bot_user_id,
+            before=message.message_ts,
+            concierge=facts.concierge,
+            context_ts=context_ts,
+        )
     with send.step("build_prompt"):
         prompt = start.prompt
         if prompt.sender_name and message.user_id not in names:

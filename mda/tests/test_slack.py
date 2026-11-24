@@ -1,6 +1,7 @@
 """MDA's Slack channel decides what each message starts and builds the turn's prompt."""
 
 import asyncio
+import json
 import logging
 import uuid
 from collections.abc import Mapping
@@ -9,6 +10,7 @@ from typing import Any, Literal, cast
 
 import pytest
 import rt.slack as slack
+import rt.slack_choices as choices
 from langgraph_sdk.schema import ThreadState
 from managed_deepagents import (
     ChannelReplyResult,
@@ -19,7 +21,8 @@ from managed_deepagents import (
 )
 from managed_deepagents._channels.http.types import ChannelName
 from managed_deepagents._channels.run_input import RunChannel, normalize_run_inputs
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
+from rt.slack_prompt import slack_history
 from runtime_api.endpoint import Endpoint
 from runtime_api.provenance import PROVENANCE_KEY
 from runtime_api.slack import (
@@ -130,9 +133,11 @@ def slack_reads(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[object]]:
     reads: dict[str, list[object]] = {"history": [], "images": []}
     monkeypatch.setattr(slack, "_bot", ("UBOT", "openswe"))
 
-    async def history(channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
+    async def history(
+        channel_id: str, thread_ts: str, *, max_pages: int | None = None
+    ) -> list[dict[str, JsonValue]]:
         reads["history"].append((channel_id, thread_ts))
-        return [dict(message) for message in _HISTORY]
+        return [dict[str, JsonValue](message) for message in _HISTORY]
 
     async def names(user_ids: object) -> dict[str, str]:
         return {"U1": "Ada", "U2": "Grace"}
@@ -167,6 +172,158 @@ def _backend(
 
 def _texts(run_input: Mapping[str, Any]) -> str:
     return "\n".join(str(message["content"]) for message in run_input["messages"])
+
+
+@pytest.mark.parametrize(
+    ("bot", "outcome"),
+    [(False, "started"), (True, "started"), (False, "declined"), (False, "no_run")],
+)
+@pytest.mark.parametrize(("concierge", "threaded"), [(False, True), (True, False), (True, True)])
+def test_later_human_turn_retires_only_older_own_reply_choices(
+    monkeypatch: pytest.MonkeyPatch,
+    slack_reads: object,
+    bot: bool,
+    outcome: str,
+    concierge: bool,
+    threaded: bool,
+) -> None:
+    started = SlackTurnStarted(run=_RUN.model_copy(deep=True), prompt=_PROMPT)
+    if outcome == "declined":
+        started = SlackTurnStarted(declined=SlackTurnDeclined(reason="sign_in"))
+    elif outcome == "no_run":
+        started = SlackTurnStarted()
+    _backend(
+        monkeypatch,
+        started,
+        SlackMessageFacts(conversation="mda", allowed_bot=True, concierge=concierge, dm=concierge),
+    )
+    body: dict[str, JsonValue] = {"type": "section", "text": {"type": "mrkdwn", "text": "Choose"}}
+    footer: dict[str, JsonValue] = {
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": "Open in Robin"}],
+    }
+    choice: dict[str, JsonValue] = {
+        "type": "button",
+        "action_id": "open_swe_option_select_0",
+        "value": json.dumps({"type": "open_swe_option", "response": "Update PR"}),
+    }
+    approval: dict[str, JsonValue] = {
+        "type": "button",
+        "action_id": "open_swe_option_select_workflow_push",
+        "value": json.dumps({"type": "workflow_push", "action": "approve"}),
+    }
+    blocks: list[JsonValue] = [body, {"type": "actions", "elements": [choice, approval]}, footer]
+    messages: list[dict[str, JsonValue]] = [
+        {"ts": "90000.15", "user": "UBOT", "text": "Choose", "blocks": blocks},
+        {"ts": "90000.16", "user": "UOTHER", "text": "Choose", "blocks": blocks},
+        {"ts": "90000.3", "user": "UBOT", "text": "New choice", "blocks": blocks},
+        *[dict[str, JsonValue](item) for item in _HISTORY],
+    ]
+    parent: dict[str, JsonValue] = {
+        "ts": "100.01",
+        "user": "UBOT",
+        "text": "Choose",
+        "blocks": blocks,
+        "reply_count": 201,
+        "latest_reply": "90000.02",
+    }
+    nested_choice: dict[str, JsonValue] = {
+        "ts": "90000.02",
+        "user": "UBOT",
+        "text": "Choose",
+        "blocks": blocks,
+    }
+    parents: list[dict[str, JsonValue]] = [
+        parent,
+        dict[str, JsonValue](_HISTORY[0], reply_count=3),
+        dict[str, JsonValue](_HISTORY[1]),
+        *[
+            dict[str, JsonValue](ts=f"100.{index}", user="U2", reply_count=1)
+            for index in range(1, 10)
+        ],
+    ]
+    scanned: list[str] = []
+    updates: list[dict[str, object]] = []
+
+    async def history(method: str, params: Mapping[str, object]) -> Mapping[str, object]:
+        if method == "conversations.history":
+            assert concierge and params == {"channel": "C1", "limit": 200}
+            return {"messages": parents}
+        assert method == "conversations.replies"
+        if str(params.get("ts")).startswith("100."):
+            assert concierge and outcome == "started" and not bot
+            assert "cursor" not in params
+            assert params.get("latest") == "90000.2"
+            scanned.append(str(params["ts"]))
+            replies = [
+                dict[str, JsonValue](ts=f"101.{index:06}", user="U2") for index in range(2, 202)
+            ]
+            if params["ts"] == "100.01":
+                replies.append(nested_choice)
+            return {
+                "messages": [
+                    item
+                    for item in replies
+                    if float(str(item["ts"])) > float(str(params.get("oldest", "0")))
+                ][:200],
+                "response_metadata": {"next_cursor": "more"},
+            }
+        expected: dict[str, object] = {"channel": "C1", "limit": 200, "ts": "171.1"}
+        if concierge and not threaded:
+            expected.update(oldest="3600.200000", latest="90000.2")
+        assert params == expected
+        if concierge and not threaded:
+            scanned.append("171.1")
+        return {"messages": messages}
+
+    async def token() -> str:
+        return "test-token"
+
+    async def api(token: str, method: str, body: dict[str, object]) -> dict[str, object]:
+        assert method == "chat.update"
+        updates.append(body)
+        return {"ok": True}
+
+    monkeypatch.setattr(slack.slack_prompt, "slack_history", slack_history)
+    monkeypatch.setattr(slack.slack_prompt, "_api", history)
+    monkeypatch.setattr(choices, "slack_bot_token", token)
+    monkeypatch.setattr(choices, "slack_api", api)
+    event = _event(message_ts="90000.2")
+    if bot:
+        event = _event(
+            "<@UBOT> alert",
+            user_id=None,
+            message_ts="90000.2",
+            payload={
+                "type": "message",
+                "bot_id": "B9",
+                "app_id": "A9",
+                **({"thread_ts": "171.1"} if threaded else {}),
+            },
+        )
+    elif not threaded:
+        event = _event(message_ts="90000.2", payload={"type": "message"})
+    result = asyncio.run(slack.start_turn(event, _thread()))
+    assert (result is None) == (outcome == "no_run")
+    assert scanned == (
+        (["100.01", "100.9", "100.8"] if threaded else ["100.01", "171.1", "100.9"])
+        if concierge and not bot and outcome == "started"
+        else []
+    )
+    expired = ["100.01", "90000.02", "90000.15"] if concierge else ["90000.15"]
+    assert sorted(updates, key=lambda update: str(update["ts"])) == (
+        []
+        if bot or outcome != "started"
+        else [
+            {
+                "channel": "C1",
+                "ts": ts,
+                "text": "Choose",
+                "blocks": [body, {"type": "actions", "elements": [approval]}, footer],
+            }
+            for ts in expired
+        ]
+    )
 
 
 def _bot_event(text: str, attachment: Mapping[str, object]) -> SlackMessageEvent:
