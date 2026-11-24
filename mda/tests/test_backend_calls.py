@@ -1515,7 +1515,7 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
 
     async def classify(_self: RouteClassifier, _messages: Sequence[object]) -> Route:
         await FakeListChatModel(responses=["lookup"]).ainvoke("classify")
-        return Route("default", task_type="lookup")
+        return Route("default", answers={"task_type": "lookup"})
 
     monkeypatch.setattr(RouteClassifier, "classify", classify)
     if not classified_ahead:
