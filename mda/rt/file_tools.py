@@ -20,6 +20,7 @@ import logging
 import posixpath
 import random
 import re
+import shlex
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from functools import partial, wraps
@@ -73,6 +74,11 @@ _QUOTING: Final = re.compile(r"\\\n|[\"'\\]")
 _EXECUTE_GRACE_SECONDS: Final = 30
 # The longest an ``execute`` may hold the turn; longer work goes to ``background_execute``.
 _FOREGROUND_SECONDS: Final = 600
+# A foreground command that starts by sleeping this long or longer is waiting on something
+# that can wake the thread instead.
+_SLEEP_SECONDS: Final = 60
+_SLEEP_OPERAND: Final = re.compile(r"(\d+(?:\.\d*)?|\.\d+)([smhd]?)(?=\s|[;&|#]|$)")
+_SLEEP_UNITS: Final = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
 # A sandbox call rejected before it started cannot have run, so it is sent again.
 _TRANSIENT_BACKOFF_SECONDS: Final = (0.5, 1.0, 2.0)
 
@@ -204,17 +210,21 @@ class FileToolsMiddleware(AgentMiddleware):
     async def _screened_run(
         self, request: ToolCallRequest, handler: Handler
     ) -> ToolMessage | Command:
-        timeout = request.tool_call["args"].get("timeout")
-        # 0 turns a command's timeout off, so it is past the limit too.
-        if (
-            request.tool_call["name"] == "execute"
-            and isinstance(timeout, int)
-            and not 0 < timeout <= _FOREGROUND_SECONDS
-        ):
-            return ToolMessage(
-                content=prompt(
+        args = request.tool_call["args"]
+        timeout = args.get("timeout")
+        command = args.get("command")
+        refusal = None
+        if request.tool_call["name"] == "execute":
+            # 0 turns a command's timeout off, so it is past the limit too.
+            if isinstance(timeout, int) and not 0 < timeout <= _FOREGROUND_SECONDS:
+                refusal = prompt(
                     "tools/foreground-limit", timeout=timeout, limit=_FOREGROUND_SECONDS
-                ),
+                )
+            elif isinstance(command, str) and (duration := self._foreground_sleep(command)):
+                refusal = prompt("tools/foreground-sleep", duration=duration)
+        if refusal is not None:
+            return ToolMessage(
+                content=refusal,
                 tool_call_id=request.tool_call.get("id") or "",
                 name="execute",
                 status="error",
@@ -223,6 +233,36 @@ class FileToolsMiddleware(AgentMiddleware):
         if isinstance(screened, ToolMessage):
             return screened
         return await handler(screened)
+
+    @staticmethod
+    def _foreground_sleep(command: str) -> str | None:
+        sleep = re.match(r"\s*sleep[ \t]+", command)
+        if sleep is None:
+            return None
+        remaining = command[sleep.end() :]
+        operands: list[str] = []
+        seconds = 0.0
+        while operand := _SLEEP_OPERAND.match(remaining):
+            operands.append(operand[0])
+            seconds += float(operand[1]) * _SLEEP_UNITS[operand[2]]
+            remaining = remaining[operand.end() :].lstrip(" \t")
+        if seconds < _SLEEP_SECONDS:
+            return None
+        shell = shlex.shlex(remaining, posix=False, punctuation_chars=";&|<>\n")
+        shell.whitespace = " \t\r"
+        shell.whitespace_split = True
+        shell.commenters = ""
+        try:
+            for token in shell:
+                if re.search(r"""[\\'"`$(){}]|&&|\|\|""", token):
+                    break
+                if token.rstrip("\n") == "&":
+                    return None
+                if token.startswith((";", "\n", "#")):
+                    break
+        except ValueError:
+            logger.debug("Could not screen foreground sleep", exc_info=True)
+        return " ".join(operands)
 
     async def _screened(self, request: ToolCallRequest) -> ToolCallRequest | ToolMessage:
         """The request or an approved push as the guards fixed it, otherwise their refusal."""

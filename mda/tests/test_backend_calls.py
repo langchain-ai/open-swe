@@ -2069,9 +2069,32 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     assert recorded.content == "pr_creation_fallback_blocked"
 
 
-@pytest.mark.parametrize("timeout", [1500, 0])
+@pytest.mark.parametrize(
+    ("command", "timeout"),
+    [
+        ("make build", 1500),
+        ("make build", 0),
+        ("sleep 295; cat /tmp/open-swe-background-tasks/cmd-1/output.log", 300),
+        ("sleep 5m; cat /tmp/open-swe-background-tasks/cmd-1/output.log", 360),
+        ("sleep 295 >/dev/null 2>&1; cat output.log", 300),
+        ("sleep 295 | cat; cat output.log", 300),
+        ("sleep 295 # wait for output", 300),
+        ("sleep 60.5; cat output.log", 300),
+        ("sleep 30 30; cat output.log", 300),
+        ('sleep 60 >"&"; cat output.log', 300),
+        ("sleep 60 # wait\necho ready &", 300),
+        ("sleep 295 && (make test & wait)", 300),
+        (r"sleep 295 | echo \&", 300),
+        ("sleep 120 | (cat & wait)", 300),
+        ("sleep 120 && printf $'ready; done\\n' &", 300),
+        ("sleep 120 && printf $'ready & waiting\\n'", 300),
+        ("sleep 120 >$'ready & waiting'", 300),
+        ('sleep 120 >"run.log" &', 300),
+        ("sleep 120 >'unfinished &", 300),
+    ],
+)
 async def test_a_foreground_command_past_the_limit_is_sent_to_the_background(
-    monkeypatch: pytest.MonkeyPatch, timeout: int
+    monkeypatch: pytest.MonkeyPatch, command: str, timeout: int
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
@@ -2082,7 +2105,7 @@ async def test_a_foreground_command_past_the_limit_is_sent_to_the_background(
     request = ToolCallRequest(
         tool_call={
             "name": "execute",
-            "args": {"command": "make build", "timeout": timeout},
+            "args": {"command": command, "timeout": timeout},
             "id": "call-1",
             "type": "tool_call",
         },
@@ -2106,6 +2129,44 @@ async def test_a_foreground_command_past_the_limit_is_sent_to_the_background(
     in_sandbox.assert_not_awaited()
     assert isinstance(refused, ToolMessage) and refused.status == "error"
     assert "background_execute" in str(refused.content)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sleep 59; echo ready",
+        "sleep 59 2>/dev/null; echo ready",
+        "sleep 120 & echo ready",
+        "sleep 120 &\necho ready",
+        "sleep 120 >/dev/null 2>&1 &\ncat x",
+        "sleep 120 >/tmp/run#42.log &",
+        "sleep 120 >/dev/null 2>&1 & echo $!",
+        "sleep 120 | cat & echo ready",
+        "sleep 1; echo ready &",
+    ],
+)
+async def test_nonblocking_or_short_sleeps_reach_the_sandbox(
+    monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    backend = _run_backend(catalog=Catalog(sandbox=_IN_SANDBOX))
+    request = ToolCallRequest(
+        tool_call={
+            "name": "execute",
+            "args": {"command": command, "timeout": 300},
+            "id": "call-1",
+            "type": "tool_call",
+        },
+        tool=None,
+        state={"messages": []},
+        runtime=MagicMock(),
+    )
+    in_sandbox = AsyncMock(return_value=ToolMessage(content="ready", tool_call_id="call-1"))
+    files = FileToolsMiddleware(backend, 300)
+
+    result = await files._screened_run(request, in_sandbox)
+
+    assert isinstance(result, ToolMessage) and result.content == "ready"
 
 
 @pytest.mark.parametrize("excluded", [[], ["grep", "glob"]])
