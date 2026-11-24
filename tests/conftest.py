@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import os
+import zlib
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -54,6 +55,21 @@ def pytest_make_parametrize_id(config: pytest.Config, val: object, argname: str)
     if isinstance(val, str) and len(val) > _MAX_PARAM_ID_CHARS:
         return f"{argname}-{hashlib.sha256(val.encode()).hexdigest()[:8]}"
     return None
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Keep only this CI shard's tests when ``PYTEST_SHARD`` is ``<n>/<total>``."""
+    shard = os.environ.get("PYTEST_SHARD")
+    if not shard:
+        return
+    index, total = (int(part) for part in shard.split("/"))
+    selected: list[pytest.Item] = []
+    deselected: list[pytest.Item] = []
+    for item in items:
+        keep = zlib.crc32(item.nodeid.encode()) % total == index - 1
+        (selected if keep else deselected).append(item)
+    config.hook.pytest_deselected(items=deselected)
+    items[:] = selected
 
 
 def patch_thread_module(monkeypatch: pytest.MonkeyPatch, name: str, value: Any) -> None:
