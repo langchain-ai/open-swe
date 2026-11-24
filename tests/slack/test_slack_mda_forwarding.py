@@ -958,8 +958,9 @@ async def test_a_new_conversation_is_claimed_once_its_sender_passed_the_gate(
     )
 
 
-async def test_an_unlinked_ask_sender_can_start_without_a_personal_owner(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("needed", ["unlinked", "revoked"])
+async def test_a_signed_out_ask_sender_can_start_without_a_personal_owner(
+    monkeypatch: pytest.MonkeyPatch, needed: str
 ) -> None:
     _prepared(monkeypatch, prompt=_PROMPT)
     monkeypatch.setattr(
@@ -968,7 +969,11 @@ async def test_an_unlinked_ask_sender_can_start_without_a_personal_owner(
     monkeypatch.setattr(
         slack_service,
         "account_link_needed",
-        AsyncMock(return_value=slack_service.AccountLinkNeeded("U1", None, "unlinked")),
+        AsyncMock(
+            return_value=slack_service.AccountLinkNeeded(
+                "U1", None, cast(webhook_common.AccountLinkReason, needed)
+            )
+        ),
     )
     monkeypatch.setattr(slack_service, "slack_login", AsyncMock(return_value=None))
     prompt = AsyncMock()

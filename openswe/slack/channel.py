@@ -435,17 +435,16 @@ async def _account_gate(
     fields: dict[str, str],
     channel_context: SlackChannelContext,
 ) -> SlackTurnStarted | None:
-    """Gate account-required turns before claiming; public Ask questions need no linked person."""
+    """Gate account-required turns before claiming; public Ask questions need no signed-in person."""
     if turn.bot_id:
         return None
     needed = await service.account_link_needed(turn.user_id)
     if needed is None:
         return None
     if (
-        needed.reason == "unlinked"
-        and turn.kind in {"turn", "edit"}
+        turn.kind in {"turn", "edit"}
         and not turn.concierge
-        and await service.SlackAuthorization.allows_unlinked_ask(turn.channel_id, channel_context)
+        and await service.SlackAuthorization.allows_signed_out_ask(turn.channel_id, channel_context)
     ):
         return None
     if not await _first_decline(webhook_id, turn):

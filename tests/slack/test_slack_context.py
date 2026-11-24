@@ -1161,8 +1161,11 @@ def bot_run(monkeypatch, allowed_bot):
     return request, client.threads, captured
 
 
+@pytest.mark.parametrize("reason", ["unlinked", "revoked"])
 @pytest.mark.parametrize("opening", ["new", "placeholder", "public-user", "public-system"])
-async def test_unlinked_ask_answers_without_borrowing_an_account(monkeypatch, bot_run, opening):
+async def test_signed_out_ask_answers_without_borrowing_an_account(
+    monkeypatch, bot_run, opening, reason
+):
     request, threads, captured = bot_run
     request = request.model_copy(
         update={
@@ -1178,6 +1181,11 @@ async def test_unlinked_ask_answers_without_borrowing_an_account(monkeypatch, bo
     monkeypatch.setattr(User, "for_identity", AsyncMock(return_value=None))
     monkeypatch.setattr(User, "login_for_slack", AsyncMock(return_value=None))
     monkeypatch.setattr(User, "login_for_email", AsyncMock(return_value="email-owner"))
+    if reason == "revoked":
+        authorization = slack_webhooks.SlackAuthorization("U123", None, None, "revoked")
+        monkeypatch.setattr(
+            slack_webhooks.SlackAuthorization, "resolve", AsyncMock(return_value=authorization)
+        )
     if opening == "placeholder":
         threads.metadata = {
             "visibility": "private",
@@ -1222,6 +1230,35 @@ async def test_unlinked_ask_answers_without_borrowing_an_account(monkeypatch, bo
         assert "email-owner" not in str(threads.metadata)
 
 
+async def test_signed_out_ask_ignores_the_senders_personal_default_repo(monkeypatch, bot_run):
+    request, _threads, captured = bot_run
+    request = request.model_copy(
+        update={
+            "triggering_bot_id": "",
+            "triggering_bot_app_id": "",
+            "text": "Why did this request fail?",
+            "channel_context": SlackChannelContext(
+                is_ext_shared=False, is_pending_ext_shared=False
+            ),
+        }
+    )
+    monkeypatch.setattr(INTEGRATIONS, "listens_to_channel", AsyncMock(return_value=True))
+    authorization = slack_webhooks.SlackAuthorization("U123", None, None, "revoked")
+    monkeypatch.setattr(
+        slack_webhooks.SlackAuthorization, "resolve", AsyncMock(return_value=authorization)
+    )
+    shared = webhook_common.SlackRepoResolution(Repo(owner="acme", name="service"))
+    resolve_repo = AsyncMock(return_value=shared)
+    monkeypatch.setattr(webhook_common, "get_slack_repo_config", resolve_repo)
+
+    personal = webhook_common.SlackRepoResolution(Repo(owner="acme", name="scratch"))
+    await slack_webhooks._process_slack_mention_impl(request, personal)
+
+    config = captured.pop("run_create")["kwargs"]["config"]["configurable"]
+    assert config["repo"] == {"owner": "acme", "name": "service"}
+    assert resolve_repo.await_args.kwargs["slack_user_id"] == ""
+
+
 @pytest.mark.parametrize(
     "boundary",
     [
@@ -1232,11 +1269,10 @@ async def test_unlinked_ask_answers_without_borrowing_an_account(monkeypatch, bo
         "dm",
         "external",
         "unknown",
-        "revoked",
         "unconfigured",
     ],
 )
-async def test_unlinked_ask_preserves_account_and_private_boundaries(
+async def test_signed_out_ask_preserves_account_and_private_boundaries(
     monkeypatch, bot_run, boundary
 ):
     request, threads, captured = bot_run
@@ -1258,9 +1294,7 @@ async def test_unlinked_ask_preserves_account_and_private_boundaries(
     monkeypatch.setattr(
         INTEGRATIONS, "listens_to_channel", AsyncMock(return_value=boundary != "unconfigured")
     )
-    authorization = slack_webhooks.SlackAuthorization(
-        "U123", None, None, "revoked" if boundary == "revoked" else "unlinked"
-    )
+    authorization = slack_webhooks.SlackAuthorization("U123", None, None, "unlinked")
     monkeypatch.setattr(
         slack_webhooks.SlackAuthorization, "resolve", AsyncMock(return_value=authorization)
     )
@@ -1281,7 +1315,7 @@ async def test_unlinked_ask_preserves_account_and_private_boundaries(
 
 
 @pytest.mark.parametrize("failure", ["write", "race"])
-async def test_unlinked_ask_fails_closed_if_ownership_cannot_be_saved(
+async def test_signed_out_ask_fails_closed_if_ownership_cannot_be_saved(
     monkeypatch, bot_run, failure
 ):
     request, threads, captured = bot_run
