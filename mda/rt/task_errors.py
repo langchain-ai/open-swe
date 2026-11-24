@@ -64,6 +64,9 @@ class TaskErrorMiddleware(AgentMiddleware):
                 "Subagent task failed without replay",
                 extra={"error_type": type(exc).__name__, "status_code": error.get("status_code")},
             )
+            # A failed subagent saved its checkpoints under the `task` call's own namespace.
+            # Naming it as deepagents does for one that finished lets a client load it too.
+            namespace = (request.runtime.config.get("configurable") or {}).get("checkpoint_ns")
             return ToolMessage(
                 content=json.dumps(
                     {"status": "failed", "source": "subagent", "error": error}, sort_keys=True
@@ -71,4 +74,5 @@ class TaskErrorMiddleware(AgentMiddleware):
                 tool_call_id=request.tool_call["id"],
                 name="task",
                 status="error",
+                artifact={"checkpoint_ns": namespace} if namespace else None,
             )

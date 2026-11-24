@@ -13,6 +13,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphBubbleUp, GraphInterrupt, NodeCancelledError
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from managed_deepagents import CredentialAuthorizationRequiredError
@@ -176,6 +177,70 @@ async def test_exhausted_model_retries_do_not_repeat_subagent_side_effects(
     assert failure.status == "error"
     assert json.loads(failure.text)["error"]["status_code"] == 503
     assert result["messages"][-1].content == "handled"
+
+
+async def test_failed_task_points_to_its_subagents_checkpoints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+
+    async def generate(
+        self: ChatOpenAI, messages: list[BaseMessage], **kwargs: object
+    ) -> ChatResult:
+        raise _ProviderError(400, "invalid_prompt")
+
+    monkeypatch.setattr(ChatOpenAI, "_agenerate", generate)
+    child = create_agent(model=ChatOpenAI(model="test", api_key="test", max_retries=0))
+    saver = InMemorySaver()
+    parent = create_agent(
+        model=GenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "name": "task",
+                                "args": {
+                                    "description": "find the flaky test",
+                                    "subagent_type": "researcher",
+                                },
+                                "id": "delegated",
+                            }
+                        ],
+                    ),
+                    AIMessage(content="handled"),
+                ]
+            )
+        ),
+        middleware=[
+            TaskErrorMiddleware(),
+            SubAgentMiddleware(
+                backend=MagicMock(),
+                subagents=[{"name": "researcher", "description": "Investigate", "runnable": child}],
+            ),
+        ],
+        checkpointer=saver,
+    )
+
+    result = await parent.ainvoke(
+        {"messages": [("user", "investigate")]}, {"configurable": {"thread_id": "thread"}}
+    )
+
+    failure = next(message for message in result["messages"] if isinstance(message, ToolMessage))
+    assert failure.status == "error"
+    saved = await saver.aget_tuple(
+        {
+            "configurable": {
+                "thread_id": "thread",
+                "checkpoint_ns": failure.artifact["checkpoint_ns"],
+            }
+        }
+    )
+    assert saved is not None, failure.artifact
+    assert [message.text for message in saved.checkpoint["channel_values"]["messages"]] == [
+        "find the flaky test"
+    ]
 
 
 @pytest.mark.parametrize(
