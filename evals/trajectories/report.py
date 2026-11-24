@@ -40,8 +40,18 @@ class Trial:
     def of(cls, directory: Path) -> Self:
         result = json.loads((directory / "result.json").read_text())
         rewards = (result.get("verifier_result") or {}).get("rewards") or {}
-        log = directory / "agent" / "robin.stdout"
-        found = _THREAD.search(log.read_text()) if log.exists() else None
+        logs = [
+            directory / "agent" / "robin.stdout",
+            *sorted(directory.glob("steps/*/agent/robin.stdout")),
+        ]
+        found = next(
+            (
+                match
+                for path in logs
+                if path.exists() and (match := _THREAD.search(path.read_text()))
+            ),
+            None,
+        )
         return cls(
             task=result["task_name"],
             reward=rewards.get("reward"),

@@ -201,8 +201,9 @@ class RobinOptions(AgentOptions):
 
 
 class RobinAgent(BaseAgent):
-    """Runs `robin run --sandbox <task sandbox>` once, beside Harbor, with the task's instruction
-    as its prompt."""
+    """Runs `robin run --sandbox <task sandbox>` beside Harbor, with the task's instruction as its
+    prompt. A multi-step task's later steps continue that thread (`robin run --thread`), as a
+    person's follow-up would."""
 
     options_model = RobinOptions
 
@@ -238,12 +239,19 @@ class RobinAgent(BaseAgent):
     INTERRUPTED = re.compile(r"^robin: run interrupted;", re.MULTILINE)
     # Long enough for the CLI to cancel the remote run and its workers after SIGINT.
     STOP_GRACE_SEC = 30
+    # The thread can still read as busy for a moment after the CLI returns, which refuses a
+    # follow-up from a service key; it is sent again until the thread takes it, for a minute.
+    BUSY = re.compile(r"HTTP 409: thread is already running")
+    BUSY_WAIT_SEC = 5
+    BUSY_TRIES = 12
 
     # One download per Harbor process, shared by its trials.
     _binary: ClassVar[dict[str, Path]] = {}
     _download_lock: ClassVar[asyncio.Lock | None] = None
 
     options: RobinOptions
+    # The thread the first step started, which later steps continue.
+    thread_id: str | None = None
 
     @staticmethod
     @override
@@ -422,39 +430,49 @@ class RobinAgent(BaseAgent):
         self, instruction: str, environment: BaseEnvironment, context: AgentContext
     ) -> None:
         assert isinstance(environment, RobinSandbox)
-        argv = [
-            str(await self.binary()),
-            "run",
-            "--sandbox",
-            environment.sandbox_name,
-            "--work-dir",
-            await self.workdir(environment),
-        ]
+        argv = [str(await self.binary()), "run"]
+        if self.thread_id is not None:
+            # The thread keeps its sandbox, so a follow-up names only the thread.
+            argv += ["--thread", self.thread_id]
+        else:
+            argv += [
+                "--sandbox",
+                environment.sandbox_name,
+                "--work-dir",
+                await self.workdir(environment),
+            ]
         if model := await self.robin_model():
             argv += ["--model", model, "--effort", str(self.options.effort)]
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         stdout_path = self.logs_dir / self.STDOUT
         stderr_path = self.logs_dir / self.STDERR
         self.logger.debug("Running %s", shlex.join(argv))
-        with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
-            process = await asyncio.create_subprocess_exec(
-                *argv,
-                env=self.cli_env(),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=stdout,
-                stderr=stderr,
-            )
-            # The prompt goes on stdin, so it is never an argument a process listing shows.
-            try:
-                await process.communicate(instruction.encode())
-            except asyncio.CancelledError:
-                # Harbor's agent timeout cancels this coroutine; stop the remote run first, and
-                # keep the thread's link, which Harbor saves with the trial all the same.
-                await asyncio.shield(self.stop(process))
-                self.record(context, stdout_path, None)
-                raise
+        for attempt in range(1, self.BUSY_TRIES + 1):
+            with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+                process = await asyncio.create_subprocess_exec(
+                    *argv,
+                    env=self.cli_env(),
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+                # The prompt goes on stdin, so it is never an argument a process listing shows.
+                try:
+                    await process.communicate(instruction.encode())
+                except asyncio.CancelledError:
+                    # Harbor's agent timeout cancels this coroutine; stop the remote run first,
+                    # and keep the thread's link, which Harbor saves with the trial all the same.
+                    await asyncio.shield(self.stop(process))
+                    self.record(context, stdout_path, None)
+                    raise
+            err = stderr_path.read_text(errors="replace")
+            busy = self.thread_id is not None and process.returncode != 0 and self.BUSY.search(err)
+            if not busy or attempt == self.BUSY_TRIES:
+                break
+            await asyncio.sleep(self.BUSY_WAIT_SEC)
         thread = self.record(context, stdout_path, process.returncode)
-        err = stderr_path.read_text(errors="replace")
+        if thread is not None and self.thread_id is None:
+            self.thread_id = thread.rstrip("/").rsplit("/", 1)[-1]
         # Robin finished, or stopped to ask a question: either way an attempt the verifier grades.
         # Anything else (the backend refused the thread, or the run failed) never was one.
         if thread is None or not (process.returncode == 0 or self.INTERRUPTED.search(err)):

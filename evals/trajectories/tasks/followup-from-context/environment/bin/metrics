@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""A slow metrics export: logs each call for the grader, then prints last week's error rates."""
+
+import json
+import sys
+import time
+
+with open("/var/log/metrics-eval/calls.log", "a") as out:
+    out.write(json.dumps({"at": time.time(), "argv": sys.argv[1:]}) + "\n")
+if sys.argv[1:3] != ["report", "--week"] or len(sys.argv) != 4:
+    sys.exit("usage: metrics report --week <n>")
+# As slow as the warehouse query it stands in for, so running it again costs the turn.
+time.sleep(45)
+RATES = {
+    "billing-api": 0.84,
+    "checkout": 2.91,
+    "inventory-sync": 0.37,
+    "notifications": 1.42,
+    "search": 0.58,
+    "auth-gateway": 0.22,
+    "recommendations": 1.07,
+    "media-resizer": 0.49,
+}
+print(f"Error rates, week {sys.argv[3]} (errors per 100 requests)\n")
+for service, rate in RATES.items():
+    print(f"  {service:<16} {rate:>5.2f}")
+sys.stdout.flush()
+with open("/var/log/metrics-eval/calls.log", "a") as out:
+    out.write(json.dumps({"at": time.time(), "argv": sys.argv[1:], "completed": True}) + "\n")
