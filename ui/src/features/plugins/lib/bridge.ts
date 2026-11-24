@@ -1376,6 +1376,12 @@ class RepositoryTarget extends RpcTarget implements GitHubRepositoryApi {
     )
   }
 
+  pullFiles(number: number) {
+    return this.#budget.run(() =>
+      pluginsApi.pullFiles(this.#plugin, this.#repository, pullNumber(number))
+    )
+  }
+
   findPull(head: string) {
     return this.#budget.run(() =>
       pluginsApi.findPull(

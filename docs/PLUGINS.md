@@ -431,6 +431,17 @@ const pr = await repo.pull(12)
 
 `requestedTeams` are `org/slug`; GitHub drops a request once it is answered with a review.
 
+Read the files it changes, with their diffs:
+
+```ts
+const { files, truncated } = await repo.pullFiles(12)
+// files: [{ path, previousPath, status, additions, deletions, patch }]
+```
+
+`patch` holds the file's unified-diff hunks, or `null` for a binary file or a diff too large for GitHub to show.
+`previousPath` is set for a renamed or copied file.
+GitHub lists at most 3000 files; `truncated` says the pull request changes more.
+
 Search the open pull requests of every repository the person shared and can still read, by their part in them:
 
 ```ts

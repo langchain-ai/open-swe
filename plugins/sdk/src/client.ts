@@ -523,6 +523,10 @@ export class GitHubRepository {
   pull(number: number) {
     return settle(this.stub.pull(number))
   }
+  /** The files pull request `number` changes, with their diffs, as GitHub has them now. */
+  pullFiles(number: number) {
+    return settle(this.stub.pullFiles(number))
+  }
   findPull(head: string) {
     return settle(this.stub.findPull(head))
   }

@@ -5,6 +5,7 @@ import type {
   JsonObject,
   PluginPermission,
   PullRequest,
+  PullRequestFiles,
   PullRequestRole,
   PullRequestSearch,
   RepositoryInfo,
@@ -289,6 +290,30 @@ const pullRequest = (wire: PullRequestWire): PullRequest => ({
   updatedAt: wire.updated_at,
   requestedReviewers: wire.requested_reviewers,
   requestedTeams: wire.requested_teams,
+})
+
+interface PullRequestFilesWire {
+  files: Array<{
+    path: string
+    previous_path: string | null
+    status: PullRequestFiles["files"][number]["status"]
+    additions: number
+    deletions: number
+    patch: string | null
+  }>
+  truncated: boolean
+}
+
+const pullRequestFiles = (wire: PullRequestFilesWire): PullRequestFiles => ({
+  files: wire.files.map((file) => ({
+    path: file.path,
+    previousPath: file.previous_path,
+    status: file.status,
+    additions: file.additions,
+    deletions: file.deletions,
+    patch: file.patch,
+  })),
+  truncated: wire.truncated,
 })
 
 const stored = (wire: DocumentWire): StoredDocument => ({
@@ -684,6 +709,12 @@ export const pluginsApi = {
     )
     return found && pullRequest(found)
   },
+  pullFiles: async (id: string, repository: string, number: number) =>
+    pullRequestFiles(
+      await agentsRequest<PullRequestFilesWire>(
+        `${repo(id, repository)}/pulls/${number}/files`
+      )
+    ),
   findPull: async (id: string, repository: string, head: string) => {
     const found = await agentsRequest<PullRequestWire | null>(
       `${repo(id, repository)}/pulls${query({ head })}`

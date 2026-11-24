@@ -966,6 +966,47 @@ class PullRequestModel(BaseModel):
         )
 
 
+class _GitHubPullFile(BaseModel):
+    filename: str
+    previous_filename: str | None = None
+    status: str
+    additions: int = 0
+    deletions: int = 0
+    patch: str | None = None
+
+
+class PullRequestFile(BaseModel):
+    """One file a pull request changes, with its unified diff when GitHub gives one."""
+
+    path: str
+    previous_path: str | None
+    """The path before a rename or copy."""
+    status: str
+    """``added``, ``removed``, ``modified``, ``renamed``, ``copied``, ``changed`` or ``unchanged``."""
+    additions: int
+    deletions: int
+    patch: str | None
+    """The file's hunks; GitHub leaves them out for binary files and very large diffs."""
+
+    @classmethod
+    def of(cls, payload: Mapping[str, object]) -> PullRequestFile:
+        file = _GitHubPullFile.model_validate(payload)
+        return cls(
+            path=file.filename,
+            previous_path=file.previous_filename,
+            status=file.status,
+            additions=file.additions,
+            deletions=file.deletions,
+            patch=file.patch,
+        )
+
+
+class PullRequestFiles(BaseModel):
+    files: list[PullRequestFile]
+    truncated: bool
+    """Whether the pull request changes more files than GitHub lists, at most 3000."""
+
+
 class PullRequestSummary(BaseModel):
     """A pull request as GitHub's search lists it, before reading it in full."""
 
@@ -1244,6 +1285,25 @@ async def api_plugin_pull(
     with _as_http():
         async with plugin.github(f"{owner}/{repo}") as client:
             return PullRequestModel.of(await client.pull_request(number).pull())
+
+
+# GitHub lists at most 3000 of a pull request's files, 100 a page.
+_MAX_FILE_PAGES = 30
+
+
+@router.get("/{installation_id}/github/{owner}/{repo}/pulls/{number}/files")
+async def api_plugin_pull_files(
+    owner: str, repo: str, number: Annotated[int, Path(ge=1, le=2**31 - 1)], plugin: PluginDep
+) -> PullRequestFiles:
+    """The files pull request ``number`` changes, with their diffs, as GitHub has them now."""
+    with _as_http():
+        async with plugin.github(f"{owner}/{repo}") as client:
+            pull = client.pull_request(number)
+            changed = (await pull.pull()).get("changed_files")
+            count = changed if isinstance(changed, int) else None
+            listed = await pull.files(max_pages=_MAX_FILE_PAGES, count=count)
+    files = [PullRequestFile.of(file) for file in listed]
+    return PullRequestFiles(files=files, truncated=count is not None and count > len(files))
 
 
 @router.get("/{installation_id}/github/{owner}/{repo}/pulls")

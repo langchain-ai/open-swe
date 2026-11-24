@@ -6060,6 +6060,80 @@
         "title": "PullRequestDescriptionUpdate",
         "type": "object"
       },
+      "PullRequestFile": {
+        "description": "One file a pull request changes, with its unified diff when GitHub gives one.",
+        "properties": {
+          "additions": {
+            "title": "Additions",
+            "type": "integer"
+          },
+          "deletions": {
+            "title": "Deletions",
+            "type": "integer"
+          },
+          "patch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patch"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "previous_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Path"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "previous_path",
+          "status",
+          "additions",
+          "deletions",
+          "patch"
+        ],
+        "title": "PullRequestFile",
+        "type": "object"
+      },
+      "PullRequestFiles": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/PullRequestFile"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "files",
+          "truncated"
+        ],
+        "title": "PullRequestFiles",
+        "type": "object"
+      },
       "PullRequestFixContext": {
         "properties": {
           "ci": {
@@ -17598,6 +17672,85 @@
           }
         ],
         "summary": "Api Plugin Pull",
+        "tags": [
+          "dashboard",
+          "plugins"
+        ]
+      }
+    },
+    "/dashboard/api/plugins/{installation_id}/github/{owner}/{repo}/pulls/{number}/files": {
+      "get": {
+        "description": "The files pull request ``number`` changes, with their diffs, as GitHub has them now.",
+        "operationId": "api_plugin_pull_files_dashboard_api_plugins__installation_id__github__owner___repo__pulls__number__files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "owner",
+            "required": true,
+            "schema": {
+              "title": "Owner",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "installation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Installation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequestFiles"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "DashboardSession": []
+          }
+        ],
+        "summary": "Api Plugin Pull Files",
         "tags": [
           "dashboard",
           "plugins"

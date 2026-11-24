@@ -182,6 +182,32 @@ export interface PullRequest {
   requestedTeams: string[]
 }
 
+/** One file a pull request changes. */
+export interface PullRequestFile {
+  path: string
+  /** The path before a rename or copy. */
+  previousPath: string | null
+  status:
+    | "added"
+    | "removed"
+    | "modified"
+    | "renamed"
+    | "copied"
+    | "changed"
+    | "unchanged"
+  additions: number
+  deletions: number
+  /** The file's unified-diff hunks; `null` for binary files and diffs too large for GitHub to show. */
+  patch: string | null
+}
+
+/** The files a pull request changes, as GitHub has them now. */
+export interface PullRequestFiles {
+  files: PullRequestFile[]
+  /** Whether it changes more files than GitHub lists, at most 3000. */
+  truncated: boolean
+}
+
 /** The person's part in the pull requests a search finds; `review-requested` includes their teams'. */
 export type PullRequestRole = "review-requested" | "author"
 
@@ -678,6 +704,8 @@ export interface GitHubRepositoryApi extends RpcTarget {
   commit(request: CommitWire): Promise<string>
   /** The pull request numbered `number` as GitHub has it now; `null` when there is none. */
   pull(number: number): Promise<PullRequest | null>
+  /** The files pull request `number` changes, with their diffs. */
+  pullFiles(number: number): Promise<PullRequestFiles>
   findPull(head: string): Promise<PullRequest | null>
   openPull(draft: PullRequestDraft): Promise<PullRequest>
 }
