@@ -272,6 +272,9 @@ class EventMatch(Base):
                 metadata={
                     "kind": EVENT_MATCH_KIND,
                     "event_match_ids": [str(match_id) for match_id in owed_ids],
+                    # What woke the thread, for splitting event-started runs on
+                    # dashboards. A run can carry several events; this is the newest.
+                    "event_source": latest.source,
                 },
                 source=latest.source,
                 thread_title=None,

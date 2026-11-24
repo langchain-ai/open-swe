@@ -651,3 +651,41 @@ async def test_subscription_delivery_waiting_on_worker_cancel_cannot_launch(
     assert not await subscription.match(event, EventSummary.of(event))
     assert await EventMatch.owed(_WORKER) == []
     assert await EventSubscription.for_thread(_WORKER) == []
+
+
+async def test_event_match_run_records_what_woke_the_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openswe.webhooks import event_matches
+    from openswe.webhooks.event_matches import EventMatch
+
+    @asynccontextmanager
+    async def transaction() -> AsyncIterator[AsyncMock]:
+        yield AsyncMock()
+
+    client = SimpleNamespace(threads=AsyncMock())
+    client.threads.get.return_value = {"status": "idle"}
+    owed = [
+        EventMatch(
+            thread_id=_WORKER,
+            source=source,
+            delivery_id=delivery_id,
+            content="CI finished",
+            run_config={"thread_id": _WORKER},
+        )
+        for source, delivery_id in [("sandbox", "monitor-1"), ("github", "ci-done")]
+    ]
+    for match in owed:
+        match.delivery_attempts = 0
+    dispatch = AsyncMock()
+    monkeypatch.setattr(postgres, "transaction", transaction)
+    monkeypatch.setattr(postgres, "session", transaction)
+    monkeypatch.setattr(event_matches, "dispatch_client", lambda: client)
+    monkeypatch.setattr(EventMatch, "owed", AsyncMock(return_value=owed))
+    monkeypatch.setattr(EventMatch, "_pending", AsyncMock(return_value=owed))
+    monkeypatch.setattr(event_matches, "create_durable_run", dispatch)
+
+    assert await EventMatch.deliver(_WORKER, "enqueue") is True
+    metadata = dispatch.await_args.kwargs["metadata"]
+    assert metadata["kind"] == "event_match"
+    assert metadata["event_source"] == "github"
