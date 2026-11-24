@@ -58,16 +58,13 @@ async def private_credential_login(
 ) -> str | None:
     """Personal integrations require the saved private owner to start the run."""
     cfg, metadata = await _thread_scope(config, thread_id=thread_id)
-    if not cfg.github_linked:
-        if (
-            not cfg.user_id
-            or metadata.get("owner_login") != f"user:{cfg.user_id}"
-            or metadata.get("visibility") != "private"
-        ):
-            raise PermissionError("Personal credentials require the private thread owner")
-        return f"user:{cfg.user_id}"
+    # A public thread runs as Robin's bot whoever is in it, linked to GitHub or not.
     if metadata.get("visibility", "public") == "public":
         return None
+    if not cfg.github_linked:
+        if not cfg.user_id or metadata.get("owner_login") != f"user:{cfg.user_id}":
+            raise PermissionError("Personal credentials require the private thread owner")
+        return f"user:{cfg.user_id}"
     return _private_owner_login(cfg, metadata)
 
 

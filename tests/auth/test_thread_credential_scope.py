@@ -481,3 +481,56 @@ async def test_ask_preflight_requires_the_authenticated_requester(
         assert await opr._resolve_pr_author_token() == ("bob-token", "user")
         credentials.assert_awaited_once_with("bob")
     app.assert_not_awaited()
+
+
+def unlinked(user_id="user-1"):
+    """A run from someone signed in with LangSmith who has no linked GitHub account."""
+    run = config(source="slack", login="")
+    run["configurable"].update(github_linked=False, user_id=user_id)
+    return run
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("visibility", ["public", None])
+@pytest.mark.parametrize("user_id", ["user-1", None])
+async def test_unlinked_person_in_a_public_thread_runs_as_the_bot(
+    thread_metadata, visibility, user_id
+):
+    """Without a linked GitHub account, a public thread still gets Robin's bot scope, like
+    everyone else's public threads, rather than refusing every integration."""
+    if visibility is None:
+        thread_metadata.pop("visibility")
+    assert await credential_scope.private_credential_login(unlinked(user_id)) is None
+
+
+@pytest.mark.asyncio
+async def test_unlinked_owner_of_a_private_thread_uses_their_own_integrations(thread_metadata):
+    thread_metadata.update(visibility="private", owner_login="user:user-1")
+    assert await credential_scope.private_credential_login(unlinked()) == "user:user-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("owner", "user_id"), [("user:user-2", "user-1"), ("user:user-1", None)])
+async def test_unlinked_person_cannot_use_someone_elses_private_thread(
+    thread_metadata, owner, user_id
+):
+    thread_metadata.update(visibility="private", owner_login=owner)
+    with pytest.raises(PermissionError, match="private thread owner"):
+        await credential_scope.private_credential_login(unlinked(user_id))
+
+
+@pytest.mark.asyncio
+async def test_unlinked_person_in_a_public_thread_still_loads_the_bot_kit(
+    monkeypatch, thread_metadata
+):
+    """The run's integration tools are the bot kit, not none at all."""
+    import openswe.server as server
+
+    server._integrations.clear()
+    bot_tool = SimpleNamespace(name="bot-tool")
+    load = AsyncMock(return_value=[bot_tool])
+    monkeypatch.setattr(server, "_run_mcp_tools", load)
+    monkeypatch.setattr(server, "BaseTool", SimpleNamespace)
+
+    assert await server.integration_tools(unlinked()) == {"bot-tool": bot_tool}
+    load.assert_awaited_once_with("thread-1", None, unattended=False)
