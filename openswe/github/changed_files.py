@@ -81,6 +81,8 @@ class ChangedFilesCache:
         self._payload_bytes = 0
         self._inflight: dict[tuple[CacheKey, int | None], Future[_Kept]] = {}
         self._lock = threading.Lock()
+        # Confirmations still running, held so none is collected before it finishes.
+        self._keeping: set[asyncio.Task[None]] = set()
 
     async def read(
         self,
@@ -95,6 +97,7 @@ class ChangedFilesCache:
 
         A fresh list is kept only when ``confirm`` reads the same tips after it was
         listed: its ``contents_url`` proves the head, but nothing in it proves the base.
+        The caller gets the list without waiting for that confirmation.
         """
         key = (full_name.lower(), number, tips.base_sha, tips.head_sha)
         read_key = (key, max_pages)
@@ -138,28 +141,6 @@ class ChangedFilesCache:
                 None if max_pages is None or len(files) < max_pages * _PAGE_SIZE else max_pages,
                 time.monotonic() + self.ttl_seconds,
             )
-            if (
-                len(snapshot.payload) <= self.max_entry_payload_bytes
-                and await tips.listed(files)
-                and await confirm() == tips
-            ):
-                with self._lock:
-                    previous = self._kept.get(key)
-                    if previous is None or (
-                        previous.max_pages is not None
-                        and (snapshot.max_pages is None or snapshot.max_pages >= previous.max_pages)
-                    ):
-                        if previous is not None:
-                            self._payload_bytes -= len(self._kept.pop(key).payload)
-                        self._kept[key] = snapshot
-                        self._payload_bytes += len(snapshot.payload)
-                        while self._payload_bytes > self.max_payload_bytes and self._kept:
-                            _, evicted = self._kept.popitem(last=False)
-                            self._payload_bytes -= len(evicted.payload)
-            with self._lock:
-                self._inflight.pop(read_key, None)
-            future.set_result(snapshot)
-            return files
         except BaseException as exc:
             # Leave first, so a waiter that reads again starts a new read rather than this one.
             with self._lock:
@@ -167,6 +148,55 @@ class ChangedFilesCache:
             if not future.done():
                 future.set_exception(exc)
             raise
+        # The list is answered now; whether to keep it is settled after. The read stays
+        # in flight until then, so a caller arriving meanwhile shares it instead of
+        # listing the files again.
+        future.set_result(snapshot)
+        keeping = asyncio.create_task(self._keep(key, read_key, snapshot, files, tips, confirm))
+        self._keeping.add(keeping)
+        keeping.add_done_callback(self._keeping.discard)
+        return files
+
+    async def _keep(
+        self,
+        key: CacheKey,
+        read_key: tuple[CacheKey, int | None],
+        snapshot: _Kept,
+        files: FileList,
+        tips: PullRequestTips,
+        confirm: Callable[[], Awaitable[PullRequestTips | None]],
+    ) -> None:
+        """Keep a fresh list once ``confirm`` reads the same tips it was listed at."""
+        try:
+            if (
+                len(snapshot.payload) > self.max_entry_payload_bytes
+                or not await tips.listed(files)
+                or await confirm() != tips
+            ):
+                return
+            with self._lock:
+                previous = self._kept.get(key)
+                if previous is None or (
+                    previous.max_pages is not None
+                    and (snapshot.max_pages is None or snapshot.max_pages >= previous.max_pages)
+                ):
+                    if previous is not None:
+                        self._payload_bytes -= len(self._kept.pop(key).payload)
+                    self._kept[key] = snapshot
+                    self._payload_bytes += len(snapshot.payload)
+                    while self._payload_bytes > self.max_payload_bytes and self._kept:
+                        _, evicted = self._kept.popitem(last=False)
+                        self._payload_bytes -= len(evicted.payload)
+        except Exception:
+            # Not keeping it only costs the next read a trip to GitHub.
+            logger.warning(
+                "Could not confirm a pull request's file list",
+                extra={"pr_repo_full_name": key[0], "pr_number": key[1]},
+                exc_info=True,
+            )
+        finally:
+            with self._lock:
+                self._inflight.pop(read_key, None)
 
     async def clear(self) -> None:
         """Discard retained snapshots."""

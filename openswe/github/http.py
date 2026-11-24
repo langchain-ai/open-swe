@@ -531,6 +531,15 @@ class GitHubClient:
         self.login = login
         self._refresh: asyncio.Future[str] | None = None
 
+    @asynccontextmanager
+    async def fork(self) -> AsyncIterator[Self]:
+        """Own an independent HTTP lifetime with the same credentials and metering."""
+        async with github_client(
+            headers=dict(self.http.headers), timeout=self.http.timeout
+        ) as http:
+            http.event_hooks = self.http.event_hooks
+            yield type(self)(http, login=self.login)
+
     @classmethod
     @asynccontextmanager
     async def connect(

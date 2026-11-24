@@ -1174,8 +1174,15 @@ class PullRequestClient:
             tips,
             max_pages,
             partial(self._listed_files, max_pages=max_pages, count=count),
-            self.tips,
+            self._confirm_tips,
         )
+
+    async def _confirm_tips(self) -> PullRequestTips | None:
+        """Confirm with an HTTP lifetime independent of the caller's context."""
+        async with self.repo.github.fork() as github:
+            return (
+                await github.repo(self.repo.owner, self.repo.name).pull_request(self.number).tips()
+            )
 
     async def _listed_files(self, *, max_pages: int, count: int | None) -> FileList:
         """Validate the GitHub file payload without dropping fields."""

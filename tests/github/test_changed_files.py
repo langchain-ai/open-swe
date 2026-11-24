@@ -21,9 +21,14 @@ class _PullRequest:
         self.retarget_to: str | None = None
         self.file_pages: list[int] = []
         self.fail = False
+        self.tips_reads = 0
+        self.confirmed = asyncio.Event()
 
     async def __call__(self, request: httpx2.Request) -> httpx2.Response:
         if request.url.path == "/graphql":
+            self.tips_reads += 1
+            if self.tips_reads > 1:
+                self.confirmed.set()
             assert json.loads(request.content)["variables"]["number"] == 7
             tips = {"baseRefOid": self.base, "headRefOid": self.head}
             return httpx2.Response(200, json={"data": {"repository": {"pullRequest": tips}}})
@@ -55,11 +60,19 @@ class _PullRequest:
         )
 
 
-async def test_a_head_already_read_is_served_without_reading_its_files_again() -> None:
+async def test_a_head_already_read_is_served_without_reading_its_files_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     github = _PullRequest("a" * 40, 3)
+    monkeypatch.setattr("openswe.github.http.GITHUB_TRANSPORT", httpx2.MockTransport(github))
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as client:
         pull = GitHubClient(client).repo("acme", "app").pull_request(7)
-        first, again = await asyncio.gather(pull.files(), pull.files())
+        first = await pull.files()
+    await asyncio.wait_for(github.confirmed.wait(), 1)
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as client:
+        pull = GitHubClient(client).repo("acme", "app").pull_request(7)
+        again, concurrent = await asyncio.gather(pull.files(), pull.files())
+        assert concurrent == first
         assert github.file_pages == [1]
         assert again == first
         first[0]["filename"] = "mutated.py"
@@ -76,8 +89,11 @@ async def test_a_head_already_read_is_served_without_reading_its_files_again() -
     assert moved[0]["contents_url"].endswith("c" * 40)
 
 
-async def test_a_retargeted_pull_request_reads_its_files_again() -> None:
+async def test_a_retargeted_pull_request_reads_its_files_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     github = _PullRequest("a" * 40, 3)
+    monkeypatch.setattr("openswe.github.http.GITHUB_TRANSPORT", httpx2.MockTransport(github))
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as client:
         pull = GitHubClient(client).repo("acme", "app").pull_request(7)
         github.retarget_to = "d" * 40
@@ -91,8 +107,11 @@ async def test_a_retargeted_pull_request_reads_its_files_again() -> None:
     assert github.file_pages == [1, 1, 1]
 
 
-async def test_a_truncated_list_does_not_answer_a_read_of_more_pages() -> None:
+async def test_a_truncated_list_does_not_answer_a_read_of_more_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     github = _PullRequest("a" * 40, 150)
+    monkeypatch.setattr("openswe.github.http.GITHUB_TRANSPORT", httpx2.MockTransport(github))
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as client:
         pull = GitHubClient(client).repo("acme", "app").pull_request(7)
         assert len(await pull.files()) == 100
@@ -104,8 +123,11 @@ async def test_a_truncated_list_does_not_answer_a_read_of_more_pages() -> None:
 
 
 @pytest.mark.parametrize("waiter_fails", [False, True])
-async def test_failed_shared_reads_do_not_prevent_a_retry(waiter_fails: bool) -> None:
+async def test_failed_shared_reads_do_not_prevent_a_retry(
+    waiter_fails: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     github = _PullRequest("a" * 40, 3)
+    monkeypatch.setattr("openswe.github.http.GITHUB_TRANSPORT", httpx2.MockTransport(github))
     github.fail = True
     other_github = _PullRequest("a" * 40, 3)
     other_github.fail = waiter_fails
@@ -186,3 +208,40 @@ async def test_cancelling_the_reading_task_lets_a_waiter_read_for_itself() -> No
     loader.release.set()
     assert len(await waiter) == 1
     assert loader.calls == 2
+
+
+async def test_the_list_is_answered_before_its_tips_are_confirmed() -> None:
+    """Confirming the base took a third GitHub call, ~250ms, before a review could start."""
+    cache = ChangedFilesCache()
+    tips = PullRequestTips("b" * 40, "a" * 40)
+    listed: FileList = [
+        {
+            "filename": "src/app.py",
+            "status": "modified",
+            "contents_url": f"https://api.github.com/repos/acme/app/contents/src/app.py?ref={'a' * 40}",
+        }
+    ]
+    loads = 0
+    confirming = asyncio.Event()
+
+    async def load() -> FileList:
+        nonlocal loads
+        loads += 1
+        return listed
+
+    async def confirm() -> PullRequestTips:
+        await confirming.wait()
+        return tips
+
+    async def read() -> FileList:
+        return await asyncio.wait_for(cache.read("acme/app", 7, tips, 1, load, confirm), 1)
+
+    assert await read() == listed
+    # A read while the confirmation is pending shares the list rather than listing it again.
+    assert await read() == listed
+    confirming.set()
+    for _ in range(10):
+        await asyncio.sleep(0)
+    assert await read() == listed
+
+    assert loads == 1
