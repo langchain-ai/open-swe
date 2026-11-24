@@ -44,6 +44,8 @@ from openswe.github.http import (
 )
 from openswe.github.metering import MeteredTransport
 from openswe.github.org_membership import OPEN_SWE_AUTHOR_LOGINS, OPEN_SWE_GITHUB_LOGINS
+from openswe.github.pull_request_head import KnownHead
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.github.queue import QueuePull, Review, ReviewPage
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,7 @@ _REPO_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _SEARCH_PAGE_SIZE = 100
 # GitHub search returns at most 1000 results per query.
 _SEARCH_MAX_PAGES = 10
+_THREAD_STATUS_CONCURRENCY = 4
 _MERGEABILITY_ATTEMPTS = 3
 _MERGEABILITY_DELAY_SECONDS = 0.7
 _SHA_PATTERN = re.compile(r"[0-9a-fA-F]{40,64}")
@@ -1734,9 +1737,10 @@ class PullRequestClient:
         """``sha``'s check runs and statuses, read over REST alone."""
         return await or_none(self.repo.commit_ci_over_rest(sha)) if sha is not None else None
 
-    async def _head_rest_checks(self) -> tuple[str | None, CommitCI | None]:
-        """The head commit REST names, and its checks read over REST."""
-        sha = await or_none(self.head_sha())
+    async def _head_rest_checks(self, known: KnownHead) -> tuple[str | None, CommitCI | None]:
+        """The head commit last read, or else the one REST names, and its checks read over
+        REST."""
+        sha = known.sha or await or_none(self.head_sha())
         return sha, await self._rest_checks(sha)
 
     async def _reviewers(self, read: _StatusRead) -> list[PullRequestReviewer] | None:
@@ -1782,13 +1786,17 @@ class PullRequestClient:
         # seconds to build the query's one page of them, which then overflows anyway,
         # while REST reads every page at once and mostly answers 304s. They are read
         # alongside the query, for the head commit REST names.
+        key = PullRequestKey.of(self.repo.owner, self.repo.name, self.number)
+        known = await KnownHead.of(key, self.repo.github)
         with MeteredTransport.attributed():
             read, (checked_sha, early_checks) = await asyncio.gather(
                 or_none(self._read_status(thread_comments=True, ci=False)),
-                self._head_rest_checks(),
+                self._head_rest_checks(known),
             )
         if read is None:
             return result
+        if read.head_sha is not None:
+            await known.remember(read.head_sha)
         state = read.state
         draft = read.pull.get("isDraft")
         result.update(
@@ -1982,15 +1990,17 @@ async def get_pull_request_statuses(
     github: GitHubClient, records: Sequence[object]
 ) -> list[dict[str, Any]]:
     """Return live status for every tracked pull request record."""
-    statuses: list[dict[str, Any]] = []
-    for record in records:
+    # A thread can track dozens of pull requests; read a few at once, as the PR list does.
+    semaphore = asyncio.Semaphore(_THREAD_STATUS_CONCURRENCY)
+
+    async def status(record: object) -> dict[str, Any]:
         client = PullRequestClient.of(github, record)
-        statuses.append(
-            await client.thread_status()
-            if client is not None
-            else _unavailable_pull_request(record)
-        )
-    return statuses
+        if client is None:
+            return _unavailable_pull_request(record)
+        async with semaphore:
+            return await client.thread_status()
+
+    return list(await asyncio.gather(*(status(record) for record in records)))
 
 
 async def list_open_pull_requests(

@@ -1,3 +1,5 @@
+import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx2
@@ -7,7 +9,9 @@ from fastapi import HTTPException
 from openswe.dashboard import profiles
 from openswe.github import http as github_http
 from openswe.github import pull_request_status
+from openswe.github.pull_request_key import PullRequestKey
 from openswe.threads import handlers
+from openswe.ui_invalidations.topics import Topic
 from tests.conftest import patch_thread_module
 from tests.dashboard.test_my_pull_requests import serve_status, status_answer
 
@@ -18,8 +22,9 @@ def _response(status: int, payload: object) -> httpx2.Response:
     )
 
 
-def _github() -> github_http.GitHubClient:
-    return github_http.GitHubClient(MagicMock())
+def _github(authorization: str | None = "Bearer test-token") -> github_http.GitHubClient:
+    headers = httpx2.Headers({"Authorization": authorization} if authorization else {})
+    return github_http.GitHubClient(MagicMock(headers=headers))
 
 
 def test_pull_request_identity_rejects_untrusted_path_components() -> None:
@@ -275,6 +280,117 @@ async def test_checks_read_before_a_push_are_read_again_for_the_new_head(
 
     assert checked == [old, new]
     assert [check["name"] for check in result["failingChecks"]] == ["unit"]
+
+
+@pytest.fixture
+def shared_cache(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """The platform's cross-replica cache, as a dict."""
+    store: dict[str, object] = {}
+
+    async def get(key: str) -> object:
+        return store.get(key)
+
+    async def put(key: str, value: object, ttl: timedelta | None = None) -> None:
+        store[key] = value
+
+    monkeypatch.setattr("langgraph_api.cache.cache_get", get)
+    monkeypatch.setattr("langgraph_api.cache.cache_set", put)
+    return store
+
+
+@pytest.mark.usefixtures("registry_db", "shared_cache")
+async def test_the_head_is_asked_of_github_again_only_after_the_pull_request_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sha = "a" * 40
+    checked: list[str] = []
+
+    async def check_runs(_repo, head: str, **_kwargs):
+        checked.append(head)
+        return []
+
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", check_runs)
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    head_sha = AsyncMock(return_value=sha)
+    monkeypatch.setattr(pull_request_status.PullRequestClient, "head_sha", head_sha)
+    serve_status(monkeypatch, status_answer(sha=sha))
+    records = [{"repo_full_name": "o/head-kept", "number": 3}]
+
+    async def poll() -> None:
+        [result] = await pull_request_status.get_pull_request_statuses(_github(), records)
+        assert result["checksAvailable"] is True
+
+    await poll()
+    await poll()
+    assert head_sha.await_count == 1
+    assert checked == [sha, sha]
+
+    # A push is reported as a change, after which the kept head may be the old one.
+    await Topic.invalidate_pull_request(
+        PullRequestKey.of("o", "head-kept", 3), *Topic.for_pull_request_event("pull_request")
+    )
+    await poll()
+    assert head_sha.await_count == 2
+
+
+@pytest.mark.usefixtures("shared_cache")
+@pytest.mark.parametrize("other_authorization", ["Bearer denied-token", None])
+async def test_cached_head_is_not_used_by_another_credential(
+    monkeypatch: pytest.MonkeyPatch, other_authorization: str | None
+) -> None:
+    sha = "a" * 40
+    checked: list[str] = []
+
+    async def check_runs(_repo, head: str, **_kwargs):
+        checked.append(head)
+        return []
+
+    monkeypatch.setattr(Topic, "last_changed", AsyncMock(return_value=(None, datetime.now(UTC))))
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", check_runs)
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    head_sha = AsyncMock(return_value=sha)
+    monkeypatch.setattr(pull_request_status.PullRequestClient, "head_sha", head_sha)
+    serve_status(monkeypatch, status_answer(sha=sha))
+    records = [{"repo_full_name": "o/head-kept", "number": 3}]
+
+    for _ in range(2):
+        [allowed] = await pull_request_status.get_pull_request_statuses(_github(), records)
+        assert allowed["checksAvailable"] is True
+    assert head_sha.await_count == 1
+
+    head_sha.side_effect = ValueError("Not Found")
+    serve_status(monkeypatch, {"errors": [{"message": "not found"}]})
+    [denied] = await pull_request_status.get_pull_request_statuses(
+        _github(other_authorization), records
+    )
+
+    assert denied["statusAvailable"] is False
+    assert denied["checksAvailable"] is False
+    assert checked == [sha, sha]
+    assert head_sha.await_count == 2
+
+
+async def test_a_threads_pull_requests_are_read_a_few_at_once_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    running = 0
+    most = 0
+
+    async def thread_status(client: pull_request_status.PullRequestClient) -> dict[str, object]:
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+        return {"number": client.number}
+
+    monkeypatch.setattr(pull_request_status.PullRequestClient, "thread_status", thread_status)
+    records = [{"repo_full_name": "o/r", "number": number} for number in range(1, 11)]
+
+    result = await pull_request_status.get_pull_request_statuses(_github(), records)
+
+    assert [status["number"] for status in result] == list(range(1, 11))
+    assert most == pull_request_status._THREAD_STATUS_CONCURRENCY
 
 
 @pytest.mark.parametrize("failed_read", ["check_runs", "commit_statuses"])

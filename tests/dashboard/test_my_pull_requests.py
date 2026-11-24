@@ -19,7 +19,11 @@ from openswe.review.reviews import ReviewCheck
 
 
 def _client(number: int) -> prs.PullRequestClient:
-    return github_http.GitHubClient(MagicMock()).repo("acme", "app").pull_request(number)
+    return (
+        github_http.GitHubClient(MagicMock(headers=httpx2.Headers()))
+        .repo("acme", "app")
+        .pull_request(number)
+    )
 
 
 def response(payload, status=200):
