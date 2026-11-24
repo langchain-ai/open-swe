@@ -5,6 +5,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Mapping
 from contextlib import nullcontext
+from typing import Final
 
 import httpx
 import httpx2
@@ -23,6 +24,7 @@ from openswe.threads.access import (
     agent_version_metadata,
 )
 from openswe.threads.identity import ThreadIdentity
+from openswe.threads.index import IndexedThread
 from openswe.threads.machine_reads import machine_thread
 from openswe.threads.mentions import ThreadMentions
 from openswe.threads.principals import Principal
@@ -238,6 +240,22 @@ async def proxy_dashboard_thread_commands(
         return CommandReply.json(500, {"detail": "the command could not be delivered"})
 
 
+_LIVE_RUN: Final = frozenset({"pending", "running"})
+
+
+async def with_current_run(thread: IndexedThread) -> IndexedThread:
+    """The thread with its latest run's status as its runtime has it, when the index's is stale.
+
+    A send records ``pending`` in the metadata, and only a reader refreshes it from the
+    runtime; the run-complete webhook updates the index's own status, not that. So a thread
+    nobody has opened since its run (a machine's, a schedule's) still reads as running, which
+    refuses a machine's next message, since a machine cannot queue one.
+    """
+    if thread.status != "busy" and thread.metadata.get("latest_run_status") in _LIVE_RUN:
+        return await THREADS.with_latest_run(thread)
+    return thread
+
+
 class ThreadSend:
     """One send to a thread: a message that starts a run, steers into the live one or
     waits behind it as a queued run, or an answer to the thread's interrupt.
@@ -303,10 +321,11 @@ class ThreadSend:
             metadata: dict[str, JsonValue] = {}
             thread_busy = False
         else:
+            await self.principal.assert_can_post(dict(thread.metadata))
+            # Only once the sender may post: the refresh writes the run it reads to the index.
+            thread = await with_current_run(thread)
             metadata = dict(thread.metadata)
-            await self.principal.assert_can_post(metadata)
-            metadata_run_status = metadata.get("latest_run_status")
-            thread_busy = thread.status == "busy" or metadata_run_status in {"pending", "running"}
+            thread_busy = thread.status == "busy" or metadata.get("latest_run_status") in _LIVE_RUN
 
         message = self.request.as_command(relayed_from=self.relayed_from)
         params = message["params"]
