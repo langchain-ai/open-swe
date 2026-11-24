@@ -804,11 +804,19 @@ async def prepare_reviewer_run(
         checkout = await checkout_task
         if not checkout.repo_ready:
             return {}
+        # A re-review's diff covers only the new commits; scoping by the whole pull request
+        # keeps the system prompt, and so the thread's cached history, the same across runs.
+        # The diff's own paths still count, since a file reverted to base leaves the PR's list.
+        pr_files = (
+            await ReviewApps.changed_files(repo_owner, repo_name, pr_number)
+            if is_re_review and last_reviewed_sha and isinstance(pr_number, int)
+            else None
+        )
         return await fetch_scoped_agents_md(
             checkout.sandbox_backend,
             f"{checkout.work_dir}/{repo_name}",
             base_sha,
-            await asyncio.to_thread(changed_files, diff_text),
+            [*(pr_files or ()), *await asyncio.to_thread(changed_files, diff_text)],
         )
 
     async def _fetch_approval_policy() -> ApprovalPolicy | None:

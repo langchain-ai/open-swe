@@ -7,7 +7,9 @@ datagram each, never waited on: with no agent listening, they are dropped.
 
 ``call_position`` keeps a thread's first model call apart from its follow-ups. A first
 call can only read a prefix another thread cached, so a cache that misses there hides
-behind the follow-ups' hits in an aggregate rate.
+behind the follow-ups' hits in an aggregate rate. A later run's first call
+(``run_first``) is kept apart too: its run rebuilds the system prompt, so it can miss
+the thread's cached history without anything inside a run breaking the cache.
 """
 
 import logging
@@ -25,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 METRIC: Final = "openswe_model_usage_tokens"
 
-type CallPosition = Literal["first", "followup", "subagent"]
+type CallPosition = Literal["first", "run_first", "followup", "subagent"]
 
 
 class ModelUsageMetrics:

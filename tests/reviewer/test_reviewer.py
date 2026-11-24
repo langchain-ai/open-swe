@@ -360,7 +360,6 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         "fetch_pr_metadata": ("Title", "Body"),
         "fetch_pr_review_threads": [],
         "fetch_agents_md": "Stable conventions",
-        "fetch_scoped_agents_md": {},
         "_cached_org_guidelines": None,
         "_cached_api_standards_skill": None,
         "approval_policy_for_review": None,
@@ -369,17 +368,31 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
     monkeypatch.setattr(
         "openswe.review.styles.get_repo_custom_prompt", AsyncMock(return_value=None)
     )
+
+    async def scoped(_backend: object, _dir: str, _ref: str, files: list[str]) -> dict[str, str]:
+        return {f"{f.split('/')[0]}/AGENTS.md": f"Conventions for {f}" for f in files}
+
+    monkeypatch.setattr(reviewer, "fetch_scoped_agents_md", scoped)
+    monkeypatch.setattr(
+        reviewer.ReviewApps,
+        "changed_files",
+        AsyncMock(return_value=["smith-go/app.go", "deployments/main.tf"]),
+    )
     findings = AsyncMock(return_value=[])
     monkeypatch.setattr(reviewer, "list_findings_async", findings)
     history = [HumanMessage(content="Review this PR"), AIMessage(content="Previous review")]
     state: dict[str, object] = {"messages": history.copy()}
     system_prompts: list[str] = []
-    for last_reviewed, head in (("a" * 40, "b" * 40), ("b" * 40, "c" * 40)):
+    for last_reviewed, head, path in (
+        ("a" * 40, "b" * 40, "smith-go/app.go"),
+        ("b" * 40, "c" * 40, "deployments/main.tf"),
+        ("c" * 40, "d" * 40, "reverted/main.tf"),
+    ):
         config["configurable"]["last_reviewed_sha"] = last_reviewed
         config["configurable"]["head_sha"] = head
         config["configurable"]["invocation_id"] = head
         config["configurable"]["base_sha"] = "0" * 40
-        diff_text = "diff --git a/app.py b/app.py\n@@ -1 +1 @@\n-old\n+new\n"
+        diff_text = f"diff --git a/{path} b/{path}\n@@ -1 +1 @@\n-old\n+new\n"
         full_diff = diff_source != "incremental"
         if diff_source == "github":
             monkeypatch.setattr(reviewer, "fetch_pr_diff", AsyncMock(return_value=diff_text))
@@ -434,6 +447,8 @@ async def test_re_review_context_appends_after_history_without_changing_system_p
         assert isinstance(rendered, str)
         assert head not in rendered
         assert "acme/repo#42" not in rendered
+        assert ("Conventions for deployments/main.tf" in rendered) is repo_ready
+        assert (f"Conventions for {path}" in rendered) is repo_ready
         if not repo_ready:
             assert f"git checkout --force {head}" in context.text
         assert state["messages"] == [*previous, context]

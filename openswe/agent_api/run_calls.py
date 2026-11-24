@@ -413,7 +413,9 @@ class TokenRun:
             if request.namespace
             else "first"
             if request.first_in_thread
-            else "followup",
+            else "followup"
+            if request.mid_turn
+            else "run_first",
         )
         return Done()
 
