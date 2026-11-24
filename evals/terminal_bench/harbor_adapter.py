@@ -72,6 +72,10 @@ class RobinSandbox(LangSmithEnvironment):
     EXEC_TIMEOUT_GRACE_SECONDS = 10
 
     def __init__(self, *args: object, **kwargs: object) -> None:
+        # CI creates task sandboxes with the Robin service key, not the tracing key it gives
+        # Harbor; locally, Harbor's own LANGSMITH_API_KEY creates them.
+        if key := os.environ.get("ROBIN_EVAL_SANDBOX_API_KEY"):
+            kwargs.setdefault("api_key", key)
         super().__init__(*args, **kwargs)
         if self._compose_mode:
             # Robin runs commands in the sandbox itself, not in a compose service inside it.

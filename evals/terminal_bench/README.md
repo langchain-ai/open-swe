@@ -38,6 +38,24 @@ The CLI runs beside Harbor with only `PATH`, `HOME`, `OPEN_SWE_BACKEND_URL` and 
 
 ## Run
 
+### From GitHub Actions
+
+The "Robin: Terminal-Bench" workflow (`.github/workflows/robin_terminal_bench.yml`) runs Harbor on a GitHub runner with CI's staging service key, so it needs no local keys or `~/.harbor-runner/` records.
+Its inputs are the deployment (staging or preview), model, effort, Harbor dataset, task globs, attempts, concurrency, and `harbor_args`, anything else for `harbor run`.
+Each run writes a per-trial table to the job summary, is recorded as a LangSmith experiment on a dataset named after Harbor's (`terminal-bench-2.0`), and uploads the Harbor job as an artifact.
+
+Start one and follow it from a terminal with `gh`; Ctrl-C only stops watching:
+
+```bash
+./run.sh gh anthropic/claude-opus-5-5 high                    # every task
+./run.sh gh anthropic/claude-opus-5-5 high fix-git 'openssl-*' -- -l 5
+ROBIN_TB_REF=my-branch ./run.sh gh anthropic/claude-opus-5-5  # the adapter on a pushed branch
+```
+
+The job times out after 6 hours, and runs only against staging or preview; for a longer run, prod, or a personal key, use `harbor-runner` below.
+
+### Locally
+
 `run.sh` wraps the commands below for any model Robin offers: `smoke` runs two tasks, follows them, pulls the results and deletes the sandbox; `full` starts every task detached.
 
 ```bash

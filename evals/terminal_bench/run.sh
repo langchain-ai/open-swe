@@ -6,6 +6,7 @@
 #   ./run.sh full  <model> [effort] [--personal-key]   every task, detached
 #   ./run.sh status|pull|attach|down [run]             the newest run unless named
 #   ./run.sh ls
+#   ./run.sh gh <model> [effort] [task glob…] [-- harbor args]   in GitHub Actions, then watch it
 #
 # <model> is Harbor's `provider/model`, e.g. anthropic/claude-opus-5-5 or google_genai/gemini-4-neon;
 # effort defaults to medium. --personal-key accepts an lsv2_pt_ key: tasks then run as you.
@@ -15,7 +16,7 @@ cd "$(dirname "$0")"
 runner() { uv run --locked harbor-runner "$@"; }
 
 usage() {
-  sed -n '5,8p' "$0" | sed 's/^# //' >&2
+  sed -n '5,9p' "$0" | sed 's/^# //' >&2
   exit 2
 }
 
@@ -49,6 +50,34 @@ case "$command" in
       runner up "$model" "$effort" "$@" --detach
       echo "Started. \`$0 status\` checks on it; \`$0 pull\` copies its results here when it's done."
     fi
+    ;;
+  gh)
+    # The "Robin: Terminal-Bench" workflow, against staging; ROBIN_TB_REF picks its branch and
+    # ROBIN_TB_DATASET its Harbor dataset.
+    model="${1:-}"
+    [ -n "$model" ] || usage
+    shift
+    effort=medium
+    if [ $# -gt 0 ] && [ "$1" != -- ]; then
+      effort="$1"
+      shift
+    fi
+    tasks=()
+    while [ $# -gt 0 ] && [ "$1" != -- ]; do
+      tasks+=("$1")
+      shift
+    done
+    [ $# -gt 0 ] && shift
+    out="$(gh workflow run robin_terminal_bench.yml --ref "${ROBIN_TB_REF:-main}" \
+      -f model="$model" -f effort="$effort" -f dataset="${ROBIN_TB_DATASET:-terminal-bench@2.0}" -f tasks="${tasks[*]:-*}" -f harbor_args="$*")"
+    echo "$out"
+    run_id="$(grep -oE 'actions/runs/[0-9]+' <<<"$out" | cut -d/ -f3 || true)"
+    if [ -z "$run_id" ]; then
+      echo "Started; \`gh run list --workflow robin_terminal_bench.yml\` finds it." >&2
+      exit 0
+    fi
+    # Ctrl-C only stops watching; the run continues.
+    gh run watch "$run_id" --exit-status
     ;;
   status | pull | attach | down) runner "$command" "$@" ;;
   ls) runner ls ;;
