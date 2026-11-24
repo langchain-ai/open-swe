@@ -114,15 +114,25 @@ class BranchConfig:
         if required is None:
             raise RuntimeError("Required checks unavailable")
         resolution_required, approvals, rule_error = rules
-        checks = json.dumps([{"name": check.name, "app_id": check.app_id} for check in required])
+        # Sorted, so the same checks store the same JSON and an unchanged refresh is seen as one.
+        checks = json.dumps(
+            [
+                {"name": check.name, "app_id": check.app_id}
+                for check in sorted(required, key=lambda c: (c.name, c.app_id or 0))
+            ]
+        )
         async with session() as conn:
             repository_id = await Repository.ensure_id(conn, self.repo)
-            await conn.execute(
+            changed = await conn.scalar(
                 text(
+                    "WITH previous AS (SELECT checks, requires_conversation_resolution, required_approving_reviews FROM branch_config WHERE repository_id = :repository_id AND branch = :branch) "
                     "INSERT INTO branch_config (id, repository_id, branch, checks, requires_conversation_resolution, required_approving_reviews, conversation_rule_updated_at) "
                     "VALUES (:id, :repository_id, :branch, CAST(:checks AS jsonb), :resolution_required, :approvals, CASE WHEN CAST(:resolution_required AS boolean) IS NOT NULL THEN clock_timestamp() END) "
                     "ON CONFLICT (repository_id, branch) DO UPDATE "
-                    "SET checks = EXCLUDED.checks, requires_conversation_resolution = COALESCE(EXCLUDED.requires_conversation_resolution, branch_config.requires_conversation_resolution), required_approving_reviews = COALESCE(EXCLUDED.required_approving_reviews, branch_config.required_approving_reviews), conversation_rule_updated_at = COALESCE(EXCLUDED.conversation_rule_updated_at, branch_config.conversation_rule_updated_at), updated_at = clock_timestamp(), updated_by = NULL"
+                    "SET checks = EXCLUDED.checks, requires_conversation_resolution = COALESCE(EXCLUDED.requires_conversation_resolution, branch_config.requires_conversation_resolution), required_approving_reviews = COALESCE(EXCLUDED.required_approving_reviews, branch_config.required_approving_reviews), conversation_rule_updated_at = COALESCE(EXCLUDED.conversation_rule_updated_at, branch_config.conversation_rule_updated_at), updated_at = clock_timestamp(), updated_by = NULL "
+                    "RETURNING NOT EXISTS (SELECT 1 FROM previous WHERE previous.checks = branch_config.checks "
+                    "AND previous.requires_conversation_resolution IS NOT DISTINCT FROM branch_config.requires_conversation_resolution "
+                    "AND previous.required_approving_reviews IS NOT DISTINCT FROM branch_config.required_approving_reviews)"
                 ),
                 {
                     "id": uuid7(),
@@ -133,7 +143,10 @@ class BranchConfig:
                     "approvals": approvals,
                 },
             )
-            await Topic.REQUIRED_CHECKS.invalidate(conn, key=self.repo.lower())
+            # Every open status of the repository rereads on this topic, so a refresh that
+            # found the same rules leaves it quiet.
+            if changed:
+                await Topic.REQUIRED_CHECKS.invalidate(conn, key=self.repo.lower())
         if rule_error is not None:
             raise rule_error
 

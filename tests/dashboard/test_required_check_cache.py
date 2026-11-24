@@ -19,6 +19,7 @@ from openswe.github.ci import RequiredCheck
 from openswe.github.http import GitHubAppUnavailable, GitHubClient, RepoClient
 from openswe.jobs import queue
 from openswe.jobs.worker import JobWorker
+from openswe.ui_invalidations import outbox
 from openswe.ui_invalidations.topics import Topic
 from openswe.users.models import User
 
@@ -66,6 +67,26 @@ async def test_required_checks_refresh_off_request_and_expire_per_branch(monkeyp
     assert await worker.run_due() == 2
     assert await cache.read() == BranchRules(set(), True, 1)
     assert await BranchConfig("acme/app", "release").read() == BranchRules(set(), True, 1)
+
+    # Every open status of the repository rereads when its rules change, so a
+    # refresh that finds them as they were stays quiet.
+    topic = Topic.REQUIRED_CHECKS.keyed("acme/app")
+    async with transaction() as conn:
+        await conn.execute(
+            text("DELETE FROM ui_invalidation WHERE topic = :topic"), {"topic": topic}
+        )
+    await cache.refresh()
+    assert await outbox.invalidated_since({topic: 60}) == set()
+    fetch.return_value = {RequiredCheck("lint", 42), RequiredCheck("build")}
+    await cache.refresh()
+    assert await outbox.invalidated_since({topic: 60}) == {topic}
+    async with transaction() as conn:
+        await conn.execute(
+            text("DELETE FROM ui_invalidation WHERE topic = :topic"), {"topic": topic}
+        )
+    fetch.return_value = {RequiredCheck("build"), RequiredCheck("lint", 42)}
+    await cache.refresh()
+    assert await outbox.invalidated_since({topic: 60}) == set()
 
     fetch.return_value = {RequiredCheck("test")}
     monkeypatch.setattr(
