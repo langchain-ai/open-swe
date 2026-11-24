@@ -40,7 +40,10 @@ test("Settings Connections preserves Slack recovery and the main app has its own
   await expect(dialog.getByRole("alert")).toHaveText(error);
   await expect(page).toHaveURL(/\/my-settings\/connections$/);
   await dialog.getByRole("button", { name: "Cancel" }).click();
-  await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Connections", level: 1 }),
+  ).toBeVisible();
+  await expect(page.getByText("GitHub", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Back to app" }).click();
   const connections = page.getByRole("link", {
     name: "Connections",
@@ -49,11 +52,14 @@ test("Settings Connections preserves Slack recovery and the main app has its own
   await expect(connections).toHaveAttribute("href", "/agents/connections");
   await connections.click();
   await expect(page).toHaveURL(/\/agents\/connections$/);
-  await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Connections", level: 1 }),
+  ).toBeVisible();
+  await expect(page.getByText("GitHub", { exact: true })).toBeVisible();
   await expect(connections).toHaveAttribute("aria-current", "page");
 });
 
-test("Connections search finds accounts, available tools, and custom servers", async ({
+test("Connections search finds core, built-in, and custom connections", async ({
   page,
 }) => {
   await page.route("**/dashboard/api/my-managed-tools", (route) =>
@@ -93,21 +99,22 @@ test("Connections search finds accounts, available tools, and custom servers", a
   await search.fill("  LiNeAr  ");
   await expect(page.getByText("Linear", { exact: true })).toBeVisible();
   await expect(page.getByText("Linear workspace MCP")).toBeVisible();
-  await expect(page.getByText("No matching accounts.")).toBeVisible();
+  await expect(page.getByText("GitHub", { exact: true })).toHaveCount(0);
 
   await page.keyboard.press("ControlOrMeta+f");
   await page.keyboard.type("github");
   await expect(search).toHaveValue("github");
   await expect(page.getByText("GitHub", { exact: true })).toBeVisible();
   await expect(page.getByText("Linear", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("No matching connections.")).toHaveCount(2);
+  await expect(page.getByText("Linear workspace MCP")).toHaveCount(0);
 
   await search.press("Escape");
   await expect(search).toHaveValue("");
   await expect(page.getByText("Linear", { exact: true })).toBeVisible();
   await search.fill("no-such-connection");
-  await expect(page.getByText("No matching accounts.")).toBeVisible();
-  await expect(page.getByText("No matching connections.")).toHaveCount(2);
+  await expect(
+    page.getByText("No connections match “no-such-connection”."),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Clear search" }).click();
   await expect(search).toBeFocused();
   await expect(page.getByText("Linear workspace MCP")).toBeVisible();

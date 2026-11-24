@@ -568,7 +568,7 @@ describe("ChatComposer options", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select repository" }))
 
     expect(
-      await screen.findByText("Link GitHub to work in a repository")
+      await screen.findByText("Connect GitHub to work in a repository")
     ).toBeTruthy()
     expect(screen.queryByText("acme/api")).toBeNull()
     expect(onRepoChange).not.toHaveBeenCalled()

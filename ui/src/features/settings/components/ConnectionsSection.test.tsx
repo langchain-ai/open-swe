@@ -7,13 +7,34 @@ import {
   waitFor,
 } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { afterEach, expect, it, vi } from "vitest"
 
-import { ConnectionsSection } from "./ConnectionsSection"
-import type { ConnectResult, SessionUser } from "@/lib/api"
+import { api } from "@/lib/api"
+import type { ConnectResult, ManagedToolsView, SessionUser } from "@/lib/api"
+import { ConnectionsPage } from "./ConnectionsPage"
+import { MANAGED_TOOLS_KEY } from "./ManagedToolsSection"
+
+vi.mock("@/lib/appCommands", () => ({ useRegisterAppCommands: () => {} }))
+
+function makeClient(managed?: ManagedToolsView) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+  })
+  client.setQueryData<ManagedToolsView>(
+    MANAGED_TOOLS_KEY,
+    managed ?? {
+      configured: false,
+      langsmith_connected: false,
+      servers: [],
+    }
+  )
+  return client
+}
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   Reflect.deleteProperty(window, "openSweDesktop")
   window.history.replaceState({}, "", "/")
 })
@@ -30,17 +51,19 @@ it.each([null, "developer"])(
       is_admin: false,
       slack_oauth_enabled: true,
     }
-    const client = new QueryClient()
+    const client = makeClient()
     render(
       <QueryClientProvider client={client}>
-        <ConnectionsSection user={user} />
+        <TooltipProvider>
+          <ConnectionsPage user={user} />
+        </TooltipProvider>
       </QueryClientProvider>
     )
-    expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Connect Slack" })).toBeTruthy()
     expect(screen.queryByText("LangSmith")).toBeNull()
-    expect(screen.queryByRole("button", { name: "Link GitHub" }) !== null).toBe(
-      github_login === null
-    )
+    expect(
+      screen.queryByRole("button", { name: "Connect GitHub" }) !== null
+    ).toBe(github_login === null)
     client.clear()
   }
 )
@@ -59,22 +82,24 @@ it("keeps desktop recovery open after the wrong GitHub account and allows cancel
     configurable: true,
     value: { connectService: connect, cancelConnectService: cancel },
   })
-  const client = new QueryClient()
+  const client = makeClient()
   render(
     <QueryClientProvider client={client}>
-      <ConnectionsSection
-        user={{
-          login: "person",
-          auth_provider: "langsmith",
-          email: null,
-          avatar_url: null,
-          is_admin: false,
-          slack_oauth_enabled: true,
-        }}
-      />
+      <TooltipProvider>
+        <ConnectionsPage
+          user={{
+            login: "person",
+            auth_provider: "langsmith",
+            email: null,
+            avatar_url: null,
+            is_admin: false,
+            slack_oauth_enabled: true,
+          }}
+        />
+      </TooltipProvider>
     </QueryClientProvider>
   )
-  fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+  fireEvent.click(screen.getByRole("button", { name: "Connect Slack" }))
   expect(
     await screen.findByRole("dialog", { name: "Recover your Robin account" })
   ).toBeTruthy()
@@ -117,19 +142,21 @@ it.each([
     "",
     `/my-settings/connections?slack_recovery=opaque-token&recovery_error=${encodeURIComponent(error)}&keep=yes`
   )
-  const client = new QueryClient()
+  const client = makeClient()
   render(
     <QueryClientProvider client={client}>
-      <ConnectionsSection
-        user={{
-          login: "person",
-          auth_provider: "langsmith",
-          email: null,
-          avatar_url: null,
-          is_admin: false,
-          slack_oauth_enabled: true,
-        }}
-      />
+      <TooltipProvider>
+        <ConnectionsPage
+          user={{
+            login: "person",
+            auth_provider: "langsmith",
+            email: null,
+            avatar_url: null,
+            is_admin: false,
+            slack_oauth_enabled: true,
+          }}
+        />
+      </TooltipProvider>
     </QueryClientProvider>
   )
   expect(
@@ -139,5 +166,194 @@ it.each([
   expect(window.location.search).toBe("?keep=yes")
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
   expect(screen.queryByRole("dialog")).toBeNull()
+  client.clear()
+})
+
+it("shows the Slack member ID rather than the dashboard login email", () => {
+  const client = makeClient()
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <ConnectionsPage
+          user={{
+            login: "person",
+            auth_provider: "langsmith",
+            email: "login@example.com",
+            slack_user_id: "U12345",
+            avatar_url: null,
+            is_admin: false,
+            slack_oauth_enabled: true,
+          }}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  expect(screen.getAllByText("U12345").length).toBeGreaterThan(0)
+  expect(screen.queryByText("login@example.com")).toBeNull()
+  client.clear()
+})
+
+it("lists accounts, built-in services, and custom connections in one searchable table", async () => {
+  const base = {
+    enabled: true,
+    has_credential: false,
+    personal: false,
+  }
+  const client = makeClient({
+    configured: true,
+    langsmith_connected: true,
+    servers: [
+      {
+        ...base,
+        id: "l",
+        name: "Linear",
+        kind: "oauth",
+        connected: true,
+      },
+      {
+        ...base,
+        id: "e",
+        name: "excalidraw",
+        kind: "secret",
+        connected: false,
+      },
+      {
+        ...base,
+        id: "mine",
+        name: "Mine",
+        kind: "none",
+        connected: true,
+        personal: true,
+      },
+    ],
+  })
+  const removeServer = vi
+    .spyOn(api, "removeManagedServer")
+    .mockResolvedValue(undefined)
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <ConnectionsPage
+          user={{
+            login: "person",
+            auth_provider: "langsmith",
+            github_login: "developer",
+            email: "person@example.com",
+            slack_user_id: "U12345",
+            avatar_url: null,
+            is_admin: false,
+            slack_oauth_enabled: true,
+          }}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+
+  const table = screen.getByRole("table")
+  expect(table.textContent).toContain("GitHub")
+  expect(table.textContent).toContain("Slack")
+  expect(table.textContent).toContain("Linear")
+  expect(table.textContent).toContain("Mine")
+  expect(screen.getByText("5 connections")).toBeTruthy()
+  expect(
+    screen.getByRole("button", { name: "Add custom connection" })
+  ).toBeTruthy()
+  expect(
+    screen
+      .getByRole("link", { name: "Connect excalidraw" })
+      .getAttribute("href")
+  ).toContain("/my-managed-tools/connect/e")
+
+  fireEvent.change(screen.getByLabelText("Search connections"), {
+    target: { value: "exc" },
+  })
+  expect(screen.getByText("1 connection")).toBeTruthy()
+  expect(table.textContent).not.toContain("Linear")
+  expect(table.textContent).not.toContain("GitHub")
+
+  fireEvent.change(screen.getByLabelText("Search connections"), {
+    target: { value: "" },
+  })
+
+  // Removing a custom connection deletes it from LangSmith, so it asks first.
+  fireEvent.keyDown(screen.getByRole("button", { name: "Actions for Mine" }), {
+    key: "Enter",
+  })
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }))
+  expect(await screen.findByText("Remove Mine?")).toBeTruthy()
+  expect(removeServer).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+  await waitFor(() => expect(removeServer.mock.calls[0]?.[0]).toBe("mine"))
+  client.clear()
+})
+
+it("reveals a newly added custom connection on page 1 even with 25+ connections and an active search", async () => {
+  const servers = Array.from({ length: 26 }, (_, i) => ({
+    id: `svc-${i}`,
+    name: `Service ${String(i).padStart(2, "0")}`,
+    kind: "oauth" as const,
+    enabled: true,
+    connected: true,
+    has_credential: true,
+    personal: false,
+  }))
+  const client = makeClient({
+    configured: true,
+    langsmith_connected: true,
+    servers,
+  })
+  const added = {
+    id: "custom-z",
+    name: "Zeta Custom",
+    kind: "oauth" as const,
+    enabled: true,
+    connected: false,
+    has_credential: false,
+    personal: true,
+  }
+  vi.spyOn(api, "addManagedServer").mockResolvedValue(added)
+  vi.spyOn(api, "getMyManagedTools").mockResolvedValue({
+    configured: true,
+    langsmith_connected: true,
+    servers: [...servers, added],
+  })
+
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <ConnectionsPage
+          user={{
+            login: "person",
+            auth_provider: "langsmith",
+            github_login: "developer",
+            email: "person@example.com",
+            slack_user_id: "U12345",
+            avatar_url: null,
+            is_admin: false,
+            slack_oauth_enabled: true,
+          }}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+
+  fireEvent.change(screen.getByLabelText("Search connections"), {
+    target: { value: "Service 00" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Add custom connection" }))
+  fireEvent.change(screen.getByLabelText("Name"), {
+    target: { value: "Zeta Custom" },
+  })
+  fireEvent.change(screen.getByLabelText("MCP server URL"), {
+    target: { value: "https://mcp.example.com/mcp" },
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Add connection" }))
+
+  expect(
+    await screen.findByRole("link", { name: "Connect Zeta Custom" })
+  ).toBeTruthy()
+  expect(
+    (screen.getByLabelText("Search connections") as HTMLInputElement).value
+  ).toBe("")
   client.clear()
 })

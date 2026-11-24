@@ -59,7 +59,9 @@ test("email-match recovery verifies GitHub and survives the next login", async (
   await page
     .getByRole("button", { name: "Select repository", exact: true })
     .click();
-  await page.getByRole("button", { name: "Link GitHub", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Connect GitHub", exact: true })
+    .click();
   await page.getByRole("textbox", { name: "GitHub user" }).fill(thread.login);
   await page.getByRole("button", { name: "Authorize GitHub" }).click();
   await expect(page.getByTestId("composer-editor")).toBeVisible();

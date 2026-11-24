@@ -966,7 +966,7 @@ test.describe("automation run history", () => {
     await page.goto("/agents/automations?tab=runs&view=all");
     const automations = page
       .getByRole("heading", { name: "Automations", level: 1 })
-      .locator("..");
+      .locator("../..");
     await expect(
       automations.getByText("Automation runs could not be loaded."),
     ).toBeVisible({ timeout: 20_000 });

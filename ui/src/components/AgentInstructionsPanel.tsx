@@ -235,7 +235,7 @@ export function AgentInstructionsPanel() {
                 void connectService("github", window.location.href)
               }}
             >
-              Link GitHub again
+              Reconnect GitHub
             </MacawLink>{" "}
             to list installed repos.
           </span>

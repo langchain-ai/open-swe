@@ -3,7 +3,6 @@ import { CopyErrorButton } from "@/components/CopyErrorButton"
 import { Text } from "@langchain/macaw-components/Text"
 import { Select } from "@langchain/macaw-components/Select"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { useState } from "react"
 import { Banner } from "@langchain/macaw-components/Banner"
 import { Button } from "@langchain/macaw-components/Button"
 import { Divider } from "@langchain/macaw-components/Divider"
@@ -11,7 +10,6 @@ import { EmptyState } from "@langchain/macaw-components/EmptyState"
 import { GroupedTabs } from "@langchain/macaw-components/GroupedTabs"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { Input } from "@langchain/macaw-components/Input"
 import { StatusBadge } from "@langchain/macaw-components/StatusBadge"
 import { Skeleton } from "@/components/Skeleton"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
@@ -19,11 +17,9 @@ import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 import { KanbanIcon } from "@phosphor-icons/react/dist/ssr/Kanban"
 import { LightningIcon } from "@phosphor-icons/react/dist/ssr/Lightning"
-import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/ssr/MagnifyingGlass"
 import { PauseIcon } from "@phosphor-icons/react/dist/ssr/Pause"
 import { PlayIcon } from "@phosphor-icons/react/dist/ssr/Play"
 import { SlackLogoIcon } from "@phosphor-icons/react/dist/ssr/SlackLogo"
-import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 
 import type {
   AgentSchedule,
@@ -101,7 +97,6 @@ export function AutomationsList({
   const schedulesQuery = useAgentSchedules({
     allUsers: isAdmin && filter === "all",
   })
-  const [query, setQuery] = useState("")
   const canManage = Boolean(session)
   const allSchedules = schedulesQuery.data ?? []
   const owners = new Map<string, string>()
@@ -127,12 +122,6 @@ export function AutomationsList({
       schedule.ownerId === session.user_id
     )
   })
-  const needle = query.trim().toLowerCase()
-  const matches = needle
-    ? schedules.filter((schedule) =>
-        schedule.name.toLowerCase().includes(needle)
-      )
-    : schedules
 
   const loading = schedulesQuery.isLoading
   const failed = schedulesQuery.isError && !schedulesQuery.data
@@ -142,48 +131,25 @@ export function AutomationsList({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-4xl px-space-5 pt-space-8 pb-space-9 max-md:pt-space-9">
-        <Text as="h1" variant="h2" weight="medium" color="primary">
-          Automations
-        </Text>
+      <div className="w-full max-w-6xl px-space-5 pt-space-8 pb-space-9 max-md:pt-space-9">
+        <header className="flex flex-wrap items-start justify-between gap-space-4">
+          <Text variant="h1">Automations</Text>
+          {canManage && (
+            <Button
+              as={<Link to="/agents/automations/new" />}
+              leftDecorator={PlusIcon}
+            >
+              New automation
+            </Button>
+          )}
+        </header>
 
-        <div className="mt-space-5 flex flex-wrap items-center justify-between gap-space-3">
+        <div className="mt-space-5">
           <GroupedTabs
             value={tab}
             onChange={onTabChange}
             options={TAB_OPTIONS}
           />
-          <div className="flex items-center gap-space-2">
-            {tab === "automations" && schedules.length > 0 && (
-              <Input
-                size="sm"
-                debounceMs={0}
-                aria-label="Search automations"
-                placeholder="Search…"
-                leftIcon={MagnifyingGlassIcon}
-                value={query}
-                onChange={setQuery}
-                className="w-48 max-sm:w-36"
-                rightAction={
-                  query
-                    ? {
-                        icon: XIcon,
-                        label: "Clear search",
-                        onClick: () => setQuery(""),
-                      }
-                    : undefined
-                }
-              />
-            )}
-            {canManage && (
-              <Button
-                as={<Link to="/agents/automations/new" />}
-                leftDecorator={PlusIcon}
-              >
-                New automation
-              </Button>
-            )}
-          </div>
         </div>
 
         {isAdmin && (
@@ -270,18 +236,9 @@ export function AutomationsList({
                       : "Get a daily briefing, a weekly review, or a heads-up when something changes, without asking each time."
                   }
                 />
-              ) : matches.length === 0 ? (
-                <Text
-                  as="p"
-                  variant="sm"
-                  color="tertiary"
-                  className="py-space-6 text-center"
-                >
-                  No automations match “{query.trim()}”.
-                </Text>
               ) : (
                 <ul aria-label="Automations" className="flex flex-col">
-                  {matches.map((schedule) => (
+                  {schedules.map((schedule) => (
                     <AutomationRow
                       key={schedule.id}
                       schedule={schedule}

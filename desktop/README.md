@@ -202,7 +202,7 @@ The desktop starts it with a PKCE challenge and loopback port.
 The backend returns a short-lived handoff code to `127.0.0.1`; `/auth/desktop/exchange` requires the verifier.
 No browser session is created, and the handoff cannot itself authenticate as a cookie.
 A LangSmith sign-in starts as its own internal UUID account, never linked by email.
-Coding features need a linked GitHub account: **Link GitHub** runs the GitHub App's OAuth through `/dashboard/api/github/login`.
+Coding features need a linked GitHub account: **Connect GitHub** runs the GitHub App's OAuth through `/dashboard/api/github/login`.
 When that GitHub account already belongs to a Robin person, the LangSmith identity and login grant move to that person, so their threads and settings return; otherwise the GitHub account joins the LangSmith account.
 A GitHub account already linked to another LangSmith account is refused.
 Once linked, the session acts as the GitHub login while every request still checks the LangSmith grant.

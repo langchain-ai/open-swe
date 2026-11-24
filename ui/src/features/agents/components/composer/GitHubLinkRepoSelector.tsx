@@ -52,7 +52,7 @@ export function GitHubLinkRepoSelector({
         <GithubLogoIcon size={24} weight="regular" aria-hidden />
         <div className="flex flex-col gap-space-1">
           <Text as="h2" variant="sm" weight="medium">
-            Link GitHub to work in a repository
+            Connect GitHub to work in a repository
           </Text>
           <Text as="p" variant="xs" color="secondary">
             Agents clone repositories, push branches and open pull requests as

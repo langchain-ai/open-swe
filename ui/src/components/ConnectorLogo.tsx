@@ -1,4 +1,5 @@
 import { useState } from "react"
+import type { ReactNode } from "react"
 
 import type { ManagedServer } from "@/lib/api"
 import { useResolvedTheme } from "@/lib/theme"
@@ -19,10 +20,13 @@ function imageUrl(value?: string | null): string | undefined {
 export function ConnectorLogo({
   name,
   icons,
+  icon,
   className,
 }: {
   name: string
   icons?: Pick<ManagedServer, "icon_url" | "icon_dark_url">
+  /** A built-in mark to show when the service has no logo image. */
+  icon?: ReactNode
   className?: string
 }) {
   const theme = useResolvedTheme()
@@ -48,7 +52,7 @@ export function ConnectorLogo({
           onError={() => setFailed((urls) => [...urls, src])}
         />
       ) : (
-        name.trim().slice(0, 1)
+        (icon ?? name.trim().slice(0, 1))
       )}
     </span>
   )

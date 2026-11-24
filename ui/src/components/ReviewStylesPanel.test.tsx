@@ -111,7 +111,7 @@ it("shows the GitHub relink banner when listing fails with expired GitHub auth",
     </QueryClientProvider>
   )
 
-  expect(await screen.findByText("Link GitHub again")).toBeTruthy()
+  expect(await screen.findByText("Reconnect GitHub")).toBeTruthy()
   expect(screen.queryByText("Couldn't load review styles")).toBeNull()
 })
 

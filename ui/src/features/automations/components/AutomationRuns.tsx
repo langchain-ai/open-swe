@@ -116,14 +116,6 @@ export function AutomationRuns({
 
   return (
     <div className="space-y-space-5" aria-busy={runsQuery.isFetching}>
-      {!runsQuery.isLoading &&
-        !runsQuery.isError &&
-        runs.some((run) => run.status === "finished") && (
-          <p className="text-xs text-secondary">
-            Finished means the run ended, not that its task succeeded. Open a
-            run to review the outcome.
-          </p>
-        )}
       {content}
       {(offset > 0 || runsQuery.data?.hasMore) && (
         <nav

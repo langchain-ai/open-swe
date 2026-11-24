@@ -112,13 +112,6 @@ describe("AutomationsList", () => {
     fireEvent.click(screen.getByRole("option", { name: "All users" }))
     expect(screen.getAllByRole("listitem")).toHaveLength(3)
 
-    fireEvent.change(screen.getByLabelText("Search automations"), {
-      target: { value: "their" },
-    })
-    expect(screen.getAllByRole("listitem")).toHaveLength(1)
-    expect(screen.getByText("Their automation")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Clear search" }))
-
     fireEvent.click(screen.getByRole("button", { name: "Mine" }))
     expect(
       screen.queryByRole("combobox", { name: "Filter by user" })
