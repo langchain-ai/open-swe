@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -68,6 +69,7 @@ async def test_ask_channel_messages_need_jev(
     reaction_succeeds: bool,
     allowed: bool,
     posted_emoji: str | None,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     async def channel_prompt(_channel_id: str) -> str | None:
         return "Investigate database reports" if ask_channel else None
@@ -107,11 +109,32 @@ async def test_ask_channel_messages_need_jev(
     monkeypatch.setattr(ask_messages, "add_slack_reaction", react)
     monkeypatch.setattr(ask_messages.common, "resolve_slack_channel_context", channel_context)
 
+    caplog.set_level(logging.INFO, logger=ask_messages.__name__)
     assert (
         await AskChannelMessage.for_robin(channel_id="C1", thread_ts="1.0", message_ts="2.0")
         is allowed
     )
     assert reactions == ([("C1", "2.0", posted_emoji)] if posted_emoji else [])
+    [decision] = [r for r in caplog.records if r.message == "Listening channel message judged"]
+    fields = vars(decision)
+    assert fields["slack_channel_id"] == "C1"
+    assert fields["slack_message_ts"] == "2.0"
+    assert fields["thread_ts"] == "1.0"
+    assert fields["ask_answered"] is allowed
+    assert fields["ask_reason"] == ("judged" if ask_channel else "not_listening")
+    assert fields["ask_reacted"] is bool(posted_emoji and reaction_succeeds)
+    assert fields["ask_reaction"] == posted_emoji
+    if ask_channel:
+        assert fields["jev_unavailable"] is (choice in {"failure", "reply"})
+        assert fields["ask_follow_up_at"] == AskResponse.FOLLOW_UP_AT
+        if choice is None:
+            assert fields["ask_action_probabilities"] == {
+                "follow_up_only": 0.3,
+                "do_nothing": 0.5,
+                "react_only": 0.2,
+            }
+    assert "dude shut up robin" not in caplog.text
+    assert "Investigate database reports" not in caplog.text
 
 
 @pytest.fixture
@@ -163,7 +186,9 @@ async def test_untagged_replies_stay_with_the_robin_that_started_the_thread(
     slack_root_cache: dict[str, bool | str],
     root_fields: JsonObject,
     allowed: bool,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level(logging.INFO, logger=ask_messages.__name__)
     monkeypatch.setattr(ask_messages.common, "SLACK_BOT_USER_ID", "BOT")
     monkeypatch.setattr(ask_messages.INTEGRATIONS, "channel_prompt", AsyncMock(return_value=None))
     slack_api.respond(
@@ -187,6 +212,12 @@ async def test_untagged_replies_stay_with_the_robin_that_started_the_thread(
             is allowed
         )
     assert len(slack_api.calls) == 1
+    decisions = [r for r in caplog.records if r.message == "Listening channel message judged"]
+    assert len(decisions) == 2
+    assert all(
+        vars(r)["ask_reason"] == ("not_listening" if allowed else "another_robin")
+        for r in decisions
+    )
 
 
 @pytest.mark.parametrize("failure", ["timeout", "rate-limit", "missing-root", "cache-unavailable"])
@@ -195,7 +226,9 @@ async def test_unknown_origin_blocks_followups_until_rechecked(
     slack_api: SlackAPI,
     slack_root_cache: dict[str, bool | str],
     failure: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level(logging.INFO, logger=ask_messages.__name__)
     from langgraph_api import cache
 
     async def stalled(*_args: object, **_kwargs: object) -> bool:
@@ -226,6 +259,10 @@ async def test_unknown_origin_blocks_followups_until_rechecked(
     if failure == "cache-unavailable":
         return
     assert not await AskChannelMessage.for_robin(channel_id="C1", thread_ts="1.0", message_ts="3.0")
+    decisions = [r for r in caplog.records if r.message == "Listening channel message judged"]
+    assert len(decisions) == 2
+    assert all(vars(r)["ask_reason"] == "origin_unverified" for r in decisions)
+    assert all(vars(r)["ask_answered"] is False for r in decisions)
     assert len(slack_api.calls) == (0 if failure == "timeout" else 1)
     if failure == "timeout":
         fetch.assert_awaited_once()

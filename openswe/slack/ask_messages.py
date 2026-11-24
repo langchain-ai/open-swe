@@ -3,6 +3,8 @@
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
+from functools import partial
 from typing import ClassVar
 
 from langchain_typesafe import Choice
@@ -89,12 +91,23 @@ class AskChannelMessage:
     @classmethod
     async def for_robin(cls, *, channel_id: str, thread_ts: str, message_ts: str) -> bool:
         """Whether an untagged message is for this Robin, using its configured channel prompt."""
+        judgment = await cls._judgment(channel_id, thread_ts, message_ts)
+        judgment.log()
+        return judgment.answered
+
+    @classmethod
+    async def _judgment(cls, channel_id: str, thread_ts: str, message_ts: str) -> ListeningJudgment:
+        judgment = partial(
+            ListeningJudgment, channel_id=channel_id, thread_ts=thread_ts, message_ts=message_ts
+        )
         if thread_ts != message_ts:
             other_robin = await SlackThread.another_robin_started(
                 channel_id, thread_ts, bot_user_id=common.SLACK_BOT_USER_ID
             )
-            if other_robin is not False:
-                return False
+            if other_robin is None:
+                return judgment(reason=JudgmentReason.ORIGIN_UNVERIFIED, answered=False)
+            if other_robin:
+                return judgment(reason=JudgmentReason.ANOTHER_ROBIN, answered=False)
         try:
             channel_prompt = await INTEGRATIONS.channel_prompt(channel_id)
         except Exception:
@@ -103,13 +116,15 @@ class AskChannelMessage:
                 extra={"slack_channel_id": channel_id},
                 exc_info=True,
             )
-            return True
+            return judgment(reason=JudgmentReason.LOOKUP_FAILED, answered=True)
         if channel_prompt is None:
-            return True
+            return judgment(reason=JudgmentReason.NOT_LISTENING, answered=True)
         try:
             messages = await cls._messages(channel_id, thread_ts, message_ts)
-            if not messages or messages[-1].has_attachment:
-                return True
+            if not messages:
+                return judgment(reason=JudgmentReason.UNREADABLE, answered=True)
+            if messages[-1].has_attachment:
+                return judgment(reason=JudgmentReason.ATTACHMENT, answered=True)
             channel = await common.resolve_slack_channel_context(channel_id)
             user_ids = [m.user for m in messages if m.user]
             names = await get_slack_user_names(user_ids) if user_ids else {}
@@ -119,26 +134,20 @@ class AskChannelMessage:
                 extra={"slack_channel_id": channel_id, "thread_ts": thread_ts},
                 exc_info=True,
             )
-            return True
+            return judgment(reason=JudgmentReason.UNREADABLE, answered=True)
         response = await cls.judge(messages, names, channel, channel_prompt=channel_prompt)
-        logger.info(
-            "Listening channel message judged",
-            extra={
-                "slack_channel_id": channel_id,
-                "thread_ts": thread_ts,
-                "ask_action": response.action,
-                "ask_follow_up": response.follow_up,
-                "ask_reaction": response.reaction,
-                "jev_confidence": response.confidence,
-                "jev_unavailable": response.unavailable,
-            },
-        )
+        reacted = False
+        answered = response.follows_up
         if response.reacts:
             reacted = await add_slack_reaction(channel_id, message_ts, response.reaction or "eyes")
             # A reaction meant as the whole answer that cannot be posted becomes a reply.
-            if not reacted and not response.follows_up:
-                return True
-        return response.follows_up
+            answered = answered or not reacted
+        return judgment(
+            reason=JudgmentReason.JUDGED,
+            answered=answered,
+            response=response,
+            reacted=reacted,
+        )
 
     @classmethod
     async def judge(
@@ -268,3 +277,52 @@ class AskChannelMessage:
                 break
             kept.append(line)
         return "\n".join(reversed(kept))
+
+
+class JudgmentReason(StrEnum):
+    """What decided whether Robin answered an untagged message."""
+
+    JUDGED = "judged"
+    ANOTHER_ROBIN = "another_robin"
+    ORIGIN_UNVERIFIED = "origin_unverified"
+    NOT_LISTENING = "not_listening"
+    LOOKUP_FAILED = "lookup_failed"
+    UNREADABLE = "unreadable"
+    ATTACHMENT = "attachment"
+
+
+@dataclass(frozen=True)
+class ListeningJudgment:
+    """The routing decision for one untagged Slack message."""
+
+    channel_id: str
+    thread_ts: str
+    message_ts: str
+    reason: JudgmentReason
+    answered: bool
+    response: AskResponse | None = None
+    reacted: bool = False
+
+    def log(self) -> None:
+        """Emit the decision without message text or channel instructions."""
+        response = self.response
+        logger.info(
+            "Listening channel message judged",
+            extra={
+                "slack_channel_id": self.channel_id,
+                "thread_ts": self.thread_ts,
+                "slack_message_ts": self.message_ts,
+                "ask_reason": self.reason.value,
+                "ask_answered": self.answered,
+                "ask_action": response.action if response else None,
+                "ask_action_probabilities": dict(response.probabilities) if response else {},
+                "ask_follow_up": response.follow_up if response else None,
+                "ask_follow_up_at": response.follow_up_at if response else None,
+                "ask_reaction": (response.reaction or "eyes")
+                if response and response.reacts
+                else None,
+                "ask_reacted": self.reacted,
+                "jev_confidence": response.confidence if response else None,
+                "jev_unavailable": response.unavailable if response else False,
+            },
+        )
