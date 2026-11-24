@@ -1,0 +1,4 @@
+#!/bin/sh
+# Installed ahead of /usr/bin: logs how long each shell sleep asked for, then sleeps.
+printf '%s %s\n' "$(date +%s)" "$*" >> /var/log/export-eval/sleeps.log
+exec /usr/bin/sleep "$@"
