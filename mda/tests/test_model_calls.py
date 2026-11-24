@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import deepcopy
 from datetime import timedelta
@@ -751,7 +752,7 @@ async def test_a_gateway_spend_limit_ends_with_an_actionable_reply(
     fallback: Callable[[], BaseChatModel] | None,
     error_type: type[openai.APIStatusError] | type[anthropic.APIStatusError],
 ) -> None:
-    body = {"error": {"message": "request blocked by gateway policies: private-policy"}}
+    body = {"error": {"message": "request blocked by gateway policies: Team cap"}}
     response = httpx2.Response(
         402, request=httpx2.Request("POST", "https://gateway.example.com"), json=body
     )
@@ -762,11 +763,64 @@ async def test_a_gateway_spend_limit_ends_with_an_actionable_reply(
     )
 
     content = answer.result[0].text
-    assert "spending limit" in content
+    assert "spending limit was reached: policy `Team cap`." in content
     assert "admin" in content
-    assert "private-policy" not in content
     assert is_model_failure_reply(answer.result[0])
     assert attempts.models == [_ANTHROPIC]
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        (
+            {
+                "blocking_policies": [
+                    {"id": "pol-1", "name": "Team cap", "policy_type": "spend_cap"},
+                    {"id": "pol-2", "name": "Org cap", "policy_type": "spend_cap"},
+                ],
+                "limit_windows": ["daily", "monthly"],
+                "scopes": ["organization", "workspace"],
+            },
+            "policy `Team cap` (ID pol-1), `Org cap` (ID pol-2); daily, monthly window; "
+            "organization, workspace scope. Ask a LangSmith organization admin to review "
+            "those policies",
+        ),
+        ({"limit_windows": ["daily"]}, "policy `Team cap`, `Org cap`; daily window."),
+        ("not json", "policy `Team cap`, `Org cap`."),
+    ],
+)
+async def test_a_gateway_spend_limit_names_the_blocking_policies(
+    metadata: object, expected: str
+) -> None:
+    body = {"error": {"message": "request blocked by gateway policies: Team cap, Org cap"}}
+    header = metadata if isinstance(metadata, str) else json.dumps(metadata)
+    response = httpx2.Response(
+        402,
+        request=httpx2.Request("POST", "https://gateway.example.com"),
+        json=body,
+        headers={"X-LangSmith-Gateway-Metadata": header},
+    )
+    attempts = _Attempts(openai.APIStatusError("request rejected", response=response, body=body))
+
+    answer = await _fallback_call(attempts)
+
+    assert expected in answer.result[0].text
+    assert attempts.models == [_ANTHROPIC]
+
+
+async def test_a_gateway_spend_limit_from_the_openai_client_names_the_policies_cleanly() -> None:
+    # The OpenAI client unwraps {"error": {...}} into `body`, unlike Anthropic's.
+    response = httpx2.Response(
+        402,
+        request=httpx2.Request("POST", "https://gateway.example.com"),
+        json={"error": {"message": "request blocked by gateway policies: Team cap, Org cap"}},
+    )
+    error = openai.OpenAI(api_key="test")._make_status_error_from_response(response)
+    attempts = _Attempts(error)
+
+    answer = await _fallback_call(attempts)
+
+    assert "policy `Team cap`, `Org cap`." in answer.result[0].text
 
 
 async def test_a_gateway_rate_limit_still_retries() -> None:
@@ -1176,8 +1230,12 @@ async def test_credential_and_policy_failures_do_not_retry_models(
     assert attempts.models == [_ANTHROPIC]
     text = answer.result[0].text
     assert "admin" in text
-    assert "private-" not in text
+    assert "private-secret" not in text
     if status == 402:
         assert "spending limit" in text
+        # Spend-cap replies name the blocking policy so people know which cap to raise.
+        assert ("private-policy" in text) == (provider != "google")
+    else:
+        assert "private-policy" not in text
     if status == 424:
         assert "ANTHROPIC_API_KEY" in text

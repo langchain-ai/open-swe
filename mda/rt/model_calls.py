@@ -42,6 +42,7 @@ from langchain_core.exceptions import ModelError, ModelRefusalError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
+from pydantic import BaseModel, ValidationError
 from runtime_api.gateway_auth import GatewayFailure
 from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY, classify_exception, exception_fields
 from runtime_api.models import MODEL_CALL_BUDGET
@@ -100,6 +101,71 @@ _TRANSIENT_EXCEPTIONS: Final[tuple[type[BaseException], ...]] = (
     # A model call's deadline too: a wedged call is where the other provider helps most.
     TimeoutError,
 )
+
+
+_GATEWAY_POLICY_BLOCK: Final = "request blocked by gateway policies:"
+
+
+class _BlockingPolicy(BaseModel):
+    id: str
+    name: str
+    policy_type: str = ""
+
+
+class GatewayPolicyBlock(BaseModel):
+    """Which gateway spend caps blocked a call, as the gateway's 402 names them."""
+
+    blocking_policies: list[_BlockingPolicy] = []
+    limit_windows: list[str] = []
+    scopes: list[str] = []
+
+    @classmethod
+    def of(
+        cls, exc: anthropic.APIStatusError | openai.APIStatusError, reason: str
+    ) -> GatewayPolicyBlock:
+        header = exc.response.headers.get("x-langsmith-gateway-metadata")
+        try:
+            block = cls.model_validate_json(header) if header else cls()
+        except ValidationError:
+            logger.warning("Unreadable gateway metadata on a policy block")
+            block = cls()
+        spend_caps = [p for p in block.blocking_policies if p.policy_type in {"", "spend_cap"}]
+        if not spend_caps:
+            start = reason.lower().find(_GATEWAY_POLICY_BLOCK)
+            names = reason[start + len(_GATEWAY_POLICY_BLOCK) :] if start >= 0 else ""
+            spend_caps = [
+                _BlockingPolicy(id="", name=name.strip())
+                for name in names.split(",")
+                if name.strip()
+            ]
+        return block.model_copy(update={"blocking_policies": spend_caps})
+
+    def message(self) -> str:
+        details = (
+            [
+                "policy "
+                + ", ".join(
+                    f"`{p.name}` (ID {p.id})" if p.id else f"`{p.name}`"
+                    for p in self.blocking_policies
+                )
+            ]
+            if self.blocking_policies
+            else []
+        )
+        if self.limit_windows:
+            details.append(", ".join(self.limit_windows) + " window")
+        if self.scopes:
+            details.append(", ".join(self.scopes) + " scope")
+        return (
+            "The model gateway blocked this request because a spending limit was reached"
+            + (": " + "; ".join(details) if details else "")
+            + ". Ask a LangSmith organization admin to review "
+            + {0: "the gateway's cost policies", 1: "that policy"}.get(
+                len(self.blocking_policies), "those policies"
+            )
+            + " and usage before retrying. Sending the same request again will not "
+            "resolve the limit."
+        )
 
 
 class ModelCallTimeoutError(TimeoutError):
@@ -218,6 +284,14 @@ def _nested_str(data: dict[str, Any], *keys: str) -> str | None:
 
 def model_access_message(exc: BaseException) -> str | None:
     """What to tell the person when the workspace may not use the call's model."""
+    if isinstance(exc, (anthropic.APIStatusError, openai.APIStatusError)):
+        body = _error_body(exc)
+        # Anthropic keeps the {"error": {...}} wrapper in `body`; OpenAI unwraps it.
+        provider_message = (
+            _nested_str(body, "error", "message") or _nested_str(body, "message") or str(exc)
+        )
+        if exc.status_code == 402 and _GATEWAY_POLICY_BLOCK in provider_message.lower():
+            return GatewayPolicyBlock.of(exc, provider_message).message()
     if (failure := GatewayFailure.of(exc)) is not None:
         return failure.access_message
     if isinstance(exc, anthropic.BadRequestError):
