@@ -2200,7 +2200,8 @@ async def test_execute_searches_through_the_shell_where_grep_and_glob_are_exclud
     assert len(descriptions) == 2
     for description in descriptions:
         if excluded:
-            assert "`git grep -n` or `grep -rn`" in description
+            assert "`git grep -n`" in description
+            assert "never on the repository root" in description
             assert "no separate grep/glob tools" in description
             assert "Instead use the grep, glob tools" not in description
             assert "Use glob tool instead" not in description

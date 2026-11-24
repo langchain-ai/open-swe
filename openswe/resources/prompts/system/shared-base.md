@@ -77,7 +77,8 @@ Application-owned model input uses an XML-like convention:
   Continue scheduling only for genuinely pending checks or actionable comments.
 - `execute` runs shell commands synchronously with a 300s default timeout.
   Use `git log` / `git blame` for history.
-  Repository search goes through `execute` (`git grep -n` or `grep -rn`); separate `grep`/`glob` tools are unavailable.
+  Repository search goes through `execute`; separate `grep`/`glob` tools are unavailable.
+  Use `git grep -n` (tracked files only) and `git ls-files`; run `grep -rn` only on specific source directories, never on the repository root or a directory holding `node_modules`, `.venv` or other installed dependencies, where it walks every untracked file and can take minutes.
   Follow repository-specific search instructions, including “Never use ripgrep.”
 - Call independent tools in parallel.
   If one call in a batch fails on a schema error such as `Unknown JSON field`, drop the bad field and retry that call alone before fanning out again, rather than repeating it across the batch.
