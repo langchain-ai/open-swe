@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from operator import attrgetter
 from pathlib import Path
-from time import perf_counter
+from time import monotonic, perf_counter
 
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
@@ -40,6 +40,8 @@ _MIGRATIONS: ScriptDirectory | None = None
 SCHEMA = "open_swe"
 MIGRATION_DIR = Path(__file__).with_name("migrations")
 MIGRATION_LOCK = 557314367248862439
+# When the pool last took a connection back, in its record's ``info``.
+_RETURNED_AT = "openswe_returned_at"
 
 
 def uri() -> str:
@@ -85,6 +87,7 @@ def engine() -> AsyncEngine:
         event.listen(_ENGINE.sync_engine, "after_cursor_execute", _query_finished)
         event.listen(_ENGINE.sync_engine, "handle_error", _query_failed)
         event.listen(_ENGINE.sync_engine, "checkout", _replace_dead_connection)
+        event.listen(_ENGINE.sync_engine, "checkin", _note_returned)
         _ENGINE_URI = database_uri
     return _ENGINE
 
@@ -108,6 +111,14 @@ def _replace_dead_connection(
     # server, or dropped without a word by a failover and reset on first write.
     if not isinstance(dbapi_connection, AdaptedConnection):
         return
+    # A connection that answered moments ago is almost surely alive, and on a busy loop
+    # each ping costs tens of milliseconds; a turn checks out about fifty connections.
+    # If a failover did drop it, its query fails, and that disconnect invalidates the
+    # whole pool, so every later checkout reconnects.
+    returned = record.info.get(_RETURNED_AT)
+    idle_limit = ENV.POSTGRES_PING_AFTER_IDLE_SECONDS.get_int(5)
+    if isinstance(returned, float) and monotonic() - returned < idle_limit:
+        return
     try:
         dbapi_connection.run_async(lambda connection: connection.execute("SELECT 1"))
     except Exception as exc:
@@ -116,6 +127,10 @@ def _replace_dead_connection(
         if dbapi_connection.driver_connection.is_closed():
             raise DisconnectionError(str(exc)) from exc
         raise
+
+
+def _note_returned(dbapi_connection: DBAPIConnection | None, record: ConnectionPoolEntry) -> None:
+    record.info[_RETURNED_AT] = monotonic()
 
 
 def _query_started(

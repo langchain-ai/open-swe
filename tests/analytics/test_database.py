@@ -136,7 +136,8 @@ async def test_preview_forgets_revision_whose_script_left_the_tree(deployment_db
         assert set(versions) == set(heads)
 
 
-async def test_pool_replaces_a_connection_the_server_closed(deployment_db):
+async def test_pool_replaces_a_connection_the_server_closed(deployment_db, monkeypatch):
+    monkeypatch.setenv("POSTGRES_PING_AFTER_IDLE_SECONDS", "0")
     async with postgres.connection() as conn:
         closed = await conn.scalar(text("SELECT pg_backend_pid()"))
     other = create_async_engine(postgres.uri(), poolclass=NullPool)
@@ -166,6 +167,7 @@ class _TracedConnection:
 async def test_pool_replaces_connections_a_failover_dropped_silently(
     deployment_db, monkeypatch, traced
 ):
+    monkeypatch.setenv("POSTGRES_PING_AFTER_IDLE_SECONDS", "0")
     if traced:
         connect = asyncpg.connect
 
@@ -220,6 +222,71 @@ async def test_pool_replaces_connections_a_failover_dropped_silently(
     finally:
         await postgres.close()
         proxy.close()
+
+
+class _CountedPings:
+    """Counts the checkout pings sent through each driver connection the pool opens."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.pings = 0
+        connect = asyncpg.connect
+        counter = self
+
+        class Counted(_TracedConnection):
+            async def execute(self, query: str, *args: object, **kwargs: object) -> str:
+                if query == "SELECT 1":
+                    counter.pings += 1
+                return await self.__wrapped__.execute(query, *args, **kwargs)
+
+        async def counted_connect(*args: object, **kwargs: object) -> Counted:
+            return Counted(await connect(*args, **kwargs))
+
+        monkeypatch.setattr(asyncpg, "connect", counted_connect)
+
+
+@pytest.mark.parametrize(("idle_seconds", "pings"), [("3600", 0), ("0", 2)])
+async def test_pool_pings_only_connections_idle_past_the_limit(
+    deployment_db, monkeypatch, idle_seconds, pings
+):
+    monkeypatch.setenv("POSTGRES_PING_AFTER_IDLE_SECONDS", idle_seconds)
+    await postgres.close()
+    counted = _CountedPings(monkeypatch)
+    try:
+        async with postgres.transaction() as conn:
+            await conn.execute(text("SELECT 2"))
+        # A fresh connection was never returned, so its first checkout pings either way.
+        counted.pings = 0
+        for _ in range(2):
+            async with postgres.transaction() as conn:
+                await conn.execute(text("SELECT 2"))
+        assert counted.pings == pings
+    finally:
+        await postgres.close()
+
+
+async def test_pool_recovers_when_an_unpinged_connection_was_dropped(deployment_db, monkeypatch):
+    monkeypatch.setenv("POSTGRES_PING_AFTER_IDLE_SECONDS", "3600")
+    async with postgres.connection() as conn:
+        closed = await conn.scalar(text("SELECT pg_backend_pid()"))
+    other = create_async_engine(postgres.uri(), poolclass=NullPool)
+    try:
+        async with other.connect() as conn:
+            assert await conn.scalar(
+                text("SELECT pg_terminate_backend(:pid, 5000)"), {"pid": closed}
+            )
+    finally:
+        await other.dispose()
+
+    failures = 0
+    for _ in range(3):
+        try:
+            async with postgres.transaction() as conn:
+                assert await conn.scalar(text("SELECT pg_backend_pid()")) != closed
+        except Exception:  # noqa: BLE001 - the one query a dead connection may fail
+            failures += 1
+    assert failures <= 1
+    async with postgres.transaction() as conn:
+        assert await conn.scalar(text("SELECT pg_backend_pid()")) != closed
 
 
 @pytest.mark.parametrize(

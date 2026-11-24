@@ -462,6 +462,12 @@ ENV.var(
     "Log application queries at or above this duration in milliseconds; 0 disables.",
     default="1000",
 )
+ENV.var(
+    "POSTGRES_PING_AFTER_IDLE_SECONDS",
+    "Ping a pooled connection as it leaves the pool only once it sat idle this many seconds; "
+    "0 pings every checkout.",
+    default="5",
+)
 ENV.var("ANALYTICS_POOL_SIZE", "PostgreSQL connection pool size per process.", default="20")
 ENV.var(
     "ANALYTICS_POOL_OVERFLOW", "PostgreSQL connections allowed beyond the pool size.", default="20"
