@@ -17,6 +17,7 @@ nothing and says why, such as a person who must sign in to Open SWE first, the
 handler replies with it in the Slack thread.
 """
 
+import asyncio
 import logging
 import re
 from collections.abc import Mapping
@@ -88,6 +89,40 @@ class _Backend(Enum):
 BACKEND: Final = _Backend.ANSWERS
 
 _bot: tuple[str, str] | None = None
+
+
+class SlackThreadPrefetch:
+    """A message's Slack thread, read as soon as the message arrives.
+
+    Only a channel mention is read early: a DM may turn out to be a concierge DM, whose
+    history is the whole DM. A read the turn doesn't use is cancelled.
+    """
+
+    def __init__(self, key: tuple[str, str] | None = None) -> None:
+        self._key = key
+        self._read = (
+            asyncio.ensure_future(slack_prompt.slack_history(*key)) if key is not None else None
+        )
+
+    @classmethod
+    def start(cls, message: SlackMessage) -> SlackThreadPrefetch:
+        if not message.explicit_mention or message.channel_type == "im":
+            return cls()
+        return cls((message.channel_id, message.reply_thread_ts or message.thread_ts))
+
+    async def history(self, channel_id: str, thread_ts: str) -> list[dict[str, Any]]:
+        """The thread's messages: the early read when it is of this thread, else a new one."""
+        read, self._read = self._read, None
+        if read is not None and self._key == (channel_id, thread_ts):
+            return await read
+        if read is not None:
+            read.cancel()
+        return await slack_prompt.slack_history(channel_id, thread_ts)
+
+    def discard(self) -> None:
+        if self._read is not None:
+            self._read.cancel()
+            self._read = None
 
 
 def decline_text(declined: SlackTurnDeclined) -> str:
@@ -194,26 +229,50 @@ async def start_turn(
     if not message.team_id or not message.app_id:
         return None
     parsed = ParsedSlackMessage.parse(text, bot_user_id, bot_username)
-    facts_began = datetime.now(UTC)
-    facts = await ask_backend(
-        SLACK_MESSAGE_FACTS,
-        SlackMessageFactsRequest(**message.model_dump()),
-        msg_id=f"facts_{event.delivery_id}",
-    )
-    facts_ended = datetime.now(UTC)
-    decided = _decide(message, facts, parsed, bot_user_id, is_message=_is_message(raw))
-    if (
-        decided is not BACKEND
-        and facts.channel == "ok"
-        and facts.automation_channel
-        and _is_message(raw)
-        and message.subtype in {"", "bot_message", "file_share"}
-        and (not message.reply_thread_ts or message.reply_thread_ts == message.message_ts)
-        and bool(message.user_id or message.bot_id)
-        and not (bot_user_id and message.user_id == bot_user_id)
-        and message.bot_app_id != message.app_id
-    ):
-        try:
+    # A mention in a channel almost always starts a turn, so its Slack thread is read
+    # while the backend checks the message.
+    early = SlackThreadPrefetch.start(message)
+    try:
+        facts_began = datetime.now(UTC)
+        facts = await ask_backend(
+            SLACK_MESSAGE_FACTS,
+            SlackMessageFactsRequest(**message.model_dump()),
+            msg_id=f"facts_{event.delivery_id}",
+        )
+        facts_ended = datetime.now(UTC)
+        decided = _decide(message, facts, parsed, bot_user_id, is_message=_is_message(raw))
+        if (
+            decided is not BACKEND
+            and facts.channel == "ok"
+            and facts.automation_channel
+            and _is_message(raw)
+            and message.subtype in {"", "bot_message", "file_share"}
+            and (not message.reply_thread_ts or message.reply_thread_ts == message.message_ts)
+            and bool(message.user_id or message.bot_id)
+            and not (bot_user_id and message.user_id == bot_user_id)
+            and message.bot_app_id != message.app_id
+        ):
+            try:
+                await ask_backend(
+                    ACT_ON_SLACK_MESSAGE,
+                    ActOnSlackMessage(
+                        team_id=message.team_id,
+                        app_id=message.app_id,
+                        delivery_id=event.delivery_id,
+                        event=raw,
+                        automation_only=True,
+                    ),
+                    msg_id=f"automation_{event.delivery_id}",
+                )
+            except Exception:
+                logger.exception(
+                    "Slack automation delivery failed", extra={"delivery_id": event.delivery_id}
+                )
+        if isinstance(decided, str):
+            return reply(decided)
+        if decided is BACKEND:
+            # Not this channel's to start: the backend answers it, and hears it only from
+            # here once Slack's Events URL points at Trigger Server.
             await ask_backend(
                 ACT_ON_SLACK_MESSAGE,
                 ActOnSlackMessage(
@@ -221,63 +280,55 @@ async def start_turn(
                     app_id=message.app_id,
                     delivery_id=event.delivery_id,
                     event=raw,
-                    automation_only=True,
                 ),
-                msg_id=f"automation_{event.delivery_id}",
+                msg_id=f"msg_{event.delivery_id}",
             )
-        except Exception:
-            logger.exception(
-                "Slack automation delivery failed", extra={"delivery_id": event.delivery_id}
+            return None
+        if decided is None:
+            return None
+        kind, turn = decided
+        if bot_id and facts.bot_trigger_mode == "true" and not message.explicit_mention:
+            card = slack_prompt.card_text(raw)
+            text = "\n".join(part for part in (event.text.strip(), card) if part)
+            message.text = turn.text = text
+            parsed = ParsedSlackMessage.parse(text, bot_user_id, bot_username)
+        # Only a message that starts a turn is traced, so the channel's chatter isn't.
+        send = SlackSendTrace.open(
+            thread_id=str(thread.id),
+            channel_id=message.channel_id,
+            message_ts=message.message_ts,
+            text=text,
+            received_at=received_at,
+            facts=(facts_began, facts_ended),
+        )
+        try:
+            if kind != "turn":
+                with send.step("start_slack_turn"):
+                    start = await ask_backend(
+                        START_SLACK_TURN, turn, msg_id=f"msg_{event.delivery_id}"
+                    )
+                if start.declined is not None:
+                    send.no_run(f"declined: {start.declined.reason}")
+                    return reply(decline_text(start.declined))
+                with send.step("branch_seed"):
+                    seed = await _branch_seed(start, thread)
+                return _handed(send, start, thread, seed)
+            return await _start_turn(
+                event,
+                thread,
+                message,
+                facts,
+                parsed,
+                turn,
+                (bot_user_id, bot_username),
+                send,
+                early,
             )
-    if isinstance(decided, str):
-        return reply(decided)
-    if decided is BACKEND:
-        # Not this channel's to start: the backend answers it, and hears it only from
-        # here once Slack's Events URL points at Trigger Server.
-        await ask_backend(
-            ACT_ON_SLACK_MESSAGE,
-            ActOnSlackMessage(
-                team_id=message.team_id,
-                app_id=message.app_id,
-                delivery_id=event.delivery_id,
-                event=raw,
-            ),
-            msg_id=f"msg_{event.delivery_id}",
-        )
-        return None
-    if decided is None:
-        return None
-    kind, turn = decided
-    if bot_id and facts.bot_trigger_mode == "true" and not message.explicit_mention:
-        card = slack_prompt.card_text(raw)
-        text = "\n".join(part for part in (event.text.strip(), card) if part)
-        message.text = turn.text = text
-        parsed = ParsedSlackMessage.parse(text, bot_user_id, bot_username)
-    # Only a message that starts a turn is traced, so the channel's chatter isn't.
-    send = SlackSendTrace.open(
-        thread_id=str(thread.id),
-        channel_id=message.channel_id,
-        message_ts=message.message_ts,
-        text=text,
-        received_at=received_at,
-        facts=(facts_began, facts_ended),
-    )
-    try:
-        if kind != "turn":
-            with send.step("start_slack_turn"):
-                start = await ask_backend(START_SLACK_TURN, turn, msg_id=f"msg_{event.delivery_id}")
-            if start.declined is not None:
-                send.no_run(f"declined: {start.declined.reason}")
-                return reply(decline_text(start.declined))
-            with send.step("branch_seed"):
-                seed = await _branch_seed(start, thread)
-            return _handed(send, start, thread, seed)
-        return await _start_turn(
-            event, thread, message, facts, parsed, turn, (bot_user_id, bot_username), send
-        )
-    except BaseException as exc:
-        send.no_run("failed", error=f"{type(exc).__name__}: {exc}")
-        raise
+        except BaseException as exc:
+            send.no_run("failed", error=f"{type(exc).__name__}: {exc}")
+            raise
+    finally:
+        early.discard()
 
 
 def _handed(
@@ -434,13 +485,21 @@ async def _start_turn(
     turn: StartSlackTurn,
     bot: tuple[str, str],
     send: SlackSendTrace,
+    early: SlackThreadPrefetch,
 ) -> ChannelRunResult | ChannelReplyResult | None:
     """Read the Slack thread, ask the backend for the turn, and build its prompt."""
     bot_user_id, bot_username = bot
     root_ts = CONCIERGE_TS if facts.concierge else message.thread_ts
     context_ts = message.reply_thread_ts or root_ts
     with send.step("read_slack_thread"):
-        history = await slack_prompt.slack_history(message.channel_id, context_ts)
+        # What the conversation's thread holds. A concierge DM's runs go on another thread,
+        # whose state the handler can't read.
+        if facts.concierge:
+            history, state = await early.history(message.channel_id, context_ts), None
+        else:
+            history, state = await asyncio.gather(
+                early.history(message.channel_id, context_ts), thread.get_state()
+            )
         current = next(
             (item for item in history if str(item.get("ts")) == message.message_ts), None
         )
@@ -469,9 +528,6 @@ async def _start_turn(
             context_ts,
             current if current is not None else history[-1],
         )
-        # What the conversation's thread holds. A concierge DM's runs go on another thread,
-        # whose state the handler can't read.
-        state = None if facts.concierge else await thread.get_state()
         context, _ = slack_prompt.select_context_messages(
             history,
             message.message_ts,

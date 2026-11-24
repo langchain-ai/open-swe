@@ -558,6 +558,32 @@ def _notice(ts: str, text: str, block_id: str) -> dict[str, Any]:
     return {"ts": ts, "user": "UBOT", "bot_id": "B1", "text": text, "blocks": [block]}
 
 
+def test_a_channel_mention_reads_its_slack_thread_while_the_backend_checks_it(
+    monkeypatch: pytest.MonkeyPatch, slack_reads: dict[str, list[object]]
+) -> None:
+    backend = _backend(
+        monkeypatch, SlackTurnStarted(run=_RUN.model_copy(deep=True), prompt=_PROMPT)
+    )
+    read_while_checking: list[list[object]] = []
+
+    async def checking(
+        endpoint: Endpoint[BaseModel, BaseModel], request: BaseModel, *, msg_id: str
+    ) -> BaseModel:
+        if endpoint is SLACK_MESSAGE_FACTS:
+            await asyncio.sleep(0)
+            read_while_checking.append(list(slack_reads["history"]))
+        return await backend(endpoint, request, msg_id=msg_id)
+
+    monkeypatch.setattr(slack, "ask_backend", checking)
+
+    [run] = cast(list[ChannelRun], asyncio.run(slack.start_turn(_event(), _thread())))
+
+    assert run["input"]
+    assert read_while_checking == [[("C1", "171.1")]]
+    # The turn uses that read instead of reading the thread again.
+    assert slack_reads["history"] == [("C1", "171.1")]
+
+
 def test_a_message_the_backend_starts_nothing_for_starts_nothing(
     monkeypatch: pytest.MonkeyPatch, slack_reads: dict[str, list[object]]
 ) -> None:
