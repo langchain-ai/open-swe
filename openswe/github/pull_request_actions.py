@@ -17,7 +17,11 @@ from openswe.github.http import (
     GraphQLError,
     github_request,
 )
-from openswe.github.pull_request_status import PullRequestClient, pull_request_identity
+from openswe.github.pull_request_status import (
+    MergeOutcome,
+    PullRequestClient,
+    pull_request_identity,
+)
 from openswe.github.repo_merge_methods import MergeMethod
 from openswe.github.squash_message import GitHubUser, SquashSource
 
@@ -44,6 +48,7 @@ class PullRequestActionResult(BaseModel):
     action: PullRequestActionName
     done: bool
     auto_merge: bool = False
+    in_merge_queue: bool = False
 
 
 def _graphql_error_message(payload: dict[str, object]) -> str | None:
@@ -74,8 +79,8 @@ class _PullRequestActionBase(BaseModel):
 
     async def perform(
         self, client: httpx2.AsyncClient, owner: str, repo: str, number: int
-    ) -> bool | None:
-        """Act on the PR; a merge answers whether it queued auto-merge instead."""
+    ) -> MergeOutcome | None:
+        """Act on the PR; a merge reports its confirmed GitHub outcome."""
         raise NotImplementedError
 
     async def _request(
@@ -131,6 +136,7 @@ class MergeAction(_PullRequestActionBase):
     auto_merge: bool = False
     resolve_conversations: bool = False
     bypass_rules: bool = False
+    queue_only: bool = False
 
     transport_failure: ClassVar[str] = (
         "Could not confirm merge. Refresh to check the PR before retrying."
@@ -140,7 +146,11 @@ class MergeAction(_PullRequestActionBase):
     )
     unconfirmed: ClassVar[str] = "GitHub did not confirm the merge."
 
-    async def perform(self, client: httpx2.AsyncClient, owner: str, repo: str, number: int) -> bool:
+    async def perform(
+        self, client: httpx2.AsyncClient, owner: str, repo: str, number: int
+    ) -> MergeOutcome:
+        if self.queue_only and self.bypass_rules:
+            raise HTTPException(422, "Queue entry cannot bypass repository rules.")
         pull = GitHubClient(client).repo(owner, repo).pull_request(number)
         resolved: list[str] = []
         if self.resolve_conversations and not self.bypass_rules:
@@ -184,7 +194,9 @@ class MergeAction(_PullRequestActionBase):
         repo: str,
         number: int,
         pull: PullRequestClient,
-    ) -> bool:
+    ) -> MergeOutcome:
+        if self.queue_only:
+            return await self._enable_auto_merge(pull, None)
         message = (
             await self._squash_message(client, owner, repo, number)
             if self.merge_method == "squash"
@@ -192,32 +204,35 @@ class MergeAction(_PullRequestActionBase):
         )
         if self.bypass_rules:
             await self._merge_now(client, owner, repo, number, message)
-            return False
+            return "merged"
         if self.auto_merge:
             try:
-                await self._enable_auto_merge(pull, message)
-                return True
+                return await self._enable_auto_merge(pull, message)
             except HTTPException as exc:
                 if exc.status_code != 422 or not _MERGEABLE_NOW.search(str(exc.detail)):
                     raise
             await self._merge_now(client, owner, repo, number, message)
-            return False
+            return "merged"
         try:
             await self._merge_now(client, owner, repo, number, message)
-            return False
+            return "merged"
         except HTTPException as refusal:
             if refusal.status_code != 405:
                 raise
             try:
-                await self._enable_auto_merge(pull, message)
+                return await self._enable_auto_merge(pull, message)
             except HTTPException as exc:
                 raise refusal from exc
-            return True
 
-    async def _enable_auto_merge(self, pull: PullRequestClient, message: str | None) -> None:
+    async def _enable_auto_merge(
+        self, pull: PullRequestClient, message: str | None
+    ) -> Literal["auto_merge", "queued"]:
         try:
-            await pull.enable_auto_merge(
-                sha=self.sha, method=self.merge_method, commit_message=message
+            return await pull.enable_auto_merge(
+                sha=self.sha,
+                method=self.merge_method,
+                commit_message=message,
+                queue_only=self.queue_only,
             )
         except GitHubError as exc:
             raise HTTPException(exc.response.status_code, exc.message) from exc
@@ -516,7 +531,7 @@ async def act_on_pull_request(
     if pull_request_identity({"repo_full_name": f"{owner}/{repo}", "number": number}) is None:
         raise HTTPException(422, "invalid pull request")
     try:
-        queued = await action.perform(pull.repo.github.http, owner, repo, number)
+        outcome = await action.perform(pull.repo.github.http, owner, repo, number)
     except HTTPException as exc:
         logger.warning(
             "Pull request action failed",
@@ -530,4 +545,10 @@ async def act_on_pull_request(
             exc_info=exc.__cause__ is not None,
         )
         raise
-    return PullRequestActionResult(action=action.action, done=True, auto_merge=queued is True)
+    return PullRequestActionResult(
+        action=action.action,
+        done=True,
+        # Older clients must also keep queued PRs open until GitHub merges them.
+        auto_merge=outcome in {"auto_merge", "queued"},
+        in_merge_queue=outcome == "queued",
+    )

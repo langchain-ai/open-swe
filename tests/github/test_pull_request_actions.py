@@ -184,18 +184,41 @@ async def test_explicit_bypass_merges_immediately_or_reports_refusal(status: int
     assert requests == [{"sha": "a" * 40, "merge_method": "merge"}]
 
 
-async def test_pending_merge_enables_github_auto_merge() -> None:
+@pytest.mark.parametrize(
+    "auto_merge,in_queue,queue_only",
+    [
+        (True, False, False),
+        (True, True, False),
+        (False, True, False),
+        (False, False, True),
+        (False, True, True),
+    ],
+)
+async def test_pending_merge_enables_github_auto_merge(
+    auto_merge: bool, in_queue: bool, queue_only: bool
+) -> None:
     requests: list[dict[str, object]] = []
 
     def github(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "PUT":
+            assert not queue_only
+            return response({"message": "Pull request must be added to the merge queue"}, 405)
         if request.method == "GET":
             return response({"node_id": "PR_1", "head": {"sha": "a" * 40}})
-        requests.append(json.loads(request.content))
+        body = json.loads(request.content)
+        if "MergeQueueRequirement" in body["query"]:
+            return response({"data": {"node": {"isMergeQueueEnabled": True}}})
+        requests.append(body)
         return response(
             {
                 "data": {
                     "enablePullRequestAutoMerge": {
-                        "pullRequest": {"autoMergeRequest": {"enabledAt": "2026-10-31T00:00:00Z"}}
+                        "pullRequest": {
+                            "autoMergeRequest": None
+                            if in_queue
+                            else {"enabledAt": "2026-10-31T00:00:00Z"},
+                            "isInMergeQueue": in_queue,
+                        }
                     }
                 }
             }
@@ -206,17 +229,48 @@ async def test_pending_merge_enables_github_auto_merge() -> None:
         result = await actions.act_on_pull_request(
             pull,
             actions.MergeAction(
-                action="merge", sha="a" * 40, merge_method="merge", auto_merge=True
+                action="merge",
+                sha="a" * 40,
+                merge_method="merge",
+                auto_merge=auto_merge,
+                queue_only=queue_only,
             ),
         )
-    assert result.done
+    assert result.done and result.auto_merge
+    assert result.in_merge_queue is in_queue
     assert requests[0]["variables"] == {
         "input": {
             "pullRequestId": "PR_1",
-            "mergeMethod": "MERGE",
+            **({} if queue_only else {"mergeMethod": "MERGE"}),
             "expectedHeadOid": "a" * 40,
         }
     }
+
+
+@pytest.mark.parametrize("queue_enabled,status", [(False, 409), (None, 502), (True, 422)])
+async def test_queue_only_never_falls_back_to_direct_merge(
+    queue_enabled: bool | None, status: int
+) -> None:
+    def github(request: httpx2.Request) -> httpx2.Response:
+        assert request.method != "PUT"
+        if request.method == "GET":
+            return response({"node_id": "PR_1", "head": {"sha": "a" * 40}})
+        body = json.loads(request.content)
+        if "MergeQueueRequirement" in body["query"]:
+            return response({"data": {"node": {"isMergeQueueEnabled": queue_enabled}}})
+        assert queue_enabled is True
+        return response({"errors": [{"message": "Pull request is in clean status"}]})
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(github)) as http:
+        pull = GitHubClient(http).repo("acme", "app").pull_request(1)
+        with pytest.raises(HTTPException) as error:
+            await actions.act_on_pull_request(
+                pull,
+                actions.MergeAction(
+                    action="merge", sha="a" * 40, merge_method="merge", queue_only=True
+                ),
+            )
+    assert error.value.status_code == status
 
 
 @pytest.mark.parametrize(

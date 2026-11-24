@@ -419,7 +419,8 @@ describe("My PRs", () => {
         pull(1, {
           ci: "pending",
           requiredChecksPassing: false,
-          autoMerge: true,
+          inMergeQueue: true,
+          mergeQueueEnabled: true,
           unresolvedThreads: 2,
           conversationResolutionRequired: true,
         }),
@@ -861,28 +862,111 @@ describe("My PRs", () => {
     ).toBeNull()
   })
 
-  it("keeps the PR open when GitHub queues auto-merge for a direct merge", async () => {
-    vi.mocked(api.openPullRequests).mockResolvedValue({
-      ...payload,
-      pullRequests: [pull(1, { reviewDecision: "approved" })],
-    })
+  it("shares queue entry across controls, remounts and status refreshes", async () => {
+    const initial = pull(1, { ci: "pending", requiredChecksPassing: false })
+    const client = makeQueryClient()
+    const query = pullRequestStatusQuery("octocat", initial)
+    client.setQueryData(query.queryKey, initial)
     vi.mocked(api.mergePullRequest).mockResolvedValue({
       action: "merge",
       done: true,
       auto_merge: true,
+      in_merge_queue: true,
     })
-    mount()
-    await screen.findByText("Change 1")
-    await chooseMergeMethod(1, "Squash merge")
-    fireEvent.click(screen.getByRole("button", { name: "Squash and merge" }))
-    expect(
-      await screen.findByRole("button", { name: "Disable auto-merge" })
-    ).toBeTruthy()
-    expect(screen.queryByText(/^Merged ·/)).toBeNull()
-    expect(toast.success).toHaveBeenCalledWith(
-      "Auto-merge enabled for acme/app#1"
+    function Controls() {
+      const { data } = useQuery({ ...query, staleTime: Infinity })
+      return data && data.state === "open" ? (
+        <>
+          <MergePullRequest pr={data} />
+          <MergePullRequest pr={data} />
+        </>
+      ) : null
+    }
+    const view = (
+      <QueryClientProvider client={client}>
+        <TooltipProvider>
+          <Controls />
+        </TooltipProvider>
+      </QueryClientProvider>
     )
+    const rendered = render(view)
+    const buttons = await screen.findAllByRole("button", {
+      name: "Enable auto-merge",
+    })
+    fireEvent.click(buttons[0]!)
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "Queued" })).toHaveLength(2)
+    )
+    rendered.unmount()
+    render(view)
+    expect(screen.getAllByRole("button", { name: "Queued" })).toHaveLength(2)
+    await act(async () => {
+      client.setQueryData(query.queryKey, initial)
+    })
+    await screen.findAllByRole("button", { name: "Enable auto-merge" })
+    await act(async () => {
+      client.setQueryData(query.queryKey, { ...initial, state: "merged" })
+    })
+    await waitFor(() => expect(screen.queryByRole("button")).toBeNull())
   })
+
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])(
+    "keeps the PR open while waiting (queue enabled: %s, in queue: %s)",
+    async (queueEnabled, inQueue) => {
+      window.localStorage.setItem("open-swe.reviews.mergeMethod", "merge")
+      vi.mocked(api.openPullRequests).mockResolvedValue({
+        ...payload,
+        pullRequests: [
+          pull(1, {
+            reviewDecision: "approved",
+            mergeQueueEnabled: queueEnabled,
+          }),
+        ],
+      })
+      let finish!: (result: PullRequestActionResult) => void
+      vi.mocked(api.mergePullRequest).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve
+          })
+      )
+      mount()
+      await screen.findByText("Change 1")
+      await chooseMergeMethod(1, "Squash merge")
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: queueEnabled ? "Merge" : "Squash and merge",
+        })
+      )
+      await waitFor(() => expect(api.mergePullRequest).toHaveBeenCalled())
+      await screen.findByText(queueEnabled ? "Merging…" : /^Merged ·/)
+      expect(screen.queryAllByText(/^Merged ·/)).toHaveLength(
+        queueEnabled ? 0 : 1
+      )
+      finish({
+        action: "merge",
+        done: true,
+        auto_merge: true,
+        in_merge_queue: inQueue,
+      })
+      expect(
+        await screen.findByRole("button", {
+          name: inQueue ? "Queued" : "Disable auto-merge",
+        })
+      ).toBeTruthy()
+      expect(screen.queryByText(/^Merged ·/)).toBeNull()
+      const saved = window.localStorage.getItem("open-swe.reviews.mergeMethod")
+      expect(saved).toBe(queueEnabled || inQueue ? "merge" : "squash")
+      expect(toast.success).toHaveBeenCalledWith(
+        inQueue ? "Queued acme/app#1" : "Auto-merge enabled for acme/app#1"
+      )
+    }
+  )
 
   it("restores enabled auto-merge when disabling an existing request fails", async () => {
     vi.mocked(api.openPullRequests).mockResolvedValue({

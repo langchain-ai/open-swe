@@ -74,7 +74,7 @@ export class PullRequestCache {
     private readonly pr: PullRequestRef
   ) {}
 
-  setAutoMerge(autoMerge: boolean): void {
+  setMergeState(autoMerge: boolean, inMergeQueue = false): void {
     const repo = this.pr.repo.toLowerCase()
     const status = {
       predicate: ({
@@ -90,10 +90,13 @@ export class PullRequestCache {
     void this.queryClient.cancelQueries(status)
     for (const query of this.queryClient.getQueryCache().findAll(status)) {
       const old = query.state.data as OpenPullRequest | null | undefined
-      if (old && old.autoMerge !== autoMerge) {
+      if (
+        old &&
+        (old.autoMerge !== autoMerge || old.inMergeQueue !== inMergeQueue)
+      ) {
         this.queryClient.setQueryData(
           query.queryKey,
-          { ...old, autoMerge },
+          { ...old, autoMerge, inMergeQueue },
           {
             updatedAt: query.state.dataUpdatedAt,
           }
@@ -131,7 +134,7 @@ export class PullRequestCache {
             ...page,
             pullRequests: page.pullRequests.map((row) =>
               row.repo.toLowerCase() === repo && row.number === this.pr.number
-                ? { ...row, autoMerge }
+                ? { ...row, autoMerge, inMergeQueue }
                 : row
             ),
           })),

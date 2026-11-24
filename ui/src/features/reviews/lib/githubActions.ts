@@ -3,6 +3,7 @@ import {
   type MergeMethod,
   type OpenPullRequest,
   type PullRequestActionName,
+  type PullRequestActionResult,
 } from "@/lib/api"
 import { mergesLater } from "./status"
 
@@ -17,11 +18,12 @@ export interface ActionLabels {
 export interface GithubAction {
   labels: ActionLabels
   /** Past tense, applied to one PR reference or to a counted phrase. */
-  /** `queued` is true when GitHub queued auto-merge instead of merging. */
-  succeeded: (subject: string, queued: boolean) => string
+  succeeded: (subject: string, result: PullRequestActionResult) => string
   failed: (subject: string) => string
-  /** Resolves to whether a merge was queued as auto-merge. */
-  run: (pr: OpenPullRequest, input: GithubActionInput) => Promise<boolean>
+  run: (
+    pr: OpenPullRequest,
+    input: GithubActionInput
+  ) => Promise<PullRequestActionResult>
 }
 
 export interface GithubActionInput {
@@ -40,19 +42,22 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
       done: null,
       retry: "Retry merge",
     },
-    succeeded: (subject, queued) =>
-      queued ? `Auto-merge enabled for ${subject}` : `Merged ${subject}`,
+    succeeded: (subject, result) =>
+      result.in_merge_queue
+        ? `Queued ${subject}`
+        : result.auto_merge
+          ? `Auto-merge enabled for ${subject}`
+          : `Merged ${subject}`,
     failed: (subject) => `Could not merge ${subject}`,
     run: async (pr, { method, resolveConversations = false, bypassRules }) => {
       if (!method) throw new Error("Choose a merge method.")
-      const result = await api.mergePullRequest(
+      return api.mergePullRequest(
         pr,
         method,
         resolveConversations && !bypassRules,
         !bypassRules && mergesLater(pr),
         bypassRules ?? false
       )
-      return result.auto_merge === true
     },
   },
   "disable-auto-merge": {
@@ -65,8 +70,7 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     succeeded: (subject) => `Auto-merge disabled for ${subject}`,
     failed: (subject) => `Could not disable auto-merge for ${subject}`,
     run: async (pr) => {
-      await api.disablePullRequestAutoMerge(pr)
-      return false
+      return api.disablePullRequestAutoMerge(pr)
     },
   },
   close: {
@@ -79,8 +83,7 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     succeeded: (subject) => `Closed ${subject}`,
     failed: (subject) => `Could not close ${subject}`,
     run: async (pr, { reason }) => {
-      await api.closePullRequest(pr, reason)
-      return false
+      return api.closePullRequest(pr, reason)
     },
   },
   "update-branch": {
@@ -93,8 +96,7 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     succeeded: (subject) => `Merging the base branch into ${subject}`,
     failed: (subject) => `Could not update ${subject}`,
     run: async (pr) => {
-      await api.updatePullRequestBranch(pr)
-      return false
+      return api.updatePullRequestBranch(pr)
     },
   },
   "mark-ready": {
@@ -107,8 +109,7 @@ export const githubActions: Record<PullRequestActionName, GithubAction> = {
     succeeded: (subject) => `Marked ${subject} ready for review`,
     failed: (subject) => `Could not mark ${subject} ready`,
     run: async (pr) => {
-      await api.markPullRequestReady(pr)
-      return false
+      return api.markPullRequestReady(pr)
     },
   },
 }

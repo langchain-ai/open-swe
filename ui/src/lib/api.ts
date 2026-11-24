@@ -1044,6 +1044,8 @@ export interface OpenPullRequest {
   mergeable: boolean | null
   mergeState: string
   autoMerge?: boolean
+  mergeQueueEnabled?: boolean
+  inMergeQueue?: boolean
   headSha: string | null
   headRef: string | null
   reviewDecision: "approved" | "changes_requested" | "none" | null
@@ -1111,6 +1113,7 @@ export interface PullRequestActionResult {
   action: PullRequestActionName
   done: boolean
   auto_merge?: boolean
+  in_merge_queue?: boolean
 }
 
 export type PullRequestThreadIntent =
@@ -1768,9 +1771,11 @@ export const api = {
       merge_method: method,
       ...(bypassRules
         ? { bypass_rules: true }
-        : autoMerge
-          ? { auto_merge: true }
-          : {}),
+        : pr.mergeQueueEnabled
+          ? { queue_only: true }
+          : autoMerge
+            ? { auto_merge: true }
+            : {}),
       ...(resolveConversations ? { resolve_conversations: true } : {}),
     }),
   disablePullRequestAutoMerge: (

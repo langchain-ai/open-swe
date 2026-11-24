@@ -5,6 +5,7 @@ import type {
   MergeMethod,
   OpenPullRequest,
   PullRequestActionName,
+  PullRequestActionResult,
 } from "@/lib/api"
 import { type GithubActionInput, githubActions } from "./githubActions"
 import { pullRequestKey } from "./status"
@@ -24,8 +25,7 @@ export function usePullRequestAction({
   pr: OpenPullRequest
   action: PullRequestActionName
   apply?: () => () => void
-  /** `queued` is true when a merge was queued as auto-merge. */
-  onDone?: (queued: boolean) => void
+  onDone?: (result: PullRequestActionResult) => void
   method?: MergeMethod
   mutationKey?: MutationKey
 }) {
@@ -37,10 +37,10 @@ export function usePullRequestAction({
     meta: { errorTitle: failed(pullRequestKey(pr)) },
     onMutate: () => ({ undo: apply?.() }),
     onError: (_error, _input, context) => context?.undo?.(),
-    onSuccess: (queued, _input, context) => {
-      if (queued) context?.undo?.()
-      toast.success(succeeded(pullRequestKey(pr), queued))
-      onDone?.(queued)
+    onSuccess: (result, _input, context) => {
+      if (result.auto_merge || result.in_merge_queue) context?.undo?.()
+      toast.success(succeeded(pullRequestKey(pr), result))
+      onDone?.(result)
     },
     retry: false,
   })

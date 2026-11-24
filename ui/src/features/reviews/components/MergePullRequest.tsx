@@ -1,5 +1,8 @@
 import { CheckIcon } from "@langchain/macaw-components/icons"
-import { DropdownMenuSeparator } from "@langchain/macaw-components/DropdownMenu"
+import {
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@langchain/macaw-components/DropdownMenu"
 import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRef, useState } from "react"
 
@@ -68,52 +71,69 @@ export function MergePullRequest({
   const autoMerge = mergesLater(pr)
   const mutationKey = ["pull-request-merge", pr.repo.toLowerCase(), pr.number]
   const pending = useIsMutating({ mutationKey })
-  const [autoMergeOverride, setAutoMergeOverride] = useState<boolean | null>(
-    null
-  )
+  const [mergeOverride, setMergeOverride] = useState<{
+    autoMerge: boolean
+    inMergeQueue: boolean
+  } | null>(null)
   const merge = usePullRequestAction({
     pr,
     action: "merge",
     mutationKey,
     method: method ?? undefined,
-    apply: autoMerge || bypassRules ? undefined : apply,
-    onDone: (queued) => {
-      if (method) writePreferredMergeMethod(method)
-      if (queued) {
-        setAutoMergeOverride(true)
-        cache.setAutoMerge(true)
+    apply: autoMerge || bypassRules || pr.mergeQueueEnabled ? undefined : apply,
+    onDone: (result) => {
+      if (
+        method &&
+        !result.in_merge_queue &&
+        (!result.auto_merge || !pr.mergeQueueEnabled)
+      )
+        writePreferredMergeMethod(method)
+      if (result.auto_merge || result.in_merge_queue) {
+        const inMergeQueue = result.in_merge_queue === true
+        setMergeOverride({ autoMerge: !inMergeQueue, inMergeQueue })
+        cache.setMergeState(!inMergeQueue, inMergeQueue)
       } else {
-        if (bypassRules) apply?.()
+        if (bypassRules || pr.mergeQueueEnabled) apply?.()
         onMerged?.()
       }
     },
   })
-  const autoMergeEnabled = autoMergeOverride ?? pr.autoMerge === true
+  const autoMergeEnabled = mergeOverride?.autoMerge ?? pr.autoMerge === true
+  const inMergeQueue = mergeOverride?.inMergeQueue ?? pr.inMergeQueue === true
   const disable = usePullRequestAction({
     pr,
     action: "disable-auto-merge",
     mutationKey,
     apply: () => {
-      const previous = autoMergeOverride
-      setAutoMergeOverride(false)
-      return () => setAutoMergeOverride(previous)
+      const previous = mergeOverride
+      setMergeOverride({ autoMerge: false, inMergeQueue: false })
+      return () => setMergeOverride(previous)
     },
     onDone: () => {
-      cache.setAutoMerge(false)
+      cache.setMergeState(false)
       merge.reset()
     },
   })
   const [snapshot, setSnapshot] = useState({
     autoMerge: pr.autoMerge,
+    inMergeQueue: pr.inMergeQueue,
     headSha: pr.headSha,
   })
-  if (snapshot.autoMerge !== pr.autoMerge || snapshot.headSha !== pr.headSha) {
-    setSnapshot({ autoMerge: pr.autoMerge, headSha: pr.headSha })
-    setAutoMergeOverride(null)
+  if (
+    snapshot.autoMerge !== pr.autoMerge ||
+    snapshot.inMergeQueue !== pr.inMergeQueue ||
+    snapshot.headSha !== pr.headSha
+  ) {
+    setSnapshot({
+      autoMerge: pr.autoMerge,
+      inMergeQueue: pr.inMergeQueue,
+      headSha: pr.headSha,
+    })
+    setMergeOverride(null)
   }
-  const busy = pending > 0 || (merge.isSuccess && merge.data !== true)
+  const busy = pending > 0 || (merge.isSuccess && !merge.data?.auto_merge)
   const labels =
-    autoMerge || (merge.data === true && autoMergeEnabled)
+    autoMerge || (merge.data?.auto_merge === true && autoMergeEnabled)
       ? {
           idle: "Enable auto-merge",
           pending: "Enabling auto-merge…",
@@ -122,7 +142,7 @@ export function MergePullRequest({
         }
       : githubActions.merge.labels
   const state =
-    merge.data === true && !autoMergeEnabled
+    merge.data?.auto_merge === true && !autoMergeEnabled
       ? labels.idle
       : actionLabel(labels, merge)
   const rulesUnknown = pr.conversationResolutionRequired == null
@@ -149,7 +169,12 @@ export function MergePullRequest({
         ? "Enable auto-merge anyway"
         : "Merge anyway"
   const start = async (bypass = false) => {
-    if (checking.current || queryClient.isMutating({ mutationKey }) > 0) return
+    if (
+      (inMergeQueue && !bypass) ||
+      checking.current ||
+      queryClient.isMutating({ mutationKey }) > 0
+    )
+      return
     if (autoMergeEnabled && !bypass) {
       disable.mutate()
       return
@@ -188,6 +213,7 @@ export function MergePullRequest({
     <>
       <SplitButton
         disabled={
+          inMergeQueue ||
           busy ||
           checkingLabels ||
           (!autoMergeEnabled && (!pr.headSha || allowed.isPending))
@@ -199,6 +225,12 @@ export function MergePullRequest({
         onMenuOpenChange={setMenuOpen}
         menu={
           <>
+            {(pr.mergeQueueEnabled || inMergeQueue) && (
+              <DropdownMenuLabel className="w-72 whitespace-normal">
+                The queue sets the merge method. These choices apply to bypass
+                only.
+              </DropdownMenuLabel>
+            )}
             {options.length > 1 &&
               options.map((option) => (
                 <DropdownMenuItem
@@ -237,21 +269,25 @@ export function MergePullRequest({
           </>
         }
       >
-        {checkingLabels
-          ? "Checking labels…"
-          : bypassRules && merge.isPending
-            ? "Merging…"
-            : autoMergeEnabled
-              ? "Disable auto-merge"
-              : disable.isPending
-                ? "Disabling auto-merge…"
-                : allowed.isPending
-                  ? "Merge"
-                  : !method
-                    ? "Choose how to merge"
-                    : !autoMerge && state === labels.idle
-                      ? mergeMethodCopy[method].button
-                      : state}
+        {inMergeQueue
+          ? "Queued"
+          : checkingLabels
+            ? "Checking labels…"
+            : bypassRules && merge.isPending
+              ? "Merging…"
+              : autoMergeEnabled
+                ? "Disable auto-merge"
+                : disable.isPending
+                  ? "Disabling auto-merge…"
+                  : allowed.isPending
+                    ? "Merge"
+                    : !method
+                      ? "Choose how to merge"
+                      : !pr.mergeQueueEnabled &&
+                          !autoMerge &&
+                          state === labels.idle
+                        ? mergeMethodCopy[method].button
+                        : state}
       </SplitButton>
       <ConfirmDialog
         open={confirmation !== null}

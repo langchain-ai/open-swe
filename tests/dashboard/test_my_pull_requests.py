@@ -178,6 +178,8 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(
                     createdAt="2026-09-01T00:00:00Z",
                     updatedAt="2026-09-12T00:00:00Z",
                     author={"__typename": "Bot", "login": "dependabot"},
+                    isMergeQueueEnabled=n == 1,
+                    isInMergeQueue=n == 1,
                 )
             )
         assert method == "GET" and url.endswith("/search/issues")
@@ -204,6 +206,8 @@ async def test_open_prs_use_live_state_current_head_and_legacy_statuses(
     assert queries == [f"is:pr is:open {qualifier}:octocat repo:acme/app"]
     assert [pr.number for pr in result.pull_requests] == [1, 3, 4]
     live, unavailable, no_checks = result.pull_requests
+    assert live.merge_queue_enabled and live.in_merge_queue
+    assert not no_checks.merge_queue_enabled and not no_checks.in_merge_queue
     assert live.title == "Current 1"
     assert live.author == "dependabot[bot]"
     assert live.ci == "failing"

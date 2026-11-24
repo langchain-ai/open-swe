@@ -242,6 +242,7 @@ query PullRequestStatus(
       author { __typename login }
       mergeable mergeStateStatus
       autoMergeRequest { enabledAt }
+      isMergeQueueEnabled isInMergeQueue
       headRefName headRefOid baseRefName reviewDecision
       reviews(first: 100) {
         pageInfo { hasNextPage endCursor }
@@ -298,6 +299,7 @@ CheckState = Literal["passing", "failing", "pending", "unknown", "none"]
 ReviewDecision = Literal["approved", "changes_requested", "none"]
 ReviewerState = Literal["approved", "changes_requested", "dismissed", "commented"]
 PullRequestState = Literal["open", "closed", "merged"]
+MergeOutcome = Literal["merged", "auto_merge", "queued"]
 
 _ANY_STATE: frozenset[PullRequestState] = frozenset({"open", "closed", "merged"})
 
@@ -383,6 +385,8 @@ class OpenPullRequest(BaseModel):
     mergeable: bool | None = None
     merge_state: str = "unknown"
     auto_merge: bool = False
+    merge_queue_enabled: bool = False
+    in_merge_queue: bool = False
     head_sha: str | None = None
     head_ref: str | None = None
     status_available: bool = False
@@ -1429,9 +1433,17 @@ class PullRequestClient:
         )
 
     async def enable_auto_merge(
-        self, *, sha: str, method: str, commit_message: str | None = None
-    ) -> None:
-        """Enable GitHub's auto-merge for the head the person inspected."""
+        self,
+        *,
+        sha: str,
+        method: str,
+        commit_message: str | None = None,
+        queue_only: bool = False,
+    ) -> Literal["auto_merge", "queued"]:
+        """Enable auto-merge or enter the queue for the head the person inspected.
+
+        This mutation requires repository auto-merge, including for queue entry.
+        """
         pull = await self.pull()
         head = pull.get("head")
         if not isinstance(head, Mapping) or head.get("sha") != sha:
@@ -1439,18 +1451,36 @@ class PullRequestClient:
         node_id = pull.get("node_id")
         if not isinstance(node_id, str) or not node_id:
             raise ValueError("GitHub did not return the pull request ID.")
+        if queue_only:
+            data = await self.repo.github.graphql(
+                """
+                query MergeQueueRequirement($id: ID!) {
+                  node(id: $id) { ... on PullRequest { isMergeQueueEnabled } }
+                }
+                """,
+                {"id": node_id},
+            )
+            node = data.get("node")
+            enabled = node.get("isMergeQueueEnabled") if isinstance(node, Mapping) else None
+            if enabled is False:
+                raise HTTPException(
+                    409, "The merge queue requirement changed. Refresh before merging."
+                )
+            if enabled is not True:
+                raise ValueError("GitHub did not confirm the merge queue requirement.")
         mutation_input: dict[str, object] = {
             "pullRequestId": node_id,
-            "mergeMethod": method.upper(),
             "expectedHeadOid": sha,
         }
-        if commit_message is not None:
-            mutation_input["commitBody"] = commit_message
+        if not queue_only:
+            mutation_input["mergeMethod"] = method.upper()
+            if commit_message is not None:
+                mutation_input["commitBody"] = commit_message
         data = await self.repo.github.graphql(
             """
             mutation EnableAutoMerge($input: EnablePullRequestAutoMergeInput!) {
               enablePullRequestAutoMerge(input: $input) {
-                pullRequest { autoMergeRequest { enabledAt } }
+                pullRequest { autoMergeRequest { enabledAt } isInMergeQueue }
               }
             }
             """,
@@ -1458,8 +1488,12 @@ class PullRequestClient:
         )
         enabled = data.get("enablePullRequestAutoMerge")
         updated = enabled.get("pullRequest") if isinstance(enabled, Mapping) else None
-        if not isinstance(updated, Mapping) or not updated.get("autoMergeRequest"):
-            raise ValueError("GitHub did not confirm auto-merge was enabled.")
+        if isinstance(updated, Mapping):
+            if updated.get("isInMergeQueue") is True:
+                return "queued"
+            if updated.get("autoMergeRequest"):
+                return "auto_merge"
+        raise ValueError("GitHub did not confirm auto-merge or queue entry.")
 
     async def disable_auto_merge(self) -> None:
         """Disable GitHub's auto-merge for this pull request."""
@@ -1818,6 +1852,8 @@ class PullRequestClient:
             mergeable=mergeability.mergeable,
             merge_state=mergeability.merge_state or "unknown",
             auto_merge=bool(pull.get("autoMergeRequest")),
+            merge_queue_enabled=pull.get("isMergeQueueEnabled") is True,
+            in_merge_queue=pull.get("isInMergeQueue") is True,
             head_ref=_as_optional_str(pull.get("headRefName")),
             status_available=True,
         )

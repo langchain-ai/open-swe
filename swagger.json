@@ -4200,6 +4200,11 @@
             "title": "Merge Method",
             "type": "string"
           },
+          "queue_only": {
+            "default": false,
+            "title": "Queue Only",
+            "type": "boolean"
+          },
           "resolve_conversations": {
             "default": false,
             "title": "Resolve Conversations",
@@ -4706,6 +4711,16 @@
               }
             ],
             "title": "Headsha"
+          },
+          "inMergeQueue": {
+            "default": false,
+            "title": "Inmergequeue",
+            "type": "boolean"
+          },
+          "mergeQueueEnabled": {
+            "default": false,
+            "title": "Mergequeueenabled",
+            "type": "boolean"
           },
           "mergeState": {
             "default": "unknown",
@@ -5962,6 +5977,11 @@
           },
           "done": {
             "title": "Done",
+            "type": "boolean"
+          },
+          "in_merge_queue": {
+            "default": false,
+            "title": "In Merge Queue",
             "type": "boolean"
           }
         },
