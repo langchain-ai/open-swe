@@ -138,6 +138,8 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
     async def request(client, method, url, **kwargs):
         assert client is not None
         # The thread's checks come over REST alone; the query never asks GitHub for them.
+        if url.endswith("/pulls/7"):
+            return _response(200, {"head": {"sha": "a" * 40}})
         if url.endswith("/check-runs"):
             return _response(200, {"total_count": len(runs), "check_runs": runs})
         if url.endswith("/status"):
@@ -248,6 +250,33 @@ async def test_one_inaccessible_pull_request_does_not_fail_the_response(
     assert result[1]["url"] is None
 
 
+async def test_checks_read_before_a_push_are_read_again_for_the_new_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old, new = "b" * 40, "a" * 40
+    failing = {"id": 1, "name": "unit", "status": "completed", "conclusion": "failure"}
+    checked: list[str] = []
+
+    async def check_runs(_repo, sha: str, **_kwargs):
+        checked.append(sha)
+        return [failing] if sha == new else []
+
+    monkeypatch.setattr(github_http.RepoClient, "check_runs", check_runs)
+    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
+    # REST still names the commit before the push; the status query already sees the new one.
+    monkeypatch.setattr(
+        pull_request_status.PullRequestClient, "head_sha", AsyncMock(return_value=old)
+    )
+    serve_status(monkeypatch, status_answer(sha=new))
+
+    [result] = await pull_request_status.get_pull_request_statuses(
+        _github(), [{"repo_full_name": "o/r", "number": 3}]
+    )
+
+    assert checked == [old, new]
+    assert [check["name"] for check in result["failingChecks"]] == ["unit"]
+
+
 @pytest.mark.parametrize("failed_read", ["check_runs", "commit_statuses"])
 async def test_partial_check_failure_cannot_appear_green(
     monkeypatch: pytest.MonkeyPatch,
@@ -257,6 +286,9 @@ async def test_partial_check_failure_cannot_appear_green(
     monkeypatch.setattr(github_http.RepoClient, "commit_statuses", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         github_http.RepoClient, failed_read, AsyncMock(side_effect=ValueError("Unavailable"))
+    )
+    monkeypatch.setattr(
+        pull_request_status.PullRequestClient, "head_sha", AsyncMock(return_value="a" * 40)
     )
     serve_status(
         monkeypatch,

@@ -138,6 +138,8 @@ def serve_status(
 
     async def request(_client, method, url, **kwargs):
         if rest_runs is not None and method == "GET":
+            if "/pulls/" in url:
+                return response({"head": {"sha": "a" * 40}})
             if url.endswith("/check-runs"):
                 return response({"total_count": len(rest_runs), "check_runs": list(rest_runs)})
             if url.endswith("/status"):

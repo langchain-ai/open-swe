@@ -1727,6 +1727,11 @@ class PullRequestClient:
         """``sha``'s check runs and statuses, read over REST alone."""
         return await or_none(self.repo.commit_ci_over_rest(sha)) if sha is not None else None
 
+    async def _head_rest_checks(self) -> tuple[str | None, CommitCI | None]:
+        """The head commit REST names, and its checks read over REST."""
+        sha = await or_none(self.head_sha())
+        return sha, await self._rest_checks(sha)
+
     async def _reviewers(self, read: _StatusRead) -> list[PullRequestReviewer] | None:
         """``read``'s reviewers, counting the reviews on the pages after it."""
         if (first := read.reviews) is None:
@@ -1768,9 +1773,13 @@ class PullRequestClient:
         result["url"] = f"https://github.com/{self.repo.full_name}/pull/{self.number}"
         # Checks come over REST alone: on a repository with many of them GitHub takes
         # seconds to build the query's one page of them, which then overflows anyway,
-        # while REST reads every page at once and mostly answers 304s.
+        # while REST reads every page at once and mostly answers 304s. They are read
+        # alongside the query, for the head commit REST names.
         with MeteredTransport.attributed():
-            read = await or_none(self._read_status(thread_comments=True, ci=False))
+            read, (checked_sha, early_checks) = await asyncio.gather(
+                or_none(self._read_status(thread_comments=True, ci=False)),
+                self._head_rest_checks(),
+            )
         if read is None:
             return result
         state = read.state
@@ -1784,10 +1793,13 @@ class PullRequestClient:
             }
         )
         with MeteredTransport.attributed():
-            review_threads, checks = await asyncio.gather(
-                self._unresolved_threads(read),
-                self._rest_checks(read.head_sha),
-            )
+            if checked_sha == read.head_sha:
+                review_threads, checks = await self._unresolved_threads(read), early_checks
+            else:
+                # A push between the two reads left the early checks on an older commit.
+                review_threads, checks = await asyncio.gather(
+                    self._unresolved_threads(read), self._rest_checks(read.head_sha)
+                )
         if review_threads is not None:
             result.update(
                 {
