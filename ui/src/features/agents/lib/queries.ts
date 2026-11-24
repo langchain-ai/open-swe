@@ -29,6 +29,7 @@ import type {
   ThreadsPageParams,
 } from "./api"
 import type {
+  AgentPullRequestStatusResponse,
   AgentSchedule,
   AgentStatus,
   AgentThread,
@@ -44,6 +45,7 @@ import type { PassageReply } from "@/features/agents/utils/passageReply"
 import { useSidebarPrefsHydrated } from "./sidebarPrefs"
 import type { ChatSort } from "./sidebarPrefs"
 import type { SessionUser, Skill, SkillInput } from "@/lib/api"
+import { pullRequestStateTopic } from "@/features/reviews/lib/cache"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
@@ -1128,15 +1130,40 @@ export function useAgentThread(threadId: string, active = true) {
   return query
 }
 
+/**
+ * The query a thread's pull request health lives in. The sidebar observes the same
+ * query from cache, and a query keeps the options its latest observer set, so every
+ * observer spreads these to keep its invalidation topics.
+ */
+export function agentThreadPullRequestStatusQuery(threadId: string) {
+  return {
+    queryKey: agentThreadKeys.pullRequestStatus(threadId),
+    queryFn: () => agentsApi.getThreadPullRequestStatus(threadId),
+    meta: {
+      invalidatedBy: (data: unknown) =>
+        (
+          (data as AgentPullRequestStatusResponse | undefined)?.pullRequests ??
+          []
+        ).flatMap(({ repoFullName, number }) =>
+          repoFullName && number !== null
+            ? [pullRequestStateTopic({ repo: repoFullName, number })]
+            : []
+        ),
+    },
+  } as const
+}
+
 export function useAgentThreadPullRequestStatus(
   threadId: string,
   enabled: boolean
 ) {
   return useQuery({
-    queryKey: agentThreadKeys.pullRequestStatus(threadId),
-    queryFn: () => agentsApi.getThreadPullRequestStatus(threadId),
+    ...agentThreadPullRequestStatusQuery(threadId),
     enabled: enabled && Boolean(threadId),
     staleTime: 15_000,
+    // GitHub reports no CI changes to Robin, so the poll is how CI and what GitHub
+    // works out on its own (mergeability) show; everything GitHub does report
+    // arrives on each pull request's state topic at once.
     refetchInterval: 30_000,
     refetchOnWindowFocus: "always",
     retry: false,

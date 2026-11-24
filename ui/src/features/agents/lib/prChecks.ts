@@ -4,7 +4,7 @@ import type { PullRequestLiveState, PullRequestSnapshot } from "./api"
 import type { AgentPullRequestStatusResponse } from "./types"
 import type { SidebarThreadItem } from "./sidebarThreads"
 import { agentsApi } from "./api"
-import { agentThreadKeys } from "./queries"
+import { agentThreadPullRequestStatusQuery } from "./queries"
 
 /** Cap matches the server's, so the request never silently drops the tail. */
 const MAX_TRACKED = 50
@@ -63,7 +63,7 @@ export function useSidebarPullRequests(
   const cloudIds = items.filter((item) => item.prRef).map((item) => item.id)
   const perThread = useQueries({
     queries: cloudIds.map((threadId) => ({
-      queryKey: agentThreadKeys.pullRequestStatus(threadId),
+      ...agentThreadPullRequestStatusQuery(threadId),
       enabled: false,
       staleTime: Infinity,
     })),

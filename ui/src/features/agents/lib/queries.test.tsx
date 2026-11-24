@@ -12,10 +12,12 @@ import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
 import { clearPerfSpans, getPerfSpans } from "@/lib/perf/trace"
 
 import { agentsApi } from "./api"
+import { useSidebarPullRequests } from "./prChecks"
 import {
   cloudSidebarThread,
   groupSidebarThreadsByRecency,
 } from "./sidebarThreads"
+import type { SidebarThreadItem } from "./sidebarThreads"
 import {
   SIDEBAR_PAGE_SIZE,
   agentScheduleKeys,
@@ -29,6 +31,7 @@ import {
   useActiveAgentThread,
   useAgentThread,
   useAgentThreadBrowser,
+  useAgentThreadPullRequestStatus,
   useAgentThreadWorkingTreeDiff,
   usePinAgentThread,
   useReorderPinnedThreads,
@@ -53,6 +56,7 @@ import type {
   ThreadsPageParams,
 } from "./api"
 import type {
+  AgentPullRequestHealth,
   AgentSchedule,
   AgentThread,
   WorkflowPushApproval,
@@ -1960,5 +1964,61 @@ describe("sidebar task families", () => {
     await vi.waitFor(() =>
       expect(result.current.items[0]?.taskWorkers?.[1]?.status).toBe("finished")
     )
+  })
+})
+
+describe("useAgentThreadPullRequestStatus", () => {
+  function health(
+    overrides: Partial<AgentPullRequestHealth> = {}
+  ): AgentPullRequestHealth {
+    return {
+      repoFullName: "Acme/App",
+      number: 7,
+      url: "https://github.com/Acme/App/pull/7",
+      statusAvailable: true,
+      state: "open",
+      isDraft: false,
+      mergeConflictState: "mergeable",
+      checksAvailable: true,
+      failingChecks: [],
+      pendingCheckCount: 0,
+      inconclusiveCheckCount: 0,
+      commentsAvailable: true,
+      unresolvedReviewThreadCount: 0,
+      unresolvedReviewThreads: [],
+      ...overrides,
+    }
+  }
+
+  it("refreshes as soon as GitHub reports a change, while the sidebar shows it too", async () => {
+    const read = vi
+      .spyOn(agentsApi, "getThreadPullRequestStatus")
+      .mockResolvedValue({ pullRequests: [health()] })
+    vi.spyOn(agentsApi, "getPullRequestChecks").mockResolvedValue({})
+    const row = {
+      id: "thread-1",
+      prRef: { repoFullName: "Acme/App", number: 7 },
+    } as SidebarThreadItem
+    const client = testClient()
+    const { result } = renderHook(
+      () => {
+        const status = useAgentThreadPullRequestStatus("thread-1", true)
+        const sidebar = useSidebarPullRequests([row], true)
+        return { status, sidebarRow: sidebar(row) }
+      },
+      { wrapper: wrapperFor(client) }
+    )
+    await vi.waitFor(() =>
+      expect(result.current.sidebarRow?.state).toBe("open")
+    )
+    expect(read).toHaveBeenCalledTimes(1)
+
+    const topic = invalidationTopic("pull-request-state", "acme/app/7")
+    await act(() =>
+      client.invalidateQueries({
+        predicate: (query) => queryTopics(query).includes(topic),
+      })
+    )
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2))
   })
 })

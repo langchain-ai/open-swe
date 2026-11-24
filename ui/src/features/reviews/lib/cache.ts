@@ -30,6 +30,14 @@ export function pullRequestTopic(pr: PullRequestRef) {
   )
 }
 
+/** Invalidated when GitHub reports a change to the pull request; `repo` is `owner/name`. */
+export function pullRequestStateTopic(pr: PullRequestRef) {
+  return invalidationTopic(
+    "pull-request-state",
+    `${pr.repo}/${pr.number}`.toLowerCase()
+  )
+}
+
 /** Invalidated as the pull request's checks run, at most every 15s; `repo` is `owner/name`. */
 export function pullRequestChecksTopic(pr: PullRequestRef) {
   return invalidationTopic(

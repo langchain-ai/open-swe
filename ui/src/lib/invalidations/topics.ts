@@ -15,6 +15,7 @@ type KeyedTopic =
   | "review-styles"
   | "pull-requests"
   | "pull-request-checks"
+  | "pull-request-state"
   | "thread-queues"
   | "thread-browsers"
   | "thread-background-work"
