@@ -26,6 +26,8 @@ For PR comparison screenshots:
   If capture is pending, unavailable, or not configured, state that explicitly instead of presenting a link as completed evidence.
 - Capture before/after from the real running app, signed in as needed, showing the exact element the user reported, with matching viewport, theme, and data.
   Use a synthetic fixture only when the real app cannot run in the sandbox; then say so in the PR and your reply, and never present it as before/after proof of the fix.
+- Label every image not captured from the real running app where it appears, not only in a footnote: start its heading, table header or caption with `⚠️` and name its source, such as `⚠️ After (mocked Storybook)` for a Storybook story with mocked data or copied markup, or `⚠️ After (simulated)` for a hand-built fixture or mockup, and put the same label in its `alt` text.
+  Leave unlabelled only screenshots of the real running app.
 - Compare the pair before publishing: the reported element must visibly change.
   If it does not, the screenshots do not show the fix; find out why instead of publishing them.
 - Generate inline image download URLs with the correct MIME type, without an expiry unless requested.
