@@ -131,10 +131,10 @@ function isActive(item: NavItem, pathname: string): boolean {
 }
 
 const LINK_CLASS =
-  "flex items-center gap-space-3 rounded-md px-space-2 py-space-1 text-xs/relaxed text-secondary transition-colors hover:bg-surface-level-2-hover hover:text-primary"
+  "flex items-center gap-space-3 rounded-md px-space-2 py-space-1 text-xs/relaxed text-secondary transition-colors hover:bg-sidebar-row-hover hover:text-primary"
 
 const ACTIVE_LINK_PROPS = {
-  className: "bg-surface-level-2-hover text-primary font-medium",
+  className: "bg-sidebar-row-hover text-primary font-medium",
 }
 
 export function AppSidebar({ user }: { user: SessionUser }) {

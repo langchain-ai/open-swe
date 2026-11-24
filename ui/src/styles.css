@@ -132,6 +132,8 @@ body.version-mismatch {
 
 @theme inline {
     --color-user-message: var(--bg-user-message);
+    --color-sidebar-row-hover: var(--bg-sidebar-row-hover);
+    --color-sidebar-row-control-hover: var(--bg-sidebar-row-control-hover);
 }
 
 /* Structure comes from tone steps (page, then rail, then composer) rather than
@@ -145,6 +147,8 @@ html.dark,
     --border-default: var(--neutral-300);
     --border-subtle: var(--neutral-200);
     --skeleton-highlight: var(--bg-surface-level-4);
+    --bg-sidebar-row-hover: var(--bg-surface-level-2-hover);
+    --bg-sidebar-row-control-hover: var(--bg-surface-level-4);
 }
 
 .dark .context-window-meter,
@@ -158,6 +162,10 @@ html.dark,
     --bg-user-message: var(--bg-surface-level-2);
     /* The shimmer swept over skeletons: a step lighter than their fill. */
     --skeleton-highlight: var(--bg-surface-level-1);
+    /* On the light rail Macaw's surface-level-2 hover is one faint step, so
+       sidebar rows hover two steps down and their buttons one step further. */
+    --bg-sidebar-row-hover: var(--neutral-200);
+    --bg-sidebar-row-control-hover: var(--neutral-300);
     /* Compact control geometry — keep semantic so chat controls, menus, and
        tooltips cannot quietly drift apart. */
     --control-radius: var(--radius-md);

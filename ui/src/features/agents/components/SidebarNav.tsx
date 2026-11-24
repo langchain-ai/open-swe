@@ -39,7 +39,7 @@ const NAV: ReadonlyArray<NavItem> = [
 ]
 
 const ROW =
-  "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm text-primary transition-colors hover:bg-surface-level-2-hover"
+  "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm text-primary transition-colors hover:bg-sidebar-row-hover"
 const SELECTED_ROW = "bg-selected hover:bg-selected-hover"
 
 function SidebarNavLink({

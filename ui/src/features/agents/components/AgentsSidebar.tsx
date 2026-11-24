@@ -142,12 +142,12 @@ interface HydratedRepoGroup extends SidebarRepoGroup {
 }
 
 const NAV_ROW_CLASS =
-  "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm text-primary transition-colors hover:bg-surface-level-2-hover"
+  "flex w-full items-center gap-space-3 rounded-md px-space-2 py-space-1 text-sm text-primary transition-colors hover:bg-sidebar-row-hover"
 const GROUP_ROW_CLASS =
   "h-auto min-w-0 flex-1 justify-start gap-space-2 border-0 px-space-2 py-space-1 text-left font-medium whitespace-normal text-tertiary hover:bg-transparent hover:text-primary dark:hover:bg-transparent"
 const GROUP_CARET_CLASS = "size-3.5 shrink-0"
 const GROUP_HEADER_CLASS =
-  "group/folder flex items-center gap-space-2 rounded-md pr-space-1 transition-colors hover:bg-surface-level-2-hover"
+  "group/folder flex items-center gap-space-2 rounded-md pr-space-1 transition-colors hover:bg-sidebar-row-hover"
 
 /** Threads shown per repo before the group needs a "Show more". */
 const REPO_PREVIEW_COUNT = 5

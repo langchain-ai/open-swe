@@ -229,7 +229,7 @@ function sidebarRowProps({
       "text-primary",
       active
         ? "bg-selected group-hover/row:bg-selected-hover group-has-data-[hover-preview=open]/row:bg-selected-hover"
-        : "group-hover/row:bg-surface-level-2-hover group-has-data-[hover-preview=open]/row:bg-surface-level-2-hover"
+        : "group-hover/row:bg-sidebar-row-hover group-has-data-[hover-preview=open]/row:bg-sidebar-row-hover"
     ),
     style: { paddingLeft: (indent ? 32 : 8) + depth * TREE_STEP },
   }
@@ -666,9 +666,7 @@ export function SidebarThreadRow({
       className={cn(
         rowProps.className,
         "group-data-[selected=true]/drag-preview:bg-selected-hover",
-        selected || rowIsActive
-          ? "bg-selected-hover"
-          : "bg-surface-level-2-hover"
+        selected || rowIsActive ? "bg-selected-hover" : "bg-sidebar-row-hover"
       )}
     >
       {rowContent}
@@ -800,7 +798,7 @@ export function SidebarThreadRow({
                       color="secondary"
                       variant="plain"
                       className={cn(
-                        "absolute top-1/2 right-1 -translate-y-1/2 text-secondary opacity-0 transition-opacity group-hover/row:opacity-100 group-has-data-[hover-preview=open]/row:z-(--thread-actions-z-index) group-has-data-[hover-preview=open]/row:opacity-100 hover:bg-surface-level-4 hover:text-primary focus-visible:bg-surface-level-4 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-surface-level-4 [@media(hover:none)]:opacity-100",
+                        "absolute top-1/2 right-1 -translate-y-1/2 text-secondary opacity-0 transition-opacity group-hover/row:opacity-100 group-has-data-[hover-preview=open]/row:z-(--thread-actions-z-index) group-has-data-[hover-preview=open]/row:opacity-100 hover:bg-sidebar-row-control-hover hover:text-primary focus-visible:bg-sidebar-row-control-hover focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-sidebar-row-control-hover [@media(hover:none)]:opacity-100",
                         moreMenuOpen && "opacity-100"
                       )}
                     />
