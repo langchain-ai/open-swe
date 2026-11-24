@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import ExitStack, closing
@@ -54,6 +55,7 @@ from langgraph_sdk.errors import (
     RateLimitError,
 )
 from langsmith import Client, agent_address, get_tracing_context, tracing_context
+from langsmith.run_helpers import _set_tracing_context
 from langsmith.run_trees import RunTree
 from managed_deepagents import (
     ConnectionNotFoundError,
@@ -76,8 +78,10 @@ from rt.file_tools import FileToolsMiddleware
 from rt.gateway import RUN_GATEWAY
 from rt.git_evidence import TurnGit, turn_git
 from rt.kinds import KINDS
+from rt.loop import RunLoop
 from rt.middleware import BackendRunMiddleware, RunState, RuntimeToolsMiddleware
 from rt.model_calls import MODEL_OUTAGE_MESSAGE, model_call_guards
+from rt.routing import Route, RouteClassifier
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from rt.tools import STATE_KEY, called, operation_tool
 from rt.tracing import RootAgentTraceMiddleware, TurnTrace
@@ -89,6 +93,7 @@ from runtime_api.catalog import (
     LoopRules,
     MemoryScope,
     ModelSpec,
+    RoutingRules,
     RunModels,
     SandboxCreate,
     SandboxSpec,
@@ -1474,10 +1479,14 @@ async def test_sandbox_tools_ask_the_guards_first(
     in_sandbox.assert_awaited_once()
 
 
+@pytest.mark.parametrize("classified_ahead", [True, False])
 @pytest.mark.parametrize("launched_worker", [False, True])
 @pytest.mark.parametrize("next_trace_available", [True, False])
 async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
-    monkeypatch: pytest.MonkeyPatch, next_trace_available: bool, launched_worker: bool
+    monkeypatch: pytest.MonkeyPatch,
+    next_trace_available: bool,
+    launched_worker: bool,
+    classified_ahead: bool,
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     monkeypatch.setattr("rt.middleware.run_id", lambda: "run-1")
@@ -1490,13 +1499,27 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         "user_id": "7e6f62e6-0313-413c-b964-710ddc5461a4",
         "billed_user_email": "human@example.com",
         "billing_bucket": "user",
+        "ls_git_repo": "org/configured",
     }
     final = {**actor, "ls_git_repo": "org/actual", "ls_git_branch": "Exact/PR-head"}
     backend = _run_backend(
         invocation_id="turn",
-        catalog=Catalog(trace_metadata=actor, trace_tags=["model_routing:active"], inbox=_INBOX),
+        catalog=Catalog(
+            trace_metadata=actor,
+            trace_tags=["model_routing:active"],
+            inbox=_INBOX,
+            loop=LoopRules(routing=RoutingRules(shadow=True)),
+        ),
     )
     git = turn_git(backend.run)
+
+    async def classify(_self: RouteClassifier, _messages: Sequence[object]) -> Route:
+        await FakeListChatModel(responses=["lookup"]).ainvoke("classify")
+        return Route("default", task_type="lookup")
+
+    monkeypatch.setattr(RouteClassifier, "classify", classify)
+    if not classified_ahead:
+        monkeypatch.setattr(RunLoop, "classify_ahead", lambda self, state: None)
 
     @tool
     async def nested_call(text: str) -> str:
@@ -1529,9 +1552,25 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
         ls_client=client,
         extra={"metadata": {"created_by": "system"}},
     )
-    monkeypatch.setattr(FakeListChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+    monkeypatch.setattr(GenericFakeChatModel, "bind_tools", lambda self, *args, **kwargs: self)
+
+    @tool
+    async def look() -> str:
+        """Look around."""
+        return "seen"
+
     graph = create_deep_agent(
-        model=FakeListChatModel(responses=["done"]),
+        tools=[look],
+        model=GenericFakeChatModel(
+            messages=iter(
+                [
+                    AIMessage(content="", tool_calls=[ToolCall(name="look", args={}, id="c1")]),
+                    AIMessage(content="done"),
+                    AIMessage(content="done again"),
+                    AIMessage(content="done on the branch"),
+                ]
+            )
+        ),
         middleware=[BackendRunMiddleware(backend)],
         checkpointer=InMemorySaver(),
     )
@@ -1555,11 +1594,34 @@ async def test_turn_reconciliation_reaches_runtime_root_llm_and_nested_calls(
     await backend.run.trace.ended()
     saved = await graph.aget_state(config)
     # A turn starts with no task joined since its catalog was planned.
-    assert saved.values["open_swe_state"] == {"kept": True, JOINED_TASK_CONTEXT: None}
+    assert saved.values["open_swe_state"] == {
+        "kept": True,
+        JOINED_TASK_CONTEXT: None,
+        "jev_shadowed": True,
+        "model_route": "default",
+    }
     assert "ls_git_repo" not in parent.metadata
     created = {call.kwargs["id"]: call.kwargs for call in client.create_run.call_args_list}
     assert any(run["run_type"] == "llm" for run in created.values())
     assert any(run["run_type"] == "tool" for run in created.values())
+    sent_git: dict[str, set[tuple[object, object]]] = {"llm": set(), "tool": set()}
+    for run in created.values():
+        if run["run_type"] == "llm" or run["name"] == "look":
+            sent = _run_metadata(run)
+            assert {key for key, value in actor.items() if sent.get(key) != value} <= {
+                "LANGSMITH_AGENT_VERSION",
+                "ls_git_repo",
+            }
+            assert (sent["ls_harness_name"], sent["ls_agent_runtime"], sent["ls_agent_type"]) == (
+                "robin",
+                "robin",
+                "root",
+            )
+            sent_git[run["run_type"]].add((sent.get("ls_git_repo"), sent.get("ls_git_branch")))
+    assert sent_git == {
+        "llm": {("org/configured", None), ("org/actual", "Exact/PR-head")},
+        "tool": {("org/actual", "Exact/PR-head")},
+    }
     reconciled = {
         run_id: metadata
         for run_id, patch in updates
@@ -1667,11 +1729,86 @@ async def test_root_attribution_survives_a_missing_catalog(
     root = backend.run.trace.root
     assert root is not None
     assert root.metadata.items() >= billing.items()
+    assert (root.metadata["ls_harness_name"], root.metadata["ls_agent_type"]) == ("robin", "root")
     assert root.metadata.get("created_by") == (None if creator == "system" else creator)
     root_patches = [patch for run_id, patch in updates if run_id == root.id]
     assert root_patches
     assert _run_metadata(root_patches[-1]).items() >= billing.items()
     assert _run_metadata(root_patches[-1]).get("created_by") != "system"
+
+
+def test_labeled_calls_keep_where_the_turn_traces_to() -> None:
+    client = MagicMock(spec=Client)
+    root = RunTree(name="turn", run_type="chain", ls_client=client)
+    with tracing_context(
+        enabled=True,
+        parent=root,
+        project_name="robin-prod",
+        client=client,
+        tags=["turn"],
+        metadata={"kept": True, "ls_agent_type": "subagent"},
+    ):
+        before = get_tracing_context()
+        with TurnTrace.labeled({"ls_git_repo": "org/repo"}):
+            inside = get_tracing_context()
+
+    assert {key: inside[key] for key in before if key != "metadata"} == {
+        key: value for key, value in before.items() if key != "metadata"
+    }
+    assert inside["metadata"] == {
+        "ls_harness_name": "robin",
+        "ls_agent_runtime": "robin",
+        "ls_agent_type": "subagent",
+        "kept": True,
+        "ls_git_repo": "org/repo",
+    }
+
+
+def test_labeled_calls_skip_their_parent_steps_own_tags() -> None:
+    client = MagicMock(spec=Client)
+    step = RunTree(
+        name="step",
+        run_type="chain",
+        ls_client=client,
+        tags=["graph:step:4"],
+        extra={"metadata": {"step_only": True}},
+    )
+
+    def labeled_in_a_graph_step() -> tuple[dict[str, object], RunTree]:
+        _set_tracing_context({"parent": step, "enabled": True, "client": client})
+        with TurnTrace.labeled({"ls_git_repo": "org/repo"}):
+            return get_tracing_context(), step.create_child(name="call", run_type="llm")
+
+    inside, call = contextvars.copy_context().run(labeled_in_a_graph_step)
+    tags, metadata = inside["tags"], inside["metadata"]
+    assert tags is None or isinstance(tags, list)
+    assert isinstance(metadata, dict)
+
+    assert inside["parent"] is step
+    assert "graph:step:4" not in (tags or [])
+    assert "step_only" not in metadata
+    assert "step_only" not in call.metadata
+    assert metadata["ls_git_repo"] == "org/repo"
+
+
+async def test_a_resumed_runs_calls_are_labeled_without_its_root() -> None:
+    client = MagicMock(spec=Client)
+    trace = TurnTrace()
+
+    async def resumed(_: object) -> None:
+        with trace.labeled({"ls_git_repo": "org/repo"}):
+            await FakeListChatModel(responses=["done"]).ainvoke("hello")
+
+    await RunnableLambda(resumed).ainvoke(
+        None, {"callbacks": [LangChainTracer(client=client, project_name="test")]}
+    )
+
+    [llm] = [
+        call.kwargs for call in client.create_run.call_args_list if call.kwargs["run_type"] == "llm"
+    ]
+    assert trace.root is None
+    assert _run_metadata(llm)["ls_git_repo"] == "org/repo"
+    assert _run_metadata(llm)["ls_harness_name"] == "robin"
 
 
 async def test_a_run_planned_without_a_sandbox_ends_before_it_prepares(
@@ -1725,6 +1862,22 @@ async def test_backfill_preserves_destination_timing_and_outputs(
             extra={"metadata": {"invocation_id": "turn"}},
         )
         child.end(outputs={"answer": "done"}, end_time=ended)
+        labeled = root.create_child(
+            name="labeled model",
+            run_type="llm",
+            start_time=started,
+            extra={
+                "metadata": {
+                    "invocation_id": "turn",
+                    "ls_git_repo": "org/repo",
+                    "ls_git_branch": "feature",
+                    "ls_harness_name": "robin",
+                    "ls_agent_runtime": "robin",
+                    "ls_agent_type": "subagent",
+                }
+            },
+        )
+        labeled.end(outputs={"answer": "done"}, end_time=ended)
         trace = TurnTrace()
         trace.root = root
 
@@ -1741,6 +1894,7 @@ async def test_backfill_preserves_destination_timing_and_outputs(
         assert isinstance(extra := patch["extra"], dict)
         assert extra["metadata"]["ls_git_repo"] == "org/repo"
         assert extra["metadata"]["ls_git_branch"] == "feature"
+        assert extra["metadata"]["ls_harness_name"] == "robin"
     assert len(patches) == 1
     if destination == "project":
         assert child_patch["session_name"] == "source"
@@ -1749,9 +1903,10 @@ async def test_backfill_preserves_destination_timing_and_outputs(
     assert child.outputs == {"answer": "done"}
     assert root.end_time is None
     assert root.metadata["ls_git_repo"] == child.metadata["ls_git_repo"] == "org/repo"
+    assert labeled.metadata["ls_agent_type"] == "subagent"
 
 
-@pytest.mark.parametrize("failure", ["lookup", "export", "fingerprint"])
+@pytest.mark.parametrize("failure", ["lookup", "export", "fingerprint", "label"])
 async def test_optional_trace_failures_do_not_change_successful_turn_output(
     monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
@@ -1771,6 +1926,8 @@ async def test_optional_trace_failures_do_not_change_successful_turn_output(
     if failure == "fingerprint":
         # The run's end never waits for the turn's last fingerprint.
         monkeypatch.setattr(TurnGit, "metadata", stuck_fingerprint)
+    if failure == "label":
+        monkeypatch.setattr("rt.tracing.get_tracing_context", unavailable_trace)
 
     git = turn_git(backend.run)
 
@@ -2814,6 +2971,7 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
             BackendRunMiddleware(backend),
             RuntimeToolsMiddleware(backend, reported_elsewhere=()),
             RunModelCallLimit(backend, 10),
+            RootAgentTraceMiddleware(),
         ],
     )
     if managed:
@@ -2856,10 +3014,15 @@ async def test_backend_calls_carry_the_running_spans_trace_without_its_metadata(
         run
         for run in created
         if str(run["name"]).startswith(
-            ("BackendRunMiddleware.", "RuntimeToolsMiddleware.", "RunModelCallLimit.")
+            (
+                "BackendRunMiddleware.",
+                "RuntimeToolsMiddleware.",
+                "RunModelCallLimit.",
+                "RootAgentTraceMiddleware.",
+            )
         )
     ]
-    assert hooks
+    assert any(run["name"] == "RootAgentTraceMiddleware.awrap_model_call" for run in hooks)
     assert all(run["inputs"] == {} for run in hooks)
     models = [run for run in created if run["run_type"] == "llm"]
     tools = [run for run in created if run["run_type"] == "tool" and run["name"] == "look"]

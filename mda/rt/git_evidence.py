@@ -12,7 +12,9 @@ later, then 60s; after three in a row the turn takes no more. A change no finger
 could see, or one a tool made before the starting fingerprint was taken, may be
 missing from the targets, so the trace says ``robin_git_incomplete``.
 
-Once the run has ended, the targets are reconciled in the order the work happened
+Every model and tool call is tagged as it's sent with the repo and branch known at
+that moment (``TurnGit.known``), which is what the turn's work touched so far or else
+the one checkout it started in. Once the run has ended, the targets are reconciled in the order the work happened
 (``TurnTrace.end``): the first is the trace's ``ls_git_repo`` and ``ls_git_branch``,
 a pull request's head branch preferred for its repository. ``open_swe_git_commits``
 retains each observed checkout HEAD under its actual branch, before that preference.
@@ -165,6 +167,11 @@ class TurnGit:
             if self._late or self._changed_at is not None or self._unread_checkouts
             else {}
         )
+        return {**self.known(), **incomplete}
+
+    def known(self) -> dict[str, JsonValue]:
+        """The repos and branches the turn's work touched so far, earliest first, or else the
+        one checkout it started in, read without waiting."""
         observed: list[GitTarget] = []
         pull_requests: dict[str, list[str]] = {}
         for observation in sorted(self._observed, key=lambda observed: observed.at):
@@ -178,7 +185,7 @@ class TurnGit:
             branch = target.branch if not branches or target.branch in branches else branches[0]
             targets.setdefault((target.repo, branch), None)
         if not targets:
-            return incomplete
+            return self._started_in()
         repo, branch = next(iter(targets))
         commits: list[JsonValue] = [
             {"repo": target.repo, "branch": target.branch, "commit": target.head}
@@ -190,7 +197,20 @@ class TurnGit:
             **({"open_swe_git_commits": commits} if commits else {}),
             "ls_git_repo": repo,
             **({"ls_git_branch": branch} if branch else {}),
-            **incomplete,
+        }
+
+    def _started_in(self) -> dict[str, JsonValue]:
+        """The one checkout the turn started in, once its first check has finished."""
+        baseline = self._baseline
+        if baseline is None or not baseline.done() or baseline.cancelled() or baseline.exception():
+            return {}
+        snapshot = baseline.result()
+        if snapshot is None or len(snapshot.repos) != 1:
+            return {}
+        checkout = next(iter(snapshot.repos.values()))
+        return {
+            "ls_git_repo": checkout.repo,
+            **({"ls_git_branch": checkout.branch} if checkout.branch else {}),
         }
 
     @property

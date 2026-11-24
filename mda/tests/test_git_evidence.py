@@ -99,6 +99,53 @@ async def test_a_turn_that_changed_nothing_waits_for_no_fingerprint(
     assert await asyncio.wait_for(git.metadata(), 1) == {}
 
 
+async def test_one_checkout_names_the_turns_repo_and_a_detached_one_no_branch(
+    tmp_path: Path, sandbox: LocalShellBackend
+) -> None:
+    _checkout(tmp_path / "one", "only", "https://github.com/org/only.git", "feature")
+    alone = TurnGit()
+    alone.start(sandbox, str(tmp_path / "one"))
+    await alone.changing()
+    _checkout(tmp_path / "two", "first", "https://github.com/org/first.git")
+    _checkout(tmp_path / "two", "second", "https://github.com/org/second.git")
+    ambiguous = TurnGit()
+    ambiguous.start(sandbox, str(tmp_path / "two"))
+    await ambiguous.changing()
+    detached_checkout = _checkout(
+        tmp_path / "three", "detached", "https://github.com/org/detached.git"
+    )
+    _git("-C", str(detached_checkout), "checkout", "--detach")
+    detached = TurnGit()
+    detached.start(sandbox, str(tmp_path / "three"))
+    await detached.changing()
+
+    assert await alone.metadata() == {"ls_git_repo": "org/only", "ls_git_branch": "feature"}
+    assert await ambiguous.metadata() == {}
+    assert await detached.metadata() == {"ls_git_repo": "org/detached"}
+    changed = TurnGit()
+    changed.start(sandbox, str(tmp_path / "three"))
+    await changed.changing()
+    (detached_checkout / "file").write_text("changed")
+    changed.changed(1)
+    worked = await changed.metadata()
+    assert (worked["ls_git_repo"], worked.get("ls_git_branch")) == ("org/detached", None)
+
+
+async def test_a_starting_fingerprint_that_failed_names_nothing(
+    tmp_path: Path, sandbox: LocalShellBackend
+) -> None:
+    _checkout(tmp_path, "only", "https://github.com/org/only.git")
+
+    async def broken() -> None:
+        raise RuntimeError("sandbox setup failed")
+
+    git = TurnGit()
+    git.start(sandbox, str(tmp_path), broken)
+    await asyncio.sleep(0)
+
+    assert git.known() == {}
+
+
 async def test_a_sandbox_the_script_cannot_read_leaves_only_the_pull_requests(
     tmp_path: Path, sandbox: LocalShellBackend
 ) -> None:

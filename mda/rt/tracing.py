@@ -3,7 +3,8 @@
 import asyncio
 import logging
 import os
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from typing import Final
 
 from langchain.agents.middleware import AgentMiddleware, TracePolicy, omit_payload
@@ -45,6 +46,9 @@ def _ended(task: asyncio.Task[None]) -> None:
 
 
 MIDDLEWARE_TRACE_POLICY = TracePolicy(process_inputs=omit_payload)
+
+_HARNESS: Final[dict[str, JsonValue]] = {"ls_harness_name": "robin", "ls_agent_runtime": "robin"}
+_ROOT_AGENT: Final[dict[str, JsonValue]] = {**_HARNESS, "ls_agent_type": "root"}
 
 _ENVIRONMENTS: Final = {
     "open-swe-mda-prod": "production",
@@ -122,7 +126,7 @@ class TurnTrace:
         self._tool_calls = self._failed_tool_calls = self._nonzero_shell_exits = 0
         try:
             self.root = self.current_root()
-            self.update({})
+            self.update(_ROOT_AGENT)
             self._count_tools()
         except Exception:
             logger.warning("Could not tag the turn trace", exc_info=True)
@@ -132,6 +136,33 @@ class TurnTrace:
             self.root.metadata.update({**metadata, **_deployment_provenance()})
             if self.root.metadata.get("created_by") == "system":
                 self.root.metadata.pop("created_by")
+
+    @staticmethod
+    @contextmanager
+    def labeled(metadata: Mapping[str, JsonValue]) -> Iterator[None]:
+        """Tag the calls made inside with ``metadata`` and their turn's ``invocation_id`` as
+        they're sent, while they still go to the same trace and project, or send them untagged
+        if the tags can't be read."""
+        try:
+            current = get_tracing_context()
+            parent = current["parent"]
+            turn = (
+                {"invocation_id": parent.metadata["invocation_id"]}
+                if parent is not None and "invocation_id" in parent.metadata
+                else {}
+            )
+            current["metadata"] = {
+                **_ROOT_AGENT,
+                **(current["metadata"] or {}),
+                **turn,
+                **metadata,
+            }
+        except Exception:
+            logger.warning("Could not label the call's trace", exc_info=True)
+            yield
+            return
+        with tracing_context(**current, inherit_parent_tags_and_metadata=False):
+            yield
 
     def tag(self, tags: Sequence[str]) -> None:
         """Add ``tags`` to the turn's root trace."""
@@ -234,7 +265,7 @@ class TurnTrace:
         except Exception:
             logger.warning("Could not gather the turn's trace metadata", exc_info=True)
             found = {}
-        await TurnTrace._reconcile(root, {**metadata, **found})
+        await TurnTrace._reconcile(root, {**_HARNESS, **metadata, **found})
 
     @staticmethod
     async def _reconcile(root: RunTree, metadata: Mapping[str, JsonValue]) -> None:
@@ -247,10 +278,12 @@ class TurnTrace:
                     "invocation_id"
                 ) != root.metadata.get("invocation_id"):
                     continue
+                before = dict(run.metadata)
                 run.metadata.update(metadata)
                 if run is root and run.metadata.get("created_by") == "system":
                     run.metadata.pop("created_by")
-                runs.append(run)
+                if run.metadata != before:
+                    runs.append(run)
                 pending.extend(run.child_runs)
 
             def patch() -> None:
@@ -278,6 +311,8 @@ class RootAgentTraceMiddleware(AgentMiddleware):
     though MDA already tagged them: deepagents starts its run with none, and the backend
     settles it only as the worker adopts its run token, after its run's metadata is fixed.
     """
+
+    trace_policy = MIDDLEWARE_TRACE_POLICY
 
     # Whom a call bills to, as the backend names it in a run's trace metadata.
     _BILLING_KEYS: Final = (

@@ -1286,6 +1286,7 @@ async def test_mda_catalog_leaves_integrations_and_code_mode_to_mda(
     metadata = catalog["trace_metadata"]
     assert isinstance(metadata, dict)
     assert metadata["LANGSMITH_AGENT_VERSION"] == "current-backend-sha"
+    assert metadata["ls_git_repo"] == "acme/widgets"
     # Traces split by the thread's visibility.
     assert metadata["visibility"] == "private"
     # The trace records the model its person picked, and the experiment's tier.

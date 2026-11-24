@@ -32,7 +32,7 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from functools import partial
 from typing import Annotated, Final, NotRequired, cast
@@ -353,7 +353,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return build_model(models.model)
 
     def _trace_metadata(self) -> dict[str, JsonValue]:
-        """Who the run acts for."""
+        """The person the run works for and the thread's repo."""
         return {**self._backend.run.catalog.trace_metadata}
 
     def _carrying(
@@ -451,7 +451,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         # which goes on while it prepares.
         opening = asyncio.create_task(self._opened(runtime))
         loading = asyncio.create_task(self._load_tool_specs())
-        classifying = self._loop.classify_ahead(state)
+        with self._labeled():
+            classifying = self._loop.classify_ahead(state)
         binding = SandboxBinding.of(self._backend.run)
         if binds_later:
             # Neither preparing nor the first model call needs the sandbox: the backend hears
@@ -482,7 +483,9 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
             # What the backend's preparation writes wins over where a turn starts from.
             starting = self._loop.starting()
             held = {**state.get(STATE_KEY, {}), **prepared.update}
-            prepared.update.update(await self._loop.routed(held, state["messages"], classifying))
+            with self._labeled():
+                routed = await self._loop.routed(held, state["messages"], classifying)
+            prepared.update.update(routed)
             # The route the classifier chose, next to the model a person picked on the trace.
             if (route := self._backend.run.route) not in (None, "default"):
                 trace.update({"model_route": route})
@@ -621,7 +624,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse | ExtendedModelResponse:
-        response = await self._call_model(request, handler)
+        with self._labeled():
+            response = await self._call_model(request, handler)
         # The reply's report rides with the reply into the run's checkpoint.
         carried = self._backend.outbox.carried(request.state)
         if carried is None:
@@ -635,7 +639,8 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
-        result = await handler(request)
+        with self._labeled():
+            result = await handler(request)
         # The call's reports, and its subagent's, ride with its result into the checkpoint.
         messages = (
             [result]
@@ -654,6 +659,11 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         if isinstance(result.update, dict):
             return dataclasses.replace(result, update={**result.update, OUTBOX_KEY: carried})
         return result
+
+    def _labeled(self) -> AbstractContextManager[None]:
+        """Tag the call made inside with the person, repo and branch."""
+        run = self._backend.run
+        return run.trace.labeled({**self._trace_metadata(), **turn_git(run).known()})
 
     async def _call_model(
         self,

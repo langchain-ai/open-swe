@@ -187,7 +187,14 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         ],
     )
 
+    without_github = User(
+        id=uuid7(),
+        identities=[UserIdentity(provider="slack", external_id="U456", email="ana@example.com")],
+    )
+
     async def by_identity(provider: str, external_id: str) -> User | None:
+        if (provider, external_id) == ("slack", "U456"):
+            return without_github
         return user if (provider, external_id) in {("slack", "U123"), ("github", "2001")} else None
 
     async def by_login(provider: str, login: str) -> User | None:
@@ -225,6 +232,17 @@ async def test_run_metadata_uses_users_id_across_slack_and_github(
         # no one.
         assert ACTING_USER_KEY not in created["metadata"]
         assert SENDER_USER_KEY not in created["metadata"]
+
+    await dispatch.create_durable_run(
+        "thread-1",
+        "agent",
+        input={"messages": []},
+        source="slack",
+        thread_title=None,
+        config={"configurable": {"slack_thread": {"triggering_user_id": "U456"}}},
+        client=client,
+    )
+    assert "ls_attribution_identifier" not in client.runs.created[-1]["metadata"]
 
     # A follow-up the person sent themselves acts as them.
     await dispatch.create_durable_run(
@@ -443,7 +461,10 @@ async def test_review_billing_uses_pr_author_not_requester(
         if linked
         else [],
     )
-    requester = User(id=requester_id)
+    requester = User(
+        id=requester_id,
+        identities=[UserIdentity(provider="github", external_id="3001", login="requester")],
+    )
     monkeypatch.setattr(
         PullRequest,
         "get",
@@ -472,6 +493,7 @@ async def test_review_billing_uses_pr_author_not_requester(
     assert metadata["billing_bucket"] == "user"
     assert metadata["billed_robin_user_id"] == str(author_id)
     assert metadata["user_id"] == str(author_id)
+    assert "ls_attribution_identifier" not in metadata
     assert prepared["configurable"]["user_id"] == str(requester_id)
     assert metadata[ACTING_USER_KEY] == str(requester_id)
 
@@ -484,6 +506,7 @@ async def test_review_billing_uses_pr_author_not_requester(
     assert unresolved["metadata"][ACTING_USER_KEY] == str(requester_id)
     assert unresolved["configurable"]["user_id"] == str(requester_id)
     assert "billed_robin_user_id" not in unresolved["metadata"]
+    assert "ls_attribution_identifier" not in unresolved["metadata"]
 
 
 @pytest.mark.parametrize("status", ["success", "error", "timeout", "interrupted"])

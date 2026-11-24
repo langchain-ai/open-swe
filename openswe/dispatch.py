@@ -48,7 +48,7 @@ from openswe.invocation import new_invocation_id, resolve_invocation_id, with_in
 from openswe.run_config import RunConfig
 from openswe.source_context import SourceContext
 from openswe.threads.creation import ensure_titled_thread
-from openswe.trace_metadata import BILLING_FIELDS, BILLING_USER_FIELDS, RunOrigin
+from openswe.trace_metadata import ATTRIBUTION_FIELD, BILLING_FIELDS, BILLING_USER_FIELDS, RunOrigin
 from openswe.ui_invalidations import Topic
 from openswe.users import User
 
@@ -441,8 +441,6 @@ async def _run_user_metadata(
             metadata.update(user.billing_trace_metadata())
             if user.email:
                 metadata["user_email"] = user.email
-            if user.github_login:
-                metadata["ls_attribution_identifier"] = user.github_login
     except Exception:
         logger.warning("Could not resolve run user for trace metadata", exc_info=True)
     return metadata
@@ -483,7 +481,7 @@ async def prepare_durable_run(
         else None
     )
     if billing is not None:
-        for key in BILLING_USER_FIELDS:
+        for key in (*BILLING_USER_FIELDS, ATTRIBUTION_FIELD):
             run_metadata.pop(key, None)
         run_metadata.update(billing)
     elif (

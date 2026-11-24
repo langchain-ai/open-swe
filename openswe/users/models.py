@@ -35,6 +35,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, selectinload
 from openswe.database import postgres
 from openswe.database.orm import NOW, Base
 from openswe.input_messages import PersonIdentity, split_person_id
+from openswe.trace_metadata import ATTRIBUTION_FIELD
 from openswe.users.authorization import (
     AccountConflict,
     UnauthorizedUser,
@@ -99,6 +100,8 @@ class User(Base):
         }
         if self.email:
             metadata["billed_user_email"] = self.email
+        if attribution := self.github_login:
+            metadata[ATTRIBUTION_FIELD] = attribution
         return metadata
 
     @property
