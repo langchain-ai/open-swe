@@ -10,6 +10,7 @@ import {
   optIntoQueue,
   openThreadViaSlackLink,
   readyComposerEditor,
+  setThreadView,
   threadIdFromUrl,
   threadState,
   typeIntoComposer,
@@ -182,6 +183,7 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     page,
   }, testInfo) => {
     await loginAs(page, SAME_USER);
+    await setThreadView(page, "transcript");
     await openThreadViaSlackLink(page);
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);

@@ -6,6 +6,7 @@ import {
   dismissOnboardingIfShown,
   loginAs,
   setFollowUpBehavior,
+  setThreadView,
   typeIntoComposer,
 } from "./helpers/dashboard";
 
@@ -28,6 +29,7 @@ test("a busy run takes a queued follow-up and a monitor event before its next mo
   page,
 }) => {
   await loginAs(page, SAME_USER);
+  await setThreadView(page, "transcript");
   // The follow-up steers the live run; an earlier spec may have left queueing on.
   await setFollowUpBehavior(page, "steer");
   await page.goto("/mock/slack");

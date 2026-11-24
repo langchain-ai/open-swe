@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react"
 
-export const STREAM_PREFERENCE_STORAGE_KEY = "open-swe.streaming.use-stream"
-export const STREAM_PREFERENCE_DEFAULT = false
+export const STREAM_PREFERENCE_STORAGE_KEY = "open-swe.streaming.use-stream.v2"
+export const STREAM_PREFERENCE_DEFAULT = true
 const CHANGE_EVENT = "open-swe-stream-preference"
 
 export function readPreference(): boolean {

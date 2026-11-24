@@ -30,21 +30,53 @@ const TURN_PAGE_SIZE = 40
 
 /** The SDK stream, behind the source interface. */
 export function useAgentStreamSource(threadId: string): StreamThreadSource {
-  const { stream, connection, trackRunAcceptance } =
+  const { stream, client, connection, trackRunAcceptance } =
     useAgentThreadStream(threadId)
   // The thread's own cancel also stops its workers, so it runs first and this
   // only stops showing the run.
   const stop = useCancelRun(threadId, stream.disconnect)
-  const login = useSession().data?.login
+  const viewer = useSession().data ?? undefined
   const { entries: queueEntries, cancel: cancelSubmission } =
     useSubmissionQueue(stream)
   const queued = useMemo<Array<QueuedTurn>>(
     () =>
       queueEntries
-        .map((entry) => queueEntryToTurn(entry, login))
+        .map((entry) => queueEntryToTurn(entry, viewer))
         .filter((entry): entry is QueuedTurn => entry !== null),
-    [login, queueEntries]
+    [viewer, queueEntries]
   )
+  const settleQueue = useCallback(async () => {
+    if (queueEntries.length === 0) return
+    let gone: (entry: (typeof queueEntries)[number]) => boolean
+    try {
+      // Pending first: a kept run that starts between the two reads then
+      // shows up in the second.
+      const pending = await client.runs.list(threadId, {
+        status: "pending",
+        limit: 100,
+        select: ["run_id"],
+      })
+      const running = await client.runs.list(threadId, {
+        status: "running",
+        limit: 100,
+        select: ["run_id"],
+      })
+      const held = new Set([...pending, ...running].map((run) => run.run_id))
+      gone = (entry) => !held.has(entry.runId ?? entry.id)
+    } catch {
+      // Without the server's list, only the viewer's own runs are known to be
+      // cancelled: the stop always cancels those.
+      const own = new Set(
+        queued
+          .filter((turn) => viewer && turn.senderLogin === viewer.login)
+          .map((turn) => turn.turnId)
+      )
+      gone = (entry) => own.has(entry.id)
+    }
+    await Promise.allSettled(
+      queueEntries.filter(gone).map((entry) => cancelSubmission(entry.id))
+    )
+  }, [cancelSubmission, client, queueEntries, queued, threadId, viewer])
 
   const messages = useMemo(() => {
     const started = perfNow()
@@ -186,6 +218,7 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     shownFrom,
     queued,
     cancelQueued: cancelSubmission,
+    settleQueue,
     isRunning: stream.isLoading,
     isHydrating: stream.isThreadLoading,
     hydration: stream.hydrationPromise,

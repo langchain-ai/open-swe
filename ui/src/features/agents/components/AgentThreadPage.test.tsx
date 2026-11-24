@@ -212,6 +212,7 @@ describe("AgentThreadPage", () => {
   })
 
   it("reads the thread through the stream while its summary loads, under the SDK setting", () => {
+    setUseStreamPreference(false)
     vi.mocked(useAgentThread).mockReturnValue(awaitingSummary as never)
     stream.messages = [answer]
 
@@ -235,6 +236,7 @@ describe("AgentThreadPage", () => {
   })
 
   it("starts the transcript read while the summary loads, unless the SDK setting is on", () => {
+    setUseStreamPreference(false)
     vi.mocked(useAgentThread).mockReturnValue(awaitingSummary as never)
     render(<AgentThreadPage threadId="transcript-early" />, { wrapper })
     expect(fetchTranscript).toHaveBeenCalledWith("transcript-early")

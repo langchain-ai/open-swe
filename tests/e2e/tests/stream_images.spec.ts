@@ -3,6 +3,7 @@ import {
   SAME_ORIGIN_HEADERS,
   SAME_USER,
   loginAs,
+  setThreadView,
   waitForThreadIdle,
 } from "./helpers/dashboard";
 
@@ -88,9 +89,7 @@ test("a thread's images reach the stream view as links and still show", async ({
     .toEqual(Array(6).fill("link"));
   await waitForThreadIdle(page, threadId);
 
-  await page.addInitScript(() =>
-    window.localStorage.setItem("open-swe.streaming.use-stream", "true"),
-  );
+  await setThreadView(page, "stream");
   await page.goto(`/agents/${threadId}`);
   const shown = page.getByRole("main").locator("img[src^='blob:']");
   await expect(shown).toHaveCount(6);

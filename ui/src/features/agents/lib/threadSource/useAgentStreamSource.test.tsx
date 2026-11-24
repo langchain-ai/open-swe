@@ -19,18 +19,37 @@ const stream = {
   submit: vi.fn<AgentStream["submit"]>(),
 }
 
+const queue = {
+  entries: [] as Array<{
+    id: string
+    runId?: string
+    createdAt: Date
+    values?: unknown
+  }>,
+  cancel: vi.fn<(id: string) => Promise<boolean>>(),
+}
+const listRuns =
+  vi.fn<
+    (
+      threadId: string,
+      options: { status?: string }
+    ) => Promise<Array<{ run_id: string }>>
+  >()
+
 vi.mock("@/features/agents/lib/stream/useAgentThreadStream", () => ({
   useAgentThreadStream: () => ({
     stream,
+    client: { runs: { list: listRuns } },
     connection: { status: "connected" },
     trackRunAcceptance: () => accepted,
   }),
 }))
 vi.mock("@langchain/react", () => ({
-  useSubmissionQueue: () => ({ entries: [], cancel: vi.fn() }),
+  useSubmissionQueue: () => queue,
 }))
 vi.mock("./useCancelRun", () => ({ useCancelRun: () => vi.fn() }))
-vi.mock("@/lib/session", () => ({ useSession: () => ({ data: {} }) }))
+const session = { data: { login: "alice", user_id: "u-alice" } }
+vi.mock("@/lib/session", () => ({ useSession: () => session }))
 vi.mock("@/features/agents/lib/transcript/api", async (importOriginal) => ({
   ...(await importOriginal<
     typeof import("@/features/agents/lib/transcript/api")
@@ -43,9 +62,54 @@ beforeEach(() => {
   stream.submit.mockReset()
   stream.messages = []
   stream.isLoading = false
+  queue.entries = []
+  queue.cancel.mockReset()
+  listRuns.mockReset()
   vi.mocked(postRunStart).mockReset()
 })
 afterEach(cleanup)
+
+it("drops after a stop only the queued runs the server no longer holds", async () => {
+  queue.entries = ["mine", "theirs", "report"].map((id) => ({
+    id,
+    runId: id,
+    createdAt: new Date(2_000),
+  }))
+  listRuns.mockImplementation(async (_, { status }) =>
+    status === "pending" ? [{ run_id: "theirs" }] : []
+  )
+  const { result } = renderHook(() => useAgentStreamSource("thread-1"))
+
+  await result.current.settleQueue()
+
+  expect(queue.cancel.mock.calls).toEqual([["mine"], ["report"]])
+})
+
+it("drops only the viewer's own queued runs after a stop when the runs can't be listed", async () => {
+  const message = (id: string, sender?: string) => ({
+    id,
+    runId: id,
+    createdAt: new Date(2_000),
+    values: {
+      messages: [
+        {
+          id: `${id}-message`,
+          content: "Check the tests",
+          ...(sender
+            ? { additional_kwargs: { open_swe_provenance: { sender } } }
+            : {}),
+        },
+      ],
+    },
+  })
+  queue.entries = [message("mine"), message("theirs", "user:u-bob")]
+  listRuns.mockRejectedValue(new Error("offline"))
+  const { result } = renderHook(() => useAgentStreamSource("thread-1"))
+
+  await result.current.settleQueue()
+
+  expect(queue.cancel.mock.calls).toEqual([["mine"]])
+})
 
 const error = new Error("Run failed")
 const refusal = new AgentsApiError(410, "This thread is read-only.")

@@ -54,7 +54,7 @@ it("reads a stream source's thread again in place when refreshed", () => {
   expect(hydrate).toHaveBeenCalledOnce()
 })
 
-it("switches a recorded thread to SDK streaming and back without changing its UI", () => {
+it("opens a recorded thread through SDK streaming by default, and switches it to the transcript and back without changing its UI", () => {
   function Conversation() {
     return <div>{useThreadSource().kind}</div>
   }
@@ -64,11 +64,12 @@ it("switches a recorded thread to SDK streaming and back without changing its UI
     </ThreadSourceProvider>
   )
   const rendered = render(view(true))
+  expect(screen.getByText("stream")).toBeTruthy()
+  act(() => setUseStreamPreference(false))
   expect(screen.getByText("transcript")).toBeTruthy()
   act(() => setUseStreamPreference(true))
   expect(screen.getByText("stream")).toBeTruthy()
   act(() => setUseStreamPreference(false))
-  expect(screen.getByText("transcript")).toBeTruthy()
   rendered.rerender(view(false))
   expect(screen.getByText("stream")).toBeTruthy()
 })

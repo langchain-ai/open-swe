@@ -89,6 +89,12 @@ export interface StreamThreadSource extends ThreadSourceShared {
    * run-cancel REST call (which leaves it stale until the next hydrate).
    */
   cancelQueued: (id: string) => Promise<boolean>
+  /**
+   * After a stop, drops the entries whose runs the server no longer holds.
+   * Dropping an entry cancels its run, and the stop keeps the follow-ups other
+   * people queued, so a plain drop of every entry would cancel theirs.
+   */
+  settleQueue: () => Promise<void>
 }
 
 /** The thread is served by the append-only transcript event log. */

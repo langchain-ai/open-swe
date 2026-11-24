@@ -5,6 +5,7 @@ import {
   loginAs,
   openRunningThreadViaSlackLink,
   openThreadViaSlackLink,
+  setThreadView,
   threadIdFromUrl,
   threadState,
   typeIntoComposer,
@@ -253,6 +254,7 @@ test.describe("transcript rendering", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
+    await setThreadView(page, "transcript");
     await openThreadViaSlackLink(page);
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);
@@ -308,7 +310,7 @@ test.describe("transcript rendering", () => {
     ).toBeVisible();
   });
 
-  test("a new user hydrates from the transcript by default", async ({
+  test("a new user hydrates from the thread state by default, and from the transcript once switched to it", async ({
     page,
   }) => {
     await loginAs(page, { login: "carol", email: "carol@example.com" });
@@ -322,12 +324,18 @@ test.describe("transcript rendering", () => {
 
     await openThreadViaSlackLink(page);
     const threadId = threadIdFromUrl(page);
+    const state = `/dashboard/api/threads/${threadId}/state`;
+    const transcript = `/dashboard/api/threads/${threadId}/transcript`;
     await waitForThreadIdle(page, threadId);
     await expectTranscriptVisible(page);
+    expect(hydrations).toContain(state);
+    expect(hydrations).not.toContain(transcript);
 
-    expect(hydrations).toContain(
-      `/dashboard/api/threads/${threadId}/transcript`,
-    );
+    hydrations.length = 0;
+    await setThreadView(page, "transcript");
+    await expectTranscriptVisible(page);
+    expect(hydrations).toContain(transcript);
+    expect(hydrations).not.toContain(state);
   });
 
   test("renders a web follow-up exactly once", async ({ page }) => {
@@ -354,6 +362,7 @@ test.describe("transcript rendering", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
+    await setThreadView(page, "transcript");
     await openThreadViaSlackLink(page);
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);
@@ -522,12 +531,13 @@ test.describe("transcript rendering", () => {
     page,
   }) => {
     await loginAs(page, SAME_USER);
+    await setThreadView(page, "transcript");
     await openRunningThreadViaSlackLink(page);
     const threadId = threadIdFromUrl(page);
     await waitForThreadIdle(page, threadId);
 
-    // A new thread is served from the transcript, so the rows the renderer has
-    // to defend against are injected into the snapshot it reads.
+    // The transcript view reads a new thread from its snapshot, so the rows the
+    // renderer has to defend against are injected there.
     await page.route(
       `**/dashboard/api/threads/${threadId}/transcript`,
       async (route) => {

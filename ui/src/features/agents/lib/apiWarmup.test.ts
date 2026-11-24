@@ -164,10 +164,10 @@ function stubPrefs(prefs: unknown) {
   })
 }
 
-function stubStreamPreference() {
+function stubStreamPreference(stored: "true" | "false" = "true") {
   vi.stubGlobal("localStorage", {
     getItem: (key: string) =>
-      key === STREAM_PREFERENCE_STORAGE_KEY ? "true" : null,
+      key === STREAM_PREFERENCE_STORAGE_KEY ? stored : null,
   })
 }
 
@@ -236,6 +236,7 @@ describe("apiWarmupScript", () => {
   })
 
   it("warms the transcript, the summary and the sidebar on a thread route, and hands each over once", async () => {
+    stubStreamPreference("false")
     setReadyState("loading")
     const original = stubFetch()
 
@@ -333,6 +334,7 @@ describe("apiWarmupScript", () => {
   })
 
   it("warms the transcript as the transcript view requests it, and hands it to that request", async () => {
+    stubStreamPreference("false")
     const own = stubFetch()
     await fetchTranscript(THREAD_ID)
 
@@ -350,6 +352,7 @@ describe("apiWarmupScript", () => {
   // The state URL comes from the SDK (its `select` list follows `stateKeys`), so
   // only the real stream can say what the page will ask for.
   it("sends the app's own request once a warmed one has failed", async () => {
+    stubStreamPreference("false")
     setReadyState("loading")
     let status = 404
     const original = vi.fn(() =>

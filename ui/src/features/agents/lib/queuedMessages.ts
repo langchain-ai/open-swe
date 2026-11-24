@@ -1,6 +1,8 @@
 import type { SubmissionQueueEntry } from "@langchain/react"
 
+import { parseStructuredInput } from "@/features/agents/lib/structuredInputMessages"
 import type { QueuedTurn } from "@/features/agents/lib/transcript/reducer"
+import type { SessionUser } from "@/lib/api"
 import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type {
   AnyImageChunk,
@@ -77,8 +79,13 @@ interface QueuedSubmitContentBlock {
 }
 interface QueuedSubmitMessage {
   id?: string
+  type?: string
+  role?: string
   content?: string | Array<QueuedSubmitContentBlock>
-  additional_kwargs?: { replies?: Array<PassageReply> }
+  additional_kwargs?: {
+    replies?: Array<PassageReply>
+    open_swe_provenance?: { sender?: string }
+  }
 }
 interface QueuedSubmitValues {
   messages?: Array<QueuedSubmitMessage>
@@ -86,50 +93,83 @@ interface QueuedSubmitValues {
 
 /**
  * Chunks of a queue entry's submitted message. Reads the *last* message in
- * `values.messages`, not the first — a hydrated entry's list is dynamic-
- * context preambles followed by the real user message.
+ * `values.messages`, not the first: a hydrated entry's list is dynamic-context
+ * preambles followed by the real user message. The backend built that message,
+ * so its provenance names the sender and each of its text blocks wraps what the
+ * sender wrote in an envelope. A message queued from this tab has neither.
  */
-function queuedEntryChunks(
-  entry: SubmissionQueueEntry
-): { id: string; chunks: Array<Chunk>; replies?: Array<PassageReply> } | null {
+function queuedEntryChunks(entry: SubmissionQueueEntry): {
+  id: string
+  chunks: Array<Chunk>
+  replies?: Array<PassageReply>
+  sender?: string
+} | null {
   const messages = (entry.values as QueuedSubmitValues | null | undefined)
     ?.messages
   const raw = messages?.[messages.length - 1]
   if (!raw?.id) return null
+  // A plugin's tool results queue a run that ends in a tool message, which
+  // nobody wrote and nobody should get back.
+  const role = raw.type ?? raw.role
+  if (role !== undefined && role !== "human" && role !== "user") return null
 
+  const sender = raw.additional_kwargs?.open_swe_provenance?.sender
+  let replies = raw.additional_kwargs?.replies
   const chunks: Array<Chunk> = []
-  if (typeof raw.content === "string") {
-    if (raw.content) chunks.push({ kind: "text", text: raw.content })
-  } else if (Array.isArray(raw.content)) {
-    for (const block of raw.content) {
-      if (block.type === "image" && block.base64 && block.mime_type) {
-        chunks.push({
-          kind: "image",
-          base64: block.base64,
-          mimeType: block.mime_type,
-          ...(block.file_name ? { fileName: block.file_name } : {}),
-        })
-      } else if (block.type === "text" && block.text) {
-        chunks.push({ kind: "text", text: block.text })
-      }
+  const blocks: Array<QueuedSubmitContentBlock> =
+    typeof raw.content === "string"
+      ? [{ type: "text", text: raw.content }]
+      : Array.isArray(raw.content)
+        ? raw.content
+        : []
+  for (const block of blocks) {
+    if (block.type === "image" && block.base64 && block.mime_type) {
+      chunks.push({
+        kind: "image",
+        base64: block.base64,
+        mimeType: block.mime_type,
+        ...(block.file_name ? { fileName: block.file_name } : {}),
+      })
+    } else if (block.type === "text" && block.text) {
+      const parsed =
+        sender === undefined ? null : parseStructuredInput(block.text)
+      if (parsed?.type === "message") replies ??= parsed.replies
+      const text = !parsed
+        ? block.text
+        : parsed.type === "entity"
+          ? ""
+          : parsed.content
+      if (text) chunks.push({ kind: "text", text })
     }
   }
-  return { id: raw.id, chunks, replies: raw.additional_kwargs?.replies }
+  return { id: raw.id, chunks, replies, sender }
 }
 
 /**
  * Reconstructs a `QueuedTurn` from the SDK's own submission-queue entry
  * (for "stream"-kind threads, which have no transcript). The SDK carries no
- * sender attribution, so `senderLogin` here is always the current viewer —
- * the run's own `queued_by` metadata is the real cancel-authorization gate.
+ * sender, so a message queued from this tab is the viewer's, and one the queue
+ * rebuilt from the server's pending runs is theirs only when its provenance
+ * names them. The run's own `queued_by` metadata is still the real
+ * cancel-authorization gate.
  */
 export function queueEntryToTurn(
   entry: SubmissionQueueEntry,
-  login: string | undefined
+  viewer: Pick<SessionUser, "login" | "github_login" | "user_id"> | undefined
 ): QueuedTurn | null {
   const found = queuedEntryChunks(entry)
   if (!found) return null
-  const { id, chunks, replies } = found
+  const { id, chunks, replies, sender } = found
+  const viewerSenders = [
+    viewer?.user_id && `user:${viewer.user_id}`,
+    viewer && `github:${viewer.github_login ?? viewer.login}`,
+  ]
+  const own =
+    sender === undefined ||
+    viewerSenders.some(
+      (candidate) =>
+        candidate && candidate.toLowerCase() === sender.toLowerCase()
+    )
 
   return {
     turnId: entry.id,
@@ -141,7 +181,7 @@ export function queueEntryToTurn(
       chunks,
       ...(replies?.length ? { replies } : {}),
     },
-    senderLogin: login ?? null,
+    senderLogin: own ? (viewer?.login ?? null) : null,
     requestedAt: entry.createdAt.toISOString(),
   }
 }

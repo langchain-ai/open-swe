@@ -515,12 +515,8 @@ export function AgentThreadView({
     if (!(await source.stop())) return
     for (const entry of pending) restoreQueuedSelection(entry.message.id)
     for (const message of unacknowledged) restoreQueuedSelection(message.id)
-    if (source.kind === "stream" && pending.length > 0) {
-      // Same reasoning as withdrawQueued: syncs the adapter's queue store.
-      await Promise.allSettled(
-        pending.map((entry) => source.cancelQueued(entry.turnId))
-      )
-    }
+    // Same reasoning as withdrawQueued: syncs the adapter's queue store.
+    if (source.kind === "stream") await source.settleQueue()
     if (unacknowledged.length > 0) {
       const dropped = new Set(unacknowledged.map((message) => message.id))
       queryClient.setQueryData<AgentThread>(

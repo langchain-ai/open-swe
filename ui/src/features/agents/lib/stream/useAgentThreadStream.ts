@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useChannelEffect, useStream } from "@langchain/react"
+import type { Client } from "@langchain/langgraph-sdk"
 import { useQueryClient } from "@tanstack/react-query"
 
 import { agentsApi } from "@/features/agents/lib/api"
@@ -23,6 +24,7 @@ const AGENT_ASSISTANT_ID = "agent"
 
 export interface AgentThreadStream {
   stream: AgentStream
+  client: Client
   connection: StreamConnection
   trackRunAcceptance: (
     messageId: string | null,
@@ -171,10 +173,11 @@ export function useAgentThreadStream(threadId: string): AgentThreadStream {
   return useMemo(
     () => ({
       stream: { ...stream, submit, isOffloading, routed },
+      client,
       connection,
       trackRunAcceptance: runAcceptance.track,
     }),
-    [connection, isOffloading, routed, runAcceptance, stream, submit]
+    [client, connection, isOffloading, routed, runAcceptance, stream, submit]
   )
 }
 

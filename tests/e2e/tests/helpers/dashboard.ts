@@ -64,6 +64,18 @@ export async function optIntoQueue(page: Page) {
   await setFollowUpBehavior(page, "queue");
 }
 
+// The "SDK useStream" setting, under the dashboard's STREAM_PREFERENCE_STORAGE_KEY.
+export async function setThreadView(page: Page, view: "stream" | "transcript") {
+  await page.addInitScript(
+    (useStream) =>
+      window.localStorage.setItem(
+        "open-swe.streaming.use-stream.v2",
+        String(useStream),
+      ),
+    view === "stream",
+  );
+}
+
 // The composer is a rich-text editor, not a <textarea>: it carries the prompt
 // as `aria-placeholder` plus a visible overlay, so `getByPlaceholder` (which
 // only matches the `placeholder` attribute) can't see it. Assert on both hooks
