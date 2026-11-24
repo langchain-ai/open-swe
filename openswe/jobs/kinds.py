@@ -36,6 +36,9 @@ from openswe.github.checks import REVIEW_CHECK_TIMEOUT_JOB
 from openswe.github.quota import SAMPLE_JOB as GITHUB_QUOTA_SAMPLE
 from openswe.github.quota import SAMPLE_SCHEDULE as GITHUB_QUOTA_SCHEDULE
 from openswe.github.quota import InstallationQuota
+from openswe.github.sandbox_budget import PURGE_JOB as SANDBOX_GITHUB_CALL_PURGE
+from openswe.github.sandbox_budget import PURGE_SCHEDULE as SANDBOX_GITHUB_CALL_SCHEDULE
+from openswe.github.sandbox_budget import SandboxGitHubCalls
 from openswe.github.webhook import PreviewReady
 from openswe.human_review.deadlines import SCHEDULER_TASK as HUMAN_REVIEW_DEADLINE
 from openswe.human_review.settling import SETTLE_JOB as HUMAN_REVIEW_SETTLE
@@ -112,6 +115,7 @@ WORKER.register(MERGE_QUEUE_RECONCILE)(reconcile_queue)
 WORKER.register(MERGE_QUEUE_RECOVERY)(QueueRecovery.run)
 WORKER.register(REQUIRED_CHECK_REFRESH)(refresh_required_checks)
 WORKER.register(GITHUB_QUOTA_SAMPLE)(InstallationQuota.sample)
+WORKER.register(SANDBOX_GITHUB_CALL_PURGE)(SandboxGitHubCalls.purge)
 WORKER.register("event_subscription_timeout")(EventSubscription.wake_on_timeout)
 WORKER.register(ApprovalWithdrawal.JOB)(ApprovalWithdrawal.retry)
 WORKER.register(ReviewScoutTarget.RETRY_JOB)(ReviewScoutTarget.retry)
@@ -378,6 +382,11 @@ async def start_jobs() -> None:
         ),
         lambda: queue.schedule(
             GITHUB_QUOTA_SAMPLE, cron=GITHUB_QUOTA_SCHEDULE, key=GITHUB_QUOTA_SAMPLE
+        ),
+        lambda: queue.schedule(
+            SANDBOX_GITHUB_CALL_PURGE,
+            cron=SANDBOX_GITHUB_CALL_SCHEDULE,
+            key=SANDBOX_GITHUB_CALL_PURGE,
         ),
         lambda: queue.schedule(
             ATTACHMENT_SWEEP_JOB, cron=ATTACHMENT_SWEEP_SCHEDULE, key=ATTACHMENT_SWEEP_JOB

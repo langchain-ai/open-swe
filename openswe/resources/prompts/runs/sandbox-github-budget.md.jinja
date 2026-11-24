@@ -1,0 +1,9 @@
+{% if reason == "brake" %}
+Robin's GitHub App is close to its hourly GitHub API limit, so GitHub API calls from this sandbox (`gh`, `curl https://api.github.com/...`) are paused until {{ until }} to keep the rest for reviews and approvals.
+{% else %}
+This thread used its budget of {{ per_hour }} GitHub API calls an hour from the sandbox, so further calls (`gh`, `curl https://api.github.com/...`) are refused until {{ until }}.
+{% endif %}
+Refused calls fail with `HTTP 502` and `callback resolution failed`; retrying before then fails the same way.
+`git` clone, fetch and push to github.com still work.
+Carry on with work that needs no GitHub API calls, and batch what you still need once calls work again (one `gh api graphql` query instead of many REST calls, `--paginate` only when you need every page).
+If the work cannot continue without GitHub, say so and stop.

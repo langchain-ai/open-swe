@@ -53,6 +53,19 @@ The proxy token is minted at runtime from the GitHub App installation credential
 The backend mints it and hands it to the Managed Deep Agents deployment, which writes these rules on the sandbox (see [mda/README.md](../mda/README.md)).
 Do not store GitHub access tokens as deployment environment variables.
 
+Every sandbox on the installation's token spends the installation's one hourly API quota, which Robin's reviews and approvals need too.
+An instance admin meters those calls under **Sandbox GitHub API budget** in **Defaults** (`/admin`), or with the `manage_sandbox_github_budget` tool (`openswe/github/sandbox_budget.py`):
+
+- `off`: `api.github.com` is answered by the sandbox's proxy callback like every other GitHub host, and LangSmith's proxy keeps each answer for 5 minutes.
+- `observe` (the default): the sandbox's proxy config gives `api.github.com` its own callback with `full_request`, which LangSmith's proxy calls for every request.
+  The backend counts each call against the thread over a rolling hour, logs it (`Sandbox GitHub API call`), and answers with the same scoped token.
+  Nothing is refused, and git, which spends no API quota, is never metered.
+- `enforce`: as `observe`, and a call is refused once the thread made the per-thread limit (500 by default) in the last hour, or while less than the brake percentage (20 by default) of the installation's core or GraphQL quota is left, until it resets.
+  The proxy reports a refusal as `502 callback resolution failed`; the thread gets a note saying why and when calls work again.
+
+If counting fails, such as when the database is unavailable, the call goes through.
+A mode change reaches a sandbox's proxy config at its thread's next run.
+
 ### Who creates sandboxes
 
 Every thread's sandbox is a LangSmith sandbox that Managed Deep Agents creates when the thread's run starts, and replaces when the agent asks for a fresh one.

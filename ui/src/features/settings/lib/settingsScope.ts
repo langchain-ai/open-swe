@@ -7,12 +7,15 @@ import {
 import { api, type RobinSettings, type RobinSettingsPatch } from "@/lib/api"
 import { invalidationTopic } from "@/lib/invalidations/topics"
 
+/** The settings fields that take any string, for rows that pick one. */
 export type StringSettingField = {
   [K in keyof RobinSettings]-?: RobinSettings[K] extends
     | string
     | null
     | undefined
-    ? K
+    ? string extends RobinSettings[K]
+      ? K
+      : never
     : never
 }[keyof RobinSettings]
 

@@ -18,6 +18,9 @@ from openswe.github.sdk import GITHUB_API_VERSION, github_sdk
 logger = logging.getLogger(__name__)
 
 RECHECK_MISSING_AFTER = timedelta(minutes=10)
+# A stored id is looked up again after this long, so a name moves to the repository GitHub
+# lists under it now within that time of a rename.
+RECHECK_FOUND_AFTER = timedelta(hours=1)
 # A sandbox keeps its token until the run's loop replaces it, 10 minutes before the
 # expiry of the token the loop last put there. A token put there by anything else,
 # such as a backend tool reconnecting to the sandbox, must outlive that schedule, so
@@ -56,8 +59,9 @@ async def repository_token(
     """Mint access only to full repository names available to the installation.
 
     Ids stored on ``repository`` rows skip the installation listing. It still
-    runs when a name has no id and was not looked for within
-    ``RECHECK_MISSING_AFTER``, and when GitHub refuses the stored ids. A missing
+    runs when a name has no row, has no id and was not looked for within
+    ``RECHECK_MISSING_AFTER``, has an id not looked up within ``RECHECK_FOUND_AFTER``,
+    and when GitHub refuses the stored ids. A missing
     match grants no credentials, so public repositories outside the installation
     remain readable anonymously. The installation-wide discovery token stays on
     the server and is never given to a sandbox.
@@ -80,7 +84,7 @@ async def repository_token(
         if token:
             return SandboxGitHubAccess(token, expires_at)
         logger.info("Stored repository ids were refused", extra={"repository_ids": stored_ids})
-    repository_ids = await _listed_repository_ids(allowed, stored or {})
+    repository_ids = await _listed_repository_ids(allowed)
     if not repository_ids:
         return SandboxGitHubAccess()
     token, expires_at = await get_github_app_installation_token_with_expiry(
@@ -104,29 +108,28 @@ async def _stored_repositories(allowed: set[str]) -> dict[str, Repository] | Non
 
 
 def _ids_are_current(allowed: set[str], stored: Mapping[str, Repository]) -> bool:
-    cutoff = datetime.now(UTC) - RECHECK_MISSING_AFTER
+    now = datetime.now(UTC)
     for key in allowed:
         row = stored.get(key)
-        if row is None:
+        if row is None or row.github_checked_at is None:
             return False
-        if row.github_id is None and (
-            row.github_checked_at is None or row.github_checked_at < cutoff
-        ):
+        recheck = RECHECK_MISSING_AFTER if row.github_id is None else RECHECK_FOUND_AFTER
+        if row.github_checked_at < now - recheck:
             return False
     return True
 
 
-async def _listed_repository_ids(allowed: set[str], stored: Mapping[str, Repository]) -> list[int]:
+async def _listed_repository_ids(allowed: set[str]) -> list[int]:
     """Look ``allowed`` up in the installation's listing and store what it found.
 
-    A stored id the installation still reaches is kept even when its repository
-    was renamed, so a repository created under the old name gains nothing.
+    A name resolves to the repository listed under it now, never to one it named before a
+    rename: a thread's scope is the names it was given, and a repository created under a
+    renamed one's old name must not reach the renamed one.
     """
     discovery_token, _ = await get_github_app_installation_token_with_expiry()
     if not discovery_token:
         raise RuntimeError("GitHub App installation token is unavailable")
-    reachable: set[int] = set()
-    listed: dict[str, int] = {}
+    listed: dict[str, _InstallationRepository] = {}
     async with github_sdk(TokenAuthStrategy(discovery_token)) as client:
         async for item in client.rest.paginate(
             client.rest(GITHUB_API_VERSION).apps.async_list_repos_accessible_to_installation,
@@ -135,23 +138,22 @@ async def _listed_repository_ids(allowed: set[str], stored: Mapping[str, Reposit
             headers={"X-GitHub-Api-Version": GITHUB_API_VERSION},
         ):
             repo = _InstallationRepository.model_validate(item)
-            reachable.add(repo.id)
             if repo.full_name.lower() in allowed:
-                listed[repo.full_name.lower()] = repo.id
-    resolved: dict[str, int | None] = {}
-    for key in allowed:
-        row = stored.get(key)
-        kept = row.github_id if row is not None and row.github_id in reachable else None
-        resolved[key] = kept or listed.get(key)
-    await _record_github_ids({key: repo_id for key, repo_id in resolved.items() if key in stored})
+                listed[repo.full_name.lower()] = repo
+    resolved = {key: repo.id if (repo := listed.get(key)) else None for key in allowed}
+    await _record_github_ids(resolved, {key: repo.full_name for key, repo in listed.items()})
     return sorted({repo_id for repo_id in resolved.values() if repo_id is not None})
 
 
-async def _record_github_ids(github_ids: Mapping[str, int | None]) -> None:
+async def _record_github_ids(
+    github_ids: Mapping[str, int | None], full_names: Mapping[str, str]
+) -> None:
     if not github_ids:
         return
     try:
-        await Repository.record_github_ids(github_ids, checked_at=datetime.now(UTC))
+        await Repository.record_github_ids(
+            github_ids, checked_at=datetime.now(UTC), full_names=full_names
+        )
     except Exception:
         logger.warning("Could not store repository ids", exc_info=True)
 

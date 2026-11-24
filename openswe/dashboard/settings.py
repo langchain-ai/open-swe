@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Iterator, Mapping
-from typing import Any, Literal, NamedTuple, NotRequired, TypedDict
+from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, get_args
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from openswe.audit_logs.context import current_audit_log
 from openswe.audit_logs.middleware import audit_endpoint
-from openswe.audit_logs.models import SettingsChange
+from openswe.audit_logs.models import AuditedSettingValue, SettingsChange
 from openswe.config import ENV
 from openswe.dashboard.deps import ADMIN_DEP, SESSION_DEP
 from openswe.dashboard.options import (
@@ -46,6 +46,8 @@ _SESSION_TOOL = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 # What a glob pathspec escapes, and its bracket expressions; an unclosed one matches nothing.
 _GLOB_ESCAPE = re.compile(r"\\.")
 _GLOB_BRACKET = re.compile(r"\[!?\]?[^\]]*\]")
+
+SandboxGitHubBudgetMode = Literal["off", "observe", "enforce"]
 
 
 class AppRelease(TypedDict):
@@ -122,6 +124,12 @@ class SettingsUpdate(BaseModel):
         default=None, json_schema_extra={"agent_feature_flag": True}
     )
     human_review_auto_assign_minutes: int | None = Field(default=None, ge=1, strict=True)
+    # How sandboxes' GitHub API calls on the App installation's token are metered
+    # (``openswe.github.sandbox_budget``). Only the instance record's values are read: the
+    # installation's quota is shared by every workspace.
+    sandbox_github_budget_mode: SandboxGitHubBudgetMode | None = None
+    sandbox_github_budget_per_hour: int | None = Field(default=None, ge=1, strict=True)
+    sandbox_github_brake_percent: int | None = Field(default=None, ge=0, le=100, strict=True)
     org_guidelines: str | None = None
     default_agent_model: str | None = None
     default_agent_reasoning_effort: str | None = None
@@ -375,6 +383,9 @@ def _default_settings() -> dict[str, Any]:
         "expedited_review_enabled": False,
         "human_review_auto_merge_enabled": True,
         "human_review_auto_assign_minutes": 120,
+        "sandbox_github_budget_mode": "observe",
+        "sandbox_github_budget_per_hour": 500,
+        "sandbox_github_brake_percent": 20,
         "slack_follow_up_suggestions": False,
         "org_guidelines": None,
         "default_agent_model": fallback_model,
@@ -471,14 +482,25 @@ def _record_values(update: SettingsUpdate) -> dict[str, Any]:
     return {**update.model_dump(), "updated_at": now_iso()}
 
 
-def _audit_setting_value(field: str, value: object) -> bool | int | Literal["[REDACTED]"] | None:
+_AUDITED_INT_FIELDS = frozenset(
+    {
+        "human_review_auto_assign_minutes",
+        "sandbox_github_budget_per_hour",
+        "sandbox_github_brake_percent",
+    }
+)
+
+
+def _audit_setting_value(field: str, value: object) -> AuditedSettingValue:
     if value is None:
         return None
     metadata = SettingsUpdate.model_fields[field].json_schema_extra
     if isinstance(metadata, dict) and metadata.get("agent_feature_flag") and type(value) is bool:
         return value
-    if field == "human_review_auto_assign_minutes" and type(value) is int:
+    if field in _AUDITED_INT_FIELDS and type(value) is int:
         return value
+    if field == "sandbox_github_budget_mode" and value in get_args(SandboxGitHubBudgetMode):
+        return str(value)
     return "[REDACTED]"
 
 

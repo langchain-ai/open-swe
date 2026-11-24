@@ -18,7 +18,13 @@ from jwt.algorithms import OKPAlgorithm
 from langsmith.sandbox import SandboxTokenVerifier
 from langsmith.sandbox import _verify as langsmith_verify
 
+from openswe.dashboard.settings import Settings
+from openswe.database import postgres
+from openswe.github import sandbox_budget
+from openswe.github.repositories import Repository
 from openswe.github.sandbox_access import SandboxGitHubAccess
+from openswe.github.sandbox_budget import WINDOW, SandboxGitHubBudget, SandboxGitHubCalls
+from openswe.message_queue import QueuedMessage
 from openswe.sandboxes import lifecycle, proxy_callback, state
 from openswe.sandboxes.proxy_callback import SandboxProxyCallback
 from openswe.sandboxes.proxy_callback_routes import ProxyCallbackAnswer, router
@@ -59,9 +65,19 @@ class _Signer:
         return jwt.encode(claims, key or self.key, algorithm="EdDSA", headers={"kid": _KID})
 
 
-def _body(host: str = "github.com", *, tenant_id: str = _TENANT) -> bytes:
+def _body(host: str = "github.com", *, tenant_id: str = _TENANT, path: str | None = None) -> bytes:
     identity = {"tenant_id": tenant_id, "sandbox_id": _BOX_ID, "organization_id": str(uuid.uuid4())}
-    return json.dumps({"host": host, "port": 443, "identity": identity}).encode()
+    payload: dict[str, object] = {"host": host, "port": 443, "identity": identity}
+    if path is not None:
+        payload["request"] = {
+            "method": "GET",
+            "url": f"https://{host}{path}",
+            "scheme": "https",
+            "host": host,
+            "path": path,
+            "headers": {},
+        }
+    return json.dumps(payload).encode()
 
 
 @pytest.fixture
@@ -216,3 +232,136 @@ async def test_a_copied_threads_sandbox_keeps_the_originals_credentials(
     assert answer.headers["Authorization"].startswith("Basic ")
     assert minted.await_args is not None
     assert minted.await_args.kwargs["repositories"] == ["acme/api"]
+
+
+def _budget(
+    monkeypatch: pytest.MonkeyPatch, mode: str, per_hour: int = 2, brake_percent: int = 20
+) -> None:
+    settings = Settings(
+        {
+            "sandbox_github_budget_mode": mode,
+            "sandbox_github_budget_per_hour": per_hour,
+            "sandbox_github_brake_percent": brake_percent,
+        }
+    )
+    monkeypatch.setattr(
+        sandbox_budget, "cached_instance_settings", AsyncMock(return_value=settings)
+    )
+
+
+async def _call(signer: _Signer, path: str = "/repos/acme/api/pulls") -> int:
+    body = _body("api.github.com", path=path)
+    try:
+        await SandboxProxyCallback.answer(body, signer.sign(body))
+    except HTTPException as refused:
+        return refused.status_code
+    return 200
+
+
+async def _notes(thread_id: str) -> list[str]:
+    return [str(queued.content) for queued in await QueuedMessage.for_thread(thread_id)]
+
+
+def test_metering_gives_api_calls_a_callback_the_proxy_calls_every_time(
+    signer: _Signer,
+) -> None:
+    metered = SandboxProxyCallback.proxy_config(None, metered=True)["callbacks"]
+    assert isinstance(metered, list) and isinstance(metered[0], dict)
+    assert metered[0]["match_hosts"] == ["api.github.com"]
+    assert metered[0]["full_request"] is True
+    assert len(metered) == 2
+
+    unmetered = SandboxProxyCallback.proxy_config({"callbacks": metered})["callbacks"]
+    assert isinstance(unmetered, list) and len(unmetered) == 1
+    assert isinstance(unmetered[0], dict) and "full_request" not in unmetered[0]
+
+
+async def test_enforce_caps_each_thread_and_tells_it_once(
+    signer: _Signer, minted: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _budget(monkeypatch, "enforce")
+    thread_id = await _thread("box-1", github_token_repositories=["acme/api"])
+
+    assert [await _call(signer) for _ in range(4)] == [200, 200, 429, 429]
+
+    notes = await _notes(thread_id)
+    assert len(notes) == 1
+    assert "budget of 2 GitHub API calls an hour" in notes[0]
+    # Refused calls never reached GitHub, so they leave the window as it was.
+    assert (await SandboxGitHubCalls.window(thread_id)).total == 2
+    # git spends no API quota and is never metered.
+    git = _body("github.com", path="/acme/api.git/info/refs")
+    assert (await SandboxProxyCallback.answer(git, signer.sign(git))).headers
+
+
+async def test_observe_counts_without_refusing(
+    signer: _Signer, minted: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _budget(monkeypatch, "observe")
+    thread_id = await _thread("box-1", github_token_repositories=["acme/api"])
+
+    assert [await _call(signer) for _ in range(3)] == [200, 200, 200]
+    assert (await SandboxGitHubCalls.window(thread_id)).total == 3
+    assert await _notes(thread_id) == []
+
+
+async def test_brake_refuses_the_low_quota_until_it_resets(
+    signer: _Signer, minted: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _budget(monkeypatch, "enforce", per_hour=100)
+    thread_id = await _thread("box-1", github_token_repositories=["acme/api"])
+    budget = await SandboxGitHubBudget.configured()
+    reset_at = datetime.now(UTC) + timedelta(minutes=30)
+    await budget.sampled("core", limit=15_000, remaining=2_999, reset_at=reset_at)
+    await budget.sampled("graphql", limit=5_000, remaining=1_000, reset_at=reset_at)
+
+    minted.reset_mock()
+    assert await _call(signer) == 429
+    # A refused call resolves no token, which can itself spend quota.
+    minted.assert_not_awaited()
+    assert await _call(signer, path="/graphql") == 200
+    assert "close to its hourly GitHub API limit" in (await _notes(thread_id))[0]
+
+
+async def test_turning_the_brake_off_lifts_one_already_engaged(
+    signer: _Signer, minted: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _budget(monkeypatch, "enforce", per_hour=100)
+    await _thread("box-1", github_token_repositories=["acme/api"])
+    budget = await SandboxGitHubBudget.configured()
+    reset_at = datetime.now(UTC) + timedelta(minutes=30)
+    await budget.sampled("core", limit=15_000, remaining=2_999, reset_at=reset_at)
+    assert await _call(signer) == 429
+
+    _budget(monkeypatch, "enforce", per_hour=100, brake_percent=0)
+    assert await _call(signer) == 200
+
+
+async def test_a_thread_whose_repositories_are_not_installed_reads_anonymously(
+    signer: _Signer, minted: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its calls carry no token and spend no installation quota, so the budget leaves them be."""
+    _budget(monkeypatch, "enforce", per_hour=1)
+    thread_id = await _thread("box-1", github_token_repositories=["acme/public-docs"])
+    await Repository.record_github_ids({"acme/public-docs": None}, checked_at=datetime.now(UTC))
+
+    assert [await _call(signer) for _ in range(3)] == [200, 200, 200]
+    assert (await SandboxGitHubCalls.window(thread_id)).total == 0
+
+
+async def test_a_call_metering_cannot_count_goes_through(
+    signer: _Signer, minted: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _budget(monkeypatch, "enforce")
+    await _thread("box-1", github_token_repositories=["acme/api"])
+    monkeypatch.setattr(SandboxGitHubBudget, "admit", AsyncMock(side_effect=RuntimeError("down")))
+
+    assert await _call(signer) == 200
+
+
+async def test_window_keeps_a_minute_until_its_last_call_is_an_hour_old() -> None:
+    oldest = (datetime.now(UTC) - WINDOW).replace(second=0, microsecond=0)
+    async with postgres.session() as session:
+        session.add(SandboxGitHubCalls(thread_id="thread-a", minute=oldest, calls=3))
+
+    assert (await SandboxGitHubCalls.window("thread-a")).total == 3

@@ -840,7 +840,6 @@
                         "type": "integer"
                       },
                       {
-                        "const": "[REDACTED]",
                         "type": "string"
                       },
                       {
@@ -9125,6 +9124,47 @@
               }
             ],
             "title": "Review Trace Links"
+          },
+          "sandbox_github_brake_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Github Brake Percent"
+          },
+          "sandbox_github_budget_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "observe",
+                  "enforce"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Github Budget Mode"
+          },
+          "sandbox_github_budget_per_hour": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Github Budget Per Hour"
           },
           "slack_bot_trigger_mode": {
             "anyOf": [

@@ -3,7 +3,8 @@
 Everything acting as the installation spends the same quotas: the backend, MDA, and
 every sandbox whose proxy carries an installation token. Only the backend's own
 requests show in its request logs; these samples show the total, so the difference
-is what MDA and the sandboxes spend.
+is what MDA and the sandboxes spend. A sample with too little left holds the brake on
+sandboxes' calls (``SandboxGitHubBudget.sampled``).
 """
 
 import logging
@@ -12,6 +13,7 @@ from typing import Final
 
 from openswe.github.app import GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY
 from openswe.github.http import GitHubClient
+from openswe.github.sandbox_budget import SandboxGitHubBudget
 from openswe.jobs.queue import Job
 
 logger = logging.getLogger(__name__)
@@ -31,9 +33,11 @@ class InstallationQuota:
             return
         async with GitHubClient.as_app() as github:
             quotas = await github.rate_limits()
+        budget = await SandboxGitHubBudget.configured()
         for resource in _RESOURCES:
             if (quota := quotas.get(resource)) is None:
                 continue
+            reset_at = datetime.fromtimestamp(quota.reset, UTC)
             logger.info(
                 "GitHub installation quota",
                 extra={
@@ -42,6 +46,9 @@ class InstallationQuota:
                     "github_quota_limit": quota.limit,
                     "github_quota_used": quota.used,
                     "github_quota_remaining": quota.remaining,
-                    "github_quota_reset_at": datetime.fromtimestamp(quota.reset, UTC).isoformat(),
+                    "github_quota_reset_at": reset_at.isoformat(),
                 },
+            )
+            await budget.sampled(
+                resource, limit=quota.limit, remaining=quota.remaining, reset_at=reset_at
             )

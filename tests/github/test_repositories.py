@@ -21,19 +21,22 @@ async def test_recorded_github_id_is_read_back_by_key() -> None:
     assert rows["acme/api"].github_checked_at == checked_at
 
 
-async def test_recording_a_missing_id_clears_it_and_only_touches_known_rows() -> None:
+async def test_recording_a_missing_id_clears_it_and_adds_unknown_rows() -> None:
     await Repository(full_name="acme/api").save()
     await Repository.record_github_ids({"acme/api": 11}, checked_at=datetime.now(UTC))
     checked_at = datetime.now(UTC)
 
     await Repository.record_github_ids(
-        {"acme/api": None, "acme/unknown": 22}, checked_at=checked_at
+        {"acme/api": None, "acme/unknown": 22},
+        checked_at=checked_at,
+        full_names={"acme/unknown": "Acme/Unknown"},
     )
 
     rows = await Repository.by_keys(["acme/api", "acme/unknown"])
-    assert list(rows) == ["acme/api"]
     assert rows["acme/api"].github_id is None
     assert rows["acme/api"].github_checked_at == checked_at
+    assert rows["acme/unknown"].github_id == 22
+    assert rows["acme/unknown"].full_name == "Acme/Unknown"
 
 
 async def test_saving_a_repository_keeps_its_github_id() -> None:
@@ -41,5 +44,13 @@ async def test_saving_a_repository_keeps_its_github_id() -> None:
     await Repository.record_github_ids({"acme/api": 11}, checked_at=datetime.now(UTC))
 
     await Repository(full_name="acme/api", default_branch="main").save()
+
+    assert (await Repository.by_keys(["acme/api"]))["acme/api"].github_id == 11
+
+
+async def test_a_lookup_spelled_another_way_leaves_the_repositorys_id_alone() -> None:
+    await Repository.record_github_ids({"acme/api": 11}, checked_at=datetime.now(UTC))
+
+    await Repository.record_github_ids({"acme/api.git": None}, checked_at=datetime.now(UTC))
 
     assert (await Repository.by_keys(["acme/api"]))["acme/api"].github_id == 11

@@ -466,10 +466,13 @@ async def stored_github_id(full_name: str) -> int | None:
 
 
 @pytest.mark.usefixtures("registry_db", "github")
+@pytest.mark.parametrize("known", [True, False])
 async def test_first_use_lists_the_installation_once_and_stores_the_id(
-    github_requests: list[httpx2.Request],
+    github_requests: list[httpx2.Request], known: bool
 ) -> None:
-    await stored_repository("acme/api")
+    """A repository Robin has no row for yet gets one, or every token would list again."""
+    if known:
+        await stored_repository("acme/api")
 
     first = await sandbox_access.repository_token(["acme/api"])
     app.clear_app_token_cache()
@@ -517,21 +520,26 @@ async def test_refused_stored_id_is_replaced_from_the_listing(
 
 
 @pytest.mark.usefixtures("registry_db", "github")
-async def test_renamed_repository_keeps_its_stored_id(
+async def test_a_name_follows_the_repository_listed_under_it_after_a_rename(
     github_repositories: list[ListedRepository],
 ) -> None:
+    """A private repository renamed away from a name never reaches whoever creates a new one
+    under it, even while the old id is stored for the name."""
     await stored_repository("acme/api", github_id=11)
-    await stored_repository("acme/internal")
     github_repositories[:] = [
         {"id": 11, "full_name": "acme/renamed"},
-        {"id": 22, "full_name": "acme/internal"},
         {"id": 33, "full_name": "acme/api"},
     ]
+    # Until its id is due a recheck, the stored one is used without listing.
+    assert (await sandbox_access.repository_token(["acme/api"])).token == "repos:11"
+    old = datetime.now(UTC) - sandbox_access.RECHECK_FOUND_AFTER - timedelta(seconds=1)
+    await Repository.record_github_ids({"acme/api": 11}, checked_at=old)
+    app.clear_app_token_cache()
 
-    access = await sandbox_access.repository_token(["acme/api", "acme/internal"])
+    access = await sandbox_access.repository_token(["acme/api"])
 
-    assert access.token == "repos:11,22"
-    assert await stored_github_id("acme/api") == 11
+    assert access.token == "repos:33"
+    assert await stored_github_id("acme/api") == 33
 
 
 @pytest.mark.usefixtures("registry_db", "github")

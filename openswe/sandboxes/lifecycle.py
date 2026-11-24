@@ -13,6 +13,7 @@ import logging
 import shlex
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Final
 
 from deepagents.backends.protocol import SandboxBackendProtocol
@@ -23,8 +24,10 @@ from runtime_api.sandbox_setup import GitIdentity
 from openswe.dashboard.execution_defaults import EXECUTION_DEFAULTS, ExecutionDefaults
 from openswe.execution import SANDBOX_EXECUTION, ExecutionProfile
 from openswe.github.app import PermissionMap
+from openswe.github.repositories import Repository
 from openswe.github.sandbox_access import (
     READ_ONLY_REVIEW_PERMISSIONS,
+    RECHECK_MISSING_AFTER,
     SandboxGitHubAccess,
     sandbox_token,
 )
@@ -104,12 +107,24 @@ class SandboxCredentialPolicy:
     @classmethod
     async def reaches_github(cls, thread_id: str, metadata: Mapping[str, object]) -> bool:
         """Whether requests from ``thread_id``'s sandbox to GitHub carry a token
-        (``proxy_token``): the thread may use GitHub, and its scope names some repository or
-        the whole installation. Worked out without minting one."""
+        (``proxy_token``): the thread may use GitHub, and its scope names the whole
+        installation or some repository a recent lookup did not find missing from it. Worked
+        out without minting one; when the lookup cannot be read, a token is assumed."""
         if not await cls(ThreadMetadata.model_validate(metadata)).allows_github():
             return False
         repositories, _permissions = await _thread_proxy_scope(thread_id, metadata)
-        return repositories != []
+        if repositories is None:
+            return True
+        if not repositories:
+            return False
+        try:
+            return not await Repository.none_installed(
+                (repo.lower() for repo in repositories),
+                checked_since=datetime.now(UTC) - RECHECK_MISSING_AFTER,
+            )
+        except Exception:
+            logger.warning("Could not read which repositories are installed", exc_info=True)
+            return True
 
 
 @dataclass(frozen=True, slots=True)

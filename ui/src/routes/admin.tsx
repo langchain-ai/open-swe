@@ -6,6 +6,7 @@ import { ExpeditedReviewSection } from "@/features/settings/components/Expedited
 import { FeaturedAppsSection } from "@/features/settings/components/FeaturedAppsSettings"
 import { ProtectedPathsSection } from "@/features/settings/components/ProtectedPathsSection"
 import { ReviewSettings } from "@/features/settings/components/ReviewSettings"
+import { SandboxGitHubBudgetSection } from "@/features/settings/components/SandboxGitHubBudgetSection"
 import { ShadowReviewSection } from "@/features/settings/components/ShadowReviewSection"
 import {
   DefaultRepoSection,
@@ -51,6 +52,7 @@ function AdminDefaultsPage() {
           (model) => model.can_be_default !== false
         )}
       />
+      <SandboxGitHubBudgetSection />
       <FeaturedAppsSection />
     </SettingsPage>
   )

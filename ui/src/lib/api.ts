@@ -57,8 +57,8 @@ export interface AuditLog {
     settings_changes: Record<
       string,
       {
-        before: boolean | number | "[REDACTED]" | null
-        after: boolean | number | "[REDACTED]" | null
+        before: boolean | number | string | null
+        after: boolean | number | string | null
       }
     > | null
     expedited_exclusions: ExpeditedExclusions | null
@@ -469,8 +469,16 @@ export interface RobinSettings {
   review_shadow_percent?: number | null
   review_shadow_model?: string | null
   review_shadow_reasoning_effort?: string | null
+  /** Instance only: how sandboxes' GitHub API calls on Robin's App token are metered. */
+  sandbox_github_budget_mode?: SandboxGitHubBudgetMode | null
+  /** Instance only: API calls one thread's sandbox may make in any 60 minutes. */
+  sandbox_github_budget_per_hour?: number | null
+  /** Instance only: below this % of the shared hourly quota, every sandbox call pauses. */
+  sandbox_github_brake_percent?: number | null
   updated_at?: string | null
 }
+
+export type SandboxGitHubBudgetMode = "off" | "observe" | "enforce"
 
 export type RobinSettingsPatch = Partial<RobinSettings>
 

@@ -272,6 +272,7 @@ from openswe.tools.manage_review_approval_mode import manage_review_approval_mod
 from openswe.tools.manage_review_apps import manage_review_apps
 from openswe.tools.manage_review_repos import manage_review_repos
 from openswe.tools.manage_review_shadow import manage_review_shadow
+from openswe.tools.manage_sandbox_github_budget import manage_sandbox_github_budget
 from openswe.tools.merge_queue import (
     merge_queue_follow_up,
     merge_queue_notify,
@@ -803,6 +804,7 @@ AGENT_TOOLS: Final = (
     manage_review_apps,
     manage_review_approval_mode,
     manage_review_shadow,
+    manage_sandbox_github_budget,
     manage_review_repos,
     upgrade_app_installs,
     list_slack_bots,

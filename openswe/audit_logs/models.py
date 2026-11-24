@@ -12,10 +12,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 from openswe.database.orm import Base
 from openswe.expedited_review.eligibility import ExcludedHunk, Exclusion
 
+# A value shown as itself (a toggle, a number, an option of a fixed set) or redacted.
+AuditedSettingValue = bool | int | str | None
+
 
 class SettingsChange(TypedDict):
-    before: bool | int | Literal["[REDACTED]"] | None
-    after: bool | int | Literal["[REDACTED]"] | None
+    before: AuditedSettingValue
+    after: AuditedSettingValue
 
 
 class ExpeditedExclusions(BaseModel):
@@ -51,10 +54,7 @@ class AuditLogEnrichments(BaseModel):
     @field_serializer("settings_changes")
     def _serialize_settings_changes(
         self, changes: dict[str, SettingsChange] | None
-    ) -> (
-        dict[str, dict[Literal["before", "after"], bool | int | Literal["[REDACTED]"] | None]]
-        | None
-    ):
+    ) -> dict[str, dict[Literal["before", "after"], AuditedSettingValue]] | None:
         """Preserve null overrides even when the envelope excludes absent metadata."""
         if changes is None:
             return None

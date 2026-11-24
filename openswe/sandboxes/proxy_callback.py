@@ -6,7 +6,9 @@ A thread's sandbox carries the same proxy config on every run, with no credentia
 thread's tool channel, LangSmith's proxy asks this callback for the request's headers,
 signed for the sandbox the request leaves from, and the backend answers for the thread
 the sandbox belongs to while that thread is still bound to it. The proxy keeps an answer
-for ``CALLBACK_TTL_SECONDS``.
+for ``CALLBACK_TTL_SECONDS``, except while the sandbox GitHub budget meters API calls
+(``openswe.github.sandbox_budget``): then ``api.github.com`` has its own callback, which the
+proxy calls for every request, and each call is counted before it is answered.
 """
 
 import logging
@@ -21,6 +23,7 @@ from fastapi import HTTPException
 from langsmith.sandbox import (
     SandboxCallback,
     SandboxCallbackIdentity,
+    SandboxCallbackRequest,
     SandboxTokenVerificationError,
     SandboxTokenVerifier,
 )
@@ -28,6 +31,7 @@ from pydantic import JsonValue
 from runtime_api.sandbox_proxy import GITHUB_PROXY_RULES
 
 from openswe.dashboard.langsmith_oauth import langsmith_issuer
+from openswe.github.sandbox_budget import METERED_HOST, ProxiedCall, SandboxGitHubBudget
 from openswe.sandboxes.lifecycle import SandboxCredentialPolicy
 from openswe.sandboxes.providers.langsmith import sandbox_proxy_config, service_identity_jwks_url
 from openswe.sandboxes.providers.langsmith_api import SandboxAPI
@@ -85,12 +89,15 @@ class SandboxProxyCallback:
         base_proxy_config: Mapping[str, object] | None,
         *,
         federated_rules: Sequence[dict[str, JsonValue]] | None = None,
+        metered: bool = False,
     ) -> dict[str, JsonValue]:
         """The proxy config of a thread's sandbox: the custom settings of
         ``base_proxy_config``, the sandbox's cloud identity rules (``federated_rules``, or the
         base config's for a sandbox not yet created), and this callback for the hosts it
-        answers for. Without a public origin there is no callback, and commands reach those
-        hosts without credentials."""
+        answers for. ``metered`` puts ``api.github.com`` first on a callback of its own that
+        the proxy calls for every request, as the first callback matching a host answers for
+        it. Without a public origin there is no callback, and commands reach those hosts
+        without credentials."""
         config = sandbox_proxy_config(
             None, base_proxy_config=base_proxy_config, federated_rules=federated_rules
         )
@@ -98,7 +105,14 @@ class SandboxProxyCallback:
         if url is None:
             return config
         callbacks = config.get("callbacks")
+        metering: dict[str, JsonValue] = {
+            "match_hosts": [METERED_HOST],
+            "url": url,
+            "ttl_seconds": CALLBACK_TTL_SECONDS,
+            "full_request": True,
+        }
         config["callbacks"] = [
+            *([metering] if metered else []),
             {"match_hosts": list(cls.hosts()), "url": url, "ttl_seconds": CALLBACK_TTL_SECONDS},
             *(
                 callback
@@ -139,6 +153,8 @@ class SandboxProxyCallback:
             raise HTTPException(404, "This backend has no proxy callback")
         callback = await cls._verified(body, signature, url)
         sandbox = await CallingSandbox.of(callback.identity)
+        if callback.request is not None:
+            await sandbox.meter(callback.host, callback.request)
         return await sandbox.headers_for(callback.host)
 
     @classmethod
@@ -224,6 +240,41 @@ class CallingSandbox:
             },
         )
         raise HTTPException(403, reason)
+
+    async def meter(self, host: str, request: SandboxCallbackRequest) -> None:
+        """Count a GitHub API call this sandbox's thread makes with its token; raises
+        ``HTTPException`` (429) when the budget refuses it, which the proxy fails as a 502.
+        It runs before the token is resolved, which can itself spend quota, so a refused call
+        spends none. A call metering cannot count goes through."""
+        if host.lower().rstrip(".") != METERED_HOST:
+            return
+        budget = await SandboxGitHubBudget.configured()
+        if budget.mode == "off" or not await SandboxCredentialPolicy.reaches_github(
+            self.thread_id, self.metadata
+        ):
+            return
+        try:
+            refusal = await budget.admit(
+                self.thread_id, ProxiedCall(method=request.method, path=request.path)
+            )
+        except Exception:
+            logger.warning(
+                "Could not meter a sandbox GitHub call; letting it through",
+                extra={"agent_thread_id": self.thread_id},
+                exc_info=True,
+            )
+            return
+        if refusal is None:
+            return
+        try:
+            await refusal.tell(self.thread_id)
+        except Exception:
+            logger.warning(
+                "Could not tell the thread its GitHub calls are refused",
+                extra={"agent_thread_id": self.thread_id},
+                exc_info=True,
+            )
+        raise HTTPException(429, f"GitHub API budget exhausted ({refusal.reason})")
 
     async def headers_for(self, host: str) -> ProxyCallbackAnswer:
         """The headers a request to ``host`` from this sandbox carries: the thread's tool

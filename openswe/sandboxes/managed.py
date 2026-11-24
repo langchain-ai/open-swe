@@ -21,6 +21,7 @@ import httpx2
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 
 from openswe.config import ENV
+from openswe.github.sandbox_budget import SandboxGitHubBudget
 from openswe.sandboxes.lifecycle import (
     BackendSandbox,
     SandboxCreateConfig,
@@ -171,7 +172,9 @@ class ManagedSandbox(BaseModel):
                 create=config.langsmith_options(),
                 thread_id=owner,
                 bind_after_prepare=bind_after_prepare,
-                proxy_config=SandboxProxyCallback.proxy_config(config.proxy_config),
+                proxy_config=SandboxProxyCallback.proxy_config(
+                    config.proxy_config, metered=await SandboxGitHubBudget.meters()
+                ),
                 env_vars=env_vars,
             )
         try:
@@ -195,7 +198,9 @@ class ManagedSandbox(BaseModel):
                 reason="LangSmith did not return the sandbox's cloud identity rules",
             ) from exc
         proxy_config = SandboxProxyCallback.proxy_config(
-            config.proxy_config, federated_rules=federated
+            config.proxy_config,
+            federated_rules=federated,
+            metered=await SandboxGitHubBudget.meters(),
         )
         return cls(
             create=await config.recreation_options(),

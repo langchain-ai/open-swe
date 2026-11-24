@@ -32,6 +32,7 @@ _TOOL_MODULES: Final = (
     "openswe.tools.manage_review_apps",
     "openswe.tools.manage_review_approval_mode",
     "openswe.tools.manage_review_shadow",
+    "openswe.tools.manage_sandbox_github_budget",
     "openswe.tools.upgrade_app_installs",
     "openswe.tools.slack_bots",
     "openswe.tools.manage_review_repos",

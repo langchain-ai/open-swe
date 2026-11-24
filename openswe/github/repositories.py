@@ -234,16 +234,40 @@ class Repository(Base):
             return {row.key: row for row in rows}
 
     @classmethod
+    async def none_installed(cls, keys: Iterable[str], *, checked_since: datetime) -> bool:
+        """Whether a lookup since ``checked_since`` found none of ``keys`` in the installation."""
+        keys = list(keys)
+        rows = await cls.by_keys(keys)
+        return bool(keys) and all(
+            (row := rows.get(key)) is not None
+            and row.github_id is None
+            and row.github_checked_at is not None
+            and row.github_checked_at >= checked_since
+            for key in keys
+        )
+
+    @classmethod
     async def record_github_ids(
-        cls, github_ids: Mapping[str, int | None], *, checked_at: datetime
+        cls,
+        github_ids: Mapping[str, int | None],
+        *,
+        checked_at: datetime,
+        full_names: Mapping[str, str] | None = None,
     ) -> None:
-        """Store what a lookup found for each key; keys without a row are skipped."""
+        """Store what a lookup found for each key, adding the row of a key without one, named
+        as ``full_names`` spells it, so the next lookup reads it instead of listing again."""
         async with postgres.session() as session:
             for key, github_id in github_ids.items():
+                row = cls(full_name=(full_names or {}).get(key, key))
+                if row.key != key:
+                    # A spelling such as ``owner/repo.git`` that names another key's row.
+                    continue
+                found = {"github_id": github_id, "github_checked_at": checked_at}
+                upsert = insert(cls).values(
+                    id=row.id, key=row.key, full_name=row.full_name, **found
+                )
                 await session.execute(
-                    update(cls)
-                    .where(cls.key == key)
-                    .values(github_id=github_id, github_checked_at=checked_at)
+                    upsert.on_conflict_do_update(index_elements=[cls.key], set_=found)
                 )
 
     @property
