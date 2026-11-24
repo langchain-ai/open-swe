@@ -45,8 +45,9 @@ def _fetch_missing(shas: Sequence[str]) -> list[str]:
         '  git cat-file -e "$sha^{commit}" 2>/dev/null || missing="$missing $sha"',
         "done",
         # One round trip for all of them, then one each if a commit is unreachable.
-        'if [ -n "$missing" ] && ! git fetch --quiet --no-tags origin $missing 2>/dev/null; then',
-        '  for sha in $missing; do git fetch --quiet --no-tags origin "$sha" 2>/dev/null || true; done',
+        # Fetch errors stay in the output: when a commit is still missing below, they say why.
+        'if [ -n "$missing" ] && ! git fetch --quiet --no-tags origin $missing; then',
+        '  for sha in $missing; do git fetch --quiet --no-tags origin "$sha" || true; done',
         "fi",
     ]
 
@@ -93,8 +94,14 @@ def _prep_command(
             pull_ref = shlex.quote(f"refs/pull/{pr_number}/head")
             lines.append(
                 f"git cat-file -e {q_head}^{{commit}} 2>/dev/null"
-                f" || git fetch --quiet --no-tags origin {pull_ref} 2>/dev/null || true"
+                f" || git fetch --quiet --no-tags origin {pull_ref} || true"
             )
+        # Without this, checking out a commit the fetches could not get dies with git's
+        # misleading "unable to read tree".
+        lines.append(
+            f"git cat-file -e {q_head}^{{commit}} 2>/dev/null"
+            f' || {{ echo "Could not fetch the pull request head "{q_head}" from origin" >&2; exit 1; }}'
+        )
         # --force: a reused sandbox can have a dirty worktree from a previous
         # run, which would otherwise block the checkout and silently leave the
         # tree at the old head. Strict on purpose: a failed checkout must fail

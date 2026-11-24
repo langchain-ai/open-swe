@@ -10,7 +10,12 @@ import pytest
 from deepagents.backends.protocol import ExecuteResponse, SandboxBackendProtocol
 
 from openswe.review.diff import materialize_review_diff
-from openswe.sandboxes.repo_prep import materialize_trusted_skills, prepare_review_repo
+from openswe.sandboxes.repo_prep import (
+    ReviewRepoPreparationError,
+    materialize_trusted_skills,
+    prepare_review_repo,
+    prepare_review_repo_or_raise,
+)
 
 
 class _ShellBackend:
@@ -250,6 +255,35 @@ async def test_reused_checkout_fetches_only_the_pull_requests_commits(tmp_path: 
         f"{{ git cat-file -e {other} 2>/dev/null && echo fetched-other || echo skipped-other; }}"
     )
     assert result.output.split() == [head, "skipped-other"]
+
+
+async def test_unfetchable_head_fails_with_the_fetch_error(tmp_path: Path) -> None:
+    shell = _ShellBackend()
+    source, clone = tmp_path / "source", tmp_path / "work" / "widget"
+    commit = "git -c user.name=Test -c user.email=test@example.com commit -q --allow-empty -m"
+    setup = await shell.aexecute(
+        f"git init -q -b main {shlex.quote(str(source))} && cd {shlex.quote(str(source))} && "
+        f"{commit} base && git rev-parse HEAD && "
+        f"git clone -q . {shlex.quote(str(clone))} && "
+        f"{commit} head && git rev-parse HEAD && "
+        f"git -C {shlex.quote(str(clone))} remote set-url origin {tmp_path / 'missing'}"
+    )
+    assert setup.exit_code == 0, setup.output
+    base, head = setup.output.split()
+
+    with pytest.raises(ReviewRepoPreparationError) as error:
+        await prepare_review_repo_or_raise(
+            cast(SandboxBackendProtocol, shell),
+            work_dir=str(tmp_path / "work"),
+            repo_owner="acme",
+            repo_name="widget",
+            head_sha=head,
+            pr_number=7,
+            base_sha=base,
+        )
+    assert f"{tmp_path / 'missing'}" in str(error.value)
+    assert f"Could not fetch the pull request head {head} from origin" in str(error.value)
+    assert "unable to read tree" not in str(error.value)
 
 
 @pytest.mark.parametrize("fetchable", [True, False])
