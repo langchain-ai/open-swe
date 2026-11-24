@@ -3,22 +3,32 @@ import { useMemo } from "react"
 import { Link } from "@tanstack/react-router"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { ChatState } from "@langchain/macaw-components/ChatState"
+import { useMessages, useToolCalls } from "@langchain/react"
+import type { SubagentDiscoverySnapshot } from "@langchain/react"
 
-import { LoadError } from "@/components/LoadError"
+import { LoadError, useLoadTimedOut } from "@/components/LoadError"
 import { ConversationLoading } from "@/features/agents/components/ConversationLoading"
 import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Messages } from "@/features/agents/components/messages"
+import type { MessagesProps } from "@/features/agents/components/messages"
 import { asString } from "@/features/agents/components/subagents/SubagentCard"
+import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
+import type { AgentStream } from "@/features/agents/lib/stream/connection"
+import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
-import type { AgentThread, Message } from "@/features/agents/lib/types"
+import type {
+  AcpToolStatus,
+  AgentThread,
+  Message,
+  ToolExecutionChunk,
+} from "@/features/agents/lib/types"
 import { cn } from "@/lib/utils"
 
 /**
  * A subagent viewed as a thread of its own: the task it was given, then
- * everything it said and did, read from the parent thread's transcript under
- * the subagent's namespace. Subagents cannot be replied to — they run to
- * completion on their own and report back to the parent — so there is no
- * composer.
+ * everything it said and did under its namespace in the parent thread.
+ * Subagents cannot be replied to (they run to completion on their own and
+ * report back to the parent), so there is no composer.
  */
 export function SubagentThreadView({
   thread,
@@ -31,26 +41,42 @@ export function SubagentThreadView({
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
   const sidebarCollapsed = useSidebarCollapsed()
-  const task =
+  const transcriptTask =
     source.kind === "transcript" ? source.subagentTask(subagentId) : null
-  const description = task ? asString(task.input.description) : ""
-  const messages = useMemo(() => {
-    if (!task || source.kind !== "transcript") return []
-    const own = source.subagentMessages([...task.namespace, task.toolCallId])
+  // The stream finds only the root conversation's `task` calls, which start
+  // every subagent the sidebar lists.
+  const task =
+    source.kind === "stream"
+      ? source.messages
+          .flatMap((message) => message.chunks)
+          .find(
+            (chunk): chunk is ToolExecutionChunk =>
+              chunk.kind === "tool-execution" &&
+              chunk.toolKind === "task" &&
+              chunk.toolCallId === subagentId
+          )
+      : transcriptTask
+  const description = asString(task?.input?.description)
+  const transcriptMessages = useMemo(() => {
+    if (!transcriptTask || source.kind !== "transcript") return []
+    const own = source.subagentMessages([
+      ...transcriptTask.namespace,
+      transcriptTask.toolCallId,
+    ])
     if (!description) return own
     // The transcript never records the task prompt as a human message — the
     // model wrote it, not a person — so the `task` call's input stands in.
     const prompt: Message = {
-      id: `${task.toolCallId}:prompt`,
+      id: `${transcriptTask.toolCallId}:prompt`,
       author: "user",
-      timestamp: task.startedAt,
+      timestamp: transcriptTask.startedAt,
       chunks: [{ kind: "text", text: description }],
     }
     return [prompt, ...own]
-  }, [description, source, task])
+  }, [description, source, transcriptTask])
 
   const title = description.split("\n", 1)[0]?.trim() || "Subagent"
-  const subagentType = task ? asString(task.input.subagent_type) : ""
+  const subagentType = asString(task?.input?.subagent_type)
   const isRunning = task?.status === "in_progress"
   const backLink = (
     <Link
@@ -68,41 +94,53 @@ export function SubagentThreadView({
   )
 
   let body: React.ReactNode
-  if (source.kind !== "transcript") {
+  if (source.isHydrating) {
+    body = <ConversationLoading label="Loading subagent" />
+  } else if (!task && source.messages.length === 0 && source.error != null) {
+    // `error` also holds a failed run's, so only a thread with no messages
+    // failed to load.
     body = (
       <LoadError
-        title="Subagent transcript unavailable"
+        title="Unable to load subagent"
         context={`Thread: ${thread.id}`}
-        error="Only threads served by the transcript log keep their subagents' transcripts."
+        error={source.error}
       />
     )
-  } else if (source.isHydrating) {
-    body = <ConversationLoading label="Loading subagent" />
   } else if (!task) {
     body = (
       <LoadError
         title="Subagent not found"
         context={`Thread: ${thread.id}`}
-        error="This thread's transcript has no subagent with that id. It may belong to a turn older than the loaded window."
-      />
-    )
-  } else {
-    body = (
-      <Messages
-        messages={messages}
-        threadId={thread.id}
-        scrollKey={`${thread.id}:${subagentId}`}
-        isStreaming={isRunning}
-        contentWidthClass="max-w-3xl"
-        footer={
-          !isRunning && (
-            <p className="px-space-1 pt-space-2 pb-space-6 text-center text-xs text-tertiary">
-              Subagents cannot be replied to. Follow up in the parent thread.
-            </p>
-          )
+        error={
+          source.kind === "stream"
+            ? "This thread started no subagent with that id."
+            : "This thread's transcript has no subagent with that id. It may belong to a turn older than the loaded window."
         }
       />
     )
+  } else {
+    const view = {
+      threadId: thread.id,
+      scrollKey: `${thread.id}:${subagentId}`,
+      isStreaming: isRunning,
+      contentWidthClass: "max-w-3xl",
+      footer: !isRunning && (
+        <p className="px-space-1 pt-space-2 pb-space-6 text-center text-xs text-tertiary">
+          Subagents cannot be replied to. Follow up in the parent thread.
+        </p>
+      ),
+    }
+    body =
+      source.kind === "stream" ? (
+        <StreamSubagentMessages
+          stream={source.stream}
+          toolCallId={subagentId}
+          status={task.status}
+          {...view}
+        />
+      ) : (
+        <Messages messages={transcriptMessages} {...view} />
+      )
   }
 
   return (
@@ -159,5 +197,61 @@ export function SubagentThreadView({
         {body}
       </div>
     </div>
+  )
+}
+
+/**
+ * A subagent's messages and tool calls, read through the SDK stream while this
+ * is mounted: its saved state, and its events while it runs.
+ */
+function StreamSubagentMessages({
+  stream,
+  toolCallId,
+  status,
+  ...view
+}: Omit<MessagesProps, "messages"> & {
+  stream: AgentStream
+  toolCallId: string
+  status: AcpToolStatus
+}) {
+  // The SDK's record of the subagent carries the namespace it streams under.
+  // Without one, as for an earlier run's subagent on a page that joined a live
+  // run as it opened, a target with the call id has the SDK look the namespace
+  // up: in the `task` result, else in the thread's history.
+  const target: Pick<SubagentDiscoverySnapshot, "id" | "namespace" | "status"> =
+    stream.subagents.get(toolCallId) ?? {
+      id: toolCallId,
+      namespace: [`tools:${toolCallId}`],
+      status:
+        status === "completed"
+          ? "complete"
+          : status === "error"
+            ? "error"
+            : "running",
+    }
+  const messages = useMessages(stream, target)
+  const toolCalls = useToolCalls(stream, target)
+  // A subagent starts from its task prompt, so an empty list is one not read yet.
+  const timedOut = useLoadTimedOut(messages.length === 0)
+
+  if (timedOut)
+    return (
+      <LoadError
+        title="Subagent unavailable"
+        context={`Thread: ${view.threadId}`}
+        error="This subagent's messages could not be read."
+      />
+    )
+  if (messages.length === 0)
+    return <ConversationLoading label="Loading subagent" />
+  return (
+    <Messages
+      messages={streamMessagesToUi(
+        messages,
+        toolCalls,
+        messageArrivalTimestamp
+      )}
+      {...view}
+    />
   )
 }
