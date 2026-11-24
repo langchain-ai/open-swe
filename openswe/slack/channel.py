@@ -452,7 +452,12 @@ async def _account_gate(
         _no_run("declined already", **fields)
         return SlackTurnStarted()
     _no_run("declined: sign in", **fields)
-    await needed.prompt(turn.channel_id, turn.thread_ts)
+    prompt_ts = turn.thread_ts
+    if (turn.concierge or is_dm_channel(channel_context)) and (
+        not turn.reply_thread_ts or turn.reply_thread_ts == turn.message_ts
+    ):
+        prompt_ts = CONCIERGE_TS
+    await needed.prompt(turn.channel_id, prompt_ts)
     return SlackTurnStarted()
 
 

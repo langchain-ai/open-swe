@@ -990,24 +990,60 @@ async def test_an_unlinked_ask_sender_can_start_without_a_personal_owner(
 
 @pytest.mark.parametrize("bot_app_id", ["", "A2"])
 @pytest.mark.parametrize("needed", ["unlinked", "revoked"])
+@pytest.mark.parametrize(
+    ("dm", "concierge", "message_ts", "reply_thread_ts", "expected_thread_ts"),
+    [
+        (False, False, "1.2", "", "1.2"),
+        (True, False, "1.2", "", None),
+        (True, False, "1.3", "1.2", "1.2"),
+        (True, True, "1.2", "", None),
+        (True, True, "1.3", "1.2", "1.2"),
+        (True, True, "1.2", "1.2", None),
+    ],
+    ids=["channel", "dm", "dm-reply", "concierge", "concierge-reply", "concierge-root"],
+)
 async def test_a_person_who_cant_run_is_prompted_privately_before_anything_is_claimed_once_per_call(
-    monkeypatch: pytest.MonkeyPatch, needed: str, bot_app_id: str
+    monkeypatch: pytest.MonkeyPatch,
+    slack_api: SlackAPI,
+    needed: str,
+    bot_app_id: str,
+    dm: bool,
+    concierge: bool,
+    message_ts: str,
+    reply_thread_ts: str,
+    expected_thread_ts: str | None,
 ) -> None:
     gate = slack_service.AccountLinkNeeded(
         "U1", None, cast(webhook_common.AccountLinkReason, needed)
     )
-    prompt = AsyncMock()
-    monkeypatch.setattr(slack_service.AccountLinkNeeded, "prompt", prompt)
     monkeypatch.setattr(slack_service, "account_link_needed", AsyncMock(return_value=gate))
+    monkeypatch.setattr(
+        webhook_common,
+        "resolve_slack_channel_context",
+        AsyncMock(return_value=SlackChannelContext(is_im=dm)),
+    )
     prepare = _prepared(monkeypatch)
     app = _start_app(monkeypatch)
+    fields: dict[str, JsonValue] = {
+        "bot_app_id": bot_app_id,
+        "channel_id": "D1" if dm else "C1",
+        "channel_type": "im" if dm else "channel",
+        "concierge": concierge,
+        "reply_thread_ts": reply_thread_ts,
+        "message_ts": message_ts,
+    }
 
-    first = await _start(app, bot_app_id=bot_app_id)
-    again = await _start(app, bot_app_id=bot_app_id)
-    other_call = await _start(app, msg_id="msg_delivery-2", bot_app_id=bot_app_id)
+    first = await _start(app, **fields)
+    again = await _start(app, **fields)
+    other_call = await _start(app, msg_id="msg_delivery-2", **fields)
 
     assert first == _NO_RUN
-    prompt.assert_awaited_once_with("C1", "1.2")
+    [(method, payload)] = slack_api.calls
+    assert method == "chat.postEphemeral"
+    assert payload["channel"] == fields["channel_id"]
+    assert payload["user"] == "U1"
+    assert payload.get("thread_ts") == expected_thread_ts
+    assert ("thread_ts" in payload) is (expected_thread_ts is not None)
     # MDA sends a call again under its webhook ID: the decline was answered already.
     assert again == _NO_RUN
     # Another event of the same message, as Slack sends a mention twice, answers nothing.
