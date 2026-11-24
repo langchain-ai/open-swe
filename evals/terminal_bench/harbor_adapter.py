@@ -87,6 +87,26 @@ class RobinSandbox(LangSmithEnvironment):
         and the job's), which Robin's commands, run by its backend, never get."""
         return sorted(self._startup_env())
 
+    # LangSmith rejects a sandbox whose memory is far from 4 GiB per vCPU; within 2-6 GiB it
+    # accepts it without a warning. Some tasks declare a shape outside that band
+    # (gsea-proteomics: 4 vCPUs, 4 GiB). Raise whichever resource is short so the task never
+    # gets less CPU or memory than it declared.
+    MIN_MEM_BYTES_PER_VCPU: ClassVar[int] = 2 * 1024**3
+    MAX_MEM_BYTES_PER_VCPU: ClassVar[int] = 6 * 1024**3
+
+    @override
+    def _create_sandbox_payload(self, snapshot_name: str | None) -> dict[str, object]:
+        payload = super()._create_sandbox_payload(snapshot_name)
+        vcpus, mem_bytes = payload.get("vcpus"), payload.get("mem_bytes")
+        if isinstance(vcpus, int) and isinstance(mem_bytes, int) and vcpus > 0 and mem_bytes > 0:
+            if mem_bytes < vcpus * self.MIN_MEM_BYTES_PER_VCPU:
+                payload["mem_bytes"] = vcpus * self.MIN_MEM_BYTES_PER_VCPU
+            elif mem_bytes > vcpus * self.MAX_MEM_BYTES_PER_VCPU:
+                payload["vcpus"] = (
+                    mem_bytes + self.MAX_MEM_BYTES_PER_VCPU - 1
+                ) // self.MAX_MEM_BYTES_PER_VCPU
+        return payload
+
     # Harbor 0.24's `_create_sandbox`, plus `labels`; Harbor has no option for them.
     @override
     def _create_sandbox(self, snapshot_name: str | None) -> object:
