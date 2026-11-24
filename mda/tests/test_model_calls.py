@@ -11,6 +11,7 @@ import httpx2
 import openai
 import pytest
 from deepagents.middleware._utils import append_to_system_message
+from google.genai.errors import ClientError
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import (
@@ -32,6 +33,7 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import tool
 from langchain_fireworks import ChatFireworks
+from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from langchain_openai import ChatOpenAI
 from langchain_openai.chat_models.base import OpenAIInvalidRequestError, OpenAIStreamServerError
 from langsmith.run_trees import RunTree
@@ -46,6 +48,7 @@ from rt.model_calls import (
     OutputLimitMiddleware,
     ReplayableHistoryMiddleware,
     call_with_fallback,
+    is_transient,
     model_call_guards,
 )
 from rt.model_retries import ModelRetriesMiddleware
@@ -1132,3 +1135,49 @@ async def test_cancelling_retry_backoff_does_not_start_another_model_attempt(
     with pytest.raises(asyncio.CancelledError):
         await task
     assert handler.await_count == 1
+
+
+@pytest.mark.parametrize("status", [401, 402, 403, 424, 503])
+@pytest.mark.parametrize("provider", ["openai", "anthropic", "google"])
+async def test_credential_and_policy_failures_do_not_retry_models(
+    status: int, provider: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    message = {
+        401: "invalid_api_key private-secret",
+        402: "request blocked by gateway policies: private-policy",
+        403: "access denied private-policy",
+        424: 'Required workspace secret "ANTHROPIC_API_KEY" is missing.',
+        503: "credential validation failed private-secret",
+    }[status]
+    body = {"error": {"message": message}}
+    response = httpx2.Response(
+        status, request=httpx2.Request("POST", "https://gateway.example.com"), json=body
+    )
+    error: BaseException
+    if provider == "google":
+        error = ChatGoogleGenerativeAIError("Error calling model")
+        error.__cause__ = ClientError(status, body)
+    elif provider == "anthropic":
+        error = anthropic.APIStatusError(message, response=response, body=body)
+    else:
+        error = openai.APIStatusError(message, response=response, body=body)
+    monkeypatch.setattr("rt.model_retries.middleware_retries", lambda model: True)
+    attempts = _Attempts(error)
+    guard = ModelRetriesMiddleware()
+
+    answer = await call_with_fallback(
+        ModelRequest(model=_ANTHROPIC, messages=[]),
+        lambda request: guard.awrap_model_call(request, attempts),
+        lambda: _OPENAI,
+    )
+
+    assert is_model_failure_reply(answer.result[0])
+    assert not is_transient(error)
+    assert attempts.models == [_ANTHROPIC]
+    text = answer.result[0].text
+    assert "admin" in text
+    assert "private-" not in text
+    if status == 402:
+        assert "spending limit" in text
+    if status == 424:
+        assert "ANTHROPIC_API_KEY" in text

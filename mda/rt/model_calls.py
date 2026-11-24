@@ -42,6 +42,7 @@ from langchain_core.exceptions import ModelError, ModelRefusalError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
+from runtime_api.gateway_auth import GatewayFailure
 from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY, classify_exception, exception_fields
 from runtime_api.models import MODEL_CALL_BUDGET
 from runtime_api.provenance import Provenance
@@ -185,6 +186,8 @@ def _is_legacy_httpx_transport_error(exc: BaseException) -> bool:
 
 def is_transient(exc: BaseException) -> bool:
     """Whether another attempt, on this provider or the other, may succeed."""
+    if GatewayFailure.of(exc) is not None:
+        return False
     if isinstance(exc, _TRANSIENT_EXCEPTIONS) or _is_legacy_httpx_transport_error(exc):
         return True
     if isinstance(exc, ModelError):
@@ -215,15 +218,8 @@ def _nested_str(data: dict[str, Any], *keys: str) -> str | None:
 
 def model_access_message(exc: BaseException) -> str | None:
     """What to tell the person when the workspace may not use the call's model."""
-    if isinstance(exc, (anthropic.APIStatusError, openai.APIStatusError)):
-        provider_message = _nested_str(_error_body(exc), "error", "message") or str(exc)
-        if exc.status_code == 402 and "blocked by gateway policies" in provider_message.lower():
-            return (
-                "The model gateway blocked this request because a spending limit was reached. "
-                "Ask a LangSmith organization admin to review the gateway's cost policies "
-                "and usage before retrying. Sending the same request again will not "
-                "resolve the limit."
-            )
+    if (failure := GatewayFailure.of(exc)) is not None:
+        return failure.access_message
     if isinstance(exc, anthropic.BadRequestError):
         body = _error_body(exc)
         if _nested_str(body, "error", "details", "error_code") == "model_not_available":
@@ -312,7 +308,7 @@ async def call_with_fallback(
             if (message := model_access_message(exc)) is not None:
                 logger.warning(
                     "Model access error surfaced to the person",
-                    extra={"model_access_error": exception_fields(exc)},
+                    extra={"model_access_error": {"error_type": type(exc).__name__}},
                 )
                 return _failure_reply(message, "model_access")
             refusal = exc if isinstance(exc, ModelRefusalError) else None

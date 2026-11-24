@@ -1,9 +1,11 @@
 import asyncio
 from collections.abc import Iterator
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import anthropic
+import httpx
+import httpx2
 import pytest
 import rt.gateway as gateway_module
 import runtime_api.models as shared
@@ -14,14 +16,21 @@ from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from pydantic import JsonValue
 from rt.backend import Run, RunContext
-from rt.gateway import GATEWAY_BEARER
+from rt.gateway import GATEWAY_BEARER, GatewaySignInRequired, RunGateway
 from rt.loop import RunLoop
 from rt.middleware import BackendRunMiddleware, RunState
 from rt.models import _SDK_RETRY_DISABLE, _build, build_model
 from rt.run_tools import RunSubagentMiddleware, RunToolsets
 from runtime_api.catalog import Catalog, LoopRules, ModelSpec, RoutingRules, RunModels
-from runtime_api.gateway_auth import GatewayChatAnthropic
+from runtime_api.gateway_auth import (
+    GatewayBearer,
+    GatewayChatAnthropic,
+    GatewayFailure,
+    _Httpx2BearerAuth,
+    _HttpxBearerAuth,
+)
 from runtime_api.loop import GATEWAY_CREDENTIAL, GatewayCredential
+from runtime_api.model_errors import is_model_failure_reply
 from runtime_api.models import SUPPORTED_MODELS, model_init_kwargs, provider_model_kwargs
 
 _ENV = (
@@ -209,9 +218,16 @@ async def test_a_shared_model_calls_the_gateway_as_each_run_acts_for(
                 model.ainvoke([HumanMessage("summarize")]),
                 return_exceptions=True,
             )
-            assert all(isinstance(answer, anthropic.AuthenticationError) for answer in answers), (
-                answers
-            )
+            planned_answer, direct_answer = answers
+            assert isinstance(direct_answer, anthropic.AuthenticationError), answers
+            if subagent:
+                assert isinstance(planned_answer, anthropic.AuthenticationError), answers
+            else:
+                # The run's planned call answers the person with the credential failure.
+                assert isinstance(planned_answer, ModelResponse), answers
+                [reply] = planned_answer.result
+                assert is_model_failure_reply(reply), answers
+                assert reply.content == GatewayFailure(401, "").access_message
             assert sorted(route for _, route in seen[before:] if route is not None) == sorted(
                 [expected, "default"]
             )
@@ -225,3 +241,83 @@ async def test_a_shared_model_calls_the_gateway_as_each_run_acts_for(
         "Bearer lsv2-deployment-key"
     ] * 3
     assert asked == [GATEWAY_CREDENTIAL.name, GATEWAY_CREDENTIAL.name]
+
+
+@pytest.mark.parametrize("use_httpx2", [False, True])
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (401, "API key not valid. Please pass a valid API key."),
+        (401, "invalid_api_key: private-provider-key"),
+        (424, 'Required workspace secret "OPENAI_API_KEY" is missing.'),
+        (401, "OAuth login expired"),
+        (401, "unauthorized"),
+        (402, "blocked by gateway policies"),
+        (403, "forbidden"),
+        (424, "unrelated dependency failure"),
+        (503, "credential validation failed"),
+    ],
+)
+@pytest.mark.parametrize("person", [False, True])
+async def test_gateway_rejections_preserve_the_original_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    use_httpx2: bool,
+    status: int,
+    message: str,
+    person: bool,
+) -> None:
+    gateway = RunGateway()
+    credential = GatewayCredential(token="private-person-token") if person else GatewayCredential()
+    monkeypatch.setattr(gateway, "credential", AsyncMock(return_value=credential))
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "private-deployment-key")
+    bearer = GatewayBearer(gateway.token)
+    seen: list[str] = []
+
+    async def reject_httpx(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["Authorization"])
+        return httpx.Response(status, json={"error": {"message": message}})
+
+    async def reject_httpx2(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request.headers["Authorization"])
+        return httpx2.Response(status, json={"error": {"message": message}})
+
+    if use_httpx2:
+        async with httpx2.AsyncClient(
+            auth=_Httpx2BearerAuth(bearer), transport=httpx2.MockTransport(reject_httpx2)
+        ) as connection2:
+            for _ in range(2):
+                response2 = await connection2.post(
+                    "https://gateway.example.com", json={"model": "example"}
+                )
+                assert response2.status_code == status
+                assert response2.json() == {"error": {"message": message}}
+    else:
+        async with httpx.AsyncClient(
+            auth=_HttpxBearerAuth(bearer), transport=httpx.MockTransport(reject_httpx)
+        ) as connection:
+            for _ in range(2):
+                response = await connection.post(
+                    "https://gateway.example.com", json={"model": "example"}
+                )
+                assert response.status_code == status
+                assert response.json() == {"error": {"message": message}}
+
+    original = "Bearer private-person-token" if person else "Bearer private-deployment-key"
+    assert seen == [original] * 2
+    for record in caplog.records:
+        assert "private-" not in str(record.__dict__)
+
+
+async def test_gateway_sign_in_required_does_not_use_the_deployment_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = RunGateway()
+    monkeypatch.setattr(
+        gateway,
+        "credential",
+        AsyncMock(return_value=GatewayCredential(unavailable="Sign in again")),
+    )
+    monkeypatch.setenv("LANGSMITH_GATEWAY_API_KEY", "private-deployment-key")
+    with pytest.raises(GatewaySignInRequired, match="Sign in again"):
+        await gateway.token()

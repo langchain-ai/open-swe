@@ -6,11 +6,12 @@ work. The gateway takes either as ``Authorization: Bearer``. OAuth access tokens
 last minutes, far shorter than a run, so each SDK here asks for the token again
 before every request instead of holding a key.
 
-Only ``runtime_api.models`` imports this module, and only for a model built with a
-``GatewayBearer``, so the provider SDKs it wires stay the caller's dependencies.
+The provider SDKs wired by ``GatewayBearer`` stay the caller's dependencies.
 """
 
+import re
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
+from dataclasses import dataclass
 from functools import cached_property
 
 import anthropic
@@ -30,6 +31,72 @@ type GatewayToken = Callable[[], Awaitable[str]]
 # SDK constructors insist on a key; the bearer auth replaces it on every request.
 PLACEHOLDER_API_KEY = "langsmith-gateway"
 _PROVIDER_KEY_HEADERS = ("x-api-key", "x-goog-api-key")
+
+
+@dataclass(frozen=True)
+class GatewayFailure:
+    """A credential or access rejection, independent of the provider SDK."""
+
+    status: int
+    message: str
+
+    @classmethod
+    def of(cls, error: BaseException) -> GatewayFailure | None:
+        """Read provider status errors and their wrapped causes without looping."""
+        seen: set[int] = set()
+        while id(error) not in seen:
+            seen.add(id(error))
+            status = getattr(error, "status_code", None)
+            if not isinstance(status, int):
+                status = getattr(error, "code", None)
+            message = f"{error} {getattr(error, 'body', '')}".lower()
+            if isinstance(status, int) and (
+                status in {401, 402, 403}
+                or (status == 424 and "workspace secret" in message and "missing" in message)
+                or (status == 503 and "credential validation failed" in message)
+            ):
+                return cls(status, message)
+            cause = error.__cause__ or error.__context__
+            if cause is None:
+                break
+            error = cause
+        return None
+
+    @property
+    def access_message(self) -> str:
+        """Describe remediation without echoing provider bodies or credential material."""
+        if self.status == 402:
+            if "blocked by gateway policies" in self.message:
+                return (
+                    "The model gateway blocked this request because a spending limit was reached. "
+                    "Ask a LangSmith organization admin to review the gateway's cost policies "
+                    "and usage before retrying. Sending the same request again will not "
+                    "resolve the limit."
+                )
+            return (
+                "The model gateway blocked this request under a billing or usage policy. "
+                "Ask a LangSmith organization admin to review gateway policies and billing before retrying."
+            )
+        if self.status == 403:
+            return (
+                "The model gateway denied access to this model. Ask a LangSmith organization "
+                "admin to review gateway access policies and the workspace's provider permissions."
+            )
+        if self.status == 424:
+            secret = re.search(
+                r"\b(?:OPENAI|ANTHROPIC|GOOGLE|GEMINI|FIREWORKS|BASETEN)_API_KEY\b",
+                self.message.upper(),
+            )
+            name = f" ({secret.group()})" if secret else ""
+            return (
+                f"The model gateway is missing a required workspace provider secret{name}. "
+                "Ask a LangSmith workspace admin to add it in workspace secrets before retrying."
+            )
+        return (
+            "The model gateway could not validate the credentials for this model. "
+            "Ask a LangSmith workspace admin to check the workspace's provider API key "
+            "and gateway credentials. If your LangSmith login expired, sign in to Robin again."
+        )
 
 
 class GatewayBearer:

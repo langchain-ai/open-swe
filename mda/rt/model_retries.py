@@ -23,6 +23,7 @@ from langgraph.config import get_stream_writer
 from langgraph.errors import GraphBubbleUp
 from langgraph.pregel._messages import StreamMessagesHandler  # noqa: PLC2701
 from langgraph.pregel.protocol import StreamChunk
+from runtime_api.gateway_auth import GatewayFailure
 
 from rt.models import middleware_retries
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
@@ -111,6 +112,8 @@ def _status(error: Exception) -> int | None:
 
 
 def _transient(error: Exception) -> bool:
+    if GatewayFailure.of(error) is not None:
+        return False
     if isinstance(error, GraphBubbleUp):
         return False
     if (status := _status(error)) is not None:
