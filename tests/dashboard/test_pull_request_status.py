@@ -123,33 +123,36 @@ async def test_get_statuses_normalizes_live_state_and_paginates_review_threads(
         "pageInfo": {"hasNextPage": False, "endCursor": None},
     }
 
+    runs = [
+        {
+            "id": 1,
+            "name": "unit",
+            "status": "completed",
+            "conclusion": "timed_out",
+            "details_url": "https://checks/unit",
+        },
+        {"id": 2, "name": "deploy", "status": "queued", "conclusion": None},
+    ]
+    statuses = [{"context": "legacy", "state": "failure", "target_url": "https://checks/legacy"}]
+
     async def request(client, method, url, **kwargs):
-        assert client is not None and url == github_http.GITHUB_GRAPHQL
+        assert client is not None
+        # The thread's checks come over REST alone; the query never asks GitHub for them.
+        if url.endswith("/check-runs"):
+            return _response(200, {"total_count": len(runs), "check_runs": runs})
+        if url.endswith("/status"):
+            return _response(200, {"total_count": len(statuses), "statuses": statuses})
+        assert url == github_http.GITHUB_GRAPHQL
         variables = kwargs["json"]["variables"]
         if "cursor" not in variables:
             assert variables["threadComments"] is True
+            assert variables["ci"] is False
             return _response(
                 200,
                 status_answer(
                     state="MERGED",
                     mergeable="CONFLICTING",
                     merge_state="DIRTY",
-                    runs=[
-                        {
-                            "name": "unit",
-                            "status": "completed",
-                            "conclusion": "timed_out",
-                            "details_url": "https://checks/unit",
-                        },
-                        {"name": "deploy", "status": "queued", "conclusion": None},
-                    ],
-                    statuses=[
-                        {
-                            "context": "legacy",
-                            "state": "failure",
-                            "target_url": "https://checks/legacy",
-                        }
-                    ],
                     reviewThreads=first_threads,
                 ),
             )

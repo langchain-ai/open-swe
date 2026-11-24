@@ -122,12 +122,40 @@ def status_answer(
     return answer
 
 
-def serve_status(monkeypatch, *answers: dict[str, object]) -> list[str]:
-    """Answer each GraphQL query with the next of ``answers``; returns the queries' names."""
+def serve_status(
+    monkeypatch,
+    *answers: dict[str, object],
+    rest_runs: Sequence[Mapping[str, object]] | None = None,
+    forbidden_workflows: bool = False,
+) -> list[str]:
+    """Answer each GraphQL query with the next of ``answers``; returns the queries' names.
+
+    With ``rest_runs`` the head commit's checks are listed over REST too, as the thread
+    status reads them, with the workflow runs their suites name unless ``forbidden_workflows``.
+    """
     queries: list[str] = []
     pending = list(answers)
 
     async def request(_client, method, url, **kwargs):
+        if rest_runs is not None and method == "GET":
+            if url.endswith("/check-runs"):
+                return response({"total_count": len(rest_runs), "check_runs": list(rest_runs)})
+            if url.endswith("/status"):
+                return response({"total_count": 0, "statuses": []})
+            if url.endswith("/actions/runs"):
+                if forbidden_workflows:
+                    return response({"message": "Resource not accessible by integration"}, 403)
+                workflows = [
+                    {
+                        "check_suite_id": run["check_suite"]["id"],
+                        "workflow_id": run["workflow"]["workflow"]["databaseId"],
+                        "event": run["workflow"]["event"],
+                    }
+                    for run in rest_runs
+                    if isinstance(run.get("check_suite"), dict)
+                    and isinstance(run.get("workflow"), dict)
+                ]
+                return response({"total_count": len(workflows), "workflow_runs": workflows})
         assert (method, url) == ("POST", github_http.GITHUB_GRAPHQL)
         queries.append(kwargs["json"]["query"].split("(")[0].split()[-1])
         return response(pending.pop(0) if len(pending) > 1 else pending[0])
@@ -303,7 +331,7 @@ async def test_review_and_thread_status_agree_on_current_check_outcomes(
         }
         for suite, result in [(10, "failure"), (20, "success"), (30, conclusion)]
     ]
-    serve_status(monkeypatch, status_answer(runs=runs))
+    serve_status(monkeypatch, status_answer(runs=runs), rest_runs=runs)
     review = await _client(1).load()
     thread = await _client(1).thread_status()
     assert review is not None
@@ -354,6 +382,7 @@ async def test_approval_is_separate_from_ci_and_only_required_by_branch_rules(
     serve_status(
         monkeypatch,
         status_answer(merge_state="BLOCKED" if required else "UNSTABLE", runs=runs),
+        rest_runs=runs,
     )
     head_ci = prs.PullRequestCI(
         state="open",
@@ -456,10 +485,9 @@ async def test_a_forbidden_workflow_hides_no_checks(monkeypatch):
         }
         for index in range(2)
     ]
-    serve_status(monkeypatch, answer)
-    rest = AsyncMock(side_effect=AssertionError("checks were read over GraphQL"))
-    monkeypatch.setattr(github_http.RepoClient, "check_runs", rest)
-    monkeypatch.setattr(github_http.RepoClient, "commit_statuses", rest)
+    # The review reads its checks over GraphQL and the thread over REST; neither may
+    # drop a run because GitHub would not name its workflow.
+    serve_status(monkeypatch, answer, rest_runs=runs, forbidden_workflows=True)
     monkeypatch.setattr(prs.BranchConfig, "read", AsyncMock(return_value=None))
     result = await _client(1).load()
     thread = await _client(1).thread_status()

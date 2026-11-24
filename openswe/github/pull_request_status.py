@@ -234,7 +234,7 @@ fragment StatusReview on PullRequestReview {
 _STATUS_QUERY = (
     """
 query PullRequestStatus(
-  $owner: String!, $repo: String!, $number: Int!, $threadComments: Boolean!
+  $owner: String!, $repo: String!, $number: Int!, $threadComments: Boolean!, $ci: Boolean!
 ) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
@@ -257,7 +257,7 @@ query PullRequestStatus(
           }
         }
       }
-      commits(last: 1) { nodes { commit { ...CommitCI } } }
+      commits(last: 1) { nodes { commit { oid ...CommitCI @include(if: $ci) } } }
     }
   }
 }
@@ -1685,7 +1685,8 @@ class PullRequestClient:
         except _CursorLoop, httpx2.HTTPError, ValueError:
             return None
 
-    async def _read_status(self, *, thread_comments: bool = False) -> _StatusRead:
+    async def _read_status(self, *, thread_comments: bool = False, ci: bool = True) -> _StatusRead:
+        """The status query's answer; without ``ci`` it leaves out the head commit's checks."""
         response = await self.repo.github.request(
             "POST",
             GITHUB_GRAPHQL,
@@ -1696,6 +1697,7 @@ class PullRequestClient:
                     "repo": self.repo.name,
                     "number": self.number,
                     "threadComments": thread_comments,
+                    "ci": ci,
                 },
             },
         )
@@ -1719,7 +1721,11 @@ class PullRequestClient:
         """``sha``'s check runs and statuses, falling back to REST for incomplete GraphQL reads."""
         if sha is None:
             return None
-        return read.checks(sha) or await or_none(self.repo.commit_ci_over_rest(sha))
+        return read.checks(sha) or await self._rest_checks(sha)
+
+    async def _rest_checks(self, sha: str | None) -> CommitCI | None:
+        """``sha``'s check runs and statuses, read over REST alone."""
+        return await or_none(self.repo.commit_ci_over_rest(sha)) if sha is not None else None
 
     async def _reviewers(self, read: _StatusRead) -> list[PullRequestReviewer] | None:
         """``read``'s reviewers, counting the reviews on the pages after it."""
@@ -1760,8 +1766,11 @@ class PullRequestClient:
             {"repo_full_name": self.repo.full_name, "number": self.number}
         )
         result["url"] = f"https://github.com/{self.repo.full_name}/pull/{self.number}"
+        # Checks come over REST alone: on a repository with many of them GitHub takes
+        # seconds to build the query's one page of them, which then overflows anyway,
+        # while REST reads every page at once and mostly answers 304s.
         with MeteredTransport.attributed():
-            read = await or_none(self._read_status(thread_comments=True))
+            read = await or_none(self._read_status(thread_comments=True, ci=False))
         if read is None:
             return result
         state = read.state
@@ -1777,7 +1786,7 @@ class PullRequestClient:
         with MeteredTransport.attributed():
             review_threads, checks = await asyncio.gather(
                 self._unresolved_threads(read),
-                self._head_checks(read, read.head_sha),
+                self._rest_checks(read.head_sha),
             )
         if review_threads is not None:
             result.update(
