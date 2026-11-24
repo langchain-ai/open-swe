@@ -360,6 +360,33 @@ async def test_schedule_timezone_survives_updates_and_reenabling(
     assert fake_client.jobs.created[-1].timezone == "America/New_York"
 
 
+@pytest.mark.parametrize(
+    "prompt,warned",
+    [
+        ("Summarize merged PRs, then use manage_thread with send_message to report back.", True),
+        ("Summarize merged PRs and post them to #eng with slack_post_message.", False),
+        ("Summarize merged PRs and send_message nothing; just open an issue.", False),
+    ],
+)
+async def test_saving_an_automation_warns_about_thread_message_delivery(
+    fake_client: _FakeClient, auth: None, prompt: str, warned: bool
+) -> None:
+    created = await schedules.create_agent_schedule(
+        "alice",
+        ScheduleCreateBody(
+            prompt="Summarize merged PRs", triggers=[ScheduleTrigger(cron="0 9 * * *")]
+        ),
+    )
+    assert "warnings" not in created
+
+    updated = await schedules.update_agent_schedule(
+        created["id"], "alice", ScheduleUpdateBody(prompt=prompt)
+    )
+
+    assert updated["prompt"] == prompt
+    assert ("manage_thread" in " ".join(updated.get("warnings", []))) is warned
+
+
 @pytest.mark.parametrize("timezone", ["Eastern", "Mars/Olympus", "../UTC", ""])
 def test_schedule_rejects_invalid_timezones(timezone: str) -> None:
     with pytest.raises(ValueError):

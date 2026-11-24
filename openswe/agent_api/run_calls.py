@@ -161,6 +161,7 @@ from openswe.run_config import RunConfig
 from openswe.sandboxes.browsers import ThreadBrowser
 from openswe.sandboxes.lifecycle import take_stale_boot
 from openswe.sandboxes.state import SandboxUnreachableError
+from openswe.schedules.delivery_outcomes import AutomationRunDelivery
 from openswe.slack.channel_moves import prepare_channel_move, record_channel_move
 from openswe.slack.tools.reply import send_slack_reply
 from openswe.threads.inbox import ThreadInbox
@@ -568,6 +569,8 @@ class TokenRun:
             ready=self._ready,
             notify=not self.kind.reviews,
         )
+        if delivery := AutomationRunDelivery.of(cfg, self.run_id):
+            await delivery.tool_finished(request.name, result.content)
         if request.name not in _JOINS_TASK or result.status == "error":
             return result
         joined = await self._task_context_message()
@@ -678,7 +681,12 @@ class TokenRun:
         await self._reporting(
             request, "run_ended", ended, messages=messages_from_dict(request.replies)
         )
+        if delivery := self._automation_delivery():
+            await delivery.ended()
         return Done()
+
+    def _automation_delivery(self) -> AutomationRunDelivery | None:
+        return AutomationRunDelivery.of(RunConfig.from_config(self.config), self.run_id)
 
     async def model_failed(self, request: ModelFailed) -> Done:
         """Leave why a model call failed the run on its thread, for the failure reply."""

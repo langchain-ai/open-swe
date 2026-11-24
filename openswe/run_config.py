@@ -234,6 +234,7 @@ class RunConfig(BaseModel):
     # Background jobs
     watch_key: str | None = None
     schedule_id: str | None = None
+    automation_invocation_id: str | None = None
     automation_slack_reply: AutomationSlackReply | None = None
     background_task_completion: bool | None = None
 

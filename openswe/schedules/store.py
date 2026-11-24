@@ -11,6 +11,7 @@ import logging
 import re
 import uuid
 from collections.abc import Collection, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from fnmatch import fnmatchcase
 from typing import Annotated, Any, ClassVar, Literal, cast, get_args
@@ -275,6 +276,18 @@ TriggerConfig = Annotated[
 _TRIGGERS = TypeAdapter(list[TriggerConfig])
 
 
+# Automation runs have no verified triggering user, so ``manage_thread`` refuses to message.
+_THREAD_MESSAGE_DELIVERY = re.compile(
+    r"manage_thread\b.{0,200}?\bsend_message|\bsend_message\b.{0,200}?manage_thread",
+    re.IGNORECASE | re.DOTALL,
+)
+_THREAD_MESSAGE_WARNING = (
+    "This prompt delivers through `manage_thread` `send_message`, which automation runs "
+    "cannot use: they have no verified triggering user. Deliver with `slack_post_message` "
+    "to a channel, or to the creator's Slack member ID to DM them, instead."
+)
+
+
 class ScheduleCreateBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=20_000)
     # Every trigger, any of which fires the automation, each with its own filters.
@@ -285,6 +298,13 @@ class ScheduleCreateBody(BaseModel):
     admin_thread: bool = False
     # System-owned, not its creator's: admins only, unbounded.
     system: bool = False
+
+    @staticmethod
+    def delivery_warnings(prompt: object) -> dict[str, list[str]]:
+        """``warnings`` for a saved automation whose prompt delivers a way its runs cannot."""
+        if not isinstance(prompt, str) or not _THREAD_MESSAGE_DELIVERY.search(prompt):
+            return {}
+        return {"warnings": [_THREAD_MESSAGE_WARNING]}
 
 
 class ScheduleUpdateBody(BaseModel):
@@ -525,6 +545,56 @@ async def _put_run_state(record: dict[str, Any], patch: dict[str, Any]) -> None:
 async def record_run_error(record: dict[str, Any], error: str) -> None:
     """Show ``error`` on the automation, as a failed launch does."""
     await _put_run_state(record, {"last_error": error, "last_error_at": now_iso()})
+
+
+@dataclass(frozen=True)
+class UndeliveredRuns:
+    """An automation's streak of consecutive runs that failed to deliver their result."""
+
+    schedule_id: uuid.UUID
+
+    async def record(self, *, delivered: bool) -> int:
+        """End the streak on a delivery, else extend it; the streak's length after."""
+        async with transaction() as conn:
+            streak = await conn.scalar(
+                text(
+                    "UPDATE automation SET undelivered_runs = "
+                    "CASE WHEN :delivered THEN 0 ELSE undelivered_runs + 1 END "
+                    "WHERE id = :id RETURNING undelivered_runs"
+                ),
+                {"delivered": delivered, "id": self.schedule_id},
+            )
+        return int(streak or 0)
+
+    async def pause(self, error: str) -> bool:
+        """Turn the automation off and show why; whether this call is what paused it."""
+        async with transaction() as conn:
+            paused = await conn.scalar(
+                text(
+                    "UPDATE automation SET enabled = false, undelivered_runs = 0, "
+                    "last_error = :error, last_error_at = clock_timestamp(), "
+                    "updated_at = clock_timestamp() WHERE id = :id AND enabled RETURNING 1"
+                ),
+                {"error": error, "id": self.schedule_id},
+            )
+            if not paused:
+                return False
+            cron_ids = (
+                await conn.scalars(
+                    text(
+                        "SELECT cron_id FROM automation_trigger "
+                        "WHERE automation_id = :id AND cron_id IS NOT NULL FOR UPDATE"
+                    ),
+                    {"id": self.schedule_id},
+                )
+            ).all()
+            await conn.execute(
+                text("UPDATE automation_trigger SET cron_id = NULL WHERE automation_id = :id"),
+                {"id": self.schedule_id},
+            )
+        for cron_id in cron_ids:
+            await _delete_cron(cron_id)
+        return True
 
 
 async def get_agent_schedule(schedule_id: str) -> dict[str, Any] | None:
@@ -858,7 +928,10 @@ async def create_agent_schedule(
         raise
     record = await get_agent_schedule(automation_id)
     assert record is not None
-    return _schedule_summary(record, policy)
+    return {
+        **_schedule_summary(record, policy),
+        **ScheduleCreateBody.delivery_warnings(record.get("prompt")),
+    }
 
 
 async def update_agent_schedule(
@@ -982,7 +1055,10 @@ async def update_agent_schedule(
             await _delete_cron(cron_id)
     updated = await get_agent_schedule(existing["id"])
     assert updated is not None
-    return _schedule_summary(updated, owner)
+    return {
+        **_schedule_summary(updated, owner),
+        **ScheduleCreateBody.delivery_warnings(updated.get("prompt")),
+    }
 
 
 async def delete_agent_schedule(schedule_id: str, *, login: str | None = None) -> None:
@@ -1144,6 +1220,7 @@ async def _agent_run_config(
         },
         new_invocation_id(),
     )
+    configurable["automation_invocation_id"] = configurable["invocation_id"]
     if record.get("system") is not True:
         from openswe.threads.identity import ThreadIdentity
 
