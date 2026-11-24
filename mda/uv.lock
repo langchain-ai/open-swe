@@ -1216,7 +1216,7 @@ wheels = [
 
 [[package]]
 name = "langchain-fireworks"
-version = "1.7.3"
+version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -1225,9 +1225,9 @@ dependencies = [
     { name = "openai" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3c/99/0a62d506ba5807fd99cd8bdf9685fec8f647e9e667dd00249eb274ece782/langchain_fireworks-1.7.3.tar.gz", hash = "sha256:b90edd0ebe84eb12de148cc69d7df6affad10efda718c70cd2b9670b4104367e", size = 256000, upload-time = "2026-11-09T20:54:05.803Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/9e/f3d8b1aaf32cab7386a0316346f120b12171a8605756c2d2aec825a9f12a/langchain_fireworks-1.8.0.tar.gz", hash = "sha256:977ab11f745f11c056fe29fb46c2e9c1d1bb5d2a6d2c538fd4baf0f73ea780f2", size = 221732, upload-time = "2026-11-23T17:13:08.056Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/68/b9/ba0bf6097d2965581dc1b06ab8b991dccf7f2e02bc4622069c5ed167979f/langchain_fireworks-1.7.3-py3-none-any.whl", hash = "sha256:3d986857918838da83a9547c37cf86757d0c59d97a4b74b86abd6f6eee47d89f", size = 35488, upload-time = "2026-11-09T20:54:04.863Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/85/c16204b76193864152b280a61604c23e36279b58a5b421e66fcf287b2daa/langchain_fireworks-1.8.0-py3-none-any.whl", hash = "sha256:6c85a74f239d0fe72f6c12d20b283406818d6683fda0f5edb4d840184aed43da", size = 35464, upload-time = "2026-11-23T17:13:07.202Z" },
 ]
 
 [[package]]
@@ -1369,7 +1369,7 @@ wheels = [
 
 [[package]]
 name = "langsmith"
-version = "0.16.0"
+version = "0.16.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1387,9 +1387,9 @@ dependencies = [
     { name = "xxhash" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e9/d0/48f803bba3f2032739095779977f38771a350d0b527d44de2ddb0ce067ca/langsmith-0.16.0.tar.gz", hash = "sha256:8111f149c720bc838ee16104d9eec59fe9379d67015dbce00b4fd2dcd910ca69", size = 5123269, upload-time = "2026-11-21T00:39:39.171Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/96/8b1ed7d37bae1f9cd9bd42a4588d26d3855ea80a5932294101feef09cad2/langsmith-0.16.1.tar.gz", hash = "sha256:20f09ff3cc2c26dd0af94a1306c988e48e46bdea2268d8e24f63bfd54f10e6a8", size = 5124903, upload-time = "2026-11-23T20:32:24.686Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0e/20/7fdaa85d1ff7a45f611b52e2be0c75d28d95b54420ab0083d672f32aa7df/langsmith-0.16.0-py3-none-any.whl", hash = "sha256:edd738910a595751218299c9791099db1b5c63ae6dc21ca68009dbfb6344524a", size = 1036883, upload-time = "2026-11-21T00:39:37.173Z" },
+    { url = "https://files.pythonhosted.org/packages/63/79/b2b50b0a6c6ac21c85411d4c5f02e27a5ea965c73ec2836011930d28e65b/langsmith-0.16.1-py3-none-any.whl", hash = "sha256:6d7ca07f254839309b6f797062271f5447c25112eda0cec9a0e7606eef77d5ee", size = 1037706, upload-time = "2026-11-23T20:32:22.367Z" },
 ]
 
 [[package]]
@@ -1699,11 +1699,11 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "langchain", extras = ["mcp"], specifier = ">=1.5.2" },
     { name = "langchain-anthropic", specifier = ">=1.7.12" },
-    { name = "langchain-fireworks", specifier = ">=1.7.3,<2.0.0" },
+    { name = "langchain-fireworks", specifier = ">=1.8.0,<2.0.0" },
     { name = "langchain-google-genai", specifier = ">=4.5.2" },
     { name = "langchain-openai", specifier = ">=1.8.5,<2.0.0" },
     { name = "langchain-quickjs", editable = "../vendor/langchain-quickjs" },
-    { name = "langsmith", specifier = ">=0.16.0" },
+    { name = "langsmith", specifier = ">=0.16.1" },
     { name = "managed-deepagents", git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=ce54e2e03a7d903b5450f059e5551cff17c1cf71" },
     { name = "markdownify", specifier = "==1.2.3" },
     { name = "mcp", specifier = ">=2.2.0" },

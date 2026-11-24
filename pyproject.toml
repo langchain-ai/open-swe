@@ -24,10 +24,10 @@ dependencies = [
     "markdownify>=1.2.3",
     "markdown-it-py==4.3.0",
     "langchain-anthropic>=1.7.12",
-    "langsmith[sandbox-auth]>=0.16.0",
+    "langsmith[sandbox-auth]>=0.16.1",
     "langchain-openai>=1.8.5,<2.0.0",
     "openai>=3.10.0",
-    "langchain-fireworks>=1.7.3",
+    "langchain-fireworks>=1.8.0",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
     "fireworks-ai>=1.2.9",
     "langchain-google-genai>=4.5.2",
@@ -68,7 +68,7 @@ managed-deepagents = { git = "https://github.com/langchain-ai/langchainplus", re
 [tool.uv]
 constraint-dependencies = [
     "langgraph-api==0.19.0.dev3",
-    "langgraph-runtime-inmem==0.39.0rc8",
+    "langgraph-runtime-inmem==0.39.0rc9",
 ]
 
 [build-system]
