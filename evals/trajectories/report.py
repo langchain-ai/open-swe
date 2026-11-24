@@ -3,7 +3,8 @@
     uv run python -m evals.trajectories.report <job-dir> --project <tracing project>
 
 Each trial's agent log names the Robin thread it ran in; its turns are scored together.
-Prints a Markdown table, also appended to ``$GITHUB_STEP_SUMMARY`` when that is set.
+Prints a Markdown table, also appended to ``$GITHUB_STEP_SUMMARY`` when that is set, and
+with ``--slack <file>`` writes each task's pass rate there for the run's Slack post.
 Without LangSmith credentials only rewards and threads are reported. Exits nonzero when a
 trial errored or never reported, so a lost replay fails CI; a low reward does not.
 """
@@ -12,6 +13,7 @@ import argparse
 import json
 import os
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
@@ -55,20 +57,52 @@ class Trial:
         )
 
 
+def pass_rates(trials: list[Trial], attempts: int) -> str:
+    """One line per task, its passing trials over its attempts, the failing tasks first.
+
+    An attempt that never reported counts as failed. Empty when no trial was graded, so
+    the job reads as one that never ran.
+    """
+    if all(trial.reward is None for trial in trials):
+        return ""
+    rewards: dict[str, list[float | None]] = defaultdict(list)
+    for trial in trials:
+        rewards[trial.task].append(trial.reward)
+    lines = []
+    for task, runs in sorted(
+        rewards.items(), key=lambda item: (item[1].count(1) == attempts, item[0])
+    ):
+        passed, errored, lost = runs.count(1), runs.count(None), attempts - len(runs)
+        line = f"{'✅' if passed == attempts else '⚠️'} `{task}` {passed}/{attempts}"
+        notes = [f"{n} {what}" for n, what in ((errored, "errored"), (lost, "never reported")) if n]
+        lines.append(line + (f" ({', '.join(notes)})" if notes else ""))
+    return "\n".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("job", type=Path, help="the Harbor job directory")
     parser.add_argument("--project", required=True, help="where the deployment traces runs")
+    parser.add_argument("--slack", type=Path, help="write each task's pass rate here")
     args = parser.parse_args()
 
     traces = RobinTraces(Client(), args.project) if os.environ.get("LANGSMITH_API_KEY") else None
     header = ["task", "reward", "thread", "wall_seconds", *_COLUMNS]
     lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     trials = Trial.in_job(args.job)
+    # Written before the traces are read, so the grades reach Slack even if LangSmith fails.
+    if args.slack is not None:
+        attempts = json.loads((args.job / "config.json").read_text())["n_attempts"]
+        args.slack.write_text(pass_rates(trials, attempts))
     for trial in trials:
         scores: dict[str, float | int | bool] = {}
         if traces is not None and trial.thread_id is not None:
-            scores = traces.score(*traces.of_thread(trial.thread_id))
+            try:
+                scores = traces.score(*traces.of_thread(trial.thread_id))
+            except (
+                Exception
+            ) as exc:  # The scores add to the grade; one missing trace loses only its row's.
+                print(f"::warning::Could not score thread {trial.thread_id}: {exc!r}")
         thread = f"[thread]({trial.thread_url})" if trial.thread_url else "none"
         row = [trial.task, str(trial.reward), thread]
         row += [str(scores.get(column, "")) for column in ("wall_seconds", *_COLUMNS)]

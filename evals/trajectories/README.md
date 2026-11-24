@@ -61,8 +61,9 @@ Score the trajectory of each trial's thread with `evals.trajectories.score --thr
 
 ### In CI
 
-`.github/workflows/robin_trajectory_evals.yml` runs the tasks on demand (Actions → "Robin: replay trajectory evals") against staging, or preview to measure a PR labeled `robin-preview` before it merges, and writes each trial's reward and trajectory scores to the job summary (`python -m evals.trajectories.report <job-dir>`).
-It loads the deployment's service key from 1Password (`CI secrets/robin-evals/<deployment>_service_key`); only staging has one so far, so a preview run needs `preview_service_key` added first (`deployments/secrets/ci/robin-evals/`).
+`.github/workflows/robin_trajectory_evals.yml` runs each task three times against staging every night at 08:00 UTC and posts each task's pass rate to #team-robin-alerts.
+It also runs on demand (Actions → "Robin: replay trajectory evals") against staging, or preview to measure a PR labeled `robin-preview` before it merges, and writes each trial's reward and trajectory scores to the job summary (`python -m evals.trajectories.report <job-dir>`).
+It loads a service key from 1Password (`CI secrets/robin-evals/staging_service_key`), which serves preview too, since staging and preview Robin share a workspace.
 Harbor's LangSmith plugin also records each run as its own experiment on the `robin-trajectory-replays` dataset, with each trial's reward and latency, so runs compare side by side under Datasets & Experiments.
 The experiments have no token or cost figures, since those live in Robin's own traces rather than in Harbor.
 The report reads the traces with the workspace key Robin's MDA deploys use.
