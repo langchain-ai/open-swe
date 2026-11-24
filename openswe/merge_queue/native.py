@@ -122,10 +122,12 @@ class NativeQueueRuntime:
         else:
             workflow = await repo.raw_file(f".github/workflows/{WORKFLOW}", snapshot.main_sha)
             actual_digest = hashlib.sha256(workflow).hexdigest() if workflow is not None else None
-        if actual_digest != config.workflow_digest:
+        if config.workflow_digest is not None and actual_digest != config.workflow_digest:
             raise ValueError("Queue workflow changed")
         main_advance = (
-            await self._main_advance_from(repo, snapshot, previous.batch) if previous else None
+            await self._validation_advance_from(repo, snapshot, previous.batch)
+            if previous
+            else None
         )
         work = await queue.prepare_native_validation(
             snapshot,
@@ -211,7 +213,7 @@ class NativeQueueRuntime:
         if await self._timeout(repo, policy) != timeout:
             raise ValueError("Native queue deadline changed during validation")
         await queue.renew(lease, timedelta(seconds=60))
-        main_advance = await self._main_advance_from(repo, snapshot, work.batch)
+        main_advance = await self._validation_advance_from(repo, snapshot, work.batch)
         if await queue.authorize_native_result(
             work, snapshot, lease, main_advance_from=main_advance
         ):
@@ -222,7 +224,7 @@ class NativeQueueRuntime:
                 if candidate.head_sha != work.request.candidate_sha
                 else None
             )
-            async with queue.native_publication(lease):
+            async with queue.native_publication(lease, timeout_seconds=30):
                 await dispatcher.report(
                     work.request,
                     work.attempt.deadline,
@@ -250,6 +252,20 @@ class NativeQueueRuntime:
             if base != snapshot.main_sha and await repo.merge_base(base, snapshot.main_sha) != base:
                 return None
         return batch.base_sha
+
+    async def _validation_advance_from(
+        self, repo: RepoClient, snapshot: NativeQueueSnapshot, batch: Batch
+    ) -> str | None:
+        base = await self._main_advance_from(repo, snapshot, batch)
+        if base is None:
+            return None
+        assert self.config is not None
+        if self.config.workflow_digest is None and base != snapshot.main_sha:
+            if await repo.validation_source_digest(base) != await repo.validation_source_digest(
+                snapshot.main_sha
+            ):
+                return None
+        return base
 
     async def _recover(
         self,
@@ -368,7 +384,9 @@ class NativeQueueRuntime:
             raise ValueError("Native queue repository identity changed")
         history = await queue.native_validation_history(lease)
         main_advance = (
-            await self._main_advance_from(repo, snapshot, history[0].batch) if history else None
+            await self._validation_advance_from(repo, snapshot, history[0].batch)
+            if history
+            else None
         )
         async with queue.native_check_update(
             snapshot, lease, main_advance_from=main_advance, attempt_id=attempt_id

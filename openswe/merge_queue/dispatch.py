@@ -39,7 +39,7 @@ class WorkflowPolicy(BaseModel):
     repository: str
     repository_id: int = Field(gt=0, strict=True)
     workflow_policy_revision: int = Field(gt=0, strict=True)
-    workflow_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    workflow_digest: str | None = Field(pattern=r"^[0-9a-f]{64}$")
     dispatch_actor_id: int = Field(gt=0, strict=True)
     check_app_id: int = Field(gt=0, strict=True)
     allow_main_advance: bool = Field(default=False, exclude_if=lambda value: not value)

@@ -1,4 +1,4 @@
-"""Operator-managed canary configuration stored on its repository binding."""
+"""Operator-managed controller configuration stored on its repository binding."""
 
 from typing import Literal, Self
 from uuid import UUID
@@ -47,7 +47,7 @@ class QueueConfiguration(BaseModel):
         if not rows:
             return None
         if len(rows) != 1:
-            raise ValueError("Only one canary repository may configure a merge queue")
+            raise ValueError("Only one repository may configure a merge queue")
         routing_id, config = rows[0]
         if not isinstance(config, dict):
             raise ValueError("Queue configuration must be a JSON object")
@@ -162,7 +162,10 @@ class QueueConfiguration(BaseModel):
             self.mode != "native"
             or self.policy.validation is None
             or self.dispatch_url is None
-            or self.workflow_digest is None
+            or (
+                self.workflow_digest is None
+                and (not self.sync_workflow_policy or self.policy.validation.suite != "services")
+            )
         ):
             raise ValueError(
                 "Native validation needs a trusted workflow, dispatcher and check issuer"

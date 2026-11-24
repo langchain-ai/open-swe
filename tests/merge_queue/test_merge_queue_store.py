@@ -1226,7 +1226,7 @@ async def test_queue_startup_rejects_multiple_configured_repositories(
                 ),
             )
         )
-    with pytest.raises(ValueError, match="Only one canary repository"):
+    with pytest.raises(ValueError, match="Only one repository"):
         await controller.start_queue()
     assert controller.CONTROLLER is None and runtime.RUNTIME is None
 
@@ -1757,6 +1757,7 @@ async def test_native_success_cannot_authorize_stale_or_paused_work(queue, fault
     "fault",
     [
         "replay",
+        "protected_main",
         "slow_dispatch",
         "dispatch_tuning",
         "dispatch_response_lost",
@@ -1811,6 +1812,21 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         "policy_revokes_main_advance",
     }:
         config = config.model_copy(update={"allow_main_advance": True})
+    if fault == "protected_main":
+        config = QueueConfiguration.model_validate(
+            {
+                **config.model_dump(),
+                "workflow_digest": None,
+                "allow_main_advance": True,
+                "policy": {
+                    **policy.model_dump(),
+                    "validation": {
+                        **policy.validation.model_dump(),
+                        "suite": "services",
+                    },
+                },
+            }
+        )
     await save_configuration(config)
     repo = Mock(spec=RepoClient)
     repo.raw_file = AsyncMock(return_value=b"reviewed workflow")
@@ -2131,6 +2147,29 @@ async def test_native_runtime_recovers_publication_without_revoking_verified_suc
         )
         await reconcile()
         assert (await queue.history(request.batch_id)).batch.state == "landed"
+
+    if fault == "protected_main":
+        repo.native_queue.return_value = native_snapshot((1, 2, 3, 4, 5, 6), main="d" * 40)
+        repo.merge_base = AsyncMock(return_value=request.workflow_sha)
+        digests = {request.workflow_sha: service_digest}
+        repo.validation_source_digest.side_effect = lambda sha: digests.get(sha, "e" * 64)
+        await reconcile()
+        assert (await queue.history(request.batch_id)).batch.state == "invalidated"
+        await reconcile()
+        dispatched = [r for r in sent if r.url.path.endswith("/dispatch")]
+        assert len(dispatched) == 2
+        assert json.loads(dispatched[-1].content)["contract"]["workflow_sha"] == "d" * 40
+        assert (
+            len(
+                [
+                    r
+                    for r in sent
+                    if r.url.path.endswith("/check-reports")
+                    and json.loads(r.content)["state"] == "success"
+                ]
+            )
+            == 2
+        )
 
     if fault in {
         "policy_adoption_after_success",
@@ -2655,6 +2694,7 @@ class TestNativeRecovery:
             "rejected",
             "forbidden",
             "advanced_before",
+            "ci_advanced_before",
             "advanced_after",
             "history_error",
             "ancestry_error",
@@ -2665,6 +2705,7 @@ class TestNativeRecovery:
     ):
         advancing = outcome in {
             "advanced_before",
+            "ci_advanced_before",
             "advanced_after",
             "ancestry_error",
         }
@@ -2744,6 +2785,7 @@ class TestNativeRecovery:
                 native_trust="trusted-policy",
                 check_app_id=456,
                 allow_main_advance=advancing,
+                workflow_digest=None,
             ),
             dispatcher=gateway,
         )
@@ -2762,7 +2804,12 @@ class TestNativeRecovery:
             gateway.defer.assert_not_awaited()
             return
 
-        if outcome == "advanced_before":
+        if outcome in {"advanced_before", "ci_advanced_before"}:
+            if outcome == "ci_advanced_before":
+                digests = {snapshot.main_sha: "a" * 64}
+                repo.validation_source_digest = AsyncMock(
+                    side_effect=lambda sha: digests.get(sha, "b" * 64)
+                )
             async with postgres.session() as session:
                 await session.execute(
                     update(Batch).where(Batch.id == work.batch.id).values(max_plans=1)
