@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import {
   SAME_USER,
   expectTranscriptVisible,
@@ -123,9 +123,15 @@ test.describe("thread pull requests", () => {
         name: "Review fakeorg/demo pull request #1 in Robin",
       }),
     ]) {
-      const newTab = page.context().waitForEvent("page");
-      await link.click({ modifiers: ["ControlOrMeta"] });
-      const reviewPage = await newTab;
+      // Right after the reload the transcript can re-render under the click, which then
+      // never fires; click again until a tab opens.
+      let reviewPage: Page | undefined;
+      await expect(async () => {
+        const newTab = page.context().waitForEvent("page", { timeout: 5_000 });
+        await link.click({ modifiers: ["ControlOrMeta"] });
+        reviewPage = await newTab;
+      }).toPass({ timeout: 30_000 });
+      if (!reviewPage) throw new Error("no review tab opened");
       await expect(reviewPage).toHaveURL(
         /\/agents\/reviews\?pr=fakeorg%2Fdemo%231(&|$)/,
       );
