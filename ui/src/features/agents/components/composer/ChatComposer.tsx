@@ -782,9 +782,17 @@ export const ChatComposer = memo(function ChatComposer({
             return true
           }
           case "Enter":
+            // Fuzzy suggestions need an explicit choice, except a skill for a
+            // bare `/word`: paths, built-in commands, `$VAR`s and modified
+            // Enter keep their literal meaning.
             if (
-              (trigger?.kind === "slash-command" ||
-                trigger?.kind === "skill-command") &&
+              (trigger?.kind === "skill-command" ||
+                (trigger?.kind === "slash-command" &&
+                  (activeItem.type !== "skill" ||
+                    trigger.query.includes("/") ||
+                    event.shiftKey ||
+                    event.metaKey ||
+                    event.ctrlKey))) &&
               activeItemId !== activeItem.id &&
               !activeItem.label
                 .slice(1)

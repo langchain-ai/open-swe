@@ -656,6 +656,24 @@ describe("ChatComposer people autocomplete", () => {
     vi.restoreAllMocks()
   })
 
+  it("inserts a highlighted file mention on Enter instead of sending", async () => {
+    vi.spyOn(api, "listSlackUsers").mockResolvedValue({ users: [] })
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      onSubmit,
+      mentionPaths: ["docs/README.md"],
+      restoreDraft: { key: 1, text: "Review @README", images: [] },
+    })
+    await screen.findByRole("option", { name: /README\.md/ })
+    fireEvent.keyDown(screen.getByRole("textbox"), {
+      key: "Enter",
+      code: "Enter",
+    })
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    expect(onSubmit).not.toHaveBeenCalled()
+    vi.restoreAllMocks()
+  })
+
   it("ranks people whose names contain the query ahead of fuzzy matches", () => {
     const person = (id: string, name: string, realName: string) => ({
       id,
@@ -733,6 +751,50 @@ describe("ChatComposer skill autocomplete", () => {
     await waitFor(() => expect(editor.textContent).toContain("/patch-notes"))
     expect(onSubmit).not.toHaveBeenCalled()
   })
+
+  it("completes a non-prefix slash suggestion on Enter instead of sending", async () => {
+    const onSubmit = vi.fn()
+    renderComposer(false, {
+      onSubmit,
+      skills: [{ name: "baby-sit", description: "Watch CI", instructions: "" }],
+      restoreDraft: { key: 1, text: "/sit", images: [] },
+    })
+    await screen.findByRole("option", { name: /baby-sit/ })
+    const editor = screen.getByRole("textbox")
+    fireEvent.keyDown(editor, { key: "Enter", code: "Enter" })
+    await waitFor(() => expect(editor.textContent).toContain("/baby-sit"))
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["a path", "fix /src/models", {}],
+    ["Cmd+Enter", "/sit", { metaKey: true }],
+  ])(
+    "sends a non-prefix slash suggestion literally for %s",
+    async (_, text, modifiers) => {
+      const onSubmit = vi.fn()
+      renderComposer(false, {
+        onSubmit,
+        skills: [
+          { name: "baby-sit", description: "Watch CI", instructions: "" },
+          { name: "models", description: "List models", instructions: "" },
+        ],
+        restoreDraft: { key: 1, text, images: [] },
+      })
+      await screen.findByRole("option", { name: /baby-sit|models/ })
+      fireEvent.keyDown(screen.getByRole("textbox"), {
+        key: "Enter",
+        code: "Enter",
+        ...modifiers,
+      })
+      await waitFor(() =>
+        expect(onSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({ text }),
+          expect.anything()
+        )
+      )
+    }
+  )
 
   it("ranks command names ahead of descriptions and tolerates typos", () => {
     const skills = [
