@@ -129,6 +129,8 @@ The backend never runs middleware around a model call; the only middleware objec
 
 ## Testing
 
+When changing Robin's default model or reasoning effort, update the pinned `EVAL_MODEL` and `EVAL_EFFORT` in `.github/workflows/robin_trajectory_evals.yml` in the same PR so replay evaluations track the model Robin ships with.
+
 Never run the full test suite locally; run only tests related to the change.
 
 `mda/` is its own project: its tests live in `mda/tests/` and run in its own environment (`make mda-test`, `make mda-typecheck`).
