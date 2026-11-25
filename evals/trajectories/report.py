@@ -6,7 +6,11 @@ Each trial's agent log names the Robin thread it ran in; its turns are scored to
 Prints a Markdown table, also appended to ``$GITHUB_STEP_SUMMARY`` when that is set, and
 with ``--slack <file>`` writes each task's pass rate there for the run's Slack post.
 Without LangSmith credentials only rewards and threads are reported. Exits nonzero when a
-trial errored or never reported, so a lost replay fails CI; a low reward does not.
+trial errored or never reported, so a lost replay fails CI; a low reward does not. With
+``--allow-errored``, some errored trials don't fail the job, for a benchmark where a few
+trials time out on every run; a trial that never reported, or a job whose every trial
+errored, still fails. Harbor grades a trial whose agent timed out, so a reward alone
+doesn't show the trial ran cleanly.
 """
 
 import argparse
@@ -94,6 +98,9 @@ def main() -> None:
     parser.add_argument("job", type=Path, help="the Harbor job directory")
     parser.add_argument("--project", required=True, help="where the deployment traces runs")
     parser.add_argument("--slack", type=Path, help="write each task's pass rate here")
+    parser.add_argument(
+        "--allow-errored", action="store_true", help="don't fail when only some trials errored"
+    )
     args = parser.parse_args()
 
     traces = RobinTraces(Client(), args.project) if os.environ.get("LANGSMITH_API_KEY") else None
@@ -125,7 +132,8 @@ def main() -> None:
     job = json.loads((args.job / "result.json").read_text())
     errored = job["stats"]["n_errored_trials"]
     missing = job["n_total_trials"] - len(trials)
-    if errored or missing:
+    some_clean = errored < len(trials)
+    if missing or (errored and not (args.allow_errored and some_clean)):
         raise SystemExit(f"{errored} trial(s) errored and {missing} never reported")
 
 
