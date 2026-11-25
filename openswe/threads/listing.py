@@ -25,9 +25,9 @@ from openswe.threads.pins import list_thread_pin_ids, pin_thread, unpin_thread
 from openswe.threads.read_state import THREAD_READ_STATES
 from openswe.threads.store import THREADS
 from openswe.threads.summary import (
-    _SURFACED_SOURCES,
     DASHBOARD_SOURCE,
     SLACK_BOT_TRIGGER_KIND,
+    SURFACED_SOURCES,
     TRIGGERING_BOT_KEY,
     _is_automation_thread,
     _is_thread_resolved,
@@ -850,7 +850,7 @@ async def _collect_thread_candidates(
                     or not thread_is_readable(metadata, viewer_login, viewer_email)
                 ):
                     continue
-                if surfaced_only and thread_source(metadata) not in _SURFACED_SOURCES:
+                if surfaced_only and thread_source(metadata) not in SURFACED_SOURCES:
                     continue
                 if not _metadata_matches_filters(
                     metadata,
@@ -961,7 +961,7 @@ async def list_unresolved_dashboard_threads(
                 thread_id = _thread_id(thread)
                 if (
                     thread_id
-                    and thread_source(thread_metadata) in _SURFACED_SOURCES
+                    and thread_source(thread_metadata) in SURFACED_SOURCES
                     and thread_is_readable(thread_metadata, login, email)
                     and not thread_is_unlisted(thread_metadata)
                     and not _is_thread_resolved(thread_metadata)
@@ -1264,8 +1264,7 @@ async def list_dashboard_threads_page(
                     filing=filing,
                 )
                 and (
-                    not surfaced_only
-                    or thread_source(_thread_metadata(thread)) in _SURFACED_SOURCES
+                    not surfaced_only or thread_source(_thread_metadata(thread)) in SURFACED_SOURCES
                 )
             ),
         )

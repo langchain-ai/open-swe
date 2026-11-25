@@ -20,6 +20,7 @@ from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.admin import is_admin
 from openswe.dashboard.oauth import enforce_github_login_gate
 from openswe.dashboard.options import SUPPORTED_MODEL_IDS, model_supports_effort
+from openswe.github.pull_requests import PullRequest
 from openswe.input_messages import input_message_text
 from openswe.invocation import resolve_invocation_id
 from openswe.message_queue import QueuedMessage
@@ -49,7 +50,12 @@ from openswe.threads.plan_store import get_plan_content, list_plan_comments
 from openswe.threads.proxy import proxy_dashboard_thread_commands
 from openswe.threads.runs import start_dashboard_thread
 from openswe.threads.store import THREADS
-from openswe.threads.summary import thread_is_owner
+from openswe.threads.summary import (
+    SURFACED_SOURCES,
+    thread_is_owner,
+    thread_is_unlisted,
+    thread_source,
+)
 from openswe.threads.workflow_approval import (
     WORKFLOW_APPROVAL_PENDING,
     get_workflow_push_approvals,
@@ -411,37 +417,64 @@ async def list_threads(
             }
 
     pr_ref = parse_github_pr_url(normalized_query)
+    include_all = all_users or (requested is None and (admin_threads is True or actor.automation))
+    filtered = any(
+        value is not None
+        for value in (requested, automation_id, admin_threads, resolved, viewed, source, status)
+    )
+    page = None
+    linked = []
+    if pr_ref and include_all and not filtered and scope == "all":
+        try:
+            linked = await _linked_pr_items(pr_ref.owner, pr_ref.repo, pr_ref.number, actor)
+        except Exception:
+            logger.exception("Could not list linked PR threads")
+            return _failure("Could not list threads")
+        if linked:
+            limit = min(max(limit, 1), 100)
+            offset = max(offset, 0)
+            page = {
+                "items": linked[offset : offset + limit],
+                "limit": limit,
+                "offset": offset,
+                "hasMore": len(linked) > offset + limit,
+            }
     search_query = pr_ref.url if pr_ref else normalized_query or None
     filter_participant_login = (
         requested if requested and requested.lower() != actor.login.lower() else None
     )
-    try:
-        page = await list_dashboard_threads_page(
-            actor.login,
-            email=actor.email,
-            limit=limit,
-            offset=offset,
-            include_all=all_users
-            or (requested is None and (admin_threads is True or actor.automation)),
-            resolved=resolved,
-            viewed=viewed,
-            source=source,
-            status=status,
-            query=search_query,
-            scope=scope,
-            automation_id=automation_id,
-            filter_participant_login=filter_participant_login,
-            surfaced_only=True,
-            include_private=await _private_thread_context(actor),
-            admin_threads=admin_threads,
-        )
-    except HTTPException as exc:
-        return _http_failure(exc)
-    except Exception:
-        logger.exception("Could not list threads")
-        return _failure("Could not list threads")
-    items = [item for item in page.get("items", []) if isinstance(item, Mapping)]
-    if pr_ref:
+    if page is None:
+        try:
+            page = await list_dashboard_threads_page(
+                actor.login,
+                email=actor.email,
+                limit=limit,
+                offset=offset,
+                include_all=include_all,
+                resolved=resolved,
+                viewed=viewed,
+                source=source,
+                status=status,
+                query=search_query,
+                scope=scope,
+                automation_id=automation_id,
+                filter_participant_login=filter_participant_login,
+                surfaced_only=True,
+                include_private=await _private_thread_context(actor),
+                admin_threads=admin_threads,
+            )
+        except HTTPException as exc:
+            return _http_failure(exc)
+        except Exception:
+            logger.exception("Could not list threads")
+            return _failure("Could not list threads")
+    page_items = page.get("items", [])
+    items = (
+        [item for item in page_items if isinstance(item, Mapping)]
+        if isinstance(page_items, list)
+        else []
+    )
+    if pr_ref and not linked:
         items = [item for item in items if _summary_matches_pr(item, pr_ref.url)]
     try:
         if compact:
@@ -817,6 +850,38 @@ async def _private_thread_context(actor: _Actor) -> bool:
         return False
     metadata = thread_metadata(thread)
     return metadata.get("visibility") == "private" and thread_is_owner(metadata, actor.login)
+
+
+async def _linked_pr_items(
+    owner: str, repo: str, number: int, actor: _Actor
+) -> list[Mapping[str, object]]:
+    """Listed threads the PR record links that ``actor`` may read, primary first."""
+    pull_request = await PullRequest.load(owner, repo, number)
+    ids = list(dict.fromkeys(await pull_request.linked_threads(backfill=False)))
+    indexed = await THREADS.get_many(ids)
+    ids = [
+        thread_id
+        for thread_id in ids
+        if (thread := indexed.get(thread_id)) is not None
+        and not thread_is_unlisted(thread.metadata)
+        and thread_source(thread.metadata) in SURFACED_SOURCES
+    ]
+    items = []
+    for start in range(0, len(ids), 8):
+        results = await asyncio.gather(
+            *(_authorized_locator(thread_id, actor) for thread_id in ids[start : start + 8]),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, HTTPException):
+                logger.debug("Linked PR thread unavailable", exc_info=result)
+                continue
+            if isinstance(result, BaseException):
+                raise result
+            if not isinstance(result, dict):
+                _, summary = result
+                items.append(summary)
+    return items
 
 
 async def _authorized_locator(

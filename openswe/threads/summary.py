@@ -45,7 +45,7 @@ SESSION_UPLOAD_PENDING_KEY = "session_upload_pending"
 # Threads whose transcript is served from the append-only event log.
 TRANSCRIPT_VERSION = "v2"
 # Sources whose threads should surface in the Agents UI (besides "dashboard").
-_SURFACED_SOURCES: tuple[str, ...] = (
+SURFACED_SOURCES: tuple[str, ...] = (
     "dashboard",
     "web",
     "github",
@@ -155,7 +155,7 @@ def thread_is_readable(
         return (thread_is_private(metadata) and thread_is_owner(metadata, login)) or (
             not thread_is_private(metadata) and thread_source(metadata) == "slack"
         )
-    return thread_source(metadata) in _SURFACED_SOURCES and (
+    return thread_source(metadata) in SURFACED_SOURCES and (
         not thread_is_private(metadata)
         or thread_is_owner(metadata, login)
         or (
@@ -175,7 +175,7 @@ def thread_is_promptable(metadata: Mapping[str, Any], login: str | None) -> bool
         return thread_is_readable(metadata, login) and thread_source(metadata) != CLAUDE_CODE_SOURCE
     source = thread_source(metadata)
     return (
-        source in _SURFACED_SOURCES
+        source in SURFACED_SOURCES
         and source != CLAUDE_CODE_SOURCE
         and (not thread_is_private(metadata) or thread_is_owner(metadata, login))
     )

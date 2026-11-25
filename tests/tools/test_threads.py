@@ -625,6 +625,11 @@ async def test_allowed_slack_bot_finds_pr_work_without_write_privileges(
         configurable = scheduled.await_args.kwargs["configurable"]
         monkeypatch.setattr(threads_tool, "get_config", lambda: {"configurable": configurable})
     pr = "https://github.com/org/repo/pull/42"
+    monkeypatch.setattr(
+        threads_tool.PullRequest,
+        "load",
+        AsyncMock(return_value=SimpleNamespace(linked_threads=AsyncMock(return_value=[]))),
+    )
     page.return_value = {
         "items": [{"id": "implementation", "pr": {"url": pr}}],
         "hasMore": False,
@@ -648,6 +653,104 @@ async def test_allowed_slack_bot_finds_pr_work_without_write_privileges(
         assert denied == {"success": False, "error": threads_tool._NO_WRITER}
     started = await threads_tool.start_thread(title="Fix", instructions="fix", repos=["org/repo"])
     assert started == {"success": False, "error": threads_tool._NO_WRITER}
+
+
+@pytest.mark.parametrize(
+    ("limit", "offset", "expected", "safe_limit", "safe_offset", "has_more"),
+    [
+        (25, 0, ["opened", "commented"], 25, 0, False),
+        (0, -1, ["opened"], 1, 0, True),
+        (1, 1, ["commented"], 1, 1, False),
+        (1000, 10, [], 100, 10, False),
+    ],
+)
+async def test_everyones_threads_on_a_pr_come_from_the_pr_record_not_a_search(
+    monkeypatch: pytest.MonkeyPatch,
+    limit: int,
+    offset: int,
+    expected: list[str],
+    safe_limit: int,
+    safe_offset: int,
+    has_more: bool,
+) -> None:
+    _, page, _ = _slack_bot_run(monkeypatch)
+    metadata = {
+        "opened": {},
+        "commented": {},
+        "hidden": {},
+        "unlisted": {"unlisted": True},
+        "review-chat": {"review_chat": True},
+        "internal": {"source": "internal"},
+    }
+    linked = AsyncMock(return_value=["opened", *metadata])
+    monkeypatch.setattr(
+        threads_tool.PullRequest,
+        "load",
+        AsyncMock(return_value=SimpleNamespace(linked_threads=linked)),
+    )
+    monkeypatch.setattr(
+        threads_tool.THREADS,
+        "get_many",
+        AsyncMock(
+            return_value={key: SimpleNamespace(metadata=value) for key, value in metadata.items()}
+        ),
+    )
+
+    async def thread(thread_id: str, login: str, *, email: str | None) -> dict[str, object]:
+        if thread_id == "hidden":
+            raise HTTPException(404, "thread not found")
+        return {"id": thread_id, "visibility": "public"}
+
+    monkeypatch.setattr(threads_tool, "get_dashboard_thread", thread)
+
+    result = await threads_tool.list_threads(
+        query="https://github.com/org/repo/pull/42", limit=limit, offset=offset
+    )
+
+    linked.assert_awaited_once_with(backfill=False)
+    page.assert_not_awaited()
+    assert result["success"] is True
+    assert [item["id"] for item in result["items"]] == expected
+    assert result["limit"] == safe_limit
+    assert result["offset"] == safe_offset
+    assert result["has_more"] is has_more
+
+
+@pytest.mark.parametrize("failure", ["registry", "details", "compact"])
+async def test_pr_thread_listing_returns_tool_failure(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    _slack_bot_run(monkeypatch)
+    monkeypatch.setattr(
+        threads_tool.PullRequest,
+        "load",
+        AsyncMock(
+            side_effect=RuntimeError("unavailable") if failure == "registry" else None,
+            return_value=SimpleNamespace(linked_threads=AsyncMock(return_value=["opened"])),
+        ),
+    )
+    monkeypatch.setattr(
+        threads_tool.THREADS,
+        "get_many",
+        AsyncMock(return_value={"opened": SimpleNamespace(metadata={})}),
+    )
+    monkeypatch.setattr(
+        threads_tool,
+        "get_dashboard_thread",
+        AsyncMock(
+            side_effect=RuntimeError("unavailable") if failure == "details" else None,
+            return_value={"id": "opened", "visibility": "public"},
+        ),
+    )
+    monkeypatch.setattr(
+        threads_tool, "_compact_list_item", AsyncMock(side_effect=RuntimeError("unavailable"))
+    )
+
+    result = await threads_tool.list_threads(
+        query="https://github.com/org/repo/pull/42", summary_only=True
+    )
+
+    assert result == {"success": False, "error": "Could not list threads"}
 
 
 @pytest.mark.parametrize(
