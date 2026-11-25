@@ -366,7 +366,10 @@ _AUTOMATION_ID = "706242c0-edba-4ab7-a342-154c354f9946"
 
 
 def _automation_run(
-    monkeypatch: pytest.MonkeyPatch, thread_metadata: dict[str, object]
+    monkeypatch: pytest.MonkeyPatch,
+    thread_metadata: dict[str, object],
+    *,
+    creator: str = "octocat",
 ) -> AsyncMock:
     config = {
         "configurable": {
@@ -385,7 +388,7 @@ def _automation_run(
     monkeypatch.setattr(
         threads_tool.schedules,
         "get_agent_schedule",
-        AsyncMock(return_value={"id": _AUTOMATION_ID, "name": "CI watch", "created_by": "octocat"}),
+        AsyncMock(return_value={"id": _AUTOMATION_ID, "name": "CI watch", "created_by": creator}),
     )
     page = AsyncMock(return_value={"items": [], "limit": 25, "offset": 0, "hasMore": False})
     monkeypatch.setattr(threads_tool, "list_dashboard_threads_page", page)
@@ -417,9 +420,13 @@ async def test_automation_run_reads_public_threads_but_cannot_write(
 
 
 def _creator_dm(
-    monkeypatch: pytest.MonkeyPatch, *, gate: HTTPException | None = None
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    gate: HTTPException | None = None,
+    langsmith: HTTPException | None = None,
 ) -> tuple[AsyncMock, AsyncMock]:
     monkeypatch.setattr(delivery, "enforce_github_login_gate", AsyncMock(side_effect=gate))
+    monkeypatch.setattr(delivery.ThreadIdentity, "authorize", AsyncMock(side_effect=langsmith))
     monkeypatch.setattr(
         delivery.User,
         "for_login",
@@ -487,6 +494,52 @@ async def test_automation_delivery_refuses_creator_failing_login_gate(
 
     assert result["success"] is False
     assert "octocat is no longer authorized" in result["error"]
+    delivery.enforce_github_login_gate.assert_awaited_once_with("octocat")
+    delivery.ThreadIdentity.authorize.assert_not_awaited()
+    post.assert_not_awaited()
+    recorded.assert_awaited_once()
+
+
+async def test_automation_delivery_checks_langsmith_only_creator_without_github_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    creator = "user:0193c3a4-5b6c-7d8e-9f00-112233445566"
+    _automation_run(
+        monkeypatch,
+        {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
+        creator=creator,
+    )
+    post, recorded = _creator_dm(monkeypatch)
+
+    result = await slack_channels.slack_post_message("U_CREATOR", "digest")
+
+    assert result == {"success": True, "channel_id": "D_CREATOR", "message_ts": "1.2"}
+    delivery.enforce_github_login_gate.assert_not_awaited()
+    delivery.ThreadIdentity.authorize.assert_awaited_once()
+    delivery.User.for_login.assert_awaited_once_with("github", creator)
+    recorded.assert_not_awaited()
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_automation_delivery_refuses_langsmith_only_creator_failing_sign_in(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    creator = "user:0193c3a4-5b6c-7d8e-9f00-112233445566"
+    _automation_run(
+        monkeypatch,
+        {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
+        creator=creator,
+    )
+    post, recorded = _creator_dm(
+        monkeypatch, langsmith=HTTPException(status, "Sign in with LangSmith to use Robin")
+    )
+
+    result = await slack_channels.slack_post_message("U_CREATOR", "digest")
+
+    assert result["success"] is False
+    assert f"{creator} is no longer authorized" in result["error"]
+    assert "GitHub" not in result["error"]
+    delivery.enforce_github_login_gate.assert_not_awaited()
     post.assert_not_awaited()
     recorded.assert_awaited_once()
 

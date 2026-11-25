@@ -20,6 +20,7 @@ from openswe.slack.client import convert_mentions_to_slack_format
 from openswe.slack.dm import post_dm
 from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from openswe.slack.records import lookup_slack_thread_id
+from openswe.threads.identity import ThreadIdentity
 from openswe.users import User
 from openswe.utils.dashboard_links import dashboard_base_url, dashboard_thread_url
 
@@ -71,7 +72,7 @@ class CreatorDelivery:
 
     @classmethod
     async def for_run(cls, cfg: RunConfig) -> Self:
-        """The creator of the automation this run belongs to, rechecked against the login gate."""
+        """The creator of the automation this run belongs to, rechecked against their sign-in."""
         record = await authorized_schedule_run(cfg)
         if record is None or not cfg.thread_id:
             raise DeliveryRefused(
@@ -88,14 +89,15 @@ class CreatorDelivery:
         if not login:
             logger.warning("Automation has no creator to deliver to", extra=log_context)
             raise DeliveryRefused("This automation has no recorded creator to deliver to.")
+        identity = ThreadIdentity(login)
         try:
-            await enforce_github_login_gate(login)
+            await cls._authorize_creator(identity)
         except HTTPException as exc:
             logger.warning(
                 "Refused automation delivery at the creator login gate",
                 extra={**log_context, "status_code": exc.status_code},
             )
-            if exc.status_code == 403:
+            if exc.status_code == 403 or (identity.github_login is None and exc.status_code == 401):
                 error = f"The automation's creator {login} is no longer authorized to use Robin."
             else:
                 error = f"Could not verify whether the automation's creator {login} is authorized."
@@ -118,6 +120,14 @@ class CreatorDelivery:
             creator_login=login,
             slack_user_id=slack_user_id,
         )
+
+    @staticmethod
+    async def _authorize_creator(identity: ThreadIdentity) -> None:
+        """Recheck the creator the way their own runs are: GitHub's gate, or LangSmith without it."""
+        if identity.github_login is None:
+            await identity.authorize()
+        else:
+            await enforce_github_login_gate(identity.github_login)
 
     def _footer(self) -> str:
         name = escape(self.schedule_name)
