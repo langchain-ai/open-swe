@@ -79,6 +79,21 @@ _FOREGROUND_SECONDS: Final = 600
 _SLEEP_SECONDS: Final = 60
 _SLEEP_OPERAND: Final = re.compile(r"(\d+(?:\.\d*)?|\.\d+)([smhd]?)(?=\s|[;&|#]|$)")
 _SLEEP_UNITS: Final = {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}
+# A leading `cd <dir> &&` or `cd <dir>;` changes nothing about how long the sleep holds the turn.
+_LEADING_SLEEP: Final = re.compile(r"\s*(?:cd[ \t]+[^\s;&|]+[ \t]*(?:&&|;)[ \t]*)?sleep[ \t]+")
+# Where `background_execute` keeps each job's output, and the shell that waits on it: a job
+# already wakes the thread when it ends, so waiting on its output in the foreground only holds
+# the turn, the same as a leading sleep.
+_BACKGROUND_TASKS: Final = "/tmp/open-swe-background-tasks/"
+# A redirection, from its descriptor through its target, which a command never sees as
+# arguments; quoted words and the `&&` and `||` operators are matched only to keep them.
+_REDIRECTION: Final = re.compile(
+    r"""('[^']*'|"(?:[^"\\]|\\.)*"|&&|\|\|)"""
+    r"""|(?:(?<![^\s;&|()])\d*(?:>>?|<<?|>&|<&|>\||<>)|&>>?)[ \t]*"""
+    r"""(?:'[^']*'|"(?:[^"\\]|\\.)*"|[^\s;&|()<>]+)"""
+)
+# A shell's options that take the next word as their operand.
+_SHELL_OPERANDS: Final = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
 # A sandbox call rejected before it started cannot have run, so it is sent again.
 _TRANSIENT_BACKOFF_SECONDS: Final = (0.5, 1.0, 2.0)
 
@@ -248,6 +263,12 @@ class FileToolsMiddleware(AgentMiddleware):
                 )
             elif isinstance(command, str) and (duration := self._foreground_sleep(command)):
                 refusal = prompt("tools/foreground-sleep", duration=duration)
+            elif (
+                isinstance(command, str)
+                and _BACKGROUND_TASKS in command
+                and self._foreground_poll(command)
+            ):
+                refusal = prompt("tools/foreground-poll")
         if refusal is not None:
             return ToolMessage(
                 content=refusal,
@@ -260,9 +281,107 @@ class FileToolsMiddleware(AgentMiddleware):
             return screened
         return await handler(screened)
 
+    @classmethod
+    def _foreground_poll(cls, command: str, depth: int = 0) -> bool:
+        if depth > _GUARDED_SHELLS:
+            return False
+        # The `&` of a redirection such as `2>&1` or `&>file` sends nothing to the background.
+        unredirected = _REDIRECTION.sub(lambda match: match[1] or " ", command)
+        shell = shlex.shlex(unredirected, posix=True, punctuation_chars=";&|()\n")
+        shell.whitespace = " \t\r"
+        shell.whitespace_split = True
+        # Each simple command, and the operator after it, newlines aside.
+        commands: list[tuple[list[str], str]] = [([], "")]
+        try:
+            for token in shell:
+                if token and all(char in ";&|()\n" for char in token):
+                    commands[-1] = (commands[-1][0], token.replace("\n", ""))
+                    commands.append(([], ""))
+                else:
+                    commands[-1][0].append(token)
+        except ValueError:
+            logger.debug("Could not screen foreground poll", exc_info=True)
+            return False
+        # A pipeline runs in the background as a whole when a trailing `&` sends it there.
+        backgrounded = [operator == "&" for _, operator in commands]
+        for index in range(len(commands) - 2, -1, -1):
+            if commands[index][1] in {"|", "|&"}:
+                backgrounded[index] = backgrounded[index + 1]
+        loops = 0
+        for (words, _), in_background in zip(commands, backgrounded, strict=True):
+            while words and words[0] in {"do", "then", "else", "done"}:
+                if words.pop(0) == "done":
+                    loops = max(0, loops - 1)
+            if not words:
+                continue
+            if words[0] in {"for", "while", "until"}:
+                loop = words[0]
+                loops += 1
+                words = words[1:]
+                condition = next((word for word in words if not re.match(r"\w+=", word)), "")
+                if loop in {"while", "until"} and condition != "read":
+                    return True
+            if words and words[0] == "timeout":
+                # Past its options, such as `-k 5`, to the duration and the command it runs.
+                index = 1
+                while index < len(words) and words[index].startswith("-"):
+                    index += 2 if words[index] in {"-k", "-s", "--kill-after", "--signal"} else 1
+                words = words[index + 1 :]
+            if not words:
+                continue
+            executable, *arguments = words
+            executable = posixpath.basename(executable)
+            if executable in {"sh", "bash", "dash", "zsh"} and (
+                script := cls._shell_script(arguments)
+            ):
+                if cls._foreground_poll(script, depth + 1):
+                    return True
+            if executable == "watch" or (loops and executable == "sleep"):
+                return True
+            if executable == "sleep" and not in_background:
+                # A long pause between reads of the job's output holds the turn as a loop does.
+                seconds = 0.0
+                for operand in arguments:
+                    if not (match := _SLEEP_OPERAND.fullmatch(operand)):
+                        break
+                    seconds += float(match[1]) * _SLEEP_UNITS[match[2]]
+                if seconds >= _SLEEP_SECONDS:
+                    return True
+            if executable == "tail":
+                options = iter(arguments)
+                for option in options:
+                    if option == "--":
+                        break
+                    if option in {"-n", "-c", "--lines", "--bytes", "--pid", "--sleep-interval"}:
+                        next(options, None)
+                    elif option == "--follow" or option.startswith("--follow="):
+                        return True
+                    elif re.fullmatch(r"-[a-zA-Z]*[fF][a-zA-Z]*", option):
+                        return True
+        return False
+
+    @staticmethod
+    def _shell_script(arguments: list[str]) -> str | None:
+        """The script a shell runs with `-c`, past its other options and `--`."""
+        command = False
+        index = 0
+        while index < len(arguments):
+            word = arguments[index]
+            if word == "--":
+                index += 1
+                break
+            if word in _SHELL_OPERANDS:
+                index += 2
+                continue
+            if len(word) < 2 or word[0] not in "-+":
+                break
+            command = command or (word[0] == "-" and word[1] != "-" and "c" in word[1:])
+            index += 1
+        return arguments[index] if command and index < len(arguments) else None
+
     @staticmethod
     def _foreground_sleep(command: str) -> str | None:
-        sleep = re.match(r"\s*sleep[ \t]+", command)
+        sleep = _LEADING_SLEEP.match(command)
         if sleep is None:
             return None
         remaining = command[sleep.end() :]

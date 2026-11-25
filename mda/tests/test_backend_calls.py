@@ -2091,6 +2091,41 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
         ("sleep 120 >$'ready & waiting'", 300),
         ('sleep 120 >"run.log" &', 300),
         ("sleep 120 >'unfinished &", 300),
+        ("cd /tmp/tri && sleep 60; cat output.log", 300),
+        (
+            "timeout 290 bash -c 'until grep -q EXIT "
+            "/tmp/open-swe-background-tasks/cmd-1/output.log; do sleep 5; done'",
+            300,
+        ),
+        (
+            "for i in $(seq 1 110); do rg -q done "
+            "/tmp/open-swe-background-tasks/cmd-2/output.log && break; sleep 5; done",
+            600,
+        ),
+        ("timeout 285 tail --pid=4242 -f /tmp/open-swe-background-tasks/cmd-1/output.log", 300),
+        ("tail -n 50 --follow=name /tmp/open-swe-background-tasks/cmd-1/output.log", 300),
+        ("tail -n 50 -f /tmp/open-swe-background-tasks/cmd-1/output.log", 300),
+        ("watch cat /tmp/open-swe-background-tasks/cmd-1/output.log", 300),
+        ("until grep -q done /tmp/open-swe-background-tasks/cmd-1/output.log; do :; done", 300),
+        ("bash -lc 'tail -f /tmp/open-swe-background-tasks/cmd-1/output.log'", 300),
+        ("timeout -k 5 285 tail -f /tmp/open-swe-background-tasks/cmd-1/output.log", 300),
+        ("bash -lc -- 'tail -f /tmp/open-swe-background-tasks/cmd-1/output.log'", 300),
+        ("bash 2>/dev/null -lc 'tail -f /tmp/open-swe-background-tasks/cmd-1/output.log'", 300),
+        (
+            "tail -n 10 /tmp/open-swe-background-tasks/cmd-1/output.log; "
+            "sleep 120 &&>/dev/null true",
+            300,
+        ),
+        ("bash -l -o pipefail -c 'tail -f /tmp/open-swe-background-tasks/cmd-1/output.log'", 300),
+        (
+            "sleep 120 2>&1; tail -n 10 /tmp/open-swe-background-tasks/cmd-1/output.log",
+            300,
+        ),
+        (
+            "tail -n 10 /tmp/open-swe-background-tasks/cmd-1/output.log; sleep 120; "
+            "tail -n 10 /tmp/open-swe-background-tasks/cmd-1/output.log",
+            300,
+        ),
     ],
 )
 async def test_a_foreground_command_past_the_limit_is_sent_to_the_background(
@@ -2143,6 +2178,22 @@ async def test_a_foreground_command_past_the_limit_is_sent_to_the_background(
         "sleep 120 >/dev/null 2>&1 & echo $!",
         "sleep 120 | cat & echo ready",
         "sleep 1; echo ready &",
+        "tail -n 50 /tmp/open-swe-background-tasks/cmd-1/output.log",
+        "grep -n 'sleep' /tmp/open-swe-background-tasks/cmd-1/output.log",
+        "rg -n watch /tmp/open-swe-background-tasks/cmd-1/output.log",
+        "bash -c 'grep -n sleep /tmp/open-swe-background-tasks/cmd-1/output.log'",
+        "while IFS= read -r l; do printf '%s\\n' \"$l\"; done "
+        "< /tmp/open-swe-background-tasks/cmd-1/output.log",
+        "sleep 2; tail -n 50 /tmp/open-swe-background-tasks/cmd-1/output.log",
+        "tail -- /tmp/open-swe-background-tasks/cmd-1/output.log -f",
+        "cat /tmp/open-swe-background-tasks/cmd-1/output.log # while sleep watch",
+        "cd /tmp/tri && sleep 2; cat output.log",
+        "sleep 120 & tail -n 10 /tmp/open-swe-background-tasks/cmd-1/output.log",
+        "sleep 120 >/dev/null &\ntail -n 10 /tmp/open-swe-background-tasks/cmd-1/output.log",
+        "sleep 120 | cat & tail -n 10 /tmp/open-swe-background-tasks/cmd-1/output.log",
+        "sleep 58 2>&1; tail -n 10 /tmp/open-swe-background-tasks/cmd-1/output.log",
+        "tail -n 10 /tmp/open-swe-background-tasks/cmd-1/output.log > '/tmp/a b' 2>&1",
+        "timeout -k 5 285 tail -n 10 /tmp/open-swe-background-tasks/cmd-1/output.log",
     ],
 )
 async def test_nonblocking_or_short_sleeps_reach_the_sandbox(
