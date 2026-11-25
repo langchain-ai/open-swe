@@ -14,7 +14,7 @@ import pytest
 from deepagents.middleware._utils import append_to_system_message
 from google.genai.errors import ClientError
 from langchain.agents import create_agent
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
 from langchain.agents.middleware.types import (
     AgentState,
     ExtendedModelResponse,
@@ -37,15 +37,18 @@ from langchain_fireworks import ChatFireworks
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from langchain_openai import ChatOpenAI
 from langchain_openai.chat_models.base import OpenAIInvalidRequestError, OpenAIStreamServerError
+from langgraph.runtime import Runtime
 from langsmith.run_trees import RunTree
 from pydantic import SecretStr
 from rt.backend import Run, RunContext
 from rt.gateway import RUN_GATEWAY
-from rt.middleware import BackendRunMiddleware, ModelCall
+from rt.loop import RunLoop
+from rt.middleware import BackendRunMiddleware, ModelCall, ReportRepliesMiddleware
 from rt.model_calls import (
     MODEL_OUTAGE_MESSAGE,
     ModelCallTimeoutError,
     ModelCallTimeoutMiddleware,
+    OutputLimitContinuationMiddleware,
     OutputLimitMiddleware,
     ReplayableHistoryMiddleware,
     call_with_fallback,
@@ -55,6 +58,7 @@ from rt.model_calls import (
 from rt.model_retries import ModelRetriesMiddleware
 from rt.models import ModelSpec, build_model
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
+from rt.run_tools import RunModelCallLimit
 from rt.tracing import TurnTrace
 from runtime_api.catalog import (
     Catalog,
@@ -293,6 +297,7 @@ async def test_a_provider_timeout_is_not_reported_as_budget_exhaustion() -> None
     [
         {"stop_reason": "max_tokens"},
         {"finish_reason": "length"},
+        {"finish_reason": "MAX_TOKENS"},
         {"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}},
     ],
 )
@@ -330,6 +335,349 @@ async def test_main_agent_cutoffs_tag_the_turn_once_without_changing_replies(
 
     monkeypatch.setattr(TurnTrace, "current_root", MagicMock(side_effect=RuntimeError))
     assert (await middleware.awrap_model_call(request, handler)).result == [reply]
+
+
+async def test_main_agent_cutoff_continues_with_bounded_retries() -> None:
+    middleware = OutputLimitContinuationMiddleware(max_continuations=2)
+    runtime = cast(Runtime, MagicMock())
+    empty = AIMessage(
+        id="ai-empty-1",
+        content=[],
+        response_metadata={"finish_reason": "MAX_TOKENS", "normalized_finish_reason": "length"},
+    )
+    first = await middleware.aafter_model(
+        cast(AgentState, {"messages": [HumanMessage(content="Fix the bug"), empty]}),
+        runtime,
+    )
+    assert first is not None
+    assert first["jump_to"] == "model"
+    updates = cast(list[AnyMessage], first["messages"])
+    assert len(updates) == 1
+    nudge1 = updates[0]
+    assert isinstance(nudge1, HumanMessage)
+    assert (provenance := Provenance.of(nudge1)) is not None
+    assert provenance.kind == "context"
+    assert provenance.sender == "open-swe:output_limit"
+
+    # A second consecutive empty cutoff still continues; the third stops once exhausted.
+    second_empty = AIMessage(
+        id="ai-empty-2",
+        content=[],
+        response_metadata={"finish_reason": "MAX_TOKENS"},
+    )
+    second = await middleware.aafter_model(
+        cast(AgentState, {"messages": [HumanMessage(content="Fix the bug"), nudge1, second_empty]}),
+        runtime,
+    )
+    assert second is not None
+    assert second["jump_to"] == "model"
+    nudge2 = cast(list[AnyMessage], second["messages"])[-1]
+    assert isinstance(nudge2, HumanMessage)
+
+    third_empty = AIMessage(
+        id="ai-empty-3",
+        content=[],
+        response_metadata={"finish_reason": "MAX_TOKENS"},
+    )
+    exhausted = await middleware.aafter_model(
+        cast(
+            AgentState,
+            {"messages": [HumanMessage(content="Fix the bug"), nudge1, nudge2, third_empty]},
+        ),
+        runtime,
+    )
+    assert exhausted is None
+
+    # A normal tool exchange resets the continuation budget.
+    after_tool = await middleware.aafter_model(
+        cast(
+            AgentState,
+            {
+                "messages": [
+                    HumanMessage(content="Fix the bug"),
+                    nudge1,
+                    nudge2,
+                    AIMessage(
+                        content="",
+                        tool_calls=[{"name": "ls", "args": {}, "id": "call-1"}],
+                    ),
+                    ToolMessage(content="ok", tool_call_id="call-1", name="ls"),
+                    AIMessage(
+                        id="ai-empty-4",
+                        content=[],
+                        response_metadata={"finish_reason": "MAX_TOKENS"},
+                    ),
+                ]
+            },
+        ),
+        runtime,
+    )
+    assert after_tool is not None
+    assert after_tool["jump_to"] == "model"
+
+
+@pytest.mark.parametrize("responses", [True, False])
+async def test_main_agent_cutoff_keeps_partial_text_and_clears_invalid_tool_calls(
+    responses: bool,
+) -> None:
+    partial = AIMessage(
+        id="ai-partial",
+        content=[
+            {"type": "text", "text": "Halfway through explaining"},
+            {
+                "type": "function_call",
+                "id": "fc-1",
+                "call_id": "bad-1",
+                "name": "edit_file",
+                "arguments": '{"file_path":',
+            },
+        ],
+        invalid_tool_calls=[
+            {"name": "edit_file", "args": '{"file_path":', "id": "bad-1", "error": "eof"}
+        ],
+        additional_kwargs={
+            "tool_calls": [
+                {
+                    "type": "function",
+                    "id": "bad-1",
+                    "function": {"name": "edit_file", "arguments": '{"file_path":'},
+                }
+            ]
+        },
+        usage_metadata={"input_tokens": 50, "output_tokens": 400, "total_tokens": 450},
+        response_metadata={
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+        },
+    )
+    empty_bad = AIMessage(
+        id="ai-empty-bad",
+        content=[],
+        invalid_tool_calls=[
+            {"name": "edit_file", "args": '{"file_path":', "id": "bad-2", "error": "eof"}
+        ],
+        response_metadata={"finish_reason": "MAX_TOKENS"},
+    )
+    replies = iter([partial, empty_bad, AIMessage(id="ai-done", content="Done")])
+    seen: list[list[AnyMessage]] = []
+
+    class _StubModel(AgentMiddleware):
+        async def awrap_model_call(
+            self,
+            request: ModelRequest,
+            handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        ) -> ModelResponse:
+            seen.append(list(request.messages))
+            return ModelResponse(result=[next(replies)])
+
+    graph = create_agent(
+        model=_OPENAI,
+        tools=[],
+        middleware=cast(
+            list[AgentMiddleware],
+            [OutputLimitContinuationMiddleware(), OutputLimitMiddleware(), _StubModel()],
+        ),
+    )
+    valid_call = AIMessage(
+        id="ai-valid",
+        content="",
+        tool_calls=[{"name": "ls", "args": {}, "id": "ok-1"}],
+    )
+    valid_result = ToolMessage(content="a.py", tool_call_id="ok-1", name="ls")
+    result = await graph.ainvoke(
+        {"messages": [HumanMessage(content="Fix it"), valid_call, valid_result]}
+    )
+
+    assert len(seen) == 3
+    forwarded = seen[2]
+    assert [m.tool_call_id for m in forwarded if isinstance(m, ToolMessage)] == ["ok-1"]
+    cleaned = next(m for m in forwarded if isinstance(m, AIMessage) and m.id == "ai-partial")
+    assert cleaned.text == partial.text
+    assert cleaned.invalid_tool_calls == []
+    assert all(m.id != "ai-empty-bad" for m in forwarded)
+
+    model = _OPENAI.model_copy(update={"use_responses_api": responses})
+    serialized = json.dumps(model._get_request_payload(forwarded))
+    assert "Halfway through explaining" in serialized
+    assert "bad-1" not in serialized
+    assert "bad-2" not in serialized
+    assert "ok-1" in serialized
+    # Original state retains the cut-off reply and its usage metadata for run accounting.
+    stored = next(
+        m for m in result["messages"] if isinstance(m, AIMessage) and m.id == "ai-partial"
+    )
+    assert stored.invalid_tool_calls
+    assert stored.usage_metadata == partial.usage_metadata
+
+    # Three consecutive malformed-call cutoffs exhaust the 2-retry cap even though
+    # LangChain commits synthetic error ToolMessages into graph state.
+    exhausted_seen: list[list[AnyMessage]] = []
+    cutoffs = iter(
+        [
+            AIMessage(
+                id=f"ai-cap-{i}",
+                content=[
+                    {"type": "text", "text": f"Attempt {i}"},
+                    {
+                        "type": "function_call",
+                        "id": f"fc-cap-{i}",
+                        "call_id": f"cap-{i}",
+                        "name": "edit_file",
+                        "arguments": '{"file_path":',
+                    },
+                ],
+                invalid_tool_calls=[
+                    {"name": "edit_file", "args": '{"file_path":', "id": f"cap-{i}", "error": "eof"}
+                ],
+                response_metadata={
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                },
+            )
+            for i in range(1, 5)
+        ]
+    )
+
+    class _AlwaysMalformedCutoff(AgentMiddleware):
+        async def awrap_model_call(
+            self,
+            request: ModelRequest,
+            handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        ) -> ModelResponse:
+            exhausted_seen.append(list(request.messages))
+            return ModelResponse(result=[next(cutoffs)])
+
+    capped_graph = create_agent(
+        model=_OPENAI,
+        tools=[],
+        middleware=cast(
+            list[AgentMiddleware],
+            [
+                OutputLimitContinuationMiddleware(),
+                OutputLimitMiddleware(),
+                _AlwaysMalformedCutoff(),
+            ],
+        ),
+    )
+    await capped_graph.ainvoke({"messages": [HumanMessage(content="Fix it")]})
+    assert len(exhausted_seen) == 3
+
+
+async def test_output_limit_does_not_nudge_with_tool_calls() -> None:
+    with_tool_call = AIMessage(
+        content="",
+        tool_calls=[{"name": "ls", "args": {}, "id": "call-1"}],
+        response_metadata={"finish_reason": "MAX_TOKENS"},
+    )
+    assert (
+        await OutputLimitContinuationMiddleware().aafter_model(
+            cast(AgentState, {"messages": [HumanMessage(content="Hi"), with_tool_call]}),
+            cast(Runtime, MagicMock()),
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("limit", [1, 2])
+async def test_agent_recovers_from_empty_gemini_max_tokens_turn(
+    limit: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("rt.loop.run_id", lambda: "run-1")
+    replies = iter(
+        [
+            AIMessage(
+                id="ai-cutoff",
+                content=[],
+                usage_metadata={"input_tokens": 100, "output_tokens": 12000, "total_tokens": 12100},
+                response_metadata={"finish_reason": "MAX_TOKENS"},
+            ),
+            AIMessage(id="ai-final", content="Done fixing the bug."),
+        ]
+    )
+    seen: list[list[AnyMessage]] = []
+
+    class _StubModel(AgentMiddleware):
+        async def awrap_model_call(
+            self,
+            request: ModelRequest,
+            handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        ) -> ModelResponse:
+            seen.append(list(request.messages))
+            return ModelResponse(result=[next(replies)])
+
+    backend = MagicMock()
+    backend.run.catalog.model_call_limit = limit
+    backend.invocation_id = "run-1"
+    backend.run.catalog.loop = LoopRules()
+    graph = create_agent(
+        model=_OPENAI,
+        tools=[],
+        middleware=cast(
+            list[AgentMiddleware],
+            [
+                ReportRepliesMiddleware(backend),
+                OutputLimitContinuationMiddleware(),
+                RunModelCallLimit(backend, limit),
+                *model_call_guards(),
+                _StubModel(),
+            ],
+        ),
+    )
+    result = await graph.ainvoke({"messages": [HumanMessage(content="Fix the bug")]})
+
+    assert len(seen) == limit
+    cutoff = next(m for m in result["messages"] if m.id == "ai-cutoff")
+    assert isinstance(cutoff, AIMessage)
+    assert cutoff.usage_metadata is not None
+    assert cutoff.usage_metadata["output_tokens"] == 12000
+    RunLoop(backend).after_agent(result)
+    ended = backend.outbox.notify.call_args.args[1]
+    assert ended.replies[0]["data"]["usage_metadata"]["output_tokens"] == 12000
+    if limit == 2:
+        assert backend.outbox.replied.call_args.args[0].humans == []
+        assert all(not isinstance(m, AIMessage) for m in seen[1])
+        assert result["messages"][-1].text == "Done fixing the bug."
+
+
+async def test_output_limit_continuation_respects_model_call_limit() -> None:
+    calls = 0
+
+    class _AlwaysCutOff(AgentMiddleware):
+        async def awrap_model_call(
+            self,
+            request: ModelRequest,
+            handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        ) -> ModelResponse:
+            nonlocal calls
+            calls += 1
+            return ModelResponse(
+                result=[
+                    AIMessage(
+                        id=f"ai-cutoff-{calls}",
+                        content=[],
+                        response_metadata={"finish_reason": "MAX_TOKENS"},
+                    )
+                ]
+            )
+
+    graph = create_agent(
+        model=_OPENAI,
+        tools=[],
+        middleware=cast(
+            list[AgentMiddleware],
+            [
+                OutputLimitContinuationMiddleware(max_continuations=5),
+                ModelCallLimitMiddleware(run_limit=2, exit_behavior="end"),
+                OutputLimitMiddleware(),
+                _AlwaysCutOff(),
+            ],
+        ),
+    )
+    result = await graph.ainvoke({"messages": [HumanMessage(content="Fix the bug")]})
+
+    assert calls == 2
+    assert "Model call limits exceeded" in result["messages"][-1].text
 
 
 @pytest.mark.parametrize("with_image", [True, False])

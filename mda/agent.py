@@ -62,7 +62,7 @@ from rt.middleware import (
     ReportRepliesMiddleware,
     RuntimeToolsMiddleware,
 )
-from rt.model_calls import model_call_guards
+from rt.model_calls import OutputLimitContinuationMiddleware, model_call_guards
 from rt.models import build_model
 from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
 from rt.run_tools import (
@@ -282,6 +282,7 @@ def _parts(graph: Graph) -> _Parts:
             RunPromptMiddleware(),
             skills,
             ThreadPromptMiddleware(),
+            OutputLimitContinuationMiddleware(),
             RunModelCallLimit(backend, _MODEL_CALL_LIMIT),
             *model_call_guards(),
             # Innermost, so only the agent's own model calls are its thread's main conversation.

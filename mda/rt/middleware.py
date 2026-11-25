@@ -107,7 +107,7 @@ from rt.gateway import RUN_GATEWAY
 from rt.git_evidence import turn_git
 from rt.loop import RunLoop
 from rt.managed_sandbox import OpenedSandbox
-from rt.model_calls import call_with_fallback
+from rt.model_calls import OutputLimitContinuationMiddleware, call_with_fallback
 from rt.models import build_model
 from rt.offload import OFFLOADING_KEY, RequestedOffload
 from rt.outbox import OUTBOX_KEY, carry
@@ -852,7 +852,15 @@ class ReportRepliesMiddleware(AgentMiddleware):
                 namespace=inside,
                 response=_json_dicts.validate_python(messages_to_dict(response.result)),
                 # A subagent's own messages are its task, never something a person said.
-                humans=[] if inside else human_messages(since_last_reply(request.messages)),
+                humans=[]
+                if inside
+                else human_messages(
+                    [
+                        message
+                        for message in since_last_reply(request.messages)
+                        if not OutputLimitContinuationMiddleware.is_nudge(message)
+                    ]
+                ),
                 mid_turn=not inside and answered.yet,
                 first_in_thread=not inside and self._first_in_thread(request.state),
                 model_route=route,

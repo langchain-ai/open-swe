@@ -19,7 +19,8 @@ A provider can also refuse a reply or cut it off at its output limit, both as an
 answer rather than an error, or block the request by policy with an error (OpenAI's
 cybersecurity flag is a 400). A refusal or block goes once to the other provider, then
 ends the run with a reply saying so that keeps what the model wrote; a reply cut off at
-the output limit is logged, and a subagent's says so to the agent that delegated.
+the output limit is logged, a subagent's says so to the agent that delegated, and a
+main-agent reply cut off without tool calls nudges the model to continue.
 """
 
 import asyncio
@@ -34,22 +35,31 @@ from typing import Any, Final
 import anthropic
 import httpx2
 import openai
-from langchain.agents.middleware import AgentMiddleware
-from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
+from langchain.agents.middleware import AgentMiddleware, hook_config
+from langchain.agents.middleware.types import (
+    AgentState,
+    ModelCallResult,
+    ModelRequest,
+    ModelResponse,
+)
 from langchain_anthropic import ChatAnthropic
 from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 from langchain_core.exceptions import ModelError, ModelRefusalError
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_fireworks import ChatFireworks
+from langgraph.runtime import Runtime
 from pydantic import BaseModel, ValidationError
 from runtime_api.gateway_auth import GatewayFailure
 from runtime_api.model_errors import MODEL_FAILURE_REPLY_KEY, classify_exception, exception_fields
 from runtime_api.models import MODEL_CALL_BUDGET
 from runtime_api.provenance import Provenance
 
+from rt.backend import harness_message
 from rt.gateway import RUN_GATEWAY
+from rt.input_messages import Fields
 from rt.model_retries import ModelOutput, ModelRetriesMiddleware
+from rt.prompts import prompt
 from rt.tracing import MIDDLEWARE_TRACE_POLICY, TurnTrace
 
 logger = logging.getLogger(__name__)
@@ -65,9 +75,17 @@ _SUBAGENT_CUT_OFF: Final = (
     "This subagent's reply was cut off at the model's output limit ({stop_reason})"
 )
 # A reply the provider stopped at its output limit, by where each provider says so:
-# Anthropic's ``stop_reason``, Chat Completions' (and Fireworks') ``finish_reason``.
+# Anthropic's ``stop_reason``, Chat Completions' (and Fireworks') ``finish_reason``,
+# and Gemini's ``finish_reason`` (``MAX_TOKENS``).
 # The Responses API marks it ``incomplete`` instead.
-_OUTPUT_LIMIT_STOPS: Final = {"stop_reason": "max_tokens", "finish_reason": "length"}
+_OUTPUT_LIMIT_STOPS: Final[dict[str, frozenset[str]]] = {
+    "stop_reason": frozenset({"max_tokens"}),
+    "finish_reason": frozenset({"length", "MAX_TOKENS"}),
+}
+_OUTPUT_LIMIT_SOURCE: Final = "output_limit"
+_OUTPUT_LIMIT_SENDER: Final = Provenance.harness(_OUTPUT_LIMIT_SOURCE).sender
+_OUTPUT_LIMIT_CONTINUE: Final = "output-limit-continue:"
+_MAX_OUTPUT_LIMIT_CONTINUATIONS: Final = 2
 
 # Seconds waited before each attempt after the first; one more attempt than delays.
 # The first failover is immediate: one provider's outage should not delay the other.
@@ -535,13 +553,13 @@ class SubagentTimeoutReplyMiddleware(_ModelCallGuard):
 
 
 class OutputLimitMiddleware(_ModelCallGuard):
-    """Say when the provider cut a reply off at its output limit.
+    """Say when the provider cut a reply off at its output limit, and continue cut-off runs.
 
     The provider answers such a reply as a success. A subagent's reply without tool
     calls is its final answer, and the agent that delegated to it would take it, or its
     silence, as finished; it says it was cut off instead, so that agent can ask again
-    in smaller steps. The agent's own reply is left as it is, logged and tagged on the
-    turn's trace.
+    in smaller steps. Main-agent replies are logged and tagged on the turn's trace;
+    OutputLimitContinuationMiddleware handles their recovery.
     """
 
     def __init__(self, *, subagent: bool = False) -> None:
@@ -591,10 +609,150 @@ class OutputLimitMiddleware(_ModelCallGuard):
             details = metadata.get("incomplete_details")
             if isinstance(details, dict) and details.get("reason") == "max_output_tokens":
                 return "max_output_tokens"
-        for key, stop in _OUTPUT_LIMIT_STOPS.items():
-            if metadata.get(key) == stop:
-                return stop
+        for key, stops in _OUTPUT_LIMIT_STOPS.items():
+            value = metadata.get(key)
+            if isinstance(value, str) and value in stops:
+                return value
         return None
+
+
+class OutputLimitContinuationMiddleware(_ModelCallGuard):
+    """Continue cutoffs after call counting, before the run treats the reply as final."""
+
+    def __init__(self, *, max_continuations: int = _MAX_OUTPUT_LIMIT_CONTINUATIONS) -> None:
+        super().__init__()
+        self._max_continuations = max_continuations
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        messages: list[AnyMessage] = []
+        dropped_call_ids: set[str] = set()
+        for message in request.messages:
+            if isinstance(message, ToolMessage) and message.tool_call_id in dropped_call_ids:
+                continue
+            if (
+                isinstance(message, AIMessage)
+                and not message.tool_calls
+                and OutputLimitMiddleware.output_limit_stop(message) is not None
+            ):
+                invalid_ids = self._invalid_call_ids(message)
+                if not message.text.strip():
+                    dropped_call_ids.update(invalid_ids)
+                    continue
+                if message.invalid_tool_calls:
+                    dropped_call_ids.update(invalid_ids)
+                    message = self._strip_invalid_tool_calls(message, invalid_ids)
+            messages.append(message)
+        if len(messages) != len(request.messages) or any(
+            a is not b for a, b in zip(messages, request.messages, strict=True)
+        ):
+            request = request.override(messages=messages)
+        return await handler(request)
+
+    @staticmethod
+    def _strip_invalid_tool_calls(message: AIMessage, invalid_ids: set[str]) -> AIMessage:
+        content = message.content
+        if isinstance(content, list):
+            content = [
+                block
+                for block in content
+                if not (
+                    isinstance(block, dict)
+                    and block.get("type")
+                    in {"function_call", "tool_use", "tool_call", "invalid_tool_call"}
+                    and (
+                        (call_id := block.get("call_id") or block.get("id")) in invalid_ids
+                        or call_id is None
+                    )
+                )
+            ]
+        return message.model_copy(
+            update={
+                "content": content,
+                "invalid_tool_calls": [],
+                "additional_kwargs": {
+                    key: value
+                    for key, value in message.additional_kwargs.items()
+                    if key not in {"tool_calls", "function_call"}
+                },
+            }
+        )
+
+    @hook_config(can_jump_to=["model"])
+    async def aafter_model(
+        self,
+        state: AgentState,
+        runtime: Runtime,  # noqa: ARG002
+    ) -> dict[str, object] | None:
+        messages = state.get("messages")
+        if not isinstance(messages, list) or not messages:
+            return None
+        last = messages[-1]
+        if (
+            not isinstance(last, AIMessage)
+            or last.tool_calls
+            or (stop := OutputLimitMiddleware.output_limit_stop(last)) is None
+        ):
+            return None
+        continuations = self._continuations(messages)
+        if continuations >= self._max_continuations:
+            logger.warning(
+                "Output-limit continuations exhausted",
+                extra={"model_output_limit": {"stop_reason": stop, "continuations": continuations}},
+            )
+            return None
+        empty = not last.text.strip()
+        nudge = harness_message(
+            Fields({"instructions": prompt("runs/output-limit-continue", empty=empty)}).element(
+                "dynamic-context", {"kind": "run", "id": _OUTPUT_LIMIT_SENDER}
+            ),
+            message_id=f"{_OUTPUT_LIMIT_CONTINUE}{uuid.uuid4()}",
+            source=_OUTPUT_LIMIT_SOURCE,
+        )
+        return {"messages": [nudge], "jump_to": "model"}
+
+    @staticmethod
+    def _invalid_call_ids(message: AIMessage) -> set[str]:
+        return {
+            call_id
+            for call in message.invalid_tool_calls
+            if isinstance(call_id := call.get("id"), str) and call_id
+        }
+
+    @staticmethod
+    def is_nudge(message: AnyMessage) -> bool:
+        provenance = Provenance.of(message)
+        return provenance is not None and provenance.sender == _OUTPUT_LIMIT_SENDER
+
+    @classmethod
+    def _continuations(cls, messages: Sequence[AnyMessage]) -> int:
+        """Consecutive output-limit nudges immediately preceding the latest reply."""
+        count = 0
+        pending_tool_ids: set[str] = set()
+        for message in reversed(messages[:-1]):
+            if isinstance(message, ToolMessage):
+                pending_tool_ids.add(message.tool_call_id)
+                continue
+            if isinstance(message, HumanMessage):
+                if pending_tool_ids or not cls.is_nudge(message):
+                    break
+                count += 1
+                continue
+            if (
+                isinstance(message, AIMessage)
+                and not message.tool_calls
+                and OutputLimitMiddleware.output_limit_stop(message) is not None
+            ):
+                if pending_tool_ids:
+                    if not pending_tool_ids <= cls._invalid_call_ids(message):
+                        break
+                    pending_tool_ids.clear()
+                continue
+            break
+        return count
 
 
 class _RunPromptCaching(AnthropicPromptCachingMiddleware):

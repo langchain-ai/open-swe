@@ -1,0 +1,7 @@
+{% if empty %}
+Your previous response hit the model's output token limit before producing any visible text or tool calls.
+Keep your reasoning brief and emit your next tool call or a concise final answer now.
+{% else %}
+Your previous response was cut off at the model's output token limit before finishing.
+Continue concisely from where you stopped and emit any remaining tool calls or the rest of your answer.
+{% endif %}
