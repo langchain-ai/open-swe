@@ -83,7 +83,7 @@ enum DevSignIn {
 final class LoopbackListener: @unchecked Sendable {
   private let onCode: (String) -> Void
   private var listener: NWListener?
-  private let queue = DispatchQueue(label: "dev.langchain.openswe.loopback")
+  private let queue = DispatchQueue(label: "com.langchain.robin.loopback")
 
   init(onCode: @escaping (String) -> Void) {
     self.onCode = onCode

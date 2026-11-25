@@ -94,7 +94,7 @@ export async function browserSignIn(backend: string): Promise<string> {
     // only resolves on its own when the sheet is dismissed.
     WebBrowser.openAuthSessionAsync(
       `${backend}/dashboard/api/auth/login?${query}`,
-      "openswe://signed-in"
+      "robin://signed-in"
     ).then(
       () => settle(null),
       () => settle(null)

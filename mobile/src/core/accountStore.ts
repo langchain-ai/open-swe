@@ -7,7 +7,7 @@ export interface StoredAccount {
   sessionToken: string
 }
 
-const ACCOUNT_KEY = "dev.langchain.openswe.account"
+const ACCOUNT_KEY = "com.langchain.robin.account"
 const LAST_BACKEND_KEY = "lastBackend"
 const KEYCHAIN = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
