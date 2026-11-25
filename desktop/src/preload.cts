@@ -87,7 +87,69 @@ ipcRenderer.on("desktop:fullscreen-change", (_event, fullscreen) => {
   document.documentElement.classList.toggle("desktop-fullscreen", fullscreen);
 });
 
+ipcRenderer.on("desktop:tabbed", (_event, tabbed) => {
+  document.documentElement.classList.toggle("desktop-tabbed", tabbed === true);
+});
+
+const THEME_TOKENS = [
+  "--bg-surface-level-1",
+  "--bg-surface-level-2",
+  "--bg-surface-level-2-hover",
+  "--text-primary",
+  "--text-secondary",
+  "--border-default",
+  "--radius-md",
+  "--font-sans",
+];
+// A CSS color as #rrggbb, which the shell can paint; Robin's tokens may be oklch().
+function hexColor(color) {
+  const context = document.createElement("canvas").getContext("2d");
+  if (!context || !color) return "";
+  context.fillStyle = color;
+  context.fillRect(0, 0, 1, 1);
+  const [red, green, blue, alpha] = context.getImageData(0, 0, 1, 1).data;
+  if (!alpha) return "";
+  return `#${[red, green, blue].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+let reportedTheme = "";
+function reportTheme() {
+  const style = getComputedStyle(document.documentElement);
+  const tokens = Object.fromEntries(
+    THEME_TOKENS.map((name) => [name, style.getPropertyValue(name).trim()]),
+  );
+  tokens["--page-background"] = document.body
+    ? hexColor(getComputedStyle(document.body).backgroundColor)
+    : "";
+  tokens["--strip-background"] = hexColor(tokens["--bg-surface-level-2"]);
+  const serialized = JSON.stringify(tokens);
+  if (serialized === reportedTheme) return;
+  reportedTheme = serialized;
+  ipcRenderer.send("desktop:tab-theme", tokens);
+}
+
+// The shell brings a new tab forward only once Robin has drawn real content.
+new PerformanceObserver((entries, observer) => {
+  if (
+    entries
+      .getEntries()
+      .some((entry) => entry.name === "first-contentful-paint")
+  ) {
+    observer.disconnect();
+    ipcRenderer.send("desktop:tab-painted");
+  }
+}).observe({ type: "paint", buffered: true });
+
 window.addEventListener("DOMContentLoaded", () => {
+  reportTheme();
+  new MutationObserver(reportTheme).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["class", "style", "data-theme"],
+  });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener(
+    "change",
+    reportTheme,
+  );
+  window.addEventListener("load", reportTheme);
   if (process.platform !== "darwin") return;
 
   const style = document.createElement("style");
@@ -103,7 +165,7 @@ window.addEventListener("DOMContentLoaded", () => {
       user-select: none;
     }
 
-    .desktop-fullscreen [data-desktop-drag-strip] {
+    :is(.desktop-fullscreen, .desktop-tabbed) [data-desktop-drag-strip] {
       left: 0;
     }
 
@@ -124,7 +186,14 @@ window.addEventListener("DOMContentLoaded", () => {
       left: 90px !important;
     }
 
-    .desktop-fullscreen :is([data-sidebar-collapse], [data-sidebar-expand]) {
+    :is(.desktop-fullscreen, .desktop-tabbed)
+      :is([data-sidebar-collapse], [data-sidebar-expand]) {
+      left: 12px !important;
+    }
+
+    /* The window buttons sit in the tab strip, so the page's title-bar
+       controls take their place at the left edge. */
+    .desktop-tabbed [data-desktop-window-controls] > * {
       left: 12px !important;
     }
   `;

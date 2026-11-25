@@ -35,6 +35,7 @@
       "build/**/*",
       "src/setup.html",
       "src/approval-panel.html",
+      "src/tab-strip.html",
       "package.json"
     ],
     "extraResources": [

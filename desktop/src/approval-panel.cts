@@ -1,5 +1,5 @@
 import path from "node:path";
-import { type BrowserWindow, WebContentsView } from "electron";
+import { type View, type WebContents, WebContentsView } from "electron";
 
 type Decision = "deny" | "once" | "grant";
 
@@ -21,6 +21,17 @@ interface Queue {
 
 const DECIDE_URL = "open-swe-approval://decide";
 
+interface PanelHost {
+  webContents: Pick<WebContents, "getURL" | "getZoomFactor">;
+  contentView: {
+    addChildView(view: View): void;
+    removeChildView(view: View): void;
+  };
+  isDestroyed(): boolean;
+  getContentBounds(): { width: number; height: number };
+  once(event: "closed", listener: () => void): unknown;
+}
+
 /**
  * The desktop's own approval surface, laid over the app window: a page bundled with
  * the app, not the dashboard the backend serves, so nothing the backend or the page
@@ -28,7 +39,7 @@ const DECIDE_URL = "open-swe-approval://decide";
  */
 class ApprovalPanel {
   private view: WebContentsView | null = null;
-  private window: BrowserWindow | null = null;
+  private window: PanelHost | null = null;
   private showing: string | null = null;
   private scoped = false;
   private scope: {
@@ -42,7 +53,7 @@ class ApprovalPanel {
 
   constructor(
     private readonly queue: Queue,
-    private readonly currentWindow: () => BrowserWindow | null,
+    private readonly currentWindow: () => PanelHost | null,
     private readonly displayFolder: (folder: string) => string,
   ) {}
 
@@ -189,7 +200,7 @@ class ApprovalPanel {
       .find((request) => this.matches(request) && !this.later.has(request.id));
   }
 
-  private attach(window: BrowserWindow): WebContentsView {
+  private attach(window: PanelHost): WebContentsView {
     if (this.view && this.window === window) return this.view;
     this.hide();
     const view = new WebContentsView({

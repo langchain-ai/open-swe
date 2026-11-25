@@ -163,12 +163,22 @@ test("only grants expected permissions to the bundled app", () => {
 });
 
 test("only proxies requests from the bundled app window", () => {
-  assert.equal(isTrustedProxyRequest(APP_URL), true);
-  assert.equal(isTrustedProxyRequest("https://evil.example"), false);
+  assert.equal(isTrustedProxyRequest([APP_URL]), true);
+  assert.equal(isTrustedProxyRequest(["https://evil.example"]), false);
   assert.equal(
-    isTrustedProxyRequest("https://github.com/login/oauth/authorize"),
+    isTrustedProxyRequest(["https://github.com/login/oauth/authorize"]),
     false,
   );
+  assert.equal(isTrustedProxyRequest([]), false);
+});
+
+test("proxies for app tabs while another tab loads or shows an error", () => {
+  assert.equal(
+    isTrustedProxyRequest([APP_URL, "", "data:text/html,error"]),
+    true,
+  );
+  assert.equal(isTrustedProxyRequest(["", "data:text/html,error"]), false);
+  assert.equal(isTrustedProxyRequest([APP_URL, "https://evil.example"]), false);
 });
 
 test("sends login to the user's browser instead of the app window", () => {

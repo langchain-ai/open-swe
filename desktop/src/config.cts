@@ -154,8 +154,12 @@ function isTrustedPermissionRequest(permission, requestingUrl) {
   return isAppUrl(requestingUrl) && ALLOWED_PERMISSIONS.has(permission);
 }
 
-function isTrustedProxyRequest(pageUrl) {
-  return isAppUrl(pageUrl);
+/** At least one tab shows the app, and none shows a foreign page. */
+function isTrustedProxyRequest(pageUrls: string[]) {
+  return (
+    pageUrls.some(isAppUrl) &&
+    pageUrls.every((url) => !url || url.startsWith("data:") || isAppUrl(url))
+  );
 }
 
 /**

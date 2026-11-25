@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { gzipSync } from "node:zlib";
-import { _electron as electron } from "playwright";
+import { _electron as electron, type ElectronApplication } from "playwright";
 
 const repoRoot = resolve(__dirname, "..", "..", "..");
 const desktopRoot = join(repoRoot, "desktop");
@@ -13,6 +13,18 @@ const uiArchive = join(repoRoot, "ui", ".output", "desktop", "ui.json.gz");
 const electronPath = createRequire(join(desktopRoot, "package.json"))(
   "electron",
 ) as string;
+
+/** The app tab; the window also holds the tab strip's page. */
+async function appTab(electronApp: ElectronApplication) {
+  const find = () =>
+    electronApp
+      .windows()
+      .find((window) => window.url().startsWith("robin://app/"));
+  await expect.poll(find, { timeout: 30_000 }).toBeTruthy();
+  const page = find()!;
+  await page.waitForLoadState("load");
+  return page;
+}
 
 test("Desktop keeps cloud browser authentication redirects inside the viewer", async () => {
   const stateRoot = mkdtempSync(join(tmpdir(), "desktop-browser-"));
@@ -71,8 +83,7 @@ test("Desktop keeps cloud browser authentication redirects inside the viewer", a
     },
   });
   try {
-    const page = await electronApp.firstWindow();
-    await page.waitForURL("robin://app/**", { waitUntil: "load" });
+    const page = await appTab(electronApp);
     await page.evaluate((origin) => {
       const frame = document.createElement("iframe");
       frame.title = "Browser window";
@@ -111,17 +122,19 @@ test("Desktop links supersede startup loading", async () => {
     },
   });
   try {
-    const page = await electronApp.firstWindow();
-    await page.waitForURL("robin://app/**", { waitUntil: "load" });
+    const page = await appTab(electronApp);
     await electronApp.evaluate(({ protocol }) => {
       protocol.unhandle("robin");
       protocol.handle("robin", () => new Response("Ready"));
     });
-    const desktopWindow = await electronApp.browserWindow(page);
     await page.goto("data:text/html,Reload fixture");
     await expect
       .poll(() =>
-        desktopWindow.evaluate((window) => window.webContents.isLoading()),
+        electronApp.evaluate(({ webContents }) =>
+          webContents
+            .getAllWebContents()
+            .some((contents) => contents.isLoading()),
+        ),
       )
       .toBe(false);
     await electronApp.evaluate(({ app, Menu }) => {
@@ -151,7 +164,11 @@ test("Desktop links supersede startup loading", async () => {
     await page.goto("data:text/html,Non-app page");
     await expect
       .poll(() =>
-        desktopWindow.evaluate((window) => window.webContents.isLoading()),
+        electronApp.evaluate(({ webContents }) =>
+          webContents
+            .getAllWebContents()
+            .some((contents) => contents.isLoading()),
+        ),
       )
       .toBe(false);
     await electronApp.evaluate(({ Menu }) => {

@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>Tabs</title>
+    <style>
+      /* Defaults until the front tab reports Robin's own tokens. */
+      :root {
+        color-scheme: light dark;
+        --bg-surface-level-1: #ffffff;
+        --bg-surface-level-2: #f4f5f7;
+        --bg-surface-level-2-hover: #e9ebef;
+        --text-primary: #16191f;
+        --text-secondary: #5a6170;
+        --border-default: #e1e4ea;
+        --radius-md: 6px;
+        --font-sans: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg-surface-level-1: #1b1d23;
+          --bg-surface-level-2: #15171c;
+          --bg-surface-level-2-hover: #22252c;
+          --text-primary: #e8eaf0;
+          --text-secondary: #a0a7b5;
+          --border-default: #2c313c;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg-surface-level-2);
+        color: var(--text-secondary);
+        font: 12px/1 var(--font-sans);
+        -webkit-font-smoothing: antialiased;
+        user-select: none;
+        cursor: default;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0 8px 0 var(--inset, 92px);
+        border-bottom: 1px solid var(--border-default);
+        -webkit-app-region: drag;
+      }
+      #tabs {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+      .tab,
+      .new {
+        -webkit-app-region: no-drag;
+        border: 0;
+        font: inherit;
+        color: inherit;
+        background: transparent;
+        border-radius: var(--radius-md);
+        transition:
+          background-color 120ms ease,
+          color 120ms ease;
+      }
+      .tab {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        min-width: 72px;
+        max-width: 240px;
+        flex: 1 1 0;
+        padding: 0 4px 0 10px;
+      }
+      .tab + .tab::before {
+        content: "";
+        position: absolute;
+        left: -2.5px;
+        top: 8px;
+        bottom: 8px;
+        width: 1px;
+        background: var(--border-default);
+        transition: opacity 120ms ease;
+      }
+      .tab[aria-selected="true"]::before,
+      .tab[aria-selected="true"] + .tab::before,
+      .tab:hover::before,
+      .tab:hover + .tab::before {
+        opacity: 0;
+      }
+      .tab.dragging {
+        z-index: 1;
+        cursor: grabbing;
+        transition: none;
+      }
+      .tab:hover {
+        background: var(--bg-surface-level-2-hover);
+        color: var(--text-primary);
+      }
+      .tab[aria-selected="true"] {
+        background: var(--bg-surface-level-1);
+        color: var(--text-primary);
+        box-shadow: 0 0 0 1px var(--border-default);
+      }
+      .title {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        text-align: left;
+      }
+      .close,
+      .new {
+        display: grid;
+        place-items: center;
+        flex: none;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: 0;
+        border-radius: calc(var(--radius-md) - 2px);
+        background: transparent;
+        color: var(--text-secondary);
+        opacity: 0;
+      }
+      .tab:hover .close,
+      .tab[aria-selected="true"] .close {
+        opacity: 1;
+      }
+      .close:hover,
+      .new:hover {
+        background: var(--bg-surface-level-2-hover);
+        color: var(--text-primary);
+      }
+      .new {
+        width: 28px;
+        height: 28px;
+        opacity: 1;
+      }
+      svg {
+        width: 12px;
+        height: 12px;
+        stroke: currentColor;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        fill: none;
+      }
+      .new svg {
+        width: 14px;
+        height: 14px;
+      }
+      button:focus-visible,
+      .tab:focus-visible {
+        outline: 2px solid var(--text-secondary);
+        outline-offset: -2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="tabs" role="tablist" aria-label="Tabs"></div>
+    <button class="new" type="button" aria-label="New tab" title="New tab">
+      <svg viewBox="0 0 14 14"><path d="M7 2.5v9M2.5 7h9" /></svg>
+    </button>
+    <script>
+      const list = document.getElementById("tabs");
+      const send = (action, id) => {
+        location.href =
+          "robin-tabs://" + action + (id === undefined ? "" : "?id=" + id);
+      };
+      document.querySelector(".new").addEventListener("click", () =>
+        send("new"),
+      );
+      list.addEventListener("pointermove", moveDrag);
+      list.addEventListener("pointerup", endDrag);
+      list.addEventListener("pointercancel", endDrag);
+      // After pointerup the drag is already over, so this only ends a lost one.
+      list.addEventListener("lostpointercapture", endDrag);
+
+      let drag = null;
+      let pending = null;
+      let lastState = null;
+      // Tabs still sliding into place; a render then would cut the slide short.
+      let settling = 0;
+      const SLIDE = "transform 160ms cubic-bezier(0.2, 0, 0, 1)";
+
+      function slide(change, except) {
+        const tabs = [...list.children];
+        const before = new Map(
+          tabs.map((tab) => [tab, tab.getBoundingClientRect().left]),
+        );
+        change();
+        for (const tab of tabs) {
+          if (tab === except) continue;
+          tab.style.transition = "none";
+          tab.style.transform = "";
+          const delta = before.get(tab) - tab.getBoundingClientRect().left;
+          if (!delta) continue;
+          tab.style.transform = `translateX(${delta}px)`;
+          tab.getBoundingClientRect();
+          tab.style.transition = SLIDE;
+          tab.style.transform = "";
+        }
+      }
+
+      function startDrag(event, item, id) {
+        drag = {
+          item,
+          id,
+          pointer: event.pointerId,
+          grab: event.clientX - item.offsetLeft,
+          startX: event.clientX,
+          moved: false,
+        };
+        item.style.transition = "";
+        // On the list, not the tab: moving the tab in the DOM drops its capture.
+        list.setPointerCapture(event.pointerId);
+      }
+
+      function moveDrag(event) {
+        if (!drag || event.pointerId !== drag.pointer) return;
+        const { item } = drag;
+        if (!drag.moved && Math.abs(event.clientX - drag.startX) < 4) return;
+        drag.moved = true;
+        item.classList.add("dragging");
+        const tabs = [...list.children];
+        const first = tabs[0];
+        const last = tabs.at(-1);
+        const wanted = event.clientX - drag.grab;
+        const left = Math.min(
+          Math.max(wanted, first.offsetLeft),
+          last.offsetLeft + last.offsetWidth - item.offsetWidth,
+        );
+        // Unclamped, so the tab can pass the first tab's center.
+        const center = wanted + item.offsetWidth / 2;
+        const before = tabs.find(
+          (tab) =>
+            tab !== item && center < tab.offsetLeft + tab.offsetWidth / 2,
+        );
+        if ((before ?? null) !== item.nextElementSibling)
+          slide(() => list.insertBefore(item, before ?? null), item);
+        item.style.transform = `translateX(${left - item.offsetLeft}px)`;
+      }
+
+      /** Shows `item` selected at once; the shell switches pages on release. */
+      function press(item) {
+        for (const tab of list.children)
+          tab.setAttribute("aria-selected", String(tab === item));
+      }
+
+      function endDrag(event) {
+        if (!drag || event.pointerId !== drag.pointer) return;
+        const { item, id, moved } = drag;
+        drag = null;
+        const cancelled = event.type !== "pointerup";
+        if (cancelled) pending ??= lastState;
+        if (!moved) {
+          if (cancelled) render(pending);
+          else send("activate", id);
+          return;
+        }
+        item.style.transition = SLIDE;
+        item.style.transform = "";
+        clearTimeout(settling);
+        settling = setTimeout(() => {
+          settling = 0;
+          item.classList.remove("dragging");
+          for (const tab of list.children) tab.style.transition = "";
+          if (pending) render(pending);
+        }, 180);
+        if (cancelled) return;
+        // A move also selects the tab, so one message carries both.
+        location.href =
+          "robin-tabs://move?id=" +
+          id +
+          "&index=" +
+          [...list.children].indexOf(item);
+      }
+
+      const painted = () =>
+        new Promise((done) =>
+          requestAnimationFrame(() => requestAnimationFrame(done)),
+        );
+
+      function render(state) {
+        lastState = state;
+        if (drag || settling) {
+          pending = state;
+          return painted();
+        }
+        pending = null;
+        const root = document.documentElement.style;
+        root.setProperty("--inset", state.inset + "px");
+        for (const [name, value] of Object.entries(state.theme))
+          root.setProperty(name, value);
+        list.replaceChildren(
+          ...state.tabs.map((tab) => {
+            const item = document.createElement("div");
+            item.className = "tab";
+            item.role = "tab";
+            item.tabIndex = tab.active ? 0 : -1;
+            item.title = tab.title;
+            item.setAttribute("aria-selected", String(tab.active));
+            item.addEventListener("pointerdown", (event) => {
+              if (event.button !== 0 || event.target.closest(".close")) return;
+              press(item);
+              startDrag(event, item, tab.id);
+            });
+            item.addEventListener("auxclick", (event) => {
+              if (event.button === 1) send("close", tab.id);
+            });
+            const title = document.createElement("span");
+            title.className = "title";
+            title.textContent = tab.title;
+            const close = document.createElement("button");
+            close.className = "close";
+            close.type = "button";
+            close.ariaLabel = "Close " + tab.title;
+            close.innerHTML =
+              '<svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" /></svg>';
+            close.addEventListener("click", () => send("close", tab.id));
+            item.append(title, close);
+            return item;
+          }),
+        );
+        return painted();
+      }
+    </script>
+  </body>
+</html>

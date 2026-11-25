@@ -10,10 +10,7 @@ export class CloseConfirmation {
     private readonly appName: string,
   ) {}
 
-  async request(
-    action: "quit" | "close",
-    window: Electron.BrowserWindow | null,
-  ) {
+  async request(action: "quit" | "close", window: Electron.BaseWindow | null) {
     if (this.pending || (action === "close" && !window)) return;
     this.pending = true;
     try {

@@ -4,6 +4,7 @@ const { pathToFileURL } = require("node:url");
 const {
   app,
   autoUpdater: nativeAutoUpdater,
+  BaseWindow,
   BrowserWindow,
   clipboard,
   ipcMain,
@@ -16,6 +17,7 @@ const {
   session,
   shell,
   webContents,
+  WebContentsView,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const {
@@ -29,6 +31,7 @@ const {
 const { LocalAccessBridge } = require("./local-access.cjs");
 const { ApprovalQueue } = require("./approval-queue.cjs");
 const { ApprovalPanel } = require("./approval-panel.cjs");
+const { AppTabs } = require("./tabs.cjs");
 const { DesktopUi } = require("./desktop-ui.cjs");
 const { getUserShellEnv } = require("./shell-env.cjs");
 const { beginLogin } = require("./login-server.cjs");
@@ -146,11 +149,53 @@ const desktopUi = {
     return this.instance;
   },
 };
-let mainWindow = null;
+type Tab = Electron.WebContentsView;
+let mainWindow: Electron.BaseWindow | null = null;
+let appTabs: InstanceType<typeof AppTabs> | null = null;
+let activeTab: Tab | null = null;
+const tabMenuCommands = new WeakMap<Tab, unknown>();
+const tabThreadScopes = new WeakMap<Tab, Map<string, unknown>>();
 const menuCommands = new MenuCommands((commandId, viaShortcut) => {
-  if (mainWindow && !mainWindow.isDestroyed())
-    mainWindow.webContents.send("desktop:menu-command", commandId, viaShortcut);
+  if (activeTab && !activeTab.webContents.isDestroyed())
+    activeTab.webContents.send("desktop:menu-command", commandId, viaShortcut);
 });
+
+function sendToTabs(channel: string, ...args: unknown[]) {
+  for (const tab of appTabs?.tabs ?? [])
+    if (!tab.webContents.isDestroyed()) tab.webContents.send(channel, ...args);
+}
+
+function onTabActivated(tab: Tab | null) {
+  activeTab = tab;
+  menuCommands.reset();
+  const commands = tab && tabMenuCommands.get(tab);
+  if (commands) menuCommands.publish(commands);
+  createMenu();
+  approvalPanel.reset();
+  for (const [threadId, bounds] of (tab && tabThreadScopes.get(tab)) ?? [])
+    approvalPanel.setThread(threadId, bounds);
+  approvalPanel.sync();
+}
+
+const panelHosts = new WeakMap<Tab, object>();
+function approvalPanelHost() {
+  const tab = activeTab;
+  if (!tab || tab.webContents.isDestroyed()) return null;
+  let host = panelHosts.get(tab);
+  if (!host) {
+    const contents = tab.webContents;
+    host = {
+      webContents: contents,
+      contentView: tab,
+      isDestroyed: () => contents.isDestroyed(),
+      getContentBounds: () => tab.getBounds(),
+      once: (_event: "closed", listener: () => void) =>
+        contents.once("destroyed", listener),
+    };
+    panelHosts.set(tab, host);
+  }
+  return host;
+}
 
 // Installed builds have no terminal; "Save Diagnostics Report…" exports these.
 const rendererConsole = new ConsoleLogBuffer(2000);
@@ -164,12 +209,11 @@ let localAccessBridge = null;
 // Local actions waiting on the person, decided only in the desktop's own panel.
 const approvalQueue = new ApprovalQueue(() => {
   approvalPanel.sync();
-  if (mainWindow && !mainWindow.isDestroyed())
-    mainWindow.webContents.send("desktop:local-access-requests-changed");
+  sendToTabs("desktop:local-access-requests-changed");
 });
 const approvalPanel = new ApprovalPanel(
   approvalQueue,
-  () => mainWindow,
+  approvalPanelHost,
   (folder) => localAccessBridge?.displayPath(folder) ?? folder,
 );
 type DesktopUpdateState = {
@@ -189,9 +233,7 @@ function setUpdateState(
       version,
     });
   updateState = { status, ...(version ? { version } : {}) };
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("desktop:update-state", updateState);
-  }
+  sendToTabs("desktop:update-state", updateState);
 }
 
 let lastUpdateCheck = 0;
@@ -299,9 +341,13 @@ async function checkForDesktopUpdates() {
 }
 
 function sendDesktopCommand(commandId) {
-  if (!isDesktopCommandId(commandId) || !mainWindow || mainWindow.isDestroyed())
+  if (
+    !isDesktopCommandId(commandId) ||
+    !activeTab ||
+    activeTab.webContents.isDestroyed()
+  )
     return;
-  mainWindow.webContents.send("desktop:command", commandId);
+  activeTab.webContents.send("desktop:command", commandId);
 }
 
 function requireTrustedDesktopIpc(event) {
@@ -339,7 +385,15 @@ async function sendBridgeRequest(method, apiPath, { body, signal }) {
 function configureDesktopIpc() {
   ipcMain.handle("desktop:set-menu-commands", (event, commands) => {
     requireTrustedDesktopIpc(event);
-    if (event.sender !== mainWindow?.webContents) return [];
+    const tab = appTabs?.tabFor(event.sender);
+    if (!tab) return [];
+    tabMenuCommands.set(tab, commands);
+    if (tab !== activeTab) {
+      // A background tab's menu shows once it comes to the front.
+      const pending = new MenuCommands(() => {});
+      pending.publish(commands);
+      return pending.nativeShortcutIds();
+    }
     if (menuCommands.publish(commands)) createMenu();
     return menuCommands.nativeShortcutIds();
   });
@@ -445,6 +499,15 @@ function configureDesktopIpc() {
     return true;
   });
 
+  ipcMain.on("desktop:tab-painted", (event) => {
+    const tab = appTabs?.tabFor(event.sender);
+    if (tab && isAppUrl(event.sender.getURL())) appTabs?.contentPainted(tab);
+  });
+  ipcMain.on("desktop:tab-theme", (event, tokens) => {
+    const tab = appTabs?.tabFor(event.sender);
+    if (tab && isAppUrl(event.sender.getURL())) appTabs?.setTheme(tab, tokens);
+  });
+
   // macOS draws the traffic lights for the window's appearance, which follows
   // the OS unless told otherwise. Without this, running the app light on a dark
   // system (or vice versa) renders them for the wrong appearance and the
@@ -463,10 +526,7 @@ function configureDesktopIpc() {
       send: sendBridgeRequest,
       env: getUserShellEnv,
       log: (message) => console.warn(message),
-      onGrantsChanged: () => {
-        if (mainWindow && !mainWindow.isDestroyed())
-          mainWindow.webContents.send("desktop:local-access-grants-changed");
-      },
+      onGrantsChanged: () => sendToTabs("desktop:local-access-grants-changed"),
       approve: (request, signal) => approvalQueue.request(request, signal),
     });
     return localAccessBridge.ensure();
@@ -489,7 +549,15 @@ function configureDesktopIpc() {
     "desktop:set-local-access-thread",
     (event, threadId, bounds) => {
       requireTrustedDesktopIpc(event);
-      return approvalPanel.setThread(threadId, bounds);
+      const tab = appTabs?.tabFor(event.sender);
+      if (!tab || typeof threadId !== "string") return false;
+      const scopes = tabThreadScopes.get(tab) ?? new Map();
+      tabThreadScopes.set(tab, scopes);
+      if (bounds === null) scopes.delete(threadId);
+      else scopes.set(threadId, bounds);
+      return tab === activeTab
+        ? approvalPanel.setThread(threadId, bounds)
+        : true;
     },
   );
   ipcMain.handle("desktop:pending-local-access-threads", (event) => {
@@ -632,7 +700,10 @@ async function connectToBackend(url) {
   if (previousUrl && previousUrl !== url)
     await session.defaultSession.clearStorageData({ origin: APP_URL });
   createMenu();
-  if (mainWindow && !mainWindow.isDestroyed()) await loadApp(mainWindow);
+  // Other tabs still show the previous backend.
+  for (const tab of (appTabs?.tabs ?? []).slice())
+    if (tab !== activeTab) appTabs?.close(tab);
+  if (activeTab) await loadApp(activeTab);
   else createWindow();
 }
 
@@ -710,8 +781,10 @@ async function proxyBackendRequest(
 ) {
   const source = new URL(request.url);
   const headers = new Headers(request.headers);
-  const pageUrl = mainWindow?.webContents.getURL() || "";
-  if (!isTrustedProxyRequest(pageUrl)) {
+  const pageUrls = (appTabs?.tabs ?? [])
+    .filter((tab) => !tab.webContents.isDestroyed())
+    .map((tab) => tab.webContents.getURL());
+  if (!isTrustedProxyRequest(pageUrls)) {
     return new Response("Forbidden", { status: 403 });
   }
   const credentials = FramePolicy.proxyCredentials(
@@ -829,28 +902,30 @@ async function serveDesktopUi(request: Request) {
   return desktopUi.current().serve(request);
 }
 
-const appNavigations = new WeakMap<Electron.BrowserWindow, { url: string }>();
-const failedAppUrls = new WeakMap<Electron.BrowserWindow, string>();
+const appNavigations = new WeakMap<Tab, { url: string }>();
+const failedAppUrls = new WeakMap<Tab, string>();
 
-async function loadApp(window: Electron.BrowserWindow, url = APP_URL) {
+async function loadApp(tab: Tab, url = APP_URL) {
   if (!backendUrl) return;
-  failedAppUrls.delete(window);
+  failedAppUrls.delete(tab);
   const navigation = { url };
-  appNavigations.set(window, navigation);
+  appNavigations.set(tab, navigation);
+  // A closed tab's view no longer returns its contents.
+  const contents = tab.webContents;
   try {
-    await window.loadURL(url);
+    await contents.loadURL(url);
   } catch (error) {
     console.warn("Desktop navigation failed", error);
     if (
-      window.isDestroyed() ||
-      appNavigations.get(window) !== navigation ||
+      contents.isDestroyed() ||
+      appNavigations.get(tab) !== navigation ||
       (error instanceof Error &&
         "code" in error &&
         error.code === "ERR_ABORTED")
     )
       return;
-    failedAppUrls.set(window, url);
-    await window
+    failedAppUrls.set(tab, url);
+    await contents
       .loadURL(errorPage(error))
       .catch((pageError) =>
         console.warn("Could not show desktop navigation error", pageError),
@@ -905,7 +980,7 @@ function createMenu() {
                 click: () =>
                   void closeConfirmation.request(
                     "quit",
-                    BrowserWindow.getFocusedWindow(),
+                    BaseWindow.getFocusedWindow(),
                   ),
               },
             ],
@@ -940,7 +1015,7 @@ function createMenu() {
                 click: () =>
                   void closeConfirmation.request(
                     "close",
-                    BrowserWindow.getFocusedWindow(),
+                    BaseWindow.getFocusedWindow(),
                   ),
               },
             ]
@@ -977,14 +1052,11 @@ function createMenu() {
           label: "Reload",
           accelerator: "CmdOrCtrl+R",
           click: () => {
-            if (!mainWindow || mainWindow.isDestroyed()) return;
-            if (isAppUrl(mainWindow.webContents.getURL()))
-              mainWindow.webContents.reload();
+            if (!activeTab || activeTab.webContents.isDestroyed()) return;
+            if (isAppUrl(activeTab.webContents.getURL()))
+              activeTab.webContents.reload();
             else
-              void loadApp(
-                mainWindow,
-                failedAppUrls.get(mainWindow) ?? APP_URL,
-              );
+              void loadApp(activeTab, failedAppUrls.get(activeTab) ?? APP_URL);
           },
         },
         // Installed builds too: the renderer is sandboxed with no Node access.
@@ -998,12 +1070,26 @@ function createMenu() {
       ],
     },
     ...menuCommands.commandMenus(),
-    process.platform === "darwin"
-      ? { role: "windowMenu" }
-      : {
-          label: "Window",
-          submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
-        },
+    {
+      label: "Window",
+      ...(process.platform === "darwin" ? { role: "window" } : {}),
+      submenu: [
+        { role: "minimize" },
+        { role: "zoom" },
+        { type: "separator" },
+        ...tabMenuItems(),
+        ...(process.platform === "darwin"
+          ? [{ type: "separator" }, { role: "front" }]
+          : [
+              { type: "separator" },
+              // Ctrl+W closes the tab while there is another one.
+              {
+                role: "close",
+                registerAccelerator: (appTabs?.tabs.length ?? 0) <= 1,
+              },
+            ]),
+      ],
+    },
     {
       role: "help",
       submenu: [
@@ -1254,10 +1340,10 @@ async function completeExternalLogin(verifier, code, exchanged?: Response) {
   window.show();
   window.focus();
   app.focus({ steal: true });
-  await loadApp(window);
+  if (activeTab) await loadApp(activeTab);
 }
 
-async function handleNavigation(window, event, url) {
+async function handleNavigation(tab: Tab, event, url, inNewTab = false) {
   if (desktopLinks.slackUrl(url)) {
     event.preventDefault();
     void desktopLinks
@@ -1277,13 +1363,15 @@ async function handleNavigation(window, event, url) {
   }
   if (isAppUrl(url)) return;
   event.preventDefault();
+  const contents = tab.webContents;
   const navigationBackend = backendUrl;
   const targetUrl =
     (navigationBackend && localCallbackUrl(url, navigationBackend)) ||
     (await desktopLinks.appUrl(url, navigationBackend));
-  if (window.isDestroyed() || backendUrl !== navigationBackend) return;
+  if (contents.isDestroyed() || backendUrl !== navigationBackend) return;
   if (targetUrl) {
-    void window.loadURL(targetUrl);
+    if (inNewTab) openTab(targetUrl, tab, { background: true });
+    else void contents.loadURL(targetUrl);
     return;
   }
   if (
@@ -1294,7 +1382,7 @@ async function handleNavigation(window, event, url) {
   }
 }
 
-function showEditContextMenu(window, params) {
+function showEditContextMenu(tab: Tab, params) {
   const { editFlags, isEditable, misspelledWord, dictionarySuggestions } =
     params;
   const linkURL = params.linkURL;
@@ -1305,7 +1393,7 @@ function showEditContextMenu(window, params) {
     for (const suggestion of dictionarySuggestions)
       template.push({
         label: suggestion,
-        click: () => window.webContents.replaceMisspelling(suggestion),
+        click: () => tab.webContents.replaceMisspelling(suggestion),
       });
     if (!dictionarySuggestions.length)
       template.push({ label: "No suggestions", enabled: false });
@@ -1313,7 +1401,7 @@ function showEditContextMenu(window, params) {
       {
         label: "Add to Dictionary",
         click: () =>
-          window.webContents.session.addWordToSpellCheckerDictionary(
+          tab.webContents.session.addWordToSpellCheckerDictionary(
             misspelledWord,
           ),
       },
@@ -1332,31 +1420,76 @@ function showEditContextMenu(window, params) {
     template.push({ role: "copy", enabled: editFlags.canCopy });
   if (linkURL) {
     if (template.length) template.push({ type: "separator" });
+    if (isAppUrl(linkURL) && !isAppLoginUrl(linkURL))
+      template.push({
+        label: "Open Link in New Tab",
+        click: () => openInNewTab(tab, linkURL),
+      });
     template.push({
       label: "Copy Link Address",
       click: () => clipboard.writeText(linkURL),
     });
   }
-  Menu.buildFromTemplate(template).popup({ window });
+  Menu.buildFromTemplate(template).popup();
 }
 
-function createWindow(initialUrl = APP_URL) {
-  if (!backendUrl) return createSetupWindow();
-  const window = new BrowserWindow({
-    title: appRuntime.name,
-    width: 1440,
-    height: 900,
-    minWidth: 480,
-    minHeight: 600,
-    backgroundColor: "#ffffff",
-    icon: iconPath(),
-    show: false,
-    ...(process.platform === "darwin"
-      ? {
-          titleBarStyle: "hiddenInset",
-          trafficLightPosition: { x: 16, y: 14 },
-        }
-      : {}),
+function openInNewTab(tab: Tab, url) {
+  const target =
+    backendUrl && isAppUrl(url) && !isAppLoginUrl(url)
+      ? backendRequestUrl(backendUrl, url) + new URL(url).hash
+      : url;
+  void handleNavigation(tab, { preventDefault() {} }, target, true);
+}
+
+function openTab(
+  url: string,
+  after: Tab | null = activeTab,
+  { background = false } = {},
+): Tab | null {
+  if (!appTabs || !mainWindow || mainWindow.isDestroyed()) {
+    createWindow(url);
+    return activeTab;
+  }
+  const tab = appTabs.add(after);
+  if (background) appTabs.openInBackground(tab);
+  else appTabs.activateWhenLoaded(tab);
+  void loadApp(tab, url);
+  return tab;
+}
+
+function tabMenuItems() {
+  const count = appTabs?.tabs.length ?? 0;
+  return [
+    {
+      label: "New Tab",
+      accelerator: "CmdOrCtrl+T",
+      enabled: Boolean(backendUrl),
+      click: () => openTab(APP_URL),
+    },
+    {
+      label: "Close Tab",
+      // Only with another tab left: closing the last tab closes the window.
+      ...(count > 1 ? { accelerator: "CmdOrCtrl+W" } : {}),
+      enabled: count > 1,
+      click: () => activeTab && appTabs?.close(activeTab),
+    },
+    {
+      label: "Show Next Tab",
+      accelerator: "Ctrl+Tab",
+      enabled: count > 1,
+      click: () => appTabs?.cycle(1),
+    },
+    {
+      label: "Show Previous Tab",
+      accelerator: "Ctrl+Shift+Tab",
+      enabled: count > 1,
+      click: () => appTabs?.cycle(-1),
+    },
+  ];
+}
+
+function createTabView(): Tab {
+  const tab = new WebContentsView({
     webPreferences: {
       contextIsolation: true,
       navigateOnDragDrop: false,
@@ -1365,89 +1498,132 @@ function createWindow(initialUrl = APP_URL) {
       sandbox: true,
     },
   });
-
-  window.once("ready-to-show", () => window.show());
-  lifecycleLog.record("window-created", { id: window.id });
-  window.on("close", () =>
-    lifecycleLog.record("window-close", { id: window.id }),
-  );
-  window.webContents.on("render-process-gone", (_event, details) =>
+  const contents = tab.webContents;
+  contents.on("render-process-gone", (_event, details) =>
     lifecycleLog.record("render-process-gone", {
       reason: details.reason,
       exitCode: details.exitCode,
     }),
   );
-  window.on("closed", () => {
-    lifecycleLog.record("window-closed");
-    if (mainWindow !== window) return;
-    mainWindow = null;
-    if (menuCommands.reset()) createMenu();
-  });
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    const target =
-      backendUrl && isAppUrl(url) && !isAppLoginUrl(url)
-        ? backendRequestUrl(backendUrl, url) + new URL(url).hash
-        : url;
-    void handleNavigation(window, { preventDefault() {} }, target);
+  // Cmd-click, middle-click and target="_blank" links.
+  contents.setWindowOpenHandler(({ url }) => {
+    openInNewTab(tab, url);
     return { action: "deny" };
   });
-  window.webContents.on("will-navigate", (event, url) =>
-    handleNavigation(window, event, url),
+  contents.on("will-navigate", (event, url) =>
+    handleNavigation(tab, event, url),
   );
-  window.webContents.on("will-frame-navigate", (event) => {
+  contents.on("will-frame-navigate", (event) => {
     if (event.isMainFrame) return;
     const initiatedByApp =
-      event.initiator?.frameTreeNodeId ===
-      window.webContents.mainFrame.frameTreeNodeId;
+      event.initiator?.frameTreeNodeId === contents.mainFrame.frameTreeNodeId;
     const frames: { url: string; origin: string }[] = [];
     for (let frame = event.frame; frame; frame = frame.parent)
       frames.push({ url: frame.url, origin: frame.origin });
     if (FramePolicy.blocksNavigation(frames, event.url, initiatedByApp))
       event.preventDefault();
   });
-  window.webContents.on("will-redirect", (event) => {
-    if (event.isMainFrame) handleNavigation(window, event, event.url);
+  contents.on("will-redirect", (event) => {
+    if (event.isMainFrame) handleNavigation(tab, event, event.url);
   });
-  window.webContents.on("will-attach-webview", (event) =>
-    event.preventDefault(),
-  );
-  window.webContents.on("did-navigate", () => {
-    if (mainWindow === window) {
+  contents.on("will-attach-webview", (event) => event.preventDefault());
+  contents.on("did-navigate", () => {
+    tabMenuCommands.delete(tab);
+    tabThreadScopes.delete(tab);
+    if (activeTab === tab) {
       if (menuCommands.reset()) createMenu();
       approvalPanel.reset();
       approvalPanel.sync();
     }
   });
-  window.webContents.on("did-navigate-in-page", () => {
-    if (mainWindow === window) approvalPanel.sync();
+  contents.on("did-navigate-in-page", () => {
+    if (activeTab === tab) approvalPanel.sync();
   });
-  window.on("resize", () => {
-    if (mainWindow === window) approvalPanel.sync();
-  });
-  window.webContents.on("did-finish-load", () =>
-    window.webContents.send("desktop:fullscreen-change", window.isFullScreen()),
+  contents.on("did-finish-load", () =>
+    contents.send(
+      "desktop:fullscreen-change",
+      Boolean(mainWindow?.isFullScreen()),
+    ),
   );
-  window.on("enter-full-screen", () =>
-    window.webContents.send("desktop:fullscreen-change", true),
-  );
-  window.on("leave-full-screen", () =>
-    window.webContents.send("desktop:fullscreen-change", false),
-  );
-  window.webContents.on("console-message", (_event, details) =>
+  contents.on("console-message", (_event, details) =>
     rendererConsole.push(normalizeConsoleMessage(details)),
   );
-  window.webContents.on("context-menu", (_event, params) =>
-    showEditContextMenu(window, params),
+  contents.on("context-menu", (_event, params) =>
+    showEditContextMenu(tab, params),
   );
+  return tab;
+}
+
+function createWindow(initialUrl = APP_URL) {
+  if (!backendUrl) return createSetupWindow();
+  const window = new BaseWindow({
+    title: appRuntime.name,
+    width: 1440,
+    height: 900,
+    minWidth: 480,
+    minHeight: 600,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#111216" : "#ffffff",
+    icon: iconPath(),
+    show: false,
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hiddenInset",
+          trafficLightPosition: { x: 16, y: 14 },
+        }
+      : {}),
+  });
   mainWindow = window;
-  void loadApp(window, initialUrl);
+  appTabs = new AppTabs(window, {
+    createTab: createTabView,
+    createStrip: () =>
+      new WebContentsView({
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      }),
+    onActivate: onTabActivated,
+    onNewTab: () => openTab(APP_URL),
+    onTabsChanged: () => createMenu(),
+    dark: () => nativeTheme.shouldUseDarkColors,
+  });
+  lifecycleLog.record("window-created", { id: window.id });
+  window.on("close", () =>
+    lifecycleLog.record("window-close", { id: window.id }),
+  );
+  window.on("closed", () => {
+    lifecycleLog.record("window-closed");
+    if (mainWindow !== window) return;
+    mainWindow = null;
+    appTabs = null;
+    activeTab = null;
+    approvalPanel.reset();
+    if (menuCommands.reset()) createMenu();
+  });
+  window.on("focus", () => activeTab?.webContents.focus());
+  window.on("resize", () => approvalPanel.sync());
+  window.on("enter-full-screen", () =>
+    sendToTabs("desktop:fullscreen-change", true),
+  );
+  window.on("leave-full-screen", () =>
+    sendToTabs("desktop:fullscreen-change", false),
+  );
+  const tab = openTab(initialUrl, null);
+  // Shown once the first page has painted, as a browser window's ready-to-show.
+  const show = () => {
+    if (!window.isDestroyed() && !window.isVisible()) window.show();
+  };
+  tab?.webContents.once("did-finish-load", show);
+  tab?.webContents.once("did-fail-load", show);
+  setTimeout(show, 3000);
   return window;
 }
 
-async function collectPerfSpans(window) {
-  if (!window || window.isDestroyed()) return null;
+async function collectPerfSpans(tab: Tab | null) {
+  if (!tab || tab.webContents.isDestroyed()) return null;
   try {
-    const exported = await window.webContents.executeJavaScript(
+    const exported = await tab.webContents.executeJavaScript(
       "window.__openSwePerf ? window.__openSwePerf.export() : null",
       true,
     );
@@ -1476,7 +1652,7 @@ async function saveDiagnosticsReport() {
     renderer: rendererConsole.entries(),
     main: mainConsole.entries(),
     lifecycle: lifecycleLog.read(),
-    perf: await collectPerfSpans(window),
+    perf: await collectPerfSpans(activeTab),
   });
   const options = {
     title: "Save diagnostics report",
@@ -1606,7 +1782,7 @@ function openDesktopLink(target: string) {
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
-  if (existingWindow) void loadApp(window, target);
+  if (existingWindow && activeTab) void loadApp(activeTab, target);
   return true;
 }
 
@@ -1674,7 +1850,7 @@ if (!hasSingleInstanceLock) {
     configureAutoUpdater();
 
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      if (BaseWindow.getAllWindows().length === 0) createWindow();
     });
   });
 
