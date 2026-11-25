@@ -216,6 +216,10 @@ class IndexedThread(BaseModel):
         return thread
 
 
+# The longest a text search over thread_index may run.
+TEXT_SEARCH_TIMEOUT: Final = "15s"
+
+
 class ThreadSearch(BaseModel):
     """The Agent Server's ``POST /threads/search`` body, as far as Open SWE uses it.
 
@@ -263,6 +267,10 @@ class ThreadSearch(BaseModel):
         if self.text:
             columns, ranking = f"{_COLUMNS}, {_RANK} AS rank", "rank DESC, "
         async with transaction() as conn:
+            if self.text:
+                # Text search scans every thread's searchable text; past this it errors instead of
+                # holding the caller (and the database) for minutes.
+                await conn.execute(text(f"SET LOCAL statement_timeout = '{TEXT_SEARCH_TIMEOUT}'"))
             rows = (
                 await conn.execute(
                     text(

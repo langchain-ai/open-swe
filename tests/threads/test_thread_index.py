@@ -269,3 +269,20 @@ async def test_activity_pagination_ignores_non_activity_writes(
     assert (await ThreadSearch(sort_by="updated_at", activity_order=True, limit=1).run())[
         0
     ].thread_id == "t00"
+
+
+async def test_a_text_search_gives_up_at_its_timeout_and_leaves_other_searches_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy.exc import DBAPIError
+
+    await _seed()
+    # A searchable text that takes 300ms to compute stands in for a scan over many threads.
+    slow = f"({index._SEARCHABLE} || (SELECT '' FROM pg_sleep(0.3)))"
+    monkeypatch.setattr(index, "_SEARCHABLE", slow)
+    monkeypatch.setattr(index, "TEXT_SEARCH_TIMEOUT", "100ms")
+
+    with pytest.raises(DBAPIError, match="statement timeout"):
+        await ThreadSearch(text="app").run()
+    # The timeout is local to that search's transaction.
+    assert len(await ThreadSearch(metadata={"owner_login": "ada"}).run()) == 2
