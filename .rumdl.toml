@@ -19,7 +19,7 @@ style = "one"
 [per-file-ignores]
 # Prompts, skills and agent instructions refer to steps by number.
 "openswe/resources/prompts/**" = ["MD029"]
-"mda/bundled_skills/**" = ["MD029"]
+"mda/skills/**" = ["MD029"]
 ".claude/**" = ["MD029"]
 ".agents/**" = ["MD029"]
 ".open-swe/**" = ["MD029"]

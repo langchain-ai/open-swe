@@ -49,6 +49,7 @@ from rt.memory_policy import MemoryPolicy
 from rt.middleware import reported
 from rt.prompts import prompt
 from rt.sandbox_setup import sandbox_setup
+from rt.skills import SKILL_ROUTES
 from rt.subdir_agents import SubdirAgentsReadMiddleware
 from rt.tool_errors import ToolErrorMiddleware
 from rt.tools import run_id
@@ -113,12 +114,8 @@ class FileToolsMiddleware(AgentMiddleware):
         self,
         backend: OpenSweBackend,
         execute_timeout: int,
-        *,
-        skills: Mapping[str, BaseTool] | None = None,
     ) -> None:
         self._backend = backend
-        # The run's skills, which this runtime keeps itself (``rt.skills``).
-        self._skills = dict(skills or {})
         # The sandbox's own tools, as the model is offered them; code mode runs them from here.
         self._sandbox_tools: dict[str, BaseTool] = {}
         self._execute_timeout = execute_timeout
@@ -230,10 +227,8 @@ class FileToolsMiddleware(AgentMiddleware):
             return await handler(request)
         if request.tool is not None:
             request = request.override(tool=self._skill_tool(request, request.tool))
-        if _under(("/memories/",), call_["name"], call_["args"]):
+        if _under(("/memories/", *SKILL_ROUTES), call_["name"], call_["args"]):
             run: Handler = handler
-        elif _under(self._backend.run.catalog.skill_sources, call_["name"], call_["args"]):
-            run = self._run_skill
         else:
             run = partial(
                 self._observed,
@@ -457,7 +452,11 @@ class FileToolsMiddleware(AgentMiddleware):
         parent, filename = posixpath.split(path)
         source, skill = posixpath.split(parent)
         listed = any(
-            source == prefix.rstrip("/") for prefix in self._backend.run.catalog.skill_sources
+            source == prefix.rstrip("/")
+            for prefix in (
+                *SKILL_ROUTES,
+                *self._backend.run.catalog.skill_sources,
+            )
         )
         if (
             filename != "SKILL.md"
@@ -485,18 +484,6 @@ class FileToolsMiddleware(AgentMiddleware):
             return result
 
         return tool.model_copy(update={"coroutine": read_skill})
-
-    async def _run_skill(self, request: ToolCallRequest) -> ToolMessage | Command:
-        """The call against the run's skills, as the sandbox's own tool would run it."""
-        tool = self._skills.get(request.tool_call["name"])
-        if tool is None:
-            return ToolMessage(
-                content="Skills are read-only here",
-                tool_call_id=request.tool_call.get("id") or "",
-                name=request.tool_call["name"],
-                status="error",
-            )
-        return await _invoked(self._skill_tool(request, tool), request)
 
     async def _in_memory(self, request: ToolCallRequest, handler: Handler) -> ToolMessage | Command:
         """``handler``'s call, unless the memory policy refuses it."""

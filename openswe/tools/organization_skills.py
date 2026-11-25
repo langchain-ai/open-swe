@@ -1,8 +1,7 @@
 """Admin-thread tools for managing organization-wide skills."""
 
-from typing import Any
-
 from fastapi import HTTPException
+from pydantic import JsonValue
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.skill_store import store
@@ -17,19 +16,13 @@ _WRITE = Policy(trusted="admin_thread", actor="admin", sole=ack("name", "skill.n
 @access(_WRITE)
 async def save_organization_skill(
     name: str, description: str, instructions: str = ""
-) -> dict[str, Any]:
+) -> dict[str, JsonValue]:
     """Implement the `save_organization_skill` tool."""
     try:
         body = store.SkillCreate(name=name, description=description, instructions=instructions)
-        update = store.SkillUpdate(description=body.description, instructions=body.instructions)
-        try:
-            skill = await store.update_organization_skill(body.name, update)
-            created = False
-        except HTTPException as exc:
-            if exc.status_code != 404:
-                raise
-            skill = await store.create_organization_skill(body)
-            created = True
+        async with store.HubSkills.open() as skills:
+            created = await skills.get(body.name) is None
+            skill = await skills.save(body, create=created)
     except HTTPException as exc:
         return {"ok": False, "error": str(exc.detail)}
     except ValueError as exc:
@@ -40,10 +33,11 @@ async def save_organization_skill(
 @expose_mcp(access="admin")
 @audit_tool()
 @access(_WRITE)
-async def delete_organization_skill(name: str) -> dict[str, Any]:
+async def delete_organization_skill(name: str) -> dict[str, JsonValue]:
     """Implement the `delete_organization_skill` tool."""
     try:
-        await store.delete_organization_skill(name)
+        async with store.HubSkills.open() as skills:
+            await skills.delete(name)
     except HTTPException as exc:
         return {"ok": False, "error": str(exc.detail)}
     except ValueError as exc:

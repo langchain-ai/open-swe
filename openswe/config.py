@@ -144,6 +144,10 @@ ENV.var(
     default="https://api.smith.langchain.com",
 )
 ENV.var(
+    "LANGSMITH_WORKSPACE_ID",
+    "LangSmith workspace used by Robin's skills Hub; defaults to LANGSMITH_TENANT_ID.",
+)
+ENV.var(
     "LANGSMITH_TENANT_ID",
     "LangSmith workspace id used in trace links; discovered from the workspace when unset.",
 )
@@ -189,6 +193,15 @@ ENV.var(
     "LangSmith workspace of the deployment at MDA_RUNTIME_URL (its LANGSMITH_WORKSPACE_ID, or "
     "else its LANGSMITH_TENANT_ID), which its channels resolve people's Agent Auth principals "
     "in; defaults to this backend's own workspace.",
+)
+ENV.var(
+    "ROBIN_SKILLS_HUB_PREFIX",
+    "Context Hub skill repository prefix in the LangSmith workspace (lowercase letters, numbers "
+    "and hyphens, up to 40 characters): organization skills live in `-/<name>` and each "
+    "person's in `-/<name>-user-<users.id>`. Defaults to `robin-skills` in production and "
+    "`robin-skills-<OPENSWE_ENV>` elsewhere, since Robin's environments share a workspace; "
+    "the backend names the repositories to its MDA runtime each run. "
+    "Repositories are private to the LangSmith workspace, not each person.",
 )
 ENV.var(
     "MDA_DEPLOYMENT_ID",

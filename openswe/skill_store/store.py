@@ -1,25 +1,24 @@
-"""Per-user Agent Skills stored as virtual ``SKILL.md`` files."""
+"""Robin's authorized skill-management shim over Context Hub files."""
 
-import base64
-import binascii
-import json
+import asyncio
+import logging
 import re
-from typing import Any
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 from uuid import UUID
 
+import yaml
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import ColumnElement, ForeignKey, delete, select, text, update
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Mapped, mapped_column
+from langsmith import Client
+from pydantic import BaseModel, Field, JsonValue, field_validator
+from runtime_api.skill_hub import SkillHubSettings
 
-from openswe.database import postgres
-from openswe.database.orm import Base
+from openswe.config import ENV
 from openswe.users.models import User
-from openswe.utils.json_types import JsonObject
-from openswe.utils.time import now_iso
+
+if TYPE_CHECKING:
+    from deepagents.backends.context_hub import ContextHubBackend
 
 MAX_SKILL_NAME_CHARS = 64
 MAX_SKILL_DESCRIPTION_CHARS = 1024
@@ -28,28 +27,8 @@ DEFAULT_SKILLS_PAGE_SIZE = 100
 MAX_SKILLS_PAGE_SIZE = 100
 MAX_ORGANIZATION_SKILLS = 1000
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-
-
-class SkillCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=MAX_SKILL_NAME_CHARS)
-    description: str = Field(min_length=1, max_length=MAX_SKILL_DESCRIPTION_CHARS)
-    instructions: str = Field(default="", max_length=MAX_SKILL_INSTRUCTIONS_CHARS)
-
-    @field_validator("name")
-    @classmethod
-    def _valid_name(cls, value: str) -> str:
-        value = value.strip()
-        if not _SKILL_NAME_RE.fullmatch(value):
-            raise ValueError("name must use lowercase letters, numbers, and single hyphens")
-        return value
-
-    @field_validator("description")
-    @classmethod
-    def _non_empty_description(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("description cannot be empty")
-        return value
+_HUB_PREFIX_RE = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
+logger = logging.getLogger(__name__)
 
 
 class SkillUpdate(BaseModel):
@@ -65,136 +44,157 @@ class SkillUpdate(BaseModel):
         return value
 
 
-class Skill(Base):
-    """A person's skill, or the organization's when ``user_id`` is ``None``."""
+class SkillCreate(SkillUpdate):
+    name: str = Field(min_length=1, max_length=MAX_SKILL_NAME_CHARS)
 
-    __tablename__ = "skill"
+    def content(self) -> str:
+        # YAML, not JSON, quoting: JSON escapes emoji as surrogate pairs YAML can't rejoin.
+        # Readable text where it reads back unchanged; escapes otherwise, since a literal
+        # U+0085 is read back as a line break.
+        metadata = {"name": self.name, "description": self.description}
+        for readable in (True, False):
+            frontmatter = yaml.safe_dump(
+                metadata, allow_unicode=readable, sort_keys=False, width=10**9
+            )
+            if yaml.safe_load(frontmatter) == metadata:
+                break
+        return f"---\n{frontmatter}---\n\n{self.instructions.strip()}\n"
 
-    id: Mapped[int] = mapped_column(primary_key=True, init=False)
-    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    name: Mapped[str]
-    value: Mapped[JsonObject] = mapped_column(JSONB)
-
-
-type Owner = UUID | None
-
-
-async def _person(login: str, *, session: AsyncSession | None = None) -> UUID:
-    user = await User.for_login("github", login, session=session)
-    if user is None:
-        raise HTTPException(409, "No Robin user record for this login yet")
-    return user.id
-
-
-def skill_path(name: str) -> str:
-    return f"/{name}/SKILL.md"
-
-
-def _content(name: str, description: str, instructions: str) -> str:
-    return (
-        "---\n"
-        f"name: {json.dumps(name)}\n"
-        f"description: {json.dumps(description)}\n"
-        "---\n\n"
-        f"{instructions.strip()}\n"
-    )
+    @field_validator("name")
+    @classmethod
+    def _valid_name(cls, value: str) -> str:
+        value = value.strip()
+        if not _SKILL_NAME_RE.fullmatch(value):
+            raise ValueError("name must use lowercase letters, numbers, and single hyphens")
+        return value
 
 
-def _record(
-    name: str, description: str, instructions: str, existing: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    now = now_iso()
-    return {
-        "name": name,
-        "description": description,
-        "instructions": instructions,
-        "content": _content(name, description, instructions),
-        "encoding": "utf-8",
-        "created_at": (existing or {}).get("created_at") or now,
-        "updated_at": now,
-    }
+class HubSkills:
+    def __init__(self, backend: ContextHubBackend, owner: UUID | None) -> None:
+        self.backend = backend
+        self.owner = owner
 
+    @classmethod
+    @asynccontextmanager
+    async def open(cls, owner: UUID | None = None) -> AsyncGenerator[HubSkills]:
+        from deepagents.backends.context_hub import ContextHubBackend
 
-def _owned_by(owner: Owner) -> ColumnElement[bool]:
-    return Skill.user_id.is_(None) if owner is None else Skill.user_id == owner
-
-
-async def _search(
-    owner: Owner, *, limit: int, offset: int = 0, session: AsyncSession | None = None
-) -> list[dict[str, Any]]:
-    async with postgres.session(session) as session:
-        values = await session.scalars(
-            select(Skill.value)
-            .where(_owned_by(owner))
-            .order_by(Skill.name)
-            .limit(limit)
-            .offset(offset)
+        try:
+            settings = await SkillHubSettings.from_env()
+            repo = cls.repo(owner)
+        except ValueError as exc:
+            raise HTTPException(503, "Skills Hub configuration is missing or invalid") from exc
+        client = Client(
+            api_url=settings.endpoint,
+            api_key=settings.api_key.get_secret_value(),
+            workspace_id=str(settings.workspace_id),
+            auto_batch_tracing=False,
         )
-        return list(values)
+        try:
+            yield cls(ContextHubBackend(repo, client=client), owner)
+        finally:
+            await asyncio.to_thread(client.close)
 
+    @staticmethod
+    def repo(owner: UUID | None = None) -> str:
+        """The Context Hub repository holding the organization's skills, or ``owner``'s.
 
-async def _get_skill(
-    owner: Owner, name: str, *, session: AsyncSession | None = None
-) -> dict[str, Any] | None:
-    SkillCreate(name=name, description="valid")
-    async with postgres.session(session) as session:
-        return await session.scalar(select(Skill.value).where(_owned_by(owner), Skill.name == name))
+        Robin's deployments share one LangSmith workspace, so each environment gets its own
+        repositories unless ``ROBIN_SKILLS_HUB_PREFIX`` says otherwise: editing staging's or
+        a preview's skills never changes production's.
+        """
+        prefix = ENV.ROBIN_SKILLS_HUB_PREFIX.optional()
+        if prefix is None:
+            environment = (ENV.OPENSWE_ENV.optional() or "local").strip().lower()
+            prefix = (
+                "robin-skills"
+                if environment in {"production", "prod"}
+                else f"robin-skills-{environment}"
+            )
+        if not _HUB_PREFIX_RE.fullmatch(prefix):
+            raise ValueError("Invalid Context Hub skill repository prefix")
+        return f"-/{prefix}" if owner is None else f"-/{prefix}-user-{owner}"
 
+    async def get(self, name: str) -> dict[str, JsonValue] | None:
+        name = SkillCreate(name=name, description="valid").name
+        # The file's exact text, which ``save`` hands back as the edit's match: ``aread``
+        # normalizes line endings, so a file saved with CRLF would never match.
+        [download] = await self.backend.adownload_files([f"/{name}/SKILL.md"])
+        if download.error == "file_not_found":
+            return None
+        if download.error or download.content is None:
+            raise HTTPException(503, "Cannot read skills Hub")
+        try:
+            content = download.content.decode("utf-8")
+            parts = re.split(r"(?m)^---[ \t]*$", content.replace("\r\n", "\n"), maxsplit=2)
+            if len(parts) != 3 or parts[0]:
+                raise ValueError("Missing frontmatter")
+            metadata = yaml.safe_load(parts[1])
+            if not isinstance(metadata, dict) or metadata.get("name") != name:
+                raise ValueError("Skill name must match its folder")
+            body = SkillCreate(
+                name=name, description=metadata.get("description"), instructions=parts[2].strip()
+            )
+        except (UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
+            raise HTTPException(409, f"Invalid skill file: {name}/SKILL.md") from exc
+        return {**body.model_dump(), "content": content, "encoding": "utf-8"}
 
-async def _list_skills(
-    owner: Owner, *, limit: int, offset: int, session: AsyncSession | None = None
-) -> dict[str, Any]:
-    found = await _search(owner, limit=limit + 1, offset=offset, session=session)
-    return {
-        "items": found[:limit],
-        "next_offset": offset + limit if len(found) > limit else None,
-    }
+    async def listed(self) -> list[dict[str, JsonValue]]:
+        listing = await self.backend.als("/")
+        if listing.error:
+            raise HTTPException(503, "Cannot list skills Hub")
+        found = []
+        for entry in sorted(listing.entries or [], key=lambda entry: entry["path"]):
+            name = entry["path"].strip("/")
+            if entry.get("is_dir") and _SKILL_NAME_RE.fullmatch(name):
+                try:
+                    skill = await self.get(name)
+                except HTTPException as exc:
+                    if exc.status_code != 409:
+                        raise
+                    # A folder Robin didn't write, as in a repository someone made by hand,
+                    # is fixed in LangSmith rather than hiding every other skill.
+                    logger.warning("Skipping invalid skill file", extra={"skill": name})
+                    continue
+                if skill:
+                    found.append(skill)
+        return found
 
-
-async def _create_skill(
-    owner: Owner, body: SkillCreate, *, session: AsyncSession | None = None
-) -> dict[str, Any]:
-    value = _record(body.name, body.description, body.instructions)
-    try:
-        async with postgres.session(session) as db:
-            if await _get_skill(owner, body.name, session=db):
-                raise HTTPException(409, "skill already exists")
-            db.add(Skill(user_id=owner, name=body.name, value=value))
-            await db.flush()
-    except IntegrityError as exc:
-        if getattr(exc.orig, "sqlstate", None) != "23505":
-            raise
-        raise HTTPException(409, "skill already exists") from exc
-    return value
-
-
-async def _update_skill(
-    owner: Owner, name: str, body: SkillUpdate, *, session: AsyncSession | None = None
-) -> dict[str, Any]:
-    SkillCreate(name=name, description=body.description, instructions=body.instructions)
-    async with postgres.session(session) as db:
-        existing = await _get_skill(owner, name, session=db)
-        if not existing:
-            raise HTTPException(404, "skill not found")
-        value = _record(name, body.description, body.instructions, existing)
-        await db.execute(
-            update(Skill).where(_owned_by(owner), Skill.name == name).values(value=value)
+    async def save(self, body: SkillCreate, *, create: bool) -> dict[str, JsonValue]:
+        old = await self.get(body.name)
+        if (old is None) != create:
+            raise HTTPException(
+                409 if create else 404, "Skill already exists" if create else "Skill not found"
+            )
+        if create and self.owner is None and len(await self.listed()) >= MAX_ORGANIZATION_SKILLS:
+            raise HTTPException(409, "Skill limit reached")
+        path, content = f"/{body.name}/SKILL.md", body.content()
+        result = (
+            await self.backend.awrite(path, content)
+            if old is None
+            else await self.backend.aedit(path, str(old["content"]), content)
         )
-    return value
+        if result.error:
+            raise HTTPException(409, "Cannot save skill; reload and retry")
+        return {**body.model_dump(), "content": content, "encoding": "utf-8"}
 
+    async def delete(self, name: str) -> None:
+        existing = await self.get(name)
+        if existing is None:
+            raise HTTPException(404, "Skill not found")
+        if (await self.backend.adelete(f"/{existing['name']}/SKILL.md")).error:
+            raise HTTPException(409, "Cannot delete skill; reload and retry")
 
-async def _delete_skill(owner: Owner, name: str, *, session: AsyncSession | None = None) -> None:
-    SkillCreate(name=name, description="valid")
-    async with postgres.session(session) as session:
-        deleted = await session.execute(
-            delete(Skill).where(_owned_by(owner), Skill.name == name).returning(Skill.id)
+    @staticmethod
+    async def person(login: str, user: User | None = None) -> UUID:
+        user = user or (
+            await User.get(UUID(login.removeprefix("user:")))
+            if login.startswith("user:")
+            else await User.for_login("github", login)
         )
-        if deleted.first() is None:
-            raise HTTPException(404, "skill not found")
-
-
-async def get_skill(login: str, name: str) -> dict[str, Any] | None:
-    return await _get_skill(await _person(login), name)
+        if user is None:
+            raise HTTPException(409, "No Robin user record for this login yet")
+        return user.id
 
 
 async def list_skills(
@@ -203,19 +203,20 @@ async def list_skills(
     limit: int,
     offset: int,
     user: User | None = None,
-    session: AsyncSession | None = None,
-) -> dict[str, Any]:
-    async with postgres.session(session) as db:
-        owner = user.id if user is not None else await _person(login, session=db)
-        return await _list_skills(owner, limit=limit, offset=offset, session=db)
+) -> dict[str, JsonValue]:
+    async with HubSkills.open(await HubSkills.person(login, user)) as skills:
+        found = await skills.listed()
+    return {
+        "items": list[JsonValue](found[offset : offset + limit]),
+        "next_offset": offset + limit if len(found) > offset + limit else None,
+    }
 
 
 async def create_skill(
-    login: str, body: SkillCreate, *, user: User | None = None, session: AsyncSession | None = None
-) -> dict[str, Any]:
-    async with postgres.session(session) as db:
-        owner = user.id if user is not None else await _person(login, session=db)
-        return await _create_skill(owner, body, session=db)
+    login: str, body: SkillCreate, *, user: User | None = None
+) -> dict[str, JsonValue]:
+    async with HubSkills.open(await HubSkills.person(login, user)) as skills:
+        return await skills.save(body, create=True)
 
 
 async def update_skill(
@@ -224,92 +225,11 @@ async def update_skill(
     body: SkillUpdate,
     *,
     user: User | None = None,
-    session: AsyncSession | None = None,
-) -> dict[str, Any]:
-    async with postgres.session(session) as db:
-        owner = user.id if user is not None else await _person(login, session=db)
-        return await _update_skill(owner, name, body, session=db)
+) -> dict[str, JsonValue]:
+    async with HubSkills.open(await HubSkills.person(login, user)) as skills:
+        return await skills.save(SkillCreate(name=name, **body.model_dump()), create=False)
 
 
-async def delete_skill(
-    login: str, name: str, *, user: User | None = None, session: AsyncSession | None = None
-) -> None:
-    async with postgres.session(session) as db:
-        owner = user.id if user is not None else await _person(login, session=db)
-        await _delete_skill(owner, name, session=db)
-
-
-async def agent_skills(login: str | None) -> list[dict[str, Any]]:
-    """The organization's skills, or ``login``'s, as the agent reads them."""
-    if login is None:
-        return await _search(None, limit=MAX_ORGANIZATION_SKILLS)
-    user = await User.for_login("github", login)
-    return [] if user is None else await _search(user.id, limit=MAX_ORGANIZATION_SKILLS)
-
-
-def _encode_cursor(name: str) -> str:
-    return base64.urlsafe_b64encode(json.dumps({"name": name}).encode()).decode().rstrip("=")
-
-
-def _decode_cursor(cursor: str | None) -> str:
-    if cursor is None:
-        return ""
-    if not cursor:
-        raise HTTPException(400, "invalid cursor")
-    try:
-        encoded = cursor.encode("ascii")
-        payload = json.loads(
-            base64.b64decode(encoded + b"=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
-        )
-    except (
-        binascii.Error,
-        UnicodeEncodeError,
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-        ValueError,
-    ):
-        raise HTTPException(400, "invalid cursor") from None
-    if not isinstance(payload, dict) or set(payload) != {"name"}:
-        raise HTTPException(400, "invalid cursor")
-    name = payload["name"]
-    if (
-        not isinstance(name, str)
-        or not 1 <= len(name) <= MAX_SKILL_NAME_CHARS
-        or not _SKILL_NAME_RE.fullmatch(name)
-    ):
-        raise HTTPException(400, "invalid cursor")
-    return name
-
-
-async def list_organization_skills(*, limit: int, cursor: str | None) -> dict[str, Any]:
-    after = _decode_cursor(cursor)
-    found = await _search(None, limit=MAX_ORGANIZATION_SKILLS + 1)
-    if len(found) > MAX_ORGANIZATION_SKILLS:
-        raise HTTPException(409, "organization skill limit exceeded; delete a skill to continue")
-    skills = sorted(
-        (value for value in found if value.get("name", "") > after),
-        key=lambda skill: skill.get("name", ""),
-    )
-    page = skills[:limit]
-    return {
-        "items": page,
-        "next_cursor": _encode_cursor(page[-1]["name"]) if len(skills) > limit else None,
-    }
-
-
-async def create_organization_skill(body: SkillCreate) -> dict[str, Any]:
-    async with postgres.session() as session:
-        # Serialize organization creates so the limit check and insert are atomic.
-        await session.execute(text("SELECT pg_advisory_xact_lock(hashtext('organization-skills'))"))
-        existing = await _search(None, limit=MAX_ORGANIZATION_SKILLS, session=session)
-        if len(existing) >= MAX_ORGANIZATION_SKILLS:
-            raise HTTPException(409, "organization skill limit reached")
-        return await _create_skill(None, body, session=session)
-
-
-async def update_organization_skill(name: str, body: SkillUpdate) -> dict[str, Any]:
-    return await _update_skill(None, name, body)
-
-
-async def delete_organization_skill(name: str) -> None:
-    await _delete_skill(None, name)
+async def delete_skill(login: str, name: str, *, user: User | None = None) -> None:
+    async with HubSkills.open(await HubSkills.person(login, user)) as skills:
+        await skills.delete(name)

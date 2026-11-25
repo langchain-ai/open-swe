@@ -321,12 +321,10 @@ class TokenRun:
         return await in_graph_context({**self.config, "run_name": name}, run)
 
     async def skills(self, request: SkillsRequest) -> RunSkills:
-        """Every skill the run may load but those the runtime serves itself: each store's
-        skill folders and their ``SKILL.md``."""
+        """The skill repositories this run mounts."""
 
         async def listed() -> RunSkills:
-            stores = await self.kind.skills(self.config)
-            return RunSkills() if stores is None else await stores.listed(request.served)
+            return await (await self.kind.skills(self.config)).listed()
 
         return await in_graph_context(
             {**self.config, "run_name": "skills"}, lambda _runtime: listed()

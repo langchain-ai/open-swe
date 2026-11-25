@@ -159,7 +159,6 @@ from openswe.sandboxes.tool_runtime import (
 )
 from openswe.schedules.policy import AutomationPolicy
 from openswe.search_policy import SHELL_SEARCH_EXCLUDED_TOOLS
-from openswe.skill_store.run_skills import RunSkillStores
 from openswe.slack.client import get_slack_user_timezone, remember_slack_user_timezone
 from openswe.slack.dm import is_concierge_thread, is_dm_channel
 from openswe.slack.staged_files import slack_files_pending, upload_files
@@ -2087,7 +2086,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
     )
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
-    skill_stores = RunSkillStores(credential_login)
     requested_models = (
         available_requested_models(fable_enabled=fable_enabled)
         if (adaptive_model_routing or source == "slack")
@@ -2242,8 +2240,6 @@ async def agent_catalog(config: RunnableConfig, surface: ToolSurface) -> None:
         )
     ]
     surface.dynamic = dynamic_tool_middleware
-    # The runtime lists the skills and answers reads of them itself (``runtime_api.skills``).
-    surface.skill_sources = skill_stores.sources
     surface.code_mode = True
     surface.always_offered = {
         _registered_tool_name(tool): tool

@@ -77,8 +77,9 @@ class RunKind:
     async def credentials(self, config: RunnableConfig) -> None:
         """Make the run's GitHub token ready in this process for its tools."""
 
-    async def skills(self, config: RunnableConfig) -> RunSkillStores | None:  # noqa: ARG002
-        return None
+    async def skills(self, config: RunnableConfig) -> RunSkillStores:  # noqa: ARG002
+        """The organization's skills; only an agent's own private thread adds personal ones."""
+        return RunSkillStores(None)
 
     async def tool(self, config: RunnableConfig, name: str) -> BaseTool | None:  # noqa: ARG002
         """The tool behind the operation ``name``."""

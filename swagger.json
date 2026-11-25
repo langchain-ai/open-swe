@@ -9396,8 +9396,8 @@
           }
         },
         "required": [
-          "name",
-          "description"
+          "description",
+          "name"
         ],
         "title": "SkillCreate",
         "type": "object"
@@ -14627,7 +14627,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/JsonValue-Output"
+                  },
                   "title": "Response Api List Organization Skills Dashboard Api Organization Skills Get",
                   "type": "object"
                 }
@@ -14673,7 +14675,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/JsonValue-Output"
+                  },
                   "title": "Response Api Create Organization Skill Dashboard Api Organization Skills Post",
                   "type": "object"
                 }
@@ -14775,7 +14779,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/JsonValue-Output"
+                  },
                   "title": "Response Api Update Organization Skill Dashboard Api Organization Skills  Name  Put",
                   "type": "object"
                 }
@@ -23826,7 +23832,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/JsonValue-Output"
+                  },
                   "title": "Response Api List Skills Dashboard Api Skills Get",
                   "type": "object"
                 }
@@ -23872,7 +23880,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/JsonValue-Output"
+                  },
                   "title": "Response Api Create Skill Dashboard Api Skills Post",
                   "type": "object"
                 }
@@ -23974,7 +23984,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/JsonValue-Output"
+                  },
                   "title": "Response Api Update Skill Dashboard Api Skills  Name  Put",
                   "type": "object"
                 }

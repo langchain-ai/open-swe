@@ -1,68 +1,91 @@
-"""The skills a run may load, by where it reads each store (``runtime_api.skills``)."""
+"""Personal skill authority from the saved private thread, never caller-supplied context."""
 
 import logging
-from collections.abc import Collection, Mapping
-from pathlib import PurePosixPath
-from typing import Final, Self
+from collections.abc import Mapping
+from typing import Self
+from uuid import UUID
 
-from deepagents.backends.composite import CompositeBackend
-from deepagents.backends.protocol import BackendProtocol
-from deepagents.backends.state import StateBackend
-from runtime_api.skills import BUNDLED_SKILLS, RunSkills, SkillFile
+from runtime_api.skills import RunSkills
 
-from openswe.credential_scope import private_credential_login
-from openswe.sandboxes.read_only_backend import ReadOnlyBackend
-from openswe.skill_store.backend import skills_backend
+from openswe.credential_scope import private_owner_login
+from openswe.run_config import RunConfig
+from openswe.skill_store.store import HubSkills
+from openswe.source_context import SourceContext
+from openswe.trace_metadata import RunOrigin
+from openswe.users.models import User
+from openswe.utils.json_types import thread_metadata
+from openswe.utils.thread_reads import read_thread
 
 logger = logging.getLogger(__name__)
 
-USER_SKILLS_ROUTE: Final = "/skills/"
-ORGANIZATION_SKILLS_ROUTE: Final = "/organization-skills/"
-BUNDLED_SKILLS_ROUTE: Final = BUNDLED_SKILLS
-_SKILL_FILE: Final = "SKILL.md"
-
 
 class RunSkillStores:
-    """The bundled skills, the organization's, and the person's own on a run that acts for them.
-
-    A later source's skill takes the place of an earlier one's of the same name.
-    """
-
-    def __init__(self, credential_login: str | None) -> None:
-        self.routes: dict[str, BackendProtocol] = {
-            ORGANIZATION_SKILLS_ROUTE: skills_backend(None),
-        }
-        self.sources: tuple[str, ...] = (ORGANIZATION_SKILLS_ROUTE, BUNDLED_SKILLS_ROUTE)
-        if credential_login:
-            self.routes[USER_SKILLS_ROUTE] = skills_backend(credential_login)
-            self.sources = (USER_SKILLS_ROUTE, *self.sources)
+    def __init__(self, owner: UUID | None) -> None:
+        self.owner = owner
 
     @classmethod
     async def for_run(cls, config: Mapping[str, object]) -> Self:
-        """The stores a run's config may read: a person's own only on a private thread of theirs."""
         try:
-            login = await private_credential_login(config)
+            cfg = RunConfig.from_config(config)
+            if (
+                cfg.unattended
+                or cfg.origin
+                not in {
+                    None,
+                    RunOrigin.DASHBOARD,
+                    RunOrigin.SLACK,
+                    RunOrigin.CLAUDE_CODE,
+                    RunOrigin.API,
+                }
+                or cfg.source
+                not in {
+                    None,
+                    "dashboard",
+                    "slack",
+                    "web",
+                    "claude_code",
+                    "api",
+                    "cli",
+                    "mcp",
+                    "desktop",
+                }
+                or not cfg.thread_id
+            ):
+                return cls(None)
+            metadata = thread_metadata(await read_thread(cfg.thread_id))
+            slack = SourceContext.from_metadata(metadata).slack_thread
+            if (
+                metadata.get("visibility") != "private"
+                or metadata.get("owner_type") not in (None, "user")
+                or metadata.get("schedule_id")
+                or metadata.get("source") in {"schedule", "github", "linear", "incidents_agent"}
+                or (slack is not None and not slack.is_dm)
+                or (cfg.slack_thread is not None and not cfg.slack_thread.is_dm)
+            ):
+                return cls(None)
+            login = (
+                private_owner_login(cfg, metadata)
+                if cfg.github_linked
+                else f"user:{cfg.user_id}"
+                if cfg.user_id and metadata.get("owner_login") == f"user:{cfg.user_id}"
+                else None
+            )
+            if not login:
+                return cls(None)
+            user = (
+                await User.get(UUID(login.removeprefix("user:")))
+                if login.startswith("user:")
+                else await User.for_login("github", login)
+            )
+            if user is None or (cfg.user_id is not None and str(user.id) != cfg.user_id):
+                return cls(None)
+            return cls(user.id)
         except Exception:
-            logger.exception("Cannot resolve thread credential scope; omitting personal skills")
-            login = None
-        return cls(login)
+            logger.exception("Cannot resolve thread scope; omitting personal skills")
+            return cls(None)
 
-    async def listed(self, served: Collection[str] = ()) -> RunSkills:
-        """Every source's skill folders and their ``SKILL.md``, but those of the sources the
-        runtime ``served`` itself."""
-        files = CompositeBackend(default=ReadOnlyBackend(StateBackend()), routes=self.routes)
-        folders: list[str] = []
-        for source in self.routes:
-            if source in served:
-                continue
-            listing = await files.als(source)
-            folders += [entry["path"] for entry in listing.entries or [] if entry.get("is_dir")]
-        paths = [str(PurePosixPath(folder) / _SKILL_FILE) for folder in folders]
-        downloaded = await files.adownload_files(paths) if paths else []
+    async def listed(self) -> RunSkills:
         return RunSkills(
-            files=[
-                SkillFile(path=file.path, content=file.content.decode())
-                for file in downloaded
-                if file.content is not None
-            ]
+            organization_repo=HubSkills.repo(),
+            personal_repo=None if self.owner is None else HubSkills.repo(self.owner),
         )

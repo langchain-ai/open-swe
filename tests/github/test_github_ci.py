@@ -138,7 +138,7 @@ async def test_write_permission_fails_closed(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_baby_sit_skill_names_every_robin_check() -> None:
-    skill = (Path(__file__).parents[2] / "mda/bundled_skills/baby-sit/SKILL.md").read_text()
+    skill = (Path(__file__).parents[2] / "mda/skills/baby-sit/SKILL.md").read_text()
 
     assert [name for name in github_ci.OPEN_SWE_CHECK_NAMES if f"`{name}`" not in skill] == []
 

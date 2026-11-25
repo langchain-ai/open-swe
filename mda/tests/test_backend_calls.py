@@ -2380,47 +2380,101 @@ async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     ran.assert_not_awaited()
 
 
-@pytest.mark.parametrize("bundled", [True, False])
-async def test_the_skills_open_swe_ships_are_served_from_this_deployment(
-    monkeypatch: pytest.MonkeyPatch, bundled: bool
+async def test_hub_skill_routes_recheck_scope_and_refresh_between_runs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    from deepagents.backends import CompositeBackend, FilesystemBackend
     from deepagents.middleware.skills import SkillsState
-    from rt.skills import RunSkillsMiddleware, SkillFiles
-    from runtime_api.skills import BUNDLED_SKILLS, RunSkills, SkillFile
+    from langgraph.runtime import Runtime
+    from langsmith.schemas import AgentContext, FileEntry
+    from rt.skills import HubSkillRoute, RunSkillRepos, RunSkillsMiddleware
+    from runtime_api.skills import RunSkills
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
-    sources = ["/organization-skills/", *([BUNDLED_SKILLS] if bundled else [])]
-    backend = _run_backend(catalog=Catalog(skill_sources=sources))
-    asked: list[dict[str, JsonValue]] = []
+    monkeypatch.setenv("LANGSMITH_API_KEY", "test-service-key")
+    monkeypatch.setenv("LANGSMITH_ENDPOINT", "https://smith.invalid")
+    monkeypatch.setenv("LANGSMITH_WORKSPACE_ID", "00000000-0000-0000-0000-000000000001")
+    current = _run_backend().run
+    monkeypatch.setattr("rt.backend.current_run", lambda: current)
+    backend = OpenSweBackend()
+    owner: UUID | None = UUID(int=1)
 
     async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
-        asked.append(body)
-        deploy = "---\nname: deploy\ndescription: Ship it\n---\n\nRun make deploy.\n"
+        assert name == "skills"
+        # Mounted exactly as the backend names it, with no runtime configuration.
         return RunSkills(
-            files=[SkillFile(path="/organization-skills/deploy/SKILL.md", content=deploy)]
+            organization_repo="-/robin-test",
+            personal_repo=None if owner is None else f"-/robin-test-user-{owner}",
         )
 
     _answering(monkeypatch, backend, answer)
-    skill_files = SkillFiles(backend, lambda: "run-1")
-    empty = cast(SkillsState, {"messages": []})
-
-    listed = await RunSkillsMiddleware(backend, skill_files).abefore_agent(empty, MagicMock(), {})
-
-    # The backend leaves out what this deployment serves, and lists only PostgreSQL's skills.
-    assert [body["served"] for body in asked] == [[BUNDLED_SKILLS]]
-    assert listed is not None
-    names = {skill["name"] for skill in listed["skills_metadata"]}
-    if bundled:
-        assert {"deploy", "baby-sit"} <= names
-        read = await skill_files.aread(f"{BUNDLED_SKILLS}baby-sit/SKILL.md")
-        assert read.error is None
-    else:
-        assert names == {"deploy"}
+    client = MagicMock(spec=Client)
+    snapshot = AgentContext(
+        commit_id=UUID(int=1),
+        commit_hash="1" * 64,
+        files={
+            "deploy/SKILL.md": FileEntry(
+                content="---\nname: deploy\ndescription: First version\n---\nPrivate instructions"
+            ),
+            "deploy/reference.md": FileEntry(content="Private reference"),
+        },
+    )
+    client.pull_agent.return_value = snapshot
+    monkeypatch.setattr("rt.skills.Client", MagicMock(return_value=client))
+    monkeypatch.setattr("rt.skills.run_id", lambda: "run-1")
+    route = HubSkillRoute(RunSkillRepos(backend), personal=True)
+    native = CompositeBackend(
+        default=FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True),
+        routes={"/my-skills/": route},
+    )
+    middleware = RunSkillsMiddleware(native)
+    previous: SkillsState = {"messages": [], "skills_metadata": []}
+    for index, next_owner in enumerate((UUID(int=1), None, UUID(int=2), UUID(int=1))):
+        owner = next_owner
+        current = _run_backend().run
+        snapshot.files["deploy/SKILL.md"] = FileEntry(
+            content=f"---\nname: deploy\ndescription: Version {index}\n---\nPrivate instructions"
+        )
+        discovered = await middleware.abefore_agent(previous, Runtime(), {})
+        assert discovered is not None
+        metadata = discovered["skills_metadata"]
+        assert len(metadata) == (1 if owner is not None else 0)
+        if owner is not None:
+            assert metadata[0]["description"] == f"Version {index}"
+        previous["skills_metadata"] = metadata
+        listed = await native.als("/my-skills/")
+        read = await native.aread("/my-skills/deploy/SKILL.md")
+        reference = await native.aread("/my-skills/deploy/reference.md")
+        [downloaded] = await native.adownload_files(["/my-skills/deploy/reference.md"])
+        if owner is None:
+            assert listed.entries == []
+            assert read.error and reference.error and downloaded.error == "permission_denied"
+            assert (await native.agrep("Private", "/my-skills/")).matches == []
+            assert (await native.aglob("**", "/my-skills/")).matches == []
+        else:
+            assert listed.entries
+            assert read.file_data is not None
+            assert f"Version {index}" in read.file_data["content"]
+            assert read.file_data is not None and reference.file_data is not None
+            assert downloaded.content == b"Private reference"
+            assert client.pull_agent.call_args.args[0] == f"-/robin-test-user-{owner}"
+        assert (await route.awrite("/deploy/SKILL.md", "overwrite")).error
+        assert (await route.aedit("/deploy/SKILL.md", "Private", "Public")).error
+        assert (await route.adelete("/deploy/SKILL.md")).error
+        assert (await route.aupload_files([("/deploy/SKILL.md", b"overwrite")]))[
+            0
+        ].error == "permission_denied"
+    assert client.pull_agent.call_count == 3
+    client.push_agent.assert_not_called()
 
 
 @pytest.mark.parametrize("code_mode", [False, True])
-async def test_memory_files_stay_in_mda_without_a_sandbox(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, code_mode: bool
+@pytest.mark.parametrize(
+    "source", ["/memories/user/projects", "/skills/deploy", "/organization-skills/review"]
+)
+async def test_native_files_stay_in_mda_without_a_sandbox(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, code_mode: bool, source: str
 ) -> None:
     from deepagents.backends import FilesystemBackend
     from deepagents.middleware.filesystem import FilesystemMiddleware
@@ -2456,13 +2510,13 @@ async def test_memory_files_stay_in_mda_without_a_sandbox(
     for name, args in (
         (
             "write_file",
-            {"file_path": "/memories/user/projects/AGENTS.md", "content": "Remember 731"},
+            {"file_path": f"{source}/AGENTS.md", "content": "Remember 731"},
         ),
         (
             "write_file",
-            {"file_path": "/memories/user/projects/notes.md", "content": "Project notes"},
+            {"file_path": f"{source}/notes.md", "content": "Project notes"},
         ),
-        ("read_file", {"file_path": "/memories/user/projects/notes.md"}),
+        ("read_file", {"file_path": f"{source}/notes.md"}),
     ):
         if code_mode:
             [code_tool] = files.code_tools([name])
@@ -2477,58 +2531,45 @@ async def test_memory_files_stay_in_mda_without_a_sandbox(
             result = await files.awrap_tool_call(request, files._run_own)
         assert isinstance(result, ToolMessage) and result.status != "error"
     assert "Project notes" in result.text
-    assert "Instructions from: /memories/user/projects/AGENTS.md\nRemember 731" in result.text
-    assert (tmp_path / "memories/user/projects/AGENTS.md").read_text() == "Remember 731"
+    assert f"Instructions from: {source}/AGENTS.md\nRemember 731" in result.text
+    assert (tmp_path / source.lstrip("/") / "AGENTS.md").read_text() == "Remember 731"
 
 
 @pytest.mark.parametrize("code_mode", [False, True])
 async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
-    monkeypatch: pytest.MonkeyPatch, code_mode: bool
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, code_mode: bool
 ) -> None:
+    from deepagents.backends import CompositeBackend, FilesystemBackend
     from deepagents.middleware.filesystem import FilesystemMiddleware
-    from deepagents.middleware.skills import SkillsState
-    from rt.skills import RunSkillsMiddleware, SkillFiles
     from runtime_api.loop import Done
-    from runtime_api.skills import RunSkills, SkillFile
+    from runtime_api.skills import RunSkills
 
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
         monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
-    backend = _run_backend(
-        catalog=Catalog(skill_sources=["/skills/", "/organization-skills/"], sandbox=_IN_SANDBOX)
-    )
+    backend = _run_backend(catalog=Catalog(skill_sources=["/my-skills/"], sandbox=_IN_SANDBOX))
     asked: list[str] = []
 
     async def answer(name: str, body: dict[str, JsonValue]) -> BaseModel:
         asked.append(name)
         if name != "skills":
             return Done()
-        deploy = "---\nname: deploy\ndescription: Ship it\n---\n\nRun make deploy.\n"
-        return RunSkills(
-            files=[SkillFile(path="/organization-skills/deploy/SKILL.md", content=deploy)]
-        )
+        return RunSkills()
 
     _answering(monkeypatch, backend, answer)
-    skill_files = SkillFiles(backend, lambda: "run-1")
-    # A run that acted for someone listed their skill; this thread's checkpoint kept it.
-    kept = cast(
-        SkillsState,
-        {
-            "messages": [],
-            "skills_metadata": [
-                {"name": "personal", "description": "private", "path": "/skills/personal/SKILL.md"}
-            ],
-        },
+    folder = tmp_path / "deploy"
+    folder.mkdir()
+    (folder / "SKILL.md").write_text(
+        "---\nname: deploy\ndescription: Ship it\n---\n\nRun make deploy.\n"
     )
-
-    listed = await RunSkillsMiddleware(backend, skill_files).abefore_agent(kept, MagicMock(), {})
-
-    assert listed is not None
-    assert [skill["name"] for skill in listed["skills_metadata"]] == ["deploy"]
+    (folder / "reference.md").write_text("Reference")
+    native = CompositeBackend(
+        default=FilesystemBackend(root_dir=str(tmp_path / "absent"), virtual_mode=True),
+        routes={"/my-skills/": FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)},
+    )
     files = FileToolsMiddleware(
         backend,
         300,
-        skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
     )
     runtime = ToolRuntime(
         state={"messages": []},
@@ -2538,7 +2579,10 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
         tool_call_id="call-1",
         store=None,
     )
-    in_sandbox = AsyncMock()
+    tools = {tool.name: tool for tool in FilesystemMiddleware(backend=native).tools}
+    request = MagicMock()
+    request.tools = list(tools.values())
+    await files.awrap_model_call(request, AsyncMock())
     collector = RunCollectorCallbackHandler()
 
     async def read_skill(path: str) -> ToolMessage | Command:
@@ -2557,7 +2601,7 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
                 state={"messages": []},
                 runtime=runtime,
             ),
-            in_sandbox,
+            files._run_own,
         )
 
     reader = RunnableLambda(read_skill)
@@ -2565,9 +2609,9 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
     tracer = LangChainTracer(client=client, project_name="test")
     config: RunnableConfig = {"callbacks": [tracer, collector]}
     with tracing_context(enabled=True):
-        read = await reader.ainvoke("/organization-skills/deploy/SKILL.md", config=config)
-        await reader.ainvoke("/organization-skills/deploy/reference.md", config=config)
-        missing = await reader.ainvoke("/organization-skills/deleted/SKILL.md", config=config)
+        read = await reader.ainvoke("/my-skills/deploy/SKILL.md", config=config)
+        await reader.ainvoke("/my-skills/deploy/reference.md", config=config)
+        missing = await reader.ainvoke("/my-skills/deleted/SKILL.md", config=config)
     assert isinstance(missing, ToolMessage) and missing.status == "error"
     await backend.outbox.drain()
     assert len(collector.traced_runs) == 3
@@ -2587,9 +2631,7 @@ async def test_each_run_lists_only_the_skills_it_may_see_and_reads_them_here(
         assert "ls_skill_name" not in _run_metadata(patches[root.id])
 
     assert isinstance(read, ToolMessage) and "Run make deploy." in read.text
-    in_sandbox.assert_not_awaited()
-    # Listed once for the run, and no file was read through the backend's files.
-    assert asked.count("skills") == 1
+    assert "skills" not in asked
     assert not [name for name in asked if name.startswith("files.")]
 
 

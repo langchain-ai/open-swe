@@ -69,8 +69,9 @@ Every call is authenticated with the run token.
 - **User memory:** `memory.py` enables MDA's caller-scoped durable memory at `/memories/user/`, with `AGENTS.md` loaded into the prompt.
   MDA's default policy requires a trusted person and permits managed Slack one-to-one DMs and verified Studio users; shared-channel and service-principal runs do not mount user memory.
   Storage and isolation are managed by MDA, not the sandbox or Robin's backend; shared agent memory remains disabled.
-- **Skills:** the backend lists the skills a run may see (`runtime_api.skills`): a person's own only on a run that acts for them.
-  `rt/skills.py` keeps them as read-only files, lists them in the system prompt of the agent's and its subagents' model calls with deepagents' skills middleware, listing them again every run, started before `prepare`, so a public thread never keeps a person's skills from a run that acted for them, and answers `read_file` and the other file tools on their paths.
+- **Skills:** public MDA `routes=` mounts organization and personal Context Hub backends (`rt/skills.py`).
+  The backend's token-authenticated `runtime_api.skills` endpoint resolves personal authority from the saved private thread owner anew each run.
+  Read-only route wrappers own fresh Hub snapshots per run; Robin refreshes checkpointed skill metadata and discovers the same mounts directly through public `CompositeBackend` and `FilesystemBackend` APIs, including bundled files in `mda/skills/`.
 - **System prompt:** each call's system prompt goes in the order of how many runs share each part, for the provider's prompt cache (`rt/run_prompt.py`): the graph's instructions with what code mode and the browser add, the run's prompt (`ModelCall.system_prompt`), the run's skills, then what only the thread's prompt says (`ModelCall.thread_prompt`).
   For Anthropic the first two each end in a cache breakpoint; with the system prompt's end and the conversation's they fill the four a request may have, and the tools, sent first, need none of their own.
 - **Loop:** `BackendRunMiddleware` (`rt/middleware.py`) prepares the run, reads its inbox and runs its loop:
@@ -161,12 +162,64 @@ The backend:
 | `MDA_RUNTIME_URL` | This deployment's URL; every new agent, reviewer and review scout thread runs here |
 | `MDA_RUNTIME_API_KEY` | LangSmith service key the backend calls this deployment with |
 | `MDA_WORKSPACE_ID` | This deployment's LangSmith workspace, if not the backend's; dashboard follow-ups on a channel's thread run as the person's principal there |
+| `ROBIN_SKILLS_HUB_PREFIX` | Optional skill repository prefix; defaults to `robin-skills` in production and `robin-skills-<OPENSWE_ENV>` elsewhere |
 | `MDA_DEPLOYMENT_ID` | This deployment's id (`host.project_id` of its `/info`): the backend reads the Slack app's bot token from Agent Auth, where this deployment's Slack channel keeps it (`mda/slack-bot-token`), so a reinstalled app's token is set in one place, `mda deploy`'s. Unset: the backend's own `SLACK_BOT_TOKEN` |
 | `MDA_LANGSMITH_PROJECT` | This deployment's LangSmith project (its `LANGSMITH_PROJECT`, the deployment name), where its runs are traced; the backend's trace links, costs, feedback and reviewer evals read runs there. Unset: the backend's `LANGSMITH_PROJECT` |
 | `REMOTE_RUNTIME_TOKEN_SECRET` | Signs run tokens; comma-separated for rotation |
 | `MDA_SERVICE_SECRET` | The same value as this deployment's; `/mda/channel-api/*` and `/github/channel/*` answer only calls signed with it |
 | `MDA_BIND_SANDBOX_AFTER_PREPARE` | `false`: every run opens its sandbox, and the backend binds its thread to it, before the run prepares. Unset or `true`: a run whose preparation reaches no sandbox prepares and makes its first model call meanwhile, and its first tool call waits for the sandbox (`bind_sandbox`) |
 | `MDA_GITHUB_USER_CONNECTION` | The deployment's user GitHub OAuth connection (`open-swe-github-<env>`): `open_pull_request` opens the requester's own PR with their grant there when it is the account Robin knows them by. Unset, or for another participant: their dashboard GitHub sign-in |
+
+### Skill storage and rollout
+
+Robin uses public MDA `routes=` and Deep Agents `ContextHubBackend`; no SDK changes are needed.
+Bundled skills live in `mda/skills/` at `/skills/`.
+Organization skills use `-/<prefix>` at `/organization-skills/`; personal skills use `-/<prefix>-user-<users.id UUID>` at `/my-skills/`.
+The prefix is `robin-skills` in production and `robin-skills-<OPENSWE_ENV>` elsewhere (`robin-skills-staging`, `robin-skills-preview`, `robin-skills-local`), because Robin's environments share one LangSmith workspace; `ROBIN_SKILLS_HUB_PREFIX` on the backend overrides it.
+The backend names each run's repositories in its `skills` answer, so the runtime needs no skill configuration of its own.
+Personal access is resolved from the saved owner-private thread each run, including bot DMs; shared threads, channels, automations and reviewers receive none.
+Runtime mounts deny mutation, take fresh snapshots each run and replace checkpointed discovery metadata.
+Discovery uses the same routed backends plus bundled `FilesystemBackend` files; native middleware handles disclosure and pinning.
+Sources are personal, organization, bundled (last matching name wins); the thread prompt stays after skills for caching.
+
+Dashboard Skills and authorized personal/org tools remain a thin file CRUD shim: fresh `ContextHubBackend` per request, async list/read/write/edit/delete of `<name>/SKILL.md`.
+Files have YAML name/description and instructions as body; edits/deletes leave support files alone.
+Organization writes remain admin-only, personal writes owner-only, with existing audit, limits and page response shapes.
+Updates use full-content `edit`; the public backend owns commit retries and rejects edits whose old text changed.
+Create/delete do not provide Robin-specific compare-and-swap guarantees: concurrent creation can upsert, and deletion can remove a newer version.
+Manage skills in Context Hub for richer workflows.
+
+On the **backend** only:
+
+- `ROBIN_SKILLS_HUB_PREFIX` (optional): repository prefix overriding the per-environment default, at most 40 lowercase letters/numbers/hyphens, starting with a letter.
+
+On **backend and runtime**, for the same workspace:
+
+- `LANGSMITH_ENDPOINT`: defaults to `https://api.smith.langchain.com`.
+- `LANGSMITH_API_KEY`: service key allowed to read/create/update private Hub repositories.
+- `LANGSMITH_WORKSPACE_ID` (or `LANGSMITH_TENANT_ID`): explicit workspace UUID.
+
+Clients receive endpoint/key/workspace explicitly, never runtime-service credentials; missing configuration fails closed with no SQL fallback.
+The public backend's SDK creates repositories private by default.
+**Workspace-private is not owner-private**: members with Hub read permission, subject to ABAC, can directly read personal repositories; UUID names are not ACLs.
+Do not store content requiring secrecy from those members.
+Deployment reconciliation/deletion leaves these repositories alone; departing-user cleanup is a manual operator follow-up, including history.
+Deleting a skill removes only its current `SKILL.md`, not old commits.
+
+The Skill ORM model and all ORM paths are removed; the SQL `skill` table stays, with no migration, as the backfill's source.
+Copy each environment's rows (NULL user = organization) into its Context Hub repositories with skill edits paused, from `open-swe/` with that environment's `POSTGRES_URI`, Hub credentials and `OPENSWE_ENV` (`production`, `staging`, `preview`) set:
+
+```bash
+uv run python -m openswe.skill_store.backfill --dry-run
+uv run python -m openswe.skill_store.backfill --apply
+```
+
+The script refuses to run without `OPENSWE_ENV` or `ROBIN_SKILLS_HUB_PREFIX`, and prints the repositories it writes to first.
+No flag means dry run; bounded raw-SQL pages release their transactions before Hub I/O and never modify SQL.
+It copies description and **instructions, never rendered content**, skips identical skills and reports differing destinations without overwriting (nonzero exit).
+Deploy the backend and runtime together, verify the mounts, then resume edits.
+Drop the table in a separate PR once every environment is copied; it holds no Hub edits made after the copy.
+No real Hub, backfill or production verification was performed for this change.
 
 ## Run locally
 

@@ -54,7 +54,7 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
         return_value=MCPTools(),
     ) as mcps:
         captured = await _agent_catalog(config)
-    assert captured["skills"] == ["/organization-skills/", "/bundled-skills/"]
+    assert captured["skills"] == []
     tools = captured["tools"]
     assert isinstance(tools, list)
     tool_names = {_registered_tool_name(tool) for tool in tools}
@@ -70,23 +70,20 @@ async def test_public_agent_excludes_personal_skills_and_tools(saved_thread_scop
     mcps.assert_awaited_once_with(None, unattended=False)
 
 
-async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_runtime_resolves_personal_authority_from_the_run_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from runtime_api.operations import RunRequest
-    from runtime_api.skills import BUNDLED_SKILLS, RunSkills, SkillsRequest
+    from runtime_api.skills import RunSkills
 
     from openswe.agent_api.agent import AgentKind
     from openswe.agent_api.run_calls import TokenRun
     from openswe.agent_api.tokens import RemoteRun
-    from openswe.skill_store.store import _record
+    from openswe.skill_store.store import HubSkills
+    from openswe.users import User
 
-    monkeypatch.setattr(
-        "openswe.skill_store.backend.agent_skills",
-        AsyncMock(
-            side_effect=lambda login: (
-                [_record("personal-workflow", "A workflow", "Do it.")] if login else []
-            )
-        ),
-    )
+    monkeypatch.setenv("ALLOWED_GITHUB_USERS", "octocat")
+    user = await User.sign_in("github", "1", login="octocat")
     captured = await _agent_catalog()
     surface = cast(ToolSurface, captured["surface"])
     configurable = dict(_base_config()["configurable"])
@@ -97,15 +94,8 @@ async def test_remote_agent_lists_personal_skills(monkeypatch: pytest.MonkeyPatc
         await TokenRun.answer(AgentKind(), run, "skills", RunRequest().model_dump())
     )
 
-    personal = next(f for f in listed.files if f.path == "/skills/personal-workflow/SKILL.md")
-    assert "Do it." in personal.content
-    assert BUNDLED_SKILLS in surface.skill_sources
-    assert not any(f.path.startswith(BUNDLED_SKILLS) for f in listed.files)
-
-    # A runtime that serves them gets PostgreSQL's skills alone.
-    served = SkillsRequest(served=[BUNDLED_SKILLS]).model_dump()
-    own = RunSkills.model_validate(await TokenRun.answer(AgentKind(), run, "skills", served))
-    assert own.files and not any(f.path.startswith(BUNDLED_SKILLS) for f in own.files)
+    assert listed.personal_repo == HubSkills.repo(user.id)
+    assert not surface.skill_sources
 
 
 @pytest.mark.parametrize("profile", [None, {"experimental_monitor": False}])

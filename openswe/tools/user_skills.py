@@ -1,19 +1,11 @@
 """Tools for managing the triggering user's skills."""
 
-from typing import Any
-
 from langgraph.config import get_config
+from pydantic import JsonValue
 
 from openswe.audit_logs.tools import audit_tool
 from openswe.dashboard.agent_overrides import resolve_github_login
-from openswe.skill_store.store import (
-    SkillCreate,
-    SkillUpdate,
-    create_skill,
-    delete_skill,
-    get_skill,
-    update_skill,
-)
+from openswe.skill_store.store import HubSkills, SkillCreate, delete_skill
 from openswe.tools.access import Policy, access, unchanged
 from openswe.tools.mcp_exposure import expose_mcp
 from openswe.utils.json_types import as_json_object
@@ -28,28 +20,24 @@ async def _login() -> str | None:
 @expose_mcp()
 @audit_tool()
 @access(_OWN)
-async def save_user_skill(name: str, description: str, instructions: str = "") -> dict[str, Any]:
+async def save_user_skill(
+    name: str, description: str, instructions: str = ""
+) -> dict[str, JsonValue]:
     """Implement the `save_user_skill` tool."""
     login = await _login()
     if not login:
         return {"ok": False, "error": "Could not resolve the triggering user's GitHub login"}
 
-    existing = await get_skill(login, name)
-    if existing:
-        skill = await update_skill(
-            login, name, SkillUpdate(description=description, instructions=instructions)
-        )
-    else:
-        skill = await create_skill(
-            login, SkillCreate(name=name, description=description, instructions=instructions)
-        )
+    async with HubSkills.open(await HubSkills.person(login)) as skills:
+        body = SkillCreate(name=name, description=description, instructions=instructions)
+        skill = await skills.save(body, create=await skills.get(body.name) is None)
     return {"ok": True, "skill": skill}
 
 
 @expose_mcp()
 @audit_tool()
 @access(_OWN)
-async def delete_user_skill(name: str) -> dict[str, Any]:
+async def delete_user_skill(name: str) -> dict[str, JsonValue]:
     """Implement the `delete_user_skill` tool."""
     login = await _login()
     if not login:

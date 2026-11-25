@@ -1,25 +1,16 @@
-"""The run's skills, as the backend lists them for it (``runtime_api.skills``), and the
-skills Open SWE ships, which this deployment carries (``bundled_skills/``).
-
-This runtime keeps them as read-only files, lists them in each model call's system
-prompt with deepagents' own skills middleware, the agent's and its subagents', and
-answers the model's reads of them. A thread's checkpoint keeps the skills it
-listed, so each run lists them again: a public thread never keeps the skills of a
-person a previous run acted for.
-"""
+"""Read-only Hub routes and native skill discovery scoped to the current run."""
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Mapping
-from functools import cache
-from pathlib import Path
-from typing import Any, Final, cast
+from collections.abc import Awaitable, Callable
+from functools import partial
+from typing import Final, cast
 
+from deepagents.backends.context_hub import ContextHubBackend
 from deepagents.backends.protocol import (
     BackendProtocol,
     DeleteResult,
     EditResult,
-    FileData,
     FileDownloadResponse,
     FileUploadResponse,
     GlobResult,
@@ -28,100 +19,120 @@ from deepagents.backends.protocol import (
     ReadResult,
     WriteResult,
 )
-from deepagents.backends.state import StateBackend
-from deepagents.backends.utils import create_file_data
-from deepagents.middleware.skills import (
-    SkillsMiddleware,
-    SkillsState,
-    SkillsStateUpdate,
-)
+from deepagents.middleware.skills import SkillsMiddleware, SkillsState, SkillsStateUpdate
 from langchain.agents.middleware.types import ExtendedModelResponse, ModelRequest, ModelResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
+from langsmith import Client
 from runtime_api.endpoint import call
-from runtime_api.skills import BUNDLED_SKILLS, SKILLS, SkillsRequest
+from runtime_api.skill_hub import SkillHubSettings
+from runtime_api.skills import SKILLS, RunSkills, SkillsRequest
 
 from rt.backend import OpenSweBackend, RunLocal
+from rt.run_prompt import ThreadPromptMiddleware
+from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY
 
 logger = logging.getLogger(__name__)
-
-_SYNC: Final = "The run's skills are read asynchronously"
+SKILL_ROUTES: Final = ("/my-skills/", "/organization-skills/", "/skills/")
 _READ_ONLY: Final = "Skills are read-only here"
-_BUNDLED_DIR: Final = Path(__file__).resolve().parent.parent / "bundled_skills"
 
 
-@cache
-def _bundled() -> dict[str, str]:
-    """The skills Open SWE ships, by the path a run reads each file at."""
-    return {
-        f"{BUNDLED_SKILLS}{path.relative_to(_BUNDLED_DIR).as_posix()}": path.read_text(
-            encoding="utf-8"
-        )
-        for path in sorted(_BUNDLED_DIR.rglob("*"))
-        if path.is_file()
-    }
-
-
-class _Listed(StateBackend):
-    """deepagents' in-memory file reads, over the skills the backend listed."""
-
-    def __init__(self, files: Mapping[str, FileData]) -> None:
-        super().__init__()
-        self._listed = dict(files)
-
-    def _read_files(self) -> dict[str, Any]:
-        return dict(self._listed)
-
-
-class _Listing:
-    """One run's skills, listed once."""
-
+class _NamedRepos:
     def __init__(self) -> None:
-        self.files: _Listed | None = None
+        self.asked = False
+        self.skills: RunSkills | None = None
         self.lock = asyncio.Lock()
-        self.ahead: asyncio.Task[_Listed] | None = None
 
 
-class SkillFiles(BackendProtocol):
-    """The run's skills as files: a folder per skill under each source, with its ``SKILL.md``.
+class RunSkillRepos:
+    """The skill repositories the backend names for the run, asked once per run.
 
-    The backend lists them on each run's first read of any; every read after that in
-    the run is answered here.
+    The backend names them so that every Robin environment sharing the workspace keeps its
+    own repositories, and so personal ones follow its private-thread check.
     """
 
-    def __init__(self, backend: OpenSweBackend, run_id: Callable[[], str | None]) -> None:
-        self._backend = backend
-        self._run_id = run_id
-        self._listings = RunLocal(_Listing)
+    def __init__(self, backend: OpenSweBackend) -> None:
+        self.backend = backend
+        self._runs = RunLocal(_NamedRepos)
 
-    async def _listed(self) -> _Listed:
-        listing = self._listings.get(self._backend.run)
-        async with listing.lock:
-            if listing.files is None:
-                asked = SkillsRequest(run_id=self._run_id(), served=[BUNDLED_SKILLS])
-                listed = await call(self._backend, SKILLS, asked)
-                files = {skill.path: skill.content for skill in listed.files}
-                if BUNDLED_SKILLS in self._backend.run.catalog.skill_sources:
-                    files.update(await asyncio.to_thread(_bundled))
-                listing.files = _Listed(
-                    {path: create_file_data(content) for path, content in files.items()}
+    async def named(self) -> RunSkills | None:
+        run = self._runs.get(self.backend.run)
+        async with run.lock:
+            if not run.asked:
+                run.asked = True
+                try:
+                    run.skills = await call(self.backend, SKILLS, SkillsRequest(run_id=run_id()))
+                except Exception:
+                    logger.exception("Cannot ask the backend for the run's skills; mounting none")
+        return run.skills
+
+
+class _HubRun:
+    def __init__(self) -> None:
+        self.opened = False
+        self.backend: ContextHubBackend | None = None
+        self.lock = asyncio.Lock()
+
+
+class HubSkillRoute(BackendProtocol):
+    """A static route whose Hub snapshot and personal authority belong to one run."""
+
+    def __init__(self, repos: RunSkillRepos, *, personal: bool) -> None:
+        self._repos = repos
+        self._personal = personal
+        self._runs = RunLocal(_HubRun)
+
+    async def _opened(self) -> ContextHubBackend | None:
+        run = self._runs.get(self._repos.backend.run)
+        async with run.lock:
+            if run.opened:
+                return run.backend
+            run.opened = True
+            try:
+                named = await self._repos.named()
+                repo = (
+                    None
+                    if named is None
+                    else named.personal_repo
+                    if self._personal
+                    else named.organization_repo
                 )
-        return listing.files
-
-    def list_ahead(self) -> None:
-        """Start listing the run's skills, so its first read finds them listed."""
-        listing = self._listings.get(self._backend.run)
-        if listing.ahead is not None or not self._backend.run.catalog.skill_sources:
-            return
-        listing.ahead = asyncio.create_task(self._listed())
-        listing.ahead.add_done_callback(_log_failure)
+                if repo is None:
+                    return None
+                settings = await SkillHubSettings.from_env()
+                client = Client(
+                    api_url=settings.endpoint,
+                    api_key=settings.api_key.get_secret_value(),
+                    workspace_id=str(settings.workspace_id),
+                    auto_batch_tracing=False,
+                )
+                hub = ContextHubBackend(repo, client=client)
+                try:
+                    listing = await hub.als("/")
+                finally:
+                    await asyncio.to_thread(client.close)
+                if listing.error:
+                    logger.warning(
+                        "Cannot open skills Hub snapshot", extra={"hub_error": listing.error}
+                    )
+                    return None
+                run.backend = hub
+            except Exception:
+                logger.exception("Cannot open run-scoped skills Hub; denying access")
+        return run.backend
 
     async def als(self, path: str) -> LsResult:
-        return (await self._listed()).ls(path)
+        hub = await self._opened()
+        return await hub.als(path) if hub is not None else LsResult(entries=[])
 
     async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        return (await self._listed()).read(file_path, offset, limit)
+        hub = await self._opened()
+        return (
+            await hub.aread(file_path, offset, limit)
+            if hub is not None
+            else ReadResult(error="Skill access denied")
+        )
 
     async def agrep(
         self,
@@ -131,13 +142,24 @@ class SkillFiles(BackendProtocol):
         *,
         max_count: int | None = None,
     ) -> GrepResult:
-        return (await self._listed()).grep(pattern, path, glob, max_count=max_count)
+        hub = await self._opened()
+        return (
+            await hub.agrep(pattern, path, glob, max_count=max_count)
+            if hub is not None
+            else GrepResult(matches=[])
+        )
 
     async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
-        return (await self._listed()).glob(pattern, path)
+        hub = await self._opened()
+        return await hub.aglob(pattern, path) if hub is not None else GlobResult(matches=[])
 
     async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        return (await self._listed()).download_files(paths)
+        hub = await self._opened()
+        return (
+            await hub.adownload_files(paths)
+            if hub is not None
+            else [FileDownloadResponse(path=path, error="permission_denied") for path in paths]
+        )
 
     async def awrite(self, file_path: str, content: str) -> WriteResult:
         return WriteResult(error=_READ_ONLY, path=file_path)
@@ -147,7 +169,7 @@ class SkillFiles(BackendProtocol):
         file_path: str,
         old_string: str,
         new_string: str,
-        replace_all: bool = False,  # noqa: FBT001, FBT002
+        replace_all: bool = False,
     ) -> EditResult:
         return EditResult(error=_READ_ONLY, path=file_path)
 
@@ -157,68 +179,27 @@ class SkillFiles(BackendProtocol):
     async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         return [FileUploadResponse(path=path, error="permission_denied") for path, _ in files]
 
-    def ls(self, path: str) -> LsResult:
-        raise NotImplementedError(_SYNC)
-
-    def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        raise NotImplementedError(_SYNC)
-
-
-def _log_failure(listed: asyncio.Task[_Listed]) -> None:
-    if not listed.cancelled() and (error := listed.exception()) is not None:
-        # The first read lists them again.
-        logger.warning("Could not list the run's skills ahead of its first read", exc_info=error)
-
-
-@cache
-def _labels(sources: tuple[str, ...]) -> tuple[str, ...]:
-    """How deepagents labels ``sources`` in the prompt."""
-    return tuple(SkillsMiddleware(backend=StateBackend(), sources=list(sources)).source_labels)
-
 
 class RunSkillsMiddleware(SkillsMiddleware):
-    """deepagents' skills middleware over the run's own skill sources, listed afresh every run.
+    """Use native discovery and pinning, replacing checkpointed metadata every run."""
 
-    The graph serves every run, so the sources are read from the run in progress; a run
-    whose catalog names none sees no skills, as if the middleware were absent.
-    """
-
+    name = "SkillsMiddleware"
     trace_policy = MIDDLEWARE_TRACE_POLICY
 
-    def __init__(self, backend: OpenSweBackend, files: SkillFiles) -> None:
-        self._run_backend = backend
-        super().__init__(backend=files, sources=[])
-
-    @property
-    def sources(self) -> list[str]:
-        return list(self._run_backend.run.catalog.skill_sources)
-
-    @sources.setter
-    def sources(self, _sources: list[str]) -> None:
-        """deepagents sets its sources once; these are each run's."""
-
-    @property
-    def source_labels(self) -> list[str]:
-        return list(_labels(tuple(self.sources)))
-
-    @source_labels.setter
-    def source_labels(self, _labels: list[str]) -> None:
-        """deepagents sets its labels once; these are each run's."""
+    def __init__(self, files: BackendProtocol, *, thread_prompt: bool = False) -> None:
+        self._thread_prompt = ThreadPromptMiddleware() if thread_prompt else None
+        super().__init__(backend=files, sources=list(SKILL_ROUTES))
 
     async def abefore_agent(
         self, state: SkillsState, runtime: Runtime, config: RunnableConfig
     ) -> SkillsStateUpdate | None:
-        if not self.sources:
-            return None
         return await super().abefore_agent(
             cast(SkillsState, {**state, "skills_metadata": None}), runtime, config
         )
 
     async def awrap_model_call(
-        self,
-        request: ModelRequest,
-        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+        self, request: ModelRequest, handler: Callable[[ModelRequest], Awaitable[ModelResponse]]
     ) -> ModelResponse | ExtendedModelResponse:
-        if not self.sources:
-            return await handler(request)
+        if self._thread_prompt is not None:
+            handler = partial(self._thread_prompt.awrap_model_call, handler=handler)
         return await super().awrap_model_call(request, handler)

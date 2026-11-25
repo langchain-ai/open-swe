@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, Literal, cast
-from unittest.mock import ANY, AsyncMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 from xml.etree import ElementTree
 
 import httpx
@@ -1398,6 +1398,14 @@ async def test_admin_schedule_keeps_tools_without_personal_execution_identity(
     from openswe.tools import automations, organization_skills
     from openswe.users import User
 
+    skills = MagicMock()
+    skills.get = AsyncMock(return_value=None)
+    skills.save = AsyncMock(return_value={"name": "system-check"})
+    skills.delete = AsyncMock()
+    opened = MagicMock()
+    opened.__aenter__ = AsyncMock(return_value=skills)
+    opened.__aexit__ = AsyncMock(return_value=None)
+    monkeypatch.setattr(organization_skills.store.HubSkills, "open", lambda *args: opened)
     monkeypatch.setenv("CONFIGURED_ADMINS", "alice")
     monkeypatch.setattr(User, "email_for_login", AsyncMock(return_value=None))
     record = {

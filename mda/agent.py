@@ -30,8 +30,8 @@ from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self, cast
 
-from deepagents.middleware.filesystem import FilesystemMiddleware
-from deepagents.middleware.subagents import SubAgent
+from deepagents.backends import CompositeBackend, FilesystemBackend
+from deepagents.backends.protocol import BackendProtocol
 from langchain.agents.middleware import AgentMiddleware, configure_trace_policy
 from langchain_core.language_models import BaseChatModel
 from managed_deepagents import (
@@ -64,7 +64,7 @@ from rt.middleware import (
 )
 from rt.model_calls import OutputLimitContinuationMiddleware, model_call_guards
 from rt.models import build_model
-from rt.run_prompt import RunPromptMiddleware, ThreadPromptMiddleware
+from rt.run_prompt import RunPromptMiddleware
 from rt.run_tools import (
     BackendTools,
     RunCodeInterpreter,
@@ -75,15 +75,14 @@ from rt.run_tools import (
     subagent_description,
     subagent_prompt,
 )
-from rt.skills import RunSkillsMiddleware, SkillFiles
+from rt.skills import HubSkillRoute, RunSkillRepos, RunSkillsMiddleware
 from rt.slack_move import SlackMoveMiddleware
 from rt.task_errors import TaskErrorMiddleware
-from rt.tools import run_id
 from rt.tracing import MIDDLEWARE_TRACE_POLICY, RootAgentTraceMiddleware
 from runtime_api.catalog import Catalog, ModelSpec
 
 if TYPE_CHECKING:
-    from managed_deepagents.define_deep_agent import ManagedAsyncSubAgent
+    from managed_deepagents.define_deep_agent import ManagedAsyncSubAgent, ManagedSubAgent
 
 # Middleware that sets no trace policy of its own, such as the SDK's channel middleware,
 # would otherwise trace every model request's full payload on each wrapper span.
@@ -177,12 +176,13 @@ def _inputs(runtime: ManagedServerRuntime) -> GraphInputs:
 class _Parts:
     """A graph's subagents and middleware, built once and shared by every run."""
 
-    subagents: list[SubAgent]
+    subagents: list[ManagedSubAgent]
     middleware: list[AgentMiddleware]
     worker_middleware: list[AgentMiddleware]
     sandbox: SandboxDefinition
+    routes: dict[str, BackendProtocol]
 
-    def sync_subagents(self, model: BaseChatModel | str) -> list[SubAgent]:
+    def sync_subagents(self, model: BaseChatModel | str) -> list[ManagedSubAgent]:
         """The graph's sync subagents, built with ``model``."""
         return [{**subagent, "model": model} for subagent in self.subagents]
 
@@ -218,17 +218,23 @@ def _parts(graph: Graph) -> _Parts:
     timing = FactoryTiming()
     # Called as the run in progress: the graph serves every run.
     backend = OpenSweBackend()
-    # The run's skills, listed for the agent and its subagents and read from here.
-    skill_files = SkillFiles(backend, run_id)
     files = FileToolsMiddleware(
         backend,
         EXECUTE_TIMEOUT_SECONDS,
-        skills={tool.name: tool for tool in FilesystemMiddleware(backend=skill_files).tools},
     )
     toolsets = RunToolsets(backend, files)
     # What the run calls that its catalog leaves out, as the backend names it.
     backend_tools = BackendTools(backend)
-    skills = RunSkillsMiddleware(backend, skill_files)
+    skill_repos = RunSkillRepos(backend)
+    routes: dict[str, BackendProtocol] = {
+        "/organization-skills/": HubSkillRoute(skill_repos, personal=False),
+        "/my-skills/": HubSkillRoute(skill_repos, personal=True),
+    }
+    skill_files = CompositeBackend(
+        default=FilesystemBackend(root_dir=str(Path(__file__).resolve().parent), virtual_mode=True),
+        routes=routes,
+    )
+    skills = RunSkillsMiddleware(skill_files)
     managed_sandbox = ManagedSandboxMiddleware()
     # The backend's transcript and usage see every reply and every tool call.
     reports: list[AgentMiddleware] = [
@@ -236,7 +242,7 @@ def _parts(graph: Graph) -> _Parts:
         RuntimeToolsMiddleware(backend, FILE_TOOLS),
     ]
     subagent = _SUBAGENTS[graph]
-    subagents: list[SubAgent] = [
+    subagents: list[ManagedSubAgent] = [
         {
             "name": subagent,
             "description": subagent_description(subagent),
@@ -265,7 +271,7 @@ def _parts(graph: Graph) -> _Parts:
                 backend,
                 opened_sandbox,
                 booted_sandbox,
-                read_ahead=[skill_files.list_ahead, RUN_GATEWAY.read_ahead],
+                read_ahead=[RUN_GATEWAY.read_ahead],
             ),
             managed_sandbox,
             *reports,
@@ -280,8 +286,7 @@ def _parts(graph: Graph) -> _Parts:
             # The system prompt in the order of how many runs share each part, for the
             # provider's prompt cache (``rt.run_prompt``).
             RunPromptMiddleware(),
-            skills,
-            ThreadPromptMiddleware(),
+            RunSkillsMiddleware(skill_files, thread_prompt=True),
             OutputLimitContinuationMiddleware(),
             RunModelCallLimit(backend, _MODEL_CALL_LIMIT),
             *model_call_guards(),
@@ -296,6 +301,7 @@ def _parts(graph: Graph) -> _Parts:
         middleware=middleware,
         worker_middleware=[*middleware, AsyncWorkerLaunchMiddleware(backend)],
         sandbox=declared_sandbox(),
+        routes=routes,
     )
 
 
@@ -305,7 +311,7 @@ def _parts(graph: Graph) -> _Parts:
 @cached_agent(keyed_by=_inputs)
 def agent(inputs: GraphInputs) -> DeepAgentDefinition:
     parts = _parts(inputs.graph)
-    sync_subagents: list[SubAgent] = parts.sync_subagents(inputs.sync_subagent_model())
+    sync_subagents: list[ManagedSubAgent] = parts.sync_subagents(inputs.sync_subagent_model())
     worker: ManagedAsyncSubAgent = {
         # MDA's build reads `name` and `async` as literals after any spread.
         **({"webhook": inputs.worker_webhook} if inputs.worker_webhook else {}),
@@ -322,6 +328,7 @@ def agent(inputs: GraphInputs) -> DeepAgentDefinition:
         name="open-swe",
         model=inputs.agent_model(),
         context_schema=RunContext,
+        routes=parts.routes,
         # The thread's sandbox, for the file and shell tools run in it and for MDA's own use
         # of it, such as the browser's screenshots; the backend's operations work in the
         # same sandbox. Which sandbox a run has, and its options, are the run's catalog's; a
