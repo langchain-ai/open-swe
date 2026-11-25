@@ -278,8 +278,8 @@ async def api_get_review_diff(
     pr_number: int,
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, Any]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await get_review_diff(owner, repo, pr_number)
+    async with _as_viewer(session, owner, repo) as repository:
+        return await get_review_diff(repository.pull_request(pr_number))
 
 
 @router.get("/reviews/{owner}/{repo}/{pr_number}/file-contents")
@@ -293,10 +293,8 @@ async def api_get_review_file_contents(
     original_path: str = "",
     session: dict[str, Any] = SESSION_DEP,
 ) -> dict[str, str | None]:
-    await require_repo_access_for_user(session["sub"], f"{owner}/{repo}")
-    return await get_review_file_contents(
-        owner, repo, pr_number, path, original_path, base_sha, head_sha
-    )
+    async with _as_viewer(session, owner, repo) as repository:
+        return await get_review_file_contents(repository, path, original_path, base_sha, head_sha)
 
 
 # Serves videos too; the path keeps its name for dashboard pages already open.

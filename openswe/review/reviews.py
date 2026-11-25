@@ -2,8 +2,8 @@
 
 Reviewer threads (``metadata.kind == "reviewer"``) hold the durable review
 state for a PR: identity (``pr``), watch flag, and head SHA; their findings
-live in PostgreSQL. These endpoints surface that state plus live PR
-details/diff fetched from GitHub with the App installation token.
+live in PostgreSQL. These endpoints surface that state plus live GitHub data;
+the review page loads its preview, diff, and file contents as the viewer.
 """
 
 import asyncio
@@ -26,7 +26,7 @@ from starlette.types import Receive, Scope, Send
 
 from openswe.github.app import get_github_app_installation_token
 from openswe.github.checks import APPROVAL_CHECK_RUN_NAME
-from openswe.github.http import GitHubClient, or_none
+from openswe.github.http import GitHubClient, RepoClient, or_none
 from openswe.github.metering import MeteredTransport
 from openswe.github.pull_request_diff import (
     fetch_file_versions,
@@ -970,15 +970,9 @@ async def get_pull_request_preview(pull_request: PullRequestClient) -> PullReque
     )
 
 
-async def get_review_diff(owner: str, repo: str, pr_number: int) -> dict[str, Any]:
-    """Return the PR's changed files as per-file git patches.
-
-    Uses the App installation token so the diff is available regardless of who
-    is viewing the review. The client renders these with pierre's PatchDiff and
-    calls :func:`get_review_file_contents` to expand context on demand.
-    """
-    async with GitHubClient.as_app(timeout=_GITHUB_TIMEOUT) as github:
-        diff = await pull_request_patches(github.repo(owner, repo).pull_request(pr_number))
+async def get_review_diff(pull: PullRequestClient) -> dict[str, Any]:
+    """Return the viewer's PR diff as patches, with file contents loaded on demand."""
+    diff = await pull_request_patches(pull)
     files = diff["files"]
     return {
         "files": [{**f, "baseSha": diff["base_sha"], "headSha": diff["head_sha"]} for f in files],
@@ -993,31 +987,21 @@ _MERGE_BASE_TTL_SECONDS = 24 * 60 * 60
 
 
 async def get_review_file_contents(
-    owner: str,
-    repo: str,
-    pr_number: int,
+    repository: RepoClient,
     path: str,
     original_path: str,
     base_sha: str,
     head_sha: str,
 ) -> dict[str, str | None]:
-    """Return one file's contents at the merge base of ``base_sha`` and ``head_sha``, and at the head.
-
-    ``base_sha`` is the base branch tip the diff was listed against; every file
-    of one diff resolves the same merge base, so it is looked up once.
-    """
+    """Read the viewer's file at the PR's merge base and head."""
     if not all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in (base_sha, head_sha)):
         raise HTTPException(400, "invalid diff revision")
-    async with GitHubClient.as_app(timeout=_GITHUB_TIMEOUT) as github:
-        repository = github.repo(owner, repo)
-        merge_base = await ttl_cache.cached(
-            f"merge-base:{repository.full_name}:{base_sha}...{head_sha}",
-            _MERGE_BASE_TTL_SECONDS,
-            lambda: resolve_merge_base(repository, base_sha, head_sha),
-        )
-        return await fetch_file_versions(
-            repository, path, original_path or path, merge_base, head_sha
-        )
+    merge_base = await ttl_cache.cached(
+        f"merge-base:{repository.github.login}:{repository.full_name}:{base_sha}...{head_sha}",
+        _MERGE_BASE_TTL_SECONDS,
+        lambda: resolve_merge_base(repository, base_sha, head_sha),
+    )
+    return await fetch_file_versions(repository, path, original_path or path, merge_base, head_sha)
 
 
 # --- PR description media proxy ----------------------------------------------

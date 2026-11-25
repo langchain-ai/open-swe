@@ -14,6 +14,7 @@ from openswe.review.reviews import (
     _serialize_pr_details,
     proxy_pr_media,
 )
+from openswe.review.routes import api_get_review_diff, api_get_review_file_contents
 
 
 @pytest.mark.parametrize("merged, expected", [(False, "closed"), (True, "merged")])
@@ -200,3 +201,102 @@ async def test_proxy_aborts_media_that_passes_the_cap_after_streaming_starts(mon
         await response({"type": "http", "asgi": {"spec_version": "2.4"}}, AsyncMock(), send)
     assert not any(message.get("more_body") is False for message in sent)
     assert body.closed
+
+
+async def test_review_changes_use_viewer_credentials_and_lazy_contents(monkeypatch):
+    from openswe.github import http
+
+    base_sha, head_sha, merge_base = "a" * 40, "b" * 40, "c" * 40
+    requests: list[httpx2.Request] = []
+    access = AsyncMock()
+    monkeypatch.setattr("openswe.review.routes.require_repo_access_for_user", access)
+    monkeypatch.setattr(
+        "openswe.dashboard.profiles.get_valid_access_token",
+        AsyncMock(return_value="viewer-token"),
+    )
+    app_access = AsyncMock(side_effect=AssertionError("must not use App credentials"))
+    monkeypatch.setattr(http.GitHubClient, "as_app", app_access)
+
+    def respond(request: httpx2.Request) -> httpx2.Response:
+        access.assert_awaited_with("viewer", "outside/private")
+        assert request.headers["authorization"] == "Bearer viewer-token"
+        requests.append(request)
+        if request.url.path == "/graphql":
+            return httpx2.Response(
+                200,
+                json={
+                    "data": {
+                        "repository": {
+                            "pullRequest": {
+                                "baseRefOid": base_sha,
+                                "headRefOid": head_sha,
+                            }
+                        }
+                    }
+                },
+            )
+        if request.url.path.endswith("/pulls/4"):
+            return httpx2.Response(
+                200,
+                json={"base": {"sha": base_sha}, "head": {"sha": head_sha}, "changed_files": 1},
+            )
+        if request.url.path.endswith("/pulls/4/files"):
+            return httpx2.Response(
+                200,
+                json=[
+                    {
+                        "filename": "new.py",
+                        "previous_filename": "old.py",
+                        "status": "renamed",
+                        "additions": 1,
+                        "deletions": 1,
+                        "patch": "@@ -1 +1 @@\n-old\n+new",
+                    }
+                ],
+            )
+        if "/compare/" in request.url.path:
+            return httpx2.Response(200, json={"merge_base_commit": {"sha": merge_base}})
+        if request.url.path.endswith("/contents/old.py"):
+            assert request.url.params["ref"] == merge_base
+            return httpx2.Response(200, content=b"old\n")
+        if request.url.path.endswith("/contents/new.py"):
+            assert request.url.params["ref"] == head_sha
+            return httpx2.Response(200, content=b"new\n")
+        raise AssertionError(f"unexpected GitHub request: {request.url}")
+
+    monkeypatch.setattr(http, "GITHUB_TRANSPORT", httpx2.MockTransport(respond))
+    session = {"sub": "viewer"}
+    diff = await api_get_review_diff("outside", "private", 4, session)
+    assert diff["files"][0]["baseSha"] == base_sha
+    assert diff["files"][0]["headSha"] == head_sha
+    assert "new.py" in diff["files"][0]["patch"]
+    assert len(requests) == 3
+
+    for _ in range(2):
+        contents = await api_get_review_file_contents(
+            "outside", "private", 4, "new.py", base_sha, head_sha, "old.py", session
+        )
+        assert contents == {"originalContent": "old\n", "modifiedContent": "new\n"}
+    assert sum("/compare/" in request.url.path for request in requests) == 1
+    assert sum("/contents/" in request.url.path for request in requests) == 4
+    app_access.assert_not_called()
+
+
+@pytest.mark.parametrize("contents", [False, True])
+async def test_review_changes_require_repository_access_before_github(monkeypatch, contents):
+    from openswe.github.http import GitHubClient
+
+    access = AsyncMock(side_effect=HTTPException(403, "repository access denied"))
+    monkeypatch.setattr("openswe.review.routes.require_repo_access_for_user", access)
+    viewer = AsyncMock()
+    monkeypatch.setattr(GitHubClient, "as_user", viewer)
+    with pytest.raises(HTTPException) as refused:
+        if contents:
+            await api_get_review_file_contents(
+                "outside", "private", 4, "file.py", "a" * 40, "b" * 40, "", {"sub": "viewer"}
+            )
+        else:
+            await api_get_review_diff("outside", "private", 4, {"sub": "viewer"})
+    assert refused.value.status_code == 403
+    access.assert_awaited_once_with("viewer", "outside/private")
+    viewer.assert_not_called()
