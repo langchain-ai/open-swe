@@ -118,6 +118,32 @@ export function remarkGithubAlerts() {
   }
 }
 
+/** Turns every newline inside text into a hard break, as GitHub renders PR descriptions and comments. */
+export function remarkLineBreaks() {
+  return (tree: MarkdownAstNode) => {
+    const visit = (node: MarkdownAstNode) => {
+      if (!node.children) return
+      node.children = node.children.flatMap((child): MarkdownAstNode[] => {
+        if (
+          child.type !== "text" ||
+          typeof child.value !== "string" ||
+          !/[\r\n]/.test(child.value)
+        ) {
+          visit(child)
+          return [child]
+        }
+        return child.value
+          .split(/\r?\n|\r/)
+          .flatMap((value, index) => [
+            ...(index > 0 ? [{ type: "break" }] : []),
+            ...(value ? [{ type: "text", value }] : []),
+          ])
+      })
+    }
+    visit(tree)
+  }
+}
+
 const INLINE_PARSE_PREFIX = "open-swe-markdown-inline-prefix:"
 
 function isSameLineOverIndentedCode(

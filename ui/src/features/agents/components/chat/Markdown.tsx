@@ -42,6 +42,7 @@ import { TableScroll } from "./TableScroll"
 import {
   orderedListGutterStyle,
   remarkGithubAlerts,
+  remarkLineBreaks,
   remarkNormalizeListItemIndentation,
   remarkResolveRelativeUrls,
 } from "./markdownPlugins"
@@ -62,6 +63,8 @@ interface MarkdownProps {
   imageBase?: string
   onOpenFile?: (path: string) => void
   enlargeImages?: boolean
+  /** Render a single newline as a line break, as GitHub does for PR descriptions and comments. */
+  breaks?: boolean
   className?: string
 }
 
@@ -79,6 +82,8 @@ const REMARK_PLUGINS = [
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
 ]
+
+const GITHUB_REMARK_PLUGINS = [...REMARK_PLUGINS, remarkLineBreaks]
 
 /** `data-alert` is set by remarkGithubAlerts and would otherwise be sanitized away. */
 const ALLOWED_TAGS = { blockquote: ["cite", "dataAlert"] }
@@ -420,6 +425,7 @@ export const Markdown = memo(function Markdown({
   imageBase,
   onOpenFile,
   enlargeImages = false,
+  breaks = false,
   className,
 }: MarkdownProps) {
   const [image, setImage] = useState<{ src: string; alt: string } | null>(null)
@@ -489,6 +495,8 @@ export const Markdown = memo(function Markdown({
     }
   }, [transformMediaUrl, workspacePath, imageBase])
 
+  const remarkPlugins = breaks ? GITHUB_REMARK_PLUGINS : REMARK_PLUGINS
+
   return (
     <div
       className={cn(
@@ -508,7 +516,7 @@ export const Markdown = memo(function Markdown({
             remarkPlugins={
               workspacePath !== undefined
                 ? [
-                    ...REMARK_PLUGINS,
+                    ...remarkPlugins,
                     [
                       remarkResolveRelativeUrls,
                       {
@@ -517,7 +525,7 @@ export const Markdown = memo(function Markdown({
                       },
                     ],
                   ]
-                : REMARK_PLUGINS
+                : remarkPlugins
             }
             allowedTags={ALLOWED_TAGS}
             urlTransform={urlTransform}

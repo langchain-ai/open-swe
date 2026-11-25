@@ -124,7 +124,7 @@ export function PendingReviewCommentCard({
           <div
             data-reply-part={`your pending review comment on ${comment.path}`}
           >
-            <Markdown content={comment.body} />
+            <Markdown content={comment.body} breaks />
           </div>
         )}
       </div>

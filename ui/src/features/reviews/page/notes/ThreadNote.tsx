@@ -53,7 +53,7 @@ export function CommentRow({
           data-reply-part={`comment by @${displayName(comment.author)}`}
           className="mt-space-1 text-xs leading-[1.6] [&_.markdown-body]:text-xs"
         >
-          <Markdown content={body} />
+          <Markdown content={body} breaks />
         </div>
       </div>
     </div>

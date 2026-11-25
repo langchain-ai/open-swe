@@ -306,6 +306,7 @@ function Description({
             content={linkGithubRefs(body, pr, pullRequests)}
             transformMediaUrl={proxyMedia}
             enlargeImages
+            breaks
           />
         ) : (
           <p className="text-secondary italic">No description.</p>

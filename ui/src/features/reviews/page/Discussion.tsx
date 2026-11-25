@@ -614,7 +614,7 @@ function ItemBlock({
             data-reply-part={`${item.kind} by @${displayName(item.author)}`}
             className="mt-space-1 rounded-lg border border-default bg-surface-level-1 px-space-3 py-space-2 text-xs leading-[1.6]"
           >
-            <Markdown content={item.body} />
+            <Markdown content={item.body} breaks />
             {bot && (
               <Button
                 color="secondary"

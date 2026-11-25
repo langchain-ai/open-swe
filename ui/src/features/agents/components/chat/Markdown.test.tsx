@@ -96,3 +96,19 @@ it.each([
     expect(screen.queryByLabelText("GitHub attachment video")).toBeNull()
   }
 )
+
+it("renders single newlines as line breaks only when asked, as GitHub does", () => {
+  const content = "Related: #1\nFixes #2\n\n```\na\nb\n```"
+  const { container } = render(<Markdown content={content} />, {
+    wrapper: TooltipProvider,
+  })
+  expect(container.querySelectorAll("p br")).toHaveLength(0)
+
+  cleanup()
+  const { container: broken } = render(<Markdown content={content} breaks />, {
+    wrapper: TooltipProvider,
+  })
+  const paragraph = broken.querySelector("p")
+  expect(paragraph?.querySelectorAll("br")).toHaveLength(1)
+  expect(broken.querySelector("pre br")).toBeNull()
+})
