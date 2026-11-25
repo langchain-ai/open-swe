@@ -661,6 +661,8 @@ export function AutomationEditor({
         <div className="rounded-xl border border-default bg-surface-level-1 p-space-3">
           <SlackChannelTextarea
             bare
+            autoResize
+            maxHeight={480}
             value={prompt}
             onValueChange={setPrompt}
             disabled={!canManage}

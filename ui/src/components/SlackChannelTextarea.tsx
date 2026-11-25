@@ -18,18 +18,20 @@ const MAX_SUGGESTIONS = 8
 type SlackChannelTextareaProps = Omit<
   ComponentProps<"textarea">,
   "value" | "onChange"
-> & {
-  value: string
-  onValueChange: (value: string) => void
-  /** Plain Macaw textarea for surfaces that frame the field themselves. */
-  bare?: boolean
-}
+> &
+  Pick<ComponentProps<typeof Textarea>, "autoResize" | "maxHeight"> & {
+    value: string
+    onValueChange: (value: string) => void
+    /** Plain Macaw textarea for surfaces that frame the field themselves. */
+    bare?: boolean
+  }
 
 /** A textarea that completes `#channel` into Slack's `<#id|name>` reference. */
 export function SlackChannelTextarea({
   value,
   onValueChange,
   bare,
+  autoResize = !bare,
   className,
   onKeyDown,
   onBlur,
@@ -122,7 +124,7 @@ export function SlackChannelTextarea({
   return (
     <div className="relative w-full">
       <Textarea
-        autoResize={!bare}
+        autoResize={autoResize}
         variant={bare ? "plain" : "default"}
         className={
           bare
