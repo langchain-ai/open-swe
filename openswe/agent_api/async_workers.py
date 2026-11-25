@@ -23,7 +23,7 @@ registered is settled at registration instead. Settling is safe to repeat.
 import logging
 from dataclasses import dataclass
 from typing import Final
-from uuid import uuid7
+from uuid import NAMESPACE_URL, uuid5, uuid7
 
 from langgraph.runtime import Runtime
 from langgraph_sdk.errors import NotFoundError
@@ -148,8 +148,24 @@ async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
     """The worker's own run token, for the thread MDA launched from the grant's coordinator."""
     actor = await _actor(grant.coordinator)
     # Registered as the coordinator's worker_launched registers it, whichever comes first.
-    instructions = _assigned_instructions(grant.coordinator.thread_id, body.instructions)
+    instructions = (
+        _assigned_instructions(grant.coordinator.thread_id, body.instructions)
+        if body.instructions.strip()
+        else ""
+    )
     await service.register_async_worker(actor, grant.request_id, body.thread_id, instructions)
+    invocation_id = (
+        body.invocation_id.strip()
+        if body.invocation_id and body.invocation_id.strip()
+        else str(
+            uuid5(
+                NAMESPACE_URL,
+                f"open-swe:worker-invocation:{body.thread_id}:{body.run_id.strip()}",
+            )
+        )
+        if body.run_id and body.run_id.strip()
+        else ""
+    )
     prepared = await prepare_durable_run(
         grant.coordinator.assistant_id,
         {
@@ -158,6 +174,7 @@ async def adopt(grant: WorkerGrant, body: Adopt) -> Adopted:
                 "origin": grant.coordinator.metadata.get("origin")
                 or grant.coordinator.configurable.get("origin"),
                 "transcript_turn_id": str(uuid7()),
+                **({"invocation_id": invocation_id} if invocation_id else {}),
             }
         },
         None,

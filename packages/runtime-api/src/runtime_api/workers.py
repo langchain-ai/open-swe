@@ -44,8 +44,11 @@ class Worker(BaseModel):
 class Adopt(BaseModel):
     thread_id: str
     run_id: str | None = None
-    # The assignment the worker was launched with, its first message.
-    instructions: str
+    # The assignment the worker was launched with, its first message; empty on a
+    # checkpoint resume of an already-registered worker.
+    instructions: str = ""
+    # The invocation the run already prepared under, when re-adopting after a drain.
+    invocation_id: str | None = None
 
 
 class Adopted(BaseModel):
@@ -61,4 +64,4 @@ LAUNCH_WORKER = Endpoint(
     "launch_worker", Launch, LaunchReply, seconds=LOOP_CALL_SECONDS, delivery="idempotent"
 )
 WORKER_LAUNCHED = Endpoint("worker_launched", Launched, Worker, seconds=LOOP_CALL_SECONDS)
-ADOPT = Endpoint("adopt", Adopt, Adopted, seconds=LOOP_CALL_SECONDS)
+ADOPT = Endpoint("adopt", Adopt, Adopted, seconds=LOOP_CALL_SECONDS, delivery="idempotent")

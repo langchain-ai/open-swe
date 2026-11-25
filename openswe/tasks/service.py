@@ -560,8 +560,18 @@ async def register_async_worker(
     a replay that started a second thread raises ``WorkerAlreadyLaunchedError``
     naming the first.
     """
-    if not request_id or not instructions.strip():
+    if not request_id:
         raise ValueError("Assignment instructions and a stable tool-call identity are required")
+    resolved_instructions = instructions.strip()
+    if not resolved_instructions:
+        existing = await store.TaskDelegation.get(worker_thread_id)
+        if (
+            existing is None
+            or existing.coordinator_thread_id != actor.thread_id
+            or existing.launch_request_id != request_id
+        ):
+            raise ValueError("Assignment instructions and a stable tool-call identity are required")
+        resolved_instructions = existing.instructions
     child = await RUNTIMES.mda.get(worker_thread_id)
     launched = LaunchedThread.model_validate((child or {}).get("metadata") or {})
     if (
@@ -570,7 +580,7 @@ async def register_async_worker(
     ):
         raise PermissionError("The thread is not an async worker this coordinator launched")
     delegation = await Delegation.authorize(actor)
-    task, reserved = await delegation.reserve(worker_thread_id, instructions.strip(), request_id)
+    task, reserved = await delegation.reserve(worker_thread_id, resolved_instructions, request_id)
     await index_worker(
         task, reserved, delegation.metadata, {MDA_GRAPH_METADATA_KEY: MDA_WORKER_GRAPH_ID}
     )

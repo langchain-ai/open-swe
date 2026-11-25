@@ -11,7 +11,7 @@ model, and the run's limit on model calls, are the run's too.
 import asyncio
 import logging
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -188,17 +188,17 @@ class RunToolsets:
             held[:] = [RunTools(run.catalog, self._backend, self._files)]
         return held[0]
 
-    async def ready(self) -> RunTools:
+    async def ready(self, state: Mapping[str, object] | None = None) -> RunTools:
         """The run's tools, once it has read their specs: a run picked up from its
         checkpoint in another process reads them here, past the hook that reads them."""
         run = self._backend.run
-        await run.load_tool_specs(run_id())
+        await run.load_tool_specs(run_id(), state=state)
         return self.get(run)
 
-    async def load(self) -> RunTools:
+    async def load(self, state: Mapping[str, object] | None = None) -> RunTools:
         """The run's tools once it has read their specs, with the tools of the MCP servers
         it connects to itself."""
-        tools = await self.ready()
+        tools = await self.ready(state)
         await tools.connect()
         return tools
 
@@ -263,10 +263,10 @@ class RunToolsMiddleware(AgentMiddleware):
         # In a node of its own: a person asked to grant a connection resumes this node
         # alone, not the model call, whose outer wrappers, such as summarization, would
         # do their work again.
-        await self._toolsets.load()
+        await self._toolsets.load(state)
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
-        tools = await self._toolsets.load()
+        tools = await self._toolsets.load(request.state)
         if self._subagent is None:
             hidden = tools.hidden
             own = tools.offered
@@ -305,7 +305,7 @@ class RunToolsMiddleware(AgentMiddleware):
         self, request: ToolCallRequest, handler: ToolHandler
     ) -> ToolMessage | Command:
         name = request.tool_call["name"]
-        tools = await self._toolsets.ready()
+        tools = await self._toolsets.ready(request.state)
         if name in tools.disabled:
             return ToolMessage(
                 content=f"Error: `{name}` is not available in this run.",
@@ -317,7 +317,7 @@ class RunToolsMiddleware(AgentMiddleware):
             tool = tools.by_name.get(name)
             if tool is None and tools.catalog.mcp_servers:
                 # A resumed run's call of an MCP server's tool, before any model call.
-                tool = (await self._toolsets.load()).by_name.get(name)
+                tool = (await self._toolsets.load(request.state)).by_name.get(name)
             # Only a name the backend knows: any other gets the tool node's own answer
             # for a tool that is not there, which the run recovers from.
             if (
@@ -342,7 +342,7 @@ class RunSubagentMiddleware(AgentMiddleware):
         self._name = name
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
-        tools = await self._toolsets.ready()
+        tools = await self._toolsets.ready(request.state)
         spec = tools.subagents.get(self._name)
         if spec is not None and request.system_message is not None:
             text = request.system_message.text.replace(
@@ -429,11 +429,11 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
     def _ptc_tools_by_slot(self, _cache: object) -> None:
         """The interpreter keeps one cache for every run; each run keeps its own."""
 
-    async def _runs_code(self) -> bool:
-        return self._active(await self._toolsets.ready())
+    async def _runs_code(self, state: Mapping[str, object] | None = None) -> bool:
+        return self._active(await self._toolsets.ready(state))
 
     async def abefore_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
-        if not await self._runs_code():
+        if not await self._runs_code(state):
             return None
         update = self._slot_update_for_runtime()
         # Each run evals on a slot of its own. QuickJS keeps a bounded number of warm slots
@@ -443,7 +443,7 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         return {**update, **(restored or {})} or None
 
     async def abefore_model(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
-        if not self._listed_in_messages or not await self._runs_code():
+        if not self._listed_in_messages or not await self._runs_code(state):
             return None
         listing = self._listing().text
         if not listing or listing == latest_with_id(visible_messages(state), _CODE_TOOLS):
@@ -475,7 +475,7 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         return cached
 
     async def awrap_model_call(self, request: ModelRequest, handler: ModelHandler) -> ModelResponse:
-        if not await self._runs_code():
+        if not await self._runs_code(request.state):
             tools = [tool for tool in request.tools if getattr(tool, "name", None) != _EVAL_TOOL]
             return await handler(request.override(tools=tools))
         if not self._listed_in_messages:
@@ -492,7 +492,7 @@ class RunCodeInterpreter(CodeInterpreterMiddleware):
         )
 
     async def aafter_agent(self, state: REPLState, runtime: Runtime) -> dict[str, object] | None:
-        if not await self._runs_code():
+        if not await self._runs_code(state):
             return None
         return await super().aafter_agent(state, runtime)
 

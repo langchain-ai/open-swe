@@ -53,7 +53,6 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
-    HumanMessage,
     ToolCall,
     ToolMessage,
     messages_from_dict,
@@ -432,11 +431,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         binds_later = self._binds_later
         if self._backend.awaiting_adoption:
             # A worker never acts on its grant: it has no identity until it adopts one.
-            thread_id = _RunConfigurable.model_validate(get_config().get("configurable", {}))
-            assignment = next(
-                (m.text for m in state["messages"] if isinstance(m, HumanMessage)), ""
-            )
-            await self._backend.adopt(thread_id.thread_id, run_id(), assignment)
+            await self._ensure_adopted(state)
             trace.update(self._trace_metadata())
         for read in self._read_ahead:
             read()
@@ -557,8 +552,14 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         async with trace("sandbox.open", run_type="chain"):
             return await self._open_sandbox(runtime)
 
+    async def _ensure_adopted(self, state: Mapping[str, object]) -> None:
+        """Adopt a launched worker's run token before acting on any hook, including after a drain."""
+        if self._backend.awaiting_adoption:
+            await self._backend.run.adopt_current(run_id(), state=state)
+
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:
+        await self._ensure_adopted(state)
         self._backend.outbox.adopt(state)
         if self._loop.rules.offload_conversation:
             return self._carrying(state, await self._offload(state, runtime))
@@ -624,6 +625,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse | ExtendedModelResponse:
+        await self._ensure_adopted(request.state)
         with self._labeled():
             response = await self._call_model(request, handler)
         # The reply's report rides with the reply into the run's checkpoint.
@@ -639,6 +641,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        await self._ensure_adopted(request.state)
         with self._labeled():
             result = await handler(request)
         # The call's reports, and its subagent's, ride with its result into the checkpoint.
@@ -748,6 +751,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
 
     @hook_config(can_jump_to=["model", "end"])
     async def aafter_model(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        await self._ensure_adopted(state)
         self._backend.outbox.adopt(state)
         return self._carrying(state, await self._after_model(state))
 
@@ -759,6 +763,7 @@ class BackendRunMiddleware(AgentMiddleware[RunState]):
         return _apply(await self._loop.after_model(state))
 
     async def aafter_agent(self, state: RunState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002
+        await self._ensure_adopted(state)
         self._backend.outbox.adopt(state)
         # What the backend has not taken by now waits in the thread's state for its next run.
         return self._carrying(state, await self._after_agent(state))

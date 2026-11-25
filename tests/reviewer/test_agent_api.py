@@ -1823,6 +1823,18 @@ async def test_an_adopted_worker_acts_as_its_own_thread_never_its_coordinator(
     assert adopted.settings == RunSettings(draft_prs=True)
     register.assert_awaited_once_with("actor", "call-1", "worker", "Fix it")
 
+    # Re-adopting after a drain preserves invocation_id and allows empty instructions.
+    resumed = await async_workers.adopt(
+        grant, Adopt(thread_id="worker", run_id="run-1", invocation_id="inv-1")
+    )
+    assert resumed.invocation_id == "inv-1"
+    assert verify_runtime_token(resumed.run_token).configurable["invocation_id"] == "inv-1"
+    assert register.await_args_list[-1].args == ("actor", "call-1", "worker", "")
+
+    # Even a config-only resume (no invocation_id in request) derives the same invocation_id.
+    config_only = await async_workers.adopt(grant, Adopt(thread_id="worker", run_id="run-1"))
+    assert config_only.invocation_id == reply.invocation_id
+
 
 async def test_a_replayed_launch_reports_the_worker_it_registered_and_stops_the_other(
     monkeypatch: pytest.MonkeyPatch,

@@ -2946,6 +2946,7 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
                 "thread_id": "worker-thread",
                 "run_id": "worker-run",
                 "instructions": "Fix login",
+                "invocation_id": None,
             }
             adopted = {
                 "run_token": "worker-token",
@@ -2979,6 +2980,141 @@ async def test_a_launched_worker_adopts_its_own_run_token_before_anything_runs(
     assert all(bearer == "Bearer worker-token" for _, bearer in seen[1:])
     # Its replies are stamped with its own invocation, which its usage counts them by.
     assert backend.invocation_id == "worker-invocation"
+
+
+async def test_a_resumed_worker_readopts_without_before_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from langchain_core.runnables.config import var_child_runnable_config
+    from langgraph.prebuilt.tool_node import ToolCallRequest
+    from rt.file_tools import FileToolsMiddleware
+    from rt.run_tools import RunToolsets
+    from runtime_api.catalog import ToolSpec
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.middleware.run_id", lambda: "worker-run")
+    request = httpx2.Request("POST", "https://backend.invalid")
+    seen: list[tuple[str, str, dict[str, object]]] = []
+    worker_tool = ToolSpec(name="ping", description="Ping", parameters={"type": "object"})
+
+    async def post(
+        url: str, *, headers: dict[str, str], json: dict[str, object], **kwargs: object
+    ) -> httpx2.Response:
+        hook = url.rsplit("/", 1)[-1]
+        seen.append((hook, headers["Authorization"], json))
+        if hook == "adopt":
+            adopted = {
+                "run_token": "worker-token",
+                "catalog": Catalog(operations=[worker_tool], inbox=_INBOX).model_dump(mode="json"),
+                "invocation_id": json["invocation_id"],
+            }
+            return httpx2.Response(200, request=request, json=adopted)
+        if hook == "inbox":
+            return httpx2.Response(200, request=request, json={})
+        return httpx2.Response(403, request=request, json={"detail": "unexpected"})
+
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(side_effect=post)
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+
+    coordinator_catalog = Catalog(operations=[worker_tool], inbox=_INBOX).names_only()
+    backend = _run_backend(None, worker_grant="worker-grant", catalog=coordinator_catalog)
+    middleware = BackendRunMiddleware(backend)
+    toolsets = RunToolsets(backend, FileToolsMiddleware(backend, 300))
+    state: RunState = {
+        "messages": [HumanMessage(content="Fix login")],
+        "open_swe_prepared_for": "worker-invocation",
+    }
+    tool_request = ToolCallRequest(
+        tool_call={"name": "ping", "args": {}, "id": "call-1", "type": "tool_call"},
+        tool=None,
+        state=state,
+        runtime=MagicMock(),
+    )
+
+    async def run_tool(_req: ToolCallRequest) -> ToolMessage:
+        tools = await toolsets.ready()
+        assert "ping" in tools.by_name
+        return ToolMessage(content="ok", tool_call_id="call-1", name="ping")
+
+    token = var_child_runnable_config.set(
+        {"configurable": {"thread_id": "worker-thread", "run_id": "worker-run"}}
+    )
+    try:
+        # Parallel tool calls on a resumed worker adopt once, then inbox uses the adopted token.
+        await asyncio.gather(
+            middleware.awrap_tool_call(tool_request, run_tool),
+            middleware.awrap_tool_call(tool_request, run_tool),
+        )
+        await middleware.abefore_model(state, MagicMock())
+    finally:
+        var_child_runnable_config.reset(token)
+
+    assert [(hook, bearer) for hook, bearer, _ in seen] == [
+        ("adopt", "Bearer worker-grant"),
+        ("inbox", "Bearer worker-token"),
+    ]
+    assert seen[0][2]["invocation_id"] == "worker-invocation"
+    assert backend.invocation_id == "worker-invocation"
+
+
+async def test_a_resumed_worker_preserves_invocation_when_inner_middleware_runs_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import cast
+
+    from langchain_core.runnables.config import var_child_runnable_config
+    from langchain_quickjs.middleware import REPLState
+    from rt.file_tools import FileToolsMiddleware
+    from rt.run_tools import RunCodeInterpreter, RunToolsets, RunToolsMiddleware
+    from runtime_api.catalog import ToolSpec
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    request = httpx2.Request("POST", "https://backend.invalid")
+    worker_tool = ToolSpec(name="ping", description="Ping", parameters={"type": "object"})
+    coordinator_catalog = Catalog(operations=[worker_tool]).names_only()
+    seen: list[dict[str, object]] = []
+
+    async def post(
+        url: str, *, headers: dict[str, str], json: dict[str, object], **kwargs: object
+    ) -> httpx2.Response:
+        assert url.rsplit("/", 1)[-1] == "adopt"
+        assert headers["Authorization"] == "Bearer worker-grant"
+        seen.append(json)
+        adopted = {
+            "run_token": "worker-token",
+            "catalog": Catalog(operations=[worker_tool]).model_dump(mode="json"),
+            "invocation_id": json["invocation_id"],
+        }
+        return httpx2.Response(200, request=request, json=adopted)
+
+    client = MagicMock(is_closed=False)
+    client.post = AsyncMock(side_effect=post)
+    monkeypatch.setattr("rt.backend.httpx2.AsyncClient", lambda **kwargs: client)
+
+    state: RunState = {
+        "messages": [HumanMessage(content="Fix login")],
+        "open_swe_prepared_for": "worker-invocation",
+    }
+    token = var_child_runnable_config.set(
+        {"configurable": {"thread_id": "worker-thread", "run_id": "worker-run"}}
+    )
+    try:
+        tools_backend = _run_backend(None, worker_grant="worker-grant", catalog=coordinator_catalog)
+        tools_sets = RunToolsets(tools_backend, FileToolsMiddleware(tools_backend, 300))
+        await RunToolsMiddleware(tools_sets).abefore_model(state, MagicMock())
+
+        code_backend = _run_backend(None, worker_grant="worker-grant", catalog=coordinator_catalog)
+        code_sets = RunToolsets(code_backend, FileToolsMiddleware(code_backend, 300))
+        await RunCodeInterpreter(code_sets, active=lambda _tools: False).aafter_agent(
+            cast(REPLState, state), MagicMock()
+        )
+    finally:
+        var_child_runnable_config.reset(token)
+
+    assert [body["invocation_id"] for body in seen] == ["worker-invocation", "worker-invocation"]
+    assert tools_backend.invocation_id == "worker-invocation"
+    assert code_backend.invocation_id == "worker-invocation"
 
 
 @pytest.mark.parametrize(

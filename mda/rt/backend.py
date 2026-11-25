@@ -33,6 +33,7 @@ from langchain_core.messages import (
     add_notification_metadata,
     messages_to_dict,
 )
+from langgraph.config import get_config
 from langgraph.runtime import get_runtime
 from pydantic import (
     BaseModel,
@@ -295,6 +296,7 @@ class Run:
         # Jev's answers about the run's request, for its trace, once the classifier ran.
         self.classified: dict[str, str] = {}
         self._locals: dict[object, object] = {}
+        self._adopting = asyncio.Lock()
 
     def tool_finished(self, report: ToolCallReport, result: ToolMessage) -> None:
         """Tell the backend how a tool call the run made ended, and count it on its trace.
@@ -329,17 +331,26 @@ class Run:
         """A launched worker that has not yet traded its grant for a run token of its own."""
         return self._token is None and self._worker_grant is not None
 
-    async def load_tool_specs(self, run_id: str | None) -> None:
+    async def load_tool_specs(
+        self, run_id: str | None, *, state: Mapping[str, object] | None = None
+    ) -> None:
         """Read the specs of the tools its catalog names, once: its context names them only.
 
-        A worker that has yet to adopt reads none; its own catalog comes with its run token.
+        A launched worker adopts its own run token and catalog first; an adopted catalog
+        already carries its specs unless the backend sent names only.
         """
-        planned = self.planned
-        if not planned.needs_tool_specs or self._token is None:
+        if self.awaiting_adoption:
+            await self.adopt_current(run_id, state=state)
+        catalog = self.catalog
+        if not catalog.needs_tool_specs or self._token is None:
             return
-        names = ToolNames(run_id=run_id, names=planned.tool_names)
+        names = ToolNames(run_id=run_id, names=catalog.tool_names)
         listed = await call(self.backend, TOOL_SPECS, names)
-        self._planned = planned.model_copy(update={"operations": listed.tools})
+        updated = catalog.model_copy(update={"operations": listed.tools})
+        if self.adopted is not None:
+            self.adopted = updated
+        else:
+            self._planned = updated
 
     @property
     def planned(self) -> Catalog:
@@ -372,18 +383,57 @@ class Run:
         """Who commits in the run's sandbox: its thread's owner, or the bot."""
         return self.sandbox.git_identity
 
-    async def adopt(self, thread_id: str, run_id: str | None, instructions: str) -> None:
+    async def adopt(
+        self,
+        thread_id: str,
+        run_id: str | None,
+        instructions: str,
+        *,
+        invocation_id: str | None = None,
+    ) -> None:
         """Become this worker thread's run: every later call, tools included, acts as it."""
-        adopted = await call(
-            self.backend,
-            ADOPT,
-            Adopt(thread_id=thread_id, run_id=run_id, instructions=instructions),
+        async with self._adopting:
+            if not self.awaiting_adoption:
+                return
+            adopted = await call(
+                self.backend,
+                ADOPT,
+                Adopt(
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    instructions=instructions,
+                    invocation_id=invocation_id,
+                ),
+            )
+            self._token, self._worker_grant = adopted.run_token, None
+            self.invocation_id = adopted.invocation_id
+            self.adopted = self._kind.applied(adopted.catalog)
+            # Resolved under the coordinator's grants.
+            self.backend_tools.clear()
+
+    async def adopt_current(
+        self, run_id: str | None = None, *, state: Mapping[str, object] | None = None
+    ) -> None:
+        """Adopt this worker from LangGraph config and optional state when resuming past ``abefore_agent``."""
+        if not self.awaiting_adoption:
+            return
+        config = get_config()
+        configurable = config.get("configurable") or {}
+        thread_id = configurable.get("thread_id")
+        if not isinstance(thread_id, str) or not thread_id:
+            raise BackendCallError("Cannot adopt a task worker without a thread_id")
+        if run_id is None:
+            raw = configurable.get("run_id") or config.get("metadata", {}).get("run_id")
+            run_id = str(raw) if raw else None
+        messages = state.get("messages") if state is not None else None
+        instructions = (
+            next((m.text for m in messages if isinstance(m, HumanMessage)), "")
+            if isinstance(messages, Sequence)
+            else ""
         )
-        self._token, self._worker_grant = adopted.run_token, None
-        self.invocation_id = adopted.invocation_id
-        self.adopted = self._kind.applied(adopted.catalog)
-        # Resolved under the coordinator's grants.
-        self.backend_tools.clear()
+        prepared_for = state.get("open_swe_prepared_for") if state is not None else None
+        invocation_id = prepared_for if isinstance(prepared_for, str) and prepared_for else None
+        await self.adopt(thread_id, run_id, instructions, invocation_id=invocation_id)
 
     def grant(self, name: str) -> str | None:
         """The grant to call operation ``name`` with: an adopted worker's own, not its coordinator's."""
@@ -474,8 +524,15 @@ class OpenSweBackend:
     def awaiting_adoption(self) -> bool:
         return self.run.awaiting_adoption
 
-    async def adopt(self, thread_id: str, run_id: str | None, instructions: str) -> None:
-        await self.run.adopt(thread_id, run_id, instructions)
+    async def adopt(
+        self,
+        thread_id: str,
+        run_id: str | None,
+        instructions: str,
+        *,
+        invocation_id: str | None = None,
+    ) -> None:
+        await self.run.adopt(thread_id, run_id, instructions, invocation_id=invocation_id)
 
     async def post(
         self,
@@ -504,6 +561,8 @@ class OpenSweBackend:
     ) -> JsonValue:
         """POST as this run, its spans nested under ``trace``, by default the running call's span."""
         label = path.rsplit("/", 1)[-1]
+        if path != ADOPT.path and self.run.awaiting_adoption:
+            await self.run.adopt_current()
         bearer = self.run.bearer
         if bearer is None:
             raise BackendCallError("This run carries no Robin run token; start it through Robin")
