@@ -38,7 +38,11 @@ import type {
 } from "@/features/agents/lib/api"
 import { CreateProjectDialog } from "@/features/projects/components/CreateProjectDialog"
 import { ProjectFolderMenu } from "@/features/projects/components/ProjectFolderMenu"
-import { type Project, useProjects } from "@/features/projects/lib/projects"
+import {
+  type Project,
+  threadProject,
+  useProjects,
+} from "@/features/projects/lib/projects"
 import type { AgentThread } from "@/features/agents/lib/types"
 import type {
   SidebarRepoGroup,
@@ -313,22 +317,9 @@ export function AgentsSidebar({
     loadedThreads: [...pinnedThreads, ...pageThreads],
     enabled: true,
   })
-  // Filed as the server files it: the thread's own project, else the project
-  // its repository is bound to, as long as the viewer is in that project.
-  const projectIds = new Set(projects.map((project) => project.id))
-  const projectOfRepo = new Map(
-    projects.flatMap((project) =>
-      project.repo_full_name
-        ? [[project.repo_full_name.toLowerCase(), project.id] as const]
-        : []
-    )
-  )
   const activeProjectId =
     repoMode && activeThread
-      ? activeThread.projectId && projectIds.has(activeThread.projectId)
-        ? activeThread.projectId
-        : (projectOfRepo.get(activeThread.repoFullName.trim().toLowerCase()) ??
-          null)
+      ? (threadProject(projects, activeThread)?.id ?? null)
       : null
   const activeInRepo = Boolean(
     repoMode && (activeProjectId || activeThread?.repoFullName.trim())
@@ -364,9 +355,7 @@ export function AgentsSidebar({
     ...serverRepos,
     ...[...recentThreads, ...(activeThread ? [activeThread] : [])].flatMap(
       (thread) =>
-        thread.repoFullName.trim() &&
-        !projectIds.has(thread.projectId ?? "") &&
-        !projectOfRepo.has(thread.repoFullName.toLowerCase())
+        thread.repoFullName.trim() && !threadProject(projects, thread)
           ? [
               {
                 repoFullName: thread.repoFullName,
@@ -414,9 +403,7 @@ export function AgentsSidebar({
   const recents = repoMode ? recentItems : sortSidebarThreads(recentItems)
   const groupOf = new Map(
     recents.map((item) => {
-      const projectId = projectIds.has(item.thread.projectId ?? "")
-        ? item.thread.projectId
-        : projectOfRepo.get(item.thread.repoFullName.toLowerCase())
+      const projectId = threadProject(projects, item.thread)?.id
       return [
         item.id,
         projectId

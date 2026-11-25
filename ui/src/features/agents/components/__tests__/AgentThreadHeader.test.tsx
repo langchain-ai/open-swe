@@ -13,16 +13,23 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import type { AgentThread } from "@/features/agents/lib/types"
+import type { Project } from "@/features/projects/lib/projects"
 
 import { toast } from "sonner"
 
-const { shareThread, useSidebarPinnedThreads, useSidebarRepos } = vi.hoisted(
-  () => ({
+const { shareThread, useSidebarPinnedThreads, useSidebarRepos, useProjects } =
+  vi.hoisted(() => ({
     shareThread: vi.fn(),
     useSidebarPinnedThreads: vi.fn(() => ({ data: [] })),
     useSidebarRepos: vi.fn(() => ({ data: [] })),
-  })
-)
+    useProjects: vi.fn(() => ({ projects: [] as Array<Project> })),
+  }))
+vi.mock("@/features/projects/lib/projects", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/features/projects/lib/projects")
+  >()),
+  useProjects,
+}))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock("@/lib/session", () => ({
   useSession: () => ({ data: { login: "owner" } }),
@@ -50,6 +57,7 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   vi.clearAllMocks()
+  useProjects.mockReturnValue({ projects: [] })
 })
 
 describe("AgentThreadHeader", () => {
@@ -254,5 +262,34 @@ describe("AgentThreadHeader", () => {
       enabled: true,
       refetchOnMount: false,
     })
+  })
+
+  it("leads the title with the project its repository is bound to", () => {
+    useProjects.mockReturnValue({
+      projects: [
+        {
+          id: "project-1",
+          name: "Robin",
+          repo_full_name: "langchain-ai/langchainplus",
+        } as Project,
+      ],
+    })
+    render(
+      <TooltipProvider>
+        <AgentThreadHeader
+          panelCollapsed={false}
+          thread={
+            {
+              id: "thread-1",
+              title,
+              repo: "langchainplus",
+              repoFullName: "langchain-ai/langchainplus",
+            } as AgentThread
+          }
+        />
+      </TooltipProvider>
+    )
+    expect(screen.getByRole("button", { name: "Project: Robin" })).toBeTruthy()
+    expect(screen.getByText("Robin")).toBeTruthy()
   })
 })

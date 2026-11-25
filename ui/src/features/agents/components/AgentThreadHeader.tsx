@@ -38,18 +38,23 @@ import {
   useSidebarPinnedThreads,
   useSidebarRepos,
 } from "@/features/agents/lib/queries"
+import { threadProject, useProjects } from "@/features/projects/lib/projects"
 import { copyPageLink } from "@/features/reviews/lib/copyText"
 import type { ThreadVisibility } from "@/lib/api"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
 
-function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
-  const [open, setOpen] = useState(false)
+/** The folder the sidebar files the thread under: its project, else its repository. */
+function useThreadFolder(thread?: AgentThread) {
   const { prefs } = useSidebarPrefs()
   const cloudRepos = useSidebarRepos({
     ...prefs.filters,
     enabled: false,
   })
+  const { projects } = useProjects()
+  if (!thread) return undefined
+  const project = threadProject(projects, thread)
+  if (project) return { kind: "Project", name: project.name }
   const repo = thread.repoFullName.trim()
   const repoName =
     cloudRepos.data?.find(
@@ -57,17 +62,20 @@ function ThreadRepoIndicator({ thread }: { thread: AgentThread }) {
         !candidate.projectId &&
         candidate.repoFullName?.toLowerCase() === repo.toLowerCase()
     )?.name ?? (repo ? thread.repo || repo : undefined)
-  if (!repoName) return null
+  return repoName ? { kind: "Repository", name: repoName } : undefined
+}
 
+function ThreadFolderIcon({ kind, name }: { kind: string; name: string }) {
+  const [open, setOpen] = useState(false)
   return (
-    <Tooltip title={repoName} side="bottom" open={open} onOpenChange={setOpen}>
+    <Tooltip title={name} side="bottom" open={open} onOpenChange={setOpen}>
       <IconButton
         color="secondary"
         variant="plain"
         size="sm"
         icon={FolderIcon}
         iconWeight="regular"
-        label={`Repository: ${repoName}`}
+        label={`${kind}: ${name}`}
         tooltipProps={{ disabled: true }}
         className="size-7 shrink-0"
         type="button"
@@ -109,6 +117,7 @@ export function AgentThreadHeader({
 }) {
   const shownThread = thread ?? startingThread
   const title = shownThread?.title
+  const folder = useThreadFolder(shownThread)
   const sidebarCollapsed = useSidebarCollapsed()
   const isDesktop =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
@@ -232,7 +241,7 @@ export function AgentThreadHeader({
     >
       <div
         className={cn(
-          "flex h-full w-full items-center gap-space-3 px-space-4",
+          "@container flex h-full w-full items-center gap-space-3 px-space-4",
           sidebarCollapsed && (isDesktop ? "pl-48" : "pl-space-8"),
           panelCollapsed && "pr-space-8"
         )}
@@ -240,62 +249,91 @@ export function AgentThreadHeader({
         {!title && loading && <Skeleton className="ml-space-2 h-4 w-40" />}
         {title && (
           <div className="flex min-w-0 items-center gap-space-1 text-sm font-medium">
-            {shownThread && <ThreadRepoIndicator thread={shownThread} />}
-            {draft !== null ? (
-              <div className="min-w-0" style={{ width: editorWidth }}>
-                <Input
+            {folder && <ThreadFolderIcon {...folder} />}
+            {/* The folder leads the title as a breadcrumb, or sits above it
+                where the header is too narrow for both on one line. */}
+            <div
+              className={cn(
+                "flex min-w-0 items-center",
+                folder &&
+                  draft === null &&
+                  "flex-col items-start @xl:flex-row @xl:items-center"
+              )}
+            >
+              {folder && draft === null && (
+                <span
+                  aria-hidden="true"
+                  title={folder.name}
+                  className="flex max-w-full min-w-0 shrink-[2] cursor-default items-center gap-space-2 px-space-2 text-xs leading-4 text-tertiary select-none @xl:max-w-60 @xl:pr-space-1 @xl:text-sm @xl:leading-normal"
+                >
+                  <span className="truncate">{folder.name}</span>
+                  <span className="hidden font-normal text-quaternary @xl:inline">
+                    /
+                  </span>
+                </span>
+              )}
+              {draft !== null ? (
+                <div className="min-w-0" style={{ width: editorWidth }}>
+                  <Input
+                    size="md"
+                    debounceMs={0}
+                    autoFocus
+                    onFocus={(event) => event.currentTarget.select()}
+                    aria-label="Thread title"
+                    data-no-drag=""
+                    className="min-w-0"
+                    inputContainerClassName="bg-surface-level-2 border-strong/70 [&:hover:not(:focus-within)]:border-strong"
+                    value={draft}
+                    onChange={setDraft}
+                    onBlur={() => void saveTitle()}
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing) return
+                      if (event.key === "Enter") {
+                        event.preventDefault()
+                        void saveTitle()
+                      } else if (event.key === "Escape") {
+                        event.preventDefault()
+                        editingRef.current = false
+                        setDraft(null)
+                      }
+                    }}
+                  />
+                </div>
+              ) : onRename ? (
+                <Button
+                  color="secondary"
+                  variant="plain"
                   size="md"
-                  debounceMs={0}
-                  autoFocus
-                  onFocus={(event) => event.currentTarget.select()}
-                  aria-label="Thread title"
+                  type="button"
+                  aria-label="Rename thread"
+                  ref={titleButtonRef}
+                  aria-busy={savingTitle !== null}
+                  disabled={savingTitle !== null}
+                  title={savingTitle ?? title}
                   data-no-drag=""
-                  className="min-w-0"
-                  inputContainerClassName="bg-surface-level-2 border-strong/70 [&:hover:not(:focus-within)]:border-strong"
-                  value={draft}
-                  onChange={setDraft}
-                  onBlur={() => void saveTitle()}
-                  onKeyDown={(event) => {
-                    if (event.nativeEvent.isComposing) return
-                    if (event.key === "Enter") {
-                      event.preventDefault()
-                      void saveTitle()
-                    } else if (event.key === "Escape") {
-                      event.preventDefault()
-                      editingRef.current = false
-                      setDraft(null)
-                    }
-                  }}
-                />
-              </div>
-            ) : onRename ? (
-              <Button
-                color="secondary"
-                variant="plain"
-                size="md"
-                type="button"
-                aria-label="Rename thread"
-                ref={titleButtonRef}
-                aria-busy={savingTitle !== null}
-                disabled={savingTitle !== null}
-                title={savingTitle ?? title}
-                data-no-drag=""
-                className="h-auto min-w-0 shrink justify-start truncate px-space-2 py-space-1 text-left text-inherit hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:bg-transparent"
-                onClick={startRename}
-              >
-                <span className="truncate">{savingTitle ?? title}</span>
-              </Button>
-            ) : (
-              // Boxed and set like the rename button (Macaw's `Button` tightens
-              // tracking and leading), so the title reads the same once the
-              // thread can be renamed.
-              <span
-                className="min-w-0 truncate border border-transparent px-space-2 py-space-1 leading-[1.15] tracking-tighter"
-                title={title}
-              >
-                {title}
-              </span>
-            )}
+                  className={cn(
+                    "h-auto max-w-full min-w-0 shrink justify-start truncate px-space-2 py-space-1 text-left text-inherit hover:bg-surface-level-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:bg-transparent",
+                    folder && "@max-xl:py-0"
+                  )}
+                  onClick={startRename}
+                >
+                  <span className="truncate">{savingTitle ?? title}</span>
+                </Button>
+              ) : (
+                // Boxed and set like the rename button (Macaw's `Button` tightens
+                // tracking and leading), so the title reads the same once the
+                // thread can be renamed.
+                <span
+                  className={cn(
+                    "max-w-full min-w-0 truncate border border-transparent px-space-2 py-space-1 leading-[1.15] tracking-tighter",
+                    folder && "@max-xl:py-0"
+                  )}
+                  title={title}
+                >
+                  {title}
+                </span>
+              )}
+            </div>
             {thread && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

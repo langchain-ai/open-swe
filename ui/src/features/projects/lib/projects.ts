@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { agentsRequest } from "@/features/agents/lib/api"
 import { invalidateAgentThreadLists } from "@/features/agents/lib/queries"
+import type { AgentThread } from "@/features/agents/lib/types"
 
 export type ProjectRole = "owner" | "member"
 
@@ -70,6 +71,25 @@ export function useProjects({ enabled = true } = {}) {
     enabled,
   })
   return { projects: query.data ?? NO_PROJECTS, isPending: query.isPending }
+}
+
+/**
+ * The project a thread is filed under, as the server files it: the thread's own
+ * project, else the project its repository is bound to, among the viewer's.
+ */
+export function threadProject(
+  projects: Array<Project>,
+  thread: Pick<AgentThread, "projectId" | "repoFullName">
+): Project | undefined {
+  const repo = thread.repoFullName.trim().toLowerCase()
+  return (
+    projects.find((project) => project.id === thread.projectId) ??
+    (repo
+      ? projects.find(
+          (project) => project.repo_full_name?.toLowerCase() === repo
+        )
+      : undefined)
+  )
 }
 
 /**
