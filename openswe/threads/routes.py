@@ -762,6 +762,7 @@ async def api_cancel_thread_run(
     wait: str = "0",
     action: str = "interrupt",
     reason: str | None = None,
+    pending_only: bool = False,
 ) -> Response:
     status_code, content, media_type = await proxy_dashboard_thread_run_cancel(
         thread_id,
@@ -771,6 +772,7 @@ async def api_cancel_thread_run(
         action=action,
         reason=reason,
         email=session.get("email"),
+        pending_only=pending_only,
     )
     if status_code < 400:
         await interrupt_transcript_turns(thread_id, [run_id])

@@ -1394,14 +1394,24 @@ async def test_proxy_commands_steers_into_the_open_turn_or_waits_for_an_ending_r
         handled.append(("queue", None))
         return SentRun(run_id="run-2", queued=True)
 
+    mentioned_as: list[str] = []
     patch_thread_module(monkeypatch, "langgraph_client", lambda: BusyClient())
     monkeypatch.setattr(thread_proxy, "steer_target", fake_steer_target)
     monkeypatch.setattr(thread_proxy, "steer_running_thread", fake_steer)
     monkeypatch.setattr(thread_proxy, "queue_follow_up_run", fake_queue)
+    monkeypatch.setattr(
+        thread_proxy.ThreadMentions,
+        "dispatch",
+        lambda self: mentioned_as.append(self.message_id),
+    )
 
+    # Steering with a queued message keeps the identity its mentions were notified under.
     command = {
         "method": "run.start",
-        "params": {"input": {"messages": [{"role": "user", "content": "and this", "id": "m1"}]}},
+        "params": {
+            "input": {"messages": [{"role": "user", "content": "and this", "id": "m1"}]},
+            "config": {"configurable": {"promoted_message_id": "queued-1"}},
+        },
     }
     status_code, _, _ = await thread_proxy.proxy_dashboard_thread_commands(
         "tid", "owner", json.dumps(command).encode()
@@ -1409,6 +1419,7 @@ async def test_proxy_commands_steers_into_the_open_turn_or_waits_for_an_ending_r
 
     assert status_code == 200
     assert handled == ([("steer", turn)] if open_turn else [("queue", None)])
+    assert mentioned_as == ["queued-1"]
 
 
 async def test_run_cancel_lets_only_the_sender_withdraw_a_queued_follow_up(monkeypatch) -> None:
@@ -1433,6 +1444,13 @@ async def test_run_cancel_lets_only_the_sender_withdraw_a_queued_follow_up(monke
         await thread_proxy.proxy_dashboard_thread_run_cancel("tid", "run-2", "teammate")
     assert exc_info.value.status_code == 403
     assert "sender" in exc_info.value.detail
+
+    # Steer now withdraws it only before it starts, never interrupting a started one.
+    with pytest.raises(HTTPException) as exc_info:
+        await thread_proxy.proxy_dashboard_thread_run_cancel(
+            "tid", "run-2", "sender", pending_only=True
+        )
+    assert exc_info.value.status_code == 409
 
 
 async def _read_thread_state(

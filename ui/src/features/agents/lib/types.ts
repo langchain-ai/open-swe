@@ -394,6 +394,8 @@ export interface QueuedThreadMessage {
   pending?: boolean
   /** False when someone else sent it: only its sender may send it now or cancel it. */
   mine?: boolean
+  /** Being taken out of the queue to steer the live run. */
+  steering?: boolean
   /** Held in the thread's queue for the agent's next model call, with no run of its own. */
   waitsForAgent?: boolean
   sender?: string | null

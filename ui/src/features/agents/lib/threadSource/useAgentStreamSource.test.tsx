@@ -85,6 +85,20 @@ it("drops after a stop only the queued runs the server no longer holds", async (
   expect(queue.cancel.mock.calls).toEqual([["mine"], ["report"]])
 })
 
+it("forgets only the withdrawn entry, even beside one still waiting for its run", async () => {
+  queue.entries = [
+    { id: "steered", runId: "run-1", createdAt: new Date(2_000) },
+    { id: "sending", createdAt: new Date(3_000) },
+  ]
+  queue.cancel.mockRejectedValue(new Error("run not found"))
+  const { result } = renderHook(() => useAgentStreamSource("thread-1"))
+
+  await result.current.forgetQueued("steered")
+
+  expect(queue.cancel.mock.calls).toEqual([["steered"]])
+  expect(listRuns).not.toHaveBeenCalled()
+})
+
 it("drops only the viewer's own queued runs after a stop when the runs can't be listed", async () => {
   const message = (id: string, sender?: string) => ({
     id,

@@ -95,6 +95,11 @@ export interface StreamThreadSource extends ThreadSourceShared {
    * people queued, so a plain drop of every entry would cancel theirs.
    */
   settleQueue: () => Promise<void>
+  /**
+   * Drops one entry, by `queued[].turnId`, whose run the server has already
+   * withdrawn, leaving every other entry alone.
+   */
+  forgetQueued: (id: string) => Promise<void>
 }
 
 /** The thread is served by the append-only transcript event log. */

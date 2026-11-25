@@ -14,6 +14,9 @@ from openswe.utils.dashboard_handoff import RELAYED_FROM_KEY
 
 MultitaskStrategy = Literal["reject", "interrupt", "rollback", "enqueue"]
 
+# The client's configurable key naming the queued message a steer sends again.
+PROMOTED_MESSAGE_KEY = "promoted_message_id"
+
 
 class RunRefused(HTTPException):
     """A run its thread, or the thread's runtime, would not start.
@@ -109,6 +112,12 @@ class StartRequest:
             if (value := params.get(key)) is not None:
                 command[key] = value
         return cls(command=command)
+
+    @property
+    def promoted_message_id(self) -> str | None:
+        """The queued message this send steers with, whose mentions were notified as it queued."""
+        promoted = self.configurable.get(PROMOTED_MESSAGE_KEY)
+        return promoted if isinstance(promoted, str) and promoted else None
 
     def as_command(self, *, relayed_from: str | None = None) -> dict[str, JsonValue]:
         """The run as the steps that build it read it: a ``run.start`` command, naming the

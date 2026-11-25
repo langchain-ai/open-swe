@@ -293,6 +293,47 @@ describe("Messages", () => {
     expect(queued.querySelector("example")).toBeNull()
   })
 
+  it("steers only the person's own acknowledged queued messages", () => {
+    const onSteer = vi.fn()
+    render(
+      <Messages
+        messages={[]}
+        isStreaming
+        onRemoveQueuedMessage={vi.fn()}
+        onSteerQueuedMessage={onSteer}
+        queuedMessages={[
+          { id: "mine", content: "Add tests too", createdAt: 1, mine: true },
+          {
+            id: "sending",
+            content: "Still sending",
+            createdAt: 2,
+            pending: true,
+          },
+          { id: "theirs", content: "Bob's", createdAt: 3, mine: false },
+          {
+            id: "inbox",
+            content: "For the agent",
+            createdAt: 4,
+            waitsForAgent: true,
+          },
+        ]}
+      />,
+      { wrapper }
+    )
+
+    const steer = (text: string) =>
+      screen
+        .getAllByTestId("queued-message")
+        .find((row) => row.textContent?.includes(text))
+        ?.querySelector<HTMLButtonElement>('[aria-label="Steer now"]')
+    expect(steer("Still sending")?.disabled).toBe(true)
+    expect(steer("Bob's")).toBeNull()
+    expect(steer("For the agent")).toBeNull()
+
+    fireEvent.click(steer("Add tests too")!)
+    expect(onSteer).toHaveBeenCalledExactlyOnceWith("mine")
+  })
+
   it("shows delegated activity while the parent is idle and clears it when settled", () => {
     const { rerender } = render(
       <Messages messages={[]} isStreaming={false} isWaitingForDelegatedWork />,

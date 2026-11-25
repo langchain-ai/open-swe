@@ -1,6 +1,11 @@
 import { ChatMessage } from "@langchain/macaw-components/ChatMessage"
 import { Button } from "@langchain/macaw-components/Button"
-import { CaretDownIcon, XIcon } from "@langchain/macaw-components/icons"
+import {
+  ArrowUpIcon,
+  CaretDownIcon,
+  XIcon,
+} from "@langchain/macaw-components/icons"
+import { Kbd } from "@langchain/macaw-components/Kbd"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ConversationFind } from "./ConversationFind"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
@@ -21,6 +26,7 @@ import { useTranscriptScroll } from "./useTranscriptScroll"
 import { turnCosts } from "@/features/agents/lib/contextUsage"
 import type { MessagesProps } from "./types"
 import { formatElapsed } from "@/lib/utils"
+import { useSubmitShortcutLabel } from "@/components/SubmitShortcut"
 import { SelectionReply } from "@/features/agents/components/SelectionReply"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
 import { WorkflowApprovalCard } from "@/features/agents/components/WorkflowApprovalCard"
@@ -31,10 +37,15 @@ import { WorkEntryRow } from "./timeline/WorkEntryRow"
 function QueuedMessages({
   queuedMessages,
   onRemove,
+  onSteer,
+  steerShortcutId,
 }: {
   queuedMessages: NonNullable<MessagesProps["queuedMessages"]>
   onRemove?: (id: string) => void
+  onSteer?: (id: string) => void
+  steerShortcutId?: string
 }) {
+  const steerShortcut = useSubmitShortcutLabel()
   if (queuedMessages.length === 0) return null
 
   return (
@@ -49,8 +60,9 @@ function QueuedMessages({
         const status = message.waitsForAgent
           ? "Waiting for the agent"
           : "Queued"
-        const actionable =
-          onRemove && message.mine !== false && !message.waitsForAgent
+        const own = message.mine !== false && !message.waitsForAgent
+        const removable = onRemove && own
+        const steerable = onSteer && own
         return (
           <ChatMessage
             key={message.id}
@@ -90,19 +102,48 @@ function QueuedMessages({
                 <span className="ml-space-1 size-1.5 animate-status-pulse rounded-full bg-current" />
               </span>
               {message.sender && <span>from {message.sender}</span>}
-              {actionable && (
+              {(removable || steerable) && (
                 <div className="ml-auto flex items-center gap-0.5">
-                  <IconButton
-                    icon={XIcon}
-                    label="Cancel and return to the composer"
-                    size="sm"
-                    color="secondary"
-                    variant="plain"
-                    onPointerDown={(event) => event.preventDefault()}
-                    onClick={() => onRemove(message.id)}
-                    disabled={message.pending}
-                    data-testid="queued-message-cancel"
-                  />
+                  {steerable && (
+                    <IconButton
+                      icon={ArrowUpIcon}
+                      label="Steer now"
+                      tooltipProps={
+                        message.id === steerShortcutId
+                          ? {
+                              title: (
+                                <span className="inline-flex items-center gap-space-1">
+                                  Steer now <Kbd>{steerShortcut}</Kbd>
+                                </span>
+                              ),
+                            }
+                          : undefined
+                      }
+                      size="sm"
+                      color="secondary"
+                      variant="plain"
+                      className="disabled:bg-transparent"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={() => onSteer(message.id)}
+                      disabled={message.pending}
+                      loading={message.steering}
+                      data-testid="queued-message-steer"
+                    />
+                  )}
+                  {removable && (
+                    <IconButton
+                      icon={XIcon}
+                      label="Cancel and return to the composer"
+                      size="sm"
+                      color="secondary"
+                      variant="plain"
+                      className="disabled:bg-transparent"
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={() => onRemove(message.id)}
+                      disabled={message.pending || message.steering}
+                      data-testid="queued-message-cancel"
+                    />
+                  )}
                 </div>
               )}
             </div>
@@ -144,6 +185,8 @@ export const Messages = memo(function MessagesComponent({
   pollWorkflowApprovalsWhileActive = false,
   queuedMessages = [],
   onRemoveQueuedMessage,
+  onSteerQueuedMessage,
+  steerShortcutQueuedId,
   onReply,
   isStreaming,
   streamIsLoading,
@@ -454,6 +497,8 @@ export const Messages = memo(function MessagesComponent({
             <QueuedMessages
               queuedMessages={queuedMessages}
               onRemove={onRemoveQueuedMessage}
+              onSteer={onSteerQueuedMessage}
+              steerShortcutId={steerShortcutQueuedId}
             />
             {footer}
           </div>

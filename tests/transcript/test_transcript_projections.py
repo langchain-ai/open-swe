@@ -23,6 +23,7 @@ from openswe.transcript.events import (
     TurnStarted,
 )
 from openswe.transcript.snapshot import load_events, load_snapshot
+from openswe.transcript.turns import OpenTurn, steer_target
 
 
 async def _create(thread_id: str) -> None:
@@ -291,3 +292,29 @@ async def test_a_late_start_does_not_reopen_an_interrupted_turn(registry_db: Non
     assert snapshot is not None
     assert snapshot.thread.status == "idle"
     assert [turn_view.state for turn_view in snapshot.turns] == ["interrupted"]
+
+
+async def test_a_withdrawn_queued_turn_leaves_the_running_turn_steerable(
+    registry_db: None,
+) -> None:
+    """A follow-up queued behind the running turn, then withdrawn before its run started."""
+    thread_id = str(uuid7())
+    running_turn, withdrawn_turn = uuid7(), uuid7()
+    await _create(thread_id)
+    await _request_turn(thread_id, running_turn)
+    await append(
+        thread_id,
+        [
+            Command(
+                command_id=f"turn:{running_turn}:started",
+                event=TurnStarted(turn_id=running_turn, run_id="run-1"),
+                actor_kind="agent",
+                run_id="run-1",
+                turn_id=running_turn,
+            )
+        ],
+    )
+    await _request_turn(thread_id, withdrawn_turn)
+    await _end_turn(thread_id, withdrawn_turn, interrupted=True, tag="interrupted")
+
+    assert await steer_target(thread_id) == OpenTurn(turn_id=running_turn, run_id="run-1")

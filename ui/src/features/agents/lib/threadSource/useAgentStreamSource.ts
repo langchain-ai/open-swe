@@ -77,6 +77,18 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
       queueEntries.filter(gone).map((entry) => cancelSubmission(entry.id))
     )
   }, [cancelSubmission, client, queueEntries, queued, threadId, viewer])
+  // The SDK has no local-only removal: dropping the entry cancels its run
+  // again, which the server refuses as already withdrawn.
+  const forgetQueued = useCallback(
+    async (id: string) => {
+      try {
+        await cancelSubmission(id)
+      } catch (error) {
+        console.debug("Repeated cancel of a withdrawn queued run failed", error)
+      }
+    },
+    [cancelSubmission]
+  )
 
   const [clock] = useState(() => new MessageClock())
   const live = stream.isLoading
@@ -221,6 +233,7 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     queued,
     cancelQueued: cancelSubmission,
     settleQueue,
+    forgetQueued,
     isRunning: stream.isLoading,
     isHydrating: stream.isThreadLoading,
     hydration: stream.hydrationPromise,

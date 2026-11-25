@@ -1605,6 +1605,8 @@ export interface SendAgentMessageVariables {
   client_message_id?: string
   /** Queue behind the live run instead of steering it. */
   enqueue?: boolean
+  /** The queued message this send steers with; its mentions were notified when it queued. */
+  promoted_message_id?: string
 }
 
 export function useCancelAgentThread(threadId: string) {

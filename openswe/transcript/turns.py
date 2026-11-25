@@ -98,8 +98,9 @@ class OpenTurn:
 async def steer_target(thread_id: str) -> OpenTurn | None:
     """The turn a follow-up joins: the running one, else the newest still waiting to start.
 
-    Only turns requested after the thread's newest closed one count: an older
-    open turn was stranded by a start that never ran or a settlement that failed.
+    Only turns requested after the thread's newest closed turn that started count:
+    an older open turn was stranded by a start that never ran or a settlement that
+    failed. A queued turn withdrawn before its run started strands nothing.
     Modeled in ``docs/tla/SteerRace.tla`` as ``JoinTarget``.
     """
     async with postgres.read_only_transaction() as conn:
@@ -114,6 +115,7 @@ async def steer_target(thread_id: str) -> OpenTurn | None:
                           SELECT max(requested_at) FROM thread_turn
                           WHERE thread_id = :thread_id
                             AND state NOT IN ('requested', 'running')
+                            AND started_at IS NOT NULL
                       ),
                       '-infinity'
                   )

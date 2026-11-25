@@ -44,6 +44,10 @@ export interface MessagesProps extends ApprovalCallbacks {
   queuedMessages?: Array<QueuedThreadMessage>
   /** Drop a queued message and hand it back to the composer. */
   onRemoveQueuedMessage?: (id: string) => void
+  /** Take a queued message out of the queue and steer the live run with it. */
+  onSteerQueuedMessage?: (id: string) => void
+  /** The queued message ⌘↵ in an empty composer steers, whose tooltip shows the shortcut. */
+  steerShortcutQueuedId?: string
   /** Offers Reply on selected transcript text, attaching the reply to the next message. */
   onReply?: (reply: PassageReply) => void
   isStreaming: boolean

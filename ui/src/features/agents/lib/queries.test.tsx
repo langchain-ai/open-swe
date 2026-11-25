@@ -5,7 +5,13 @@ import {
   QueryClientProvider,
   onlineManager,
 } from "@tanstack/react-query"
-import { act, render, renderHook, waitFor } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  render,
+  renderHook,
+  waitFor,
+} from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { invalidationTopic, queryTopics } from "@/lib/invalidations/topics"
@@ -84,6 +90,9 @@ const page: ThreadsPage = {
 
 const clients: Array<QueryClient> = []
 afterEach(() => {
+  // Vitest runs without globals, so Testing Library never unmounts on its own:
+  // a query settling after the file ends would update a mounted tree with no window.
+  cleanup()
   vi.useRealTimers()
   for (const client of clients) client.clear()
   clients.length = 0

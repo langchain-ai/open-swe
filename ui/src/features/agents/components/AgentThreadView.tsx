@@ -73,7 +73,7 @@ import type {
   RestoredDraft,
   SubmitOptions,
 } from "@/features/agents/components/composer/ChatComposer"
-import { agentsApi } from "@/features/agents/lib/api"
+import { AgentsApiError, agentsApi } from "@/features/agents/lib/api"
 import { reportError } from "@/lib/errorReporting"
 import { useSession } from "@/lib/session"
 import { useIsMobile } from "@/lib/useIsMobile"
@@ -93,6 +93,15 @@ import {
  * dock reopening, a layout change) would put the same draft there again.
  */
 const appliedComposerDrafts = new WeakSet<ComposerDraft>()
+
+/** How a message sent while a run is live goes in, and what to do if its start is refused. */
+interface SendOptions {
+  /** Wait for the live run instead of steering it. Defaults to the person's preference. */
+  queue?: boolean
+  onStartError?: () => void
+  /** The queued message this send steers with. */
+  promotedMessageId?: string
+}
 
 interface AgentThreadViewProps {
   thread: AgentThread
@@ -235,18 +244,19 @@ export function AgentThreadView({
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
   const followUpBehavior = session.data?.follow_up_behavior ?? "steer"
+  const queueByDefault = followUpBehavior === "queue"
   const submitMessage = useCallback(
     async (
       { text: content, images, replies }: ComposerSubmission,
-      options?: SubmitOptions,
-      onStartError?: () => void
+      {
+        queue = queueByDefault,
+        onStartError,
+        promotedMessageId,
+      }: SendOptions = {}
     ) => {
       if (modelsLoading) throw new Error("Could not load model settings")
       // While a run is live the message either waits for it as a queued run of
-      // its own, or goes straight in and steers it. The preference sets the
-      // default; ⌘↵ flips it for one message.
-      const queue =
-        (followUpBehavior === "queue") !== (options?.alternate === true)
+      // its own, or goes straight in and steers it.
       const enqueue = isStreaming && queue
       const offload = content.trim() === "/offload"
       const analyticsActorId = session.data?.user_id ?? null
@@ -302,6 +312,7 @@ export function AgentThreadView({
           model_selection_changed: carriesSelection,
           inherit_model_selection: !modelSelectionEnabled,
           enqueue,
+          promoted_message_id: promotedMessageId,
           onStartError: () => {
             restoreSelection()
             onStartError?.()
@@ -318,7 +329,7 @@ export function AgentThreadView({
       thread.visibility,
       ownsThread,
       selectionIntent,
-      followUpBehavior,
+      queueByDefault,
       isStreaming,
       modelSelectionEnabled,
       modelsLoading,
@@ -327,7 +338,9 @@ export function AgentThreadView({
     ]
   )
 
-  // Code attached on the review page rides along as fenced excerpts the transcript renders as blocks.
+  // Code attached on the review page rides along as fenced excerpts the
+  // transcript renders as blocks. The preference sets whether a message sent
+  // during a run queues; ⌘↵ flips it for one message.
   const submitWithExcerpts = useCallback(
     async (submission: ComposerSubmission, options?: SubmitOptions) => {
       const excerpts = reviewChat?.excerpts ?? []
@@ -350,8 +363,10 @@ export function AgentThreadView({
                 text: serializeExcerpts(submission.text, excerpts),
               }
             : submission,
-          options,
-          restoreReplies
+          {
+            queue: queueByDefault !== (options?.alternate === true),
+            onStartError: restoreReplies,
+          }
         )
         if (excerpts.length) reviewChat?.clearExcerpts?.()
       } catch (error) {
@@ -359,7 +374,7 @@ export function AgentThreadView({
         throw error
       }
     },
-    [reviewChat, submitMessage]
+    [queueByDefault, reviewChat, submitMessage]
   )
 
   const submitText = useCallback(
@@ -456,17 +471,20 @@ export function AgentThreadView({
   // A "stream"-kind source's queue only reflects a cancel via `cancelQueued`
   // — never a lifecycle event, since the run never reached "running" —
   // otherwise the row lingers until the next hydrate.
+  // `pendingOnly` leaves a follow-up that has started running alone: the
+  // server refuses with a 409 instead of interrupting it.
   const withdrawQueued = useCallback(
-    async (entry: QueuedTurn) => {
+    async (entry: QueuedTurn, pendingOnly = false) => {
       if (entry.runId === null) return
       const action = productAnalytics.beginAction("queue_cancel")
       try {
-        if (source.kind === "stream") {
+        if (source.kind === "stream" && !pendingOnly) {
           if (!(await source.cancelQueued(entry.turnId))) {
             throw new Error("The queued message could not be cancelled.")
           }
         } else {
-          await agentsApi.cancelRun(thread.id, entry.runId)
+          await agentsApi.cancelRun(thread.id, entry.runId, { pendingOnly })
+          if (source.kind === "stream") await source.forgetQueued(entry.turnId)
         }
         action.accepted()
       } catch (error) {
@@ -495,6 +513,79 @@ export function AgentThreadView({
       )
     },
     [materializeQueuedImages, queued, restoreQueuedToComposer, withdrawQueued]
+  )
+  // Steer now withdraws the queued run, only while it has not started, before
+  // sending its message the way a steer is sent, so the message is never both
+  // queued and steered. A send that fails or is refused after the withdrawal
+  // hands the message back to the composer.
+  const [steeringIds, setSteeringIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
+  const steerQueuedMessage = useCallback(
+    (id: string) => {
+      const entry = queued.find((candidate) => candidate.message.id === id)
+      if (!entry || entry.runId === null || steeringIds.has(id)) return
+      setSteeringIds((ids) => new Set(ids).add(id))
+      void (async () => {
+        const images = await materializeQueuedImages(entry)
+        if (images === null) return
+        try {
+          await withdrawQueued(entry, true)
+        } catch (error) {
+          if (error instanceof AgentsApiError && error.status === 409) {
+            toast.info("That message already started, so it was left to run.")
+            return
+          }
+          throw error
+        }
+        const text = queuedText(entry)
+        const replies = entry.message.replies ?? []
+        let restored = false
+        const restore = () => {
+          if (restored) return
+          restored = true
+          restoreQueuedToComposer([text], images, replies)
+        }
+        try {
+          await submitMessage(
+            { text, images, replies },
+            {
+              queue: false,
+              onStartError: restore,
+              promotedMessageId: entry.message.id,
+            }
+          )
+        } catch (error) {
+          restore()
+          throw error
+        }
+      })()
+        .catch((error: unknown) =>
+          reportError({
+            title: "Couldn't steer with the queued message",
+            error,
+          })
+        )
+        .finally(() =>
+          setSteeringIds((ids) => {
+            const next = new Set(ids)
+            next.delete(id)
+            return next
+          })
+        )
+    },
+    [
+      materializeQueuedImages,
+      queued,
+      restoreQueuedToComposer,
+      steeringIds,
+      submitMessage,
+      withdrawQueued,
+    ]
+  )
+  // ⌘↵ in an empty composer steers the newest message the person queued.
+  const latestOwnQueued = queued.findLast(
+    (entry) => isOwnQueued(entry) && entry.runId !== null
   )
   // Stop cancels the queued runs along with the live one; the user's own come
   // back to the composer instead of starting the moment the run settles. Only
@@ -678,6 +769,7 @@ export function AgentThreadView({
         createdAt: Date.parse(entry.requestedAt),
         pending: entry.runId === null,
         mine: isOwnQueued(entry),
+        steering: steeringIds.has(entry.message.id),
       })),
       ...(thread.pendingMessages ?? [])
         .filter(
@@ -710,6 +802,7 @@ export function AgentThreadView({
     inboxIds,
     isOwnQueued,
     queued,
+    steeringIds,
     thread.pendingMessages,
   ])
 
@@ -879,6 +972,12 @@ export function AgentThreadView({
                     onRemoveQueuedMessage={
                       canPost ? removeQueuedMessage : undefined
                     }
+                    onSteerQueuedMessage={
+                      canPost ? steerQueuedMessage : undefined
+                    }
+                    steerShortcutQueuedId={
+                      canPost ? latestOwnQueued?.message.id : undefined
+                    }
                     onReply={canPost ? addReply : undefined}
                     isStreaming={isStreaming}
                     streamIsLoading={source.isRunning}
@@ -963,6 +1062,11 @@ export function AgentThreadView({
                 onStop={stopRun}
                 stoppable={!historicalSession}
                 onSubmit={submitWithExcerpts}
+                onSteerQueued={
+                  canPost && latestOwnQueued
+                    ? () => steerQueuedMessage(latestOwnQueued.message.id)
+                    : undefined
+                }
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
                 addedReply={addedReply}

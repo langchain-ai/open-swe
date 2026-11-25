@@ -368,6 +368,37 @@ describe("ChatComposer stop button", () => {
   })
 })
 
+describe("ChatComposer steering", () => {
+  it("steers the newest queued message on ⌘↵ only from an empty composer", async () => {
+    const onSteerQueued = vi.fn()
+    const onSubmit = vi.fn()
+    renderComposer(true, { busy: true, onSteerQueued, onSubmit })
+    const editor = screen.getByRole("textbox", { name: "Message" })
+
+    fireEvent.keyDown(editor, { key: "Enter" })
+    expect(onSteerQueued).not.toHaveBeenCalled()
+    fireEvent.keyDown(editor, { key: "Enter", metaKey: true })
+    expect(onSteerQueued).toHaveBeenCalledOnce()
+    cleanup()
+
+    renderComposer(true, {
+      busy: true,
+      onSteerQueued,
+      onSubmit,
+      restoreDraft: { key: 1, text: "Look at the logs", images: [] },
+    })
+    const drafted = screen.getByRole("textbox", { name: "Message" })
+    await waitFor(() => expect(drafted.textContent).toContain("Look at"))
+    fireEvent.keyDown(drafted, { key: "Enter", ctrlKey: true })
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith(expect.anything(), {
+        alternate: true,
+      })
+    )
+    expect(onSteerQueued).toHaveBeenCalledOnce()
+  })
+})
+
 describe("ChatComposer drafts", () => {
   it("restores independent mode drafts and attachments across remounts, but not after sending", async () => {
     Object.defineProperty(Range.prototype, "getBoundingClientRect", {

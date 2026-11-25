@@ -173,6 +173,9 @@ export function useSubmitAgentMessage(threadId: string) {
               ...(vars.local_access_bridge_id
                 ? { local_access_bridge_id: vars.local_access_bridge_id }
                 : {}),
+              ...(vars.promoted_message_id
+                ? { promoted_message_id: vars.promoted_message_id }
+                : {}),
               ...(offered.length
                 ? { page_tools: offered, page_session: pageTools.session }
                 : {}),

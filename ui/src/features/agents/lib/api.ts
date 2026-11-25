@@ -567,9 +567,14 @@ export const agentsApi = {
       `/workflow-approval/${encodeURIComponent(threadId)}/${encodeURIComponent(fingerprint)}/reject`,
       { method: "POST" }
     ),
-  cancelRun: (threadId: string, runId: string) =>
+  /** `pendingOnly` withdraws a queued run only while it has not started; a 409 says it had. */
+  cancelRun: (
+    threadId: string,
+    runId: string,
+    { pendingOnly = false }: { pendingOnly?: boolean } = {}
+  ) =>
     agentsRequest<unknown>(
-      `/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/cancel`,
+      `/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/cancel${pendingOnly ? "?pending_only=true" : ""}`,
       { method: "POST" }
     ),
   cancelThread: (threadId: string) =>

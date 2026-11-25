@@ -27040,6 +27040,16 @@
               ],
               "title": "Reason"
             }
+          },
+          {
+            "in": "query",
+            "name": "pending_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Pending Only",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

@@ -333,7 +333,7 @@ class ThreadSend:
         mentions = ThreadMentions(
             self.thread_id,
             self.login,
-            _command_message_id(params) or str(uuid.uuid7()),
+            self.request.promoted_message_id or _command_message_id(params) or str(uuid.uuid7()),
             _command_prompt_text(_command_message_content(params))
             if not self.principal.machine and not self.relayed_from
             else "",
@@ -704,7 +704,9 @@ async def proxy_dashboard_thread_run_cancel(
     action: str = "interrupt",
     reason: str | None = None,
     email: str | None = None,
+    pending_only: bool = False,
 ) -> tuple[int, bytes, str | None]:
+    """Cancel a run; ``pending_only`` withdraws a queued follow-up only while it has not started."""
     metadata = await _authorized_thread_metadata(thread_id, login, email=email)
     await _assert_thread_postable(metadata, login, email)
     try:
@@ -714,6 +716,8 @@ async def proxy_dashboard_thread_run_cancel(
     queued_by = (run.get("metadata") or {}).get(QUEUED_BY_KEY)
     if isinstance(queued_by, str) and login not in {queued_by, metadata.get("owner_login")}:
         raise HTTPException(403, "only its sender can withdraw a queued follow-up")
+    if pending_only and run.get("status") != "pending":
+        raise HTTPException(409, "the queued follow-up has already started")
     url = f"{langgraph_url().rstrip('/')}/threads/{thread_id}/runs/{run_id}/cancel"
     headers = langgraph_proxy_headers()
     async with httpx2.AsyncClient(

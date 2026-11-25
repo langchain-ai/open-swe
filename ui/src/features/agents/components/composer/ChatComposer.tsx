@@ -60,6 +60,7 @@ import {
   useSlackChannelDirectory,
 } from "@/lib/slack-channels"
 import { cn } from "@/lib/utils"
+import { useSubmitShortcutLabel } from "@/components/SubmitShortcut"
 
 export type { ActiveRun }
 
@@ -197,6 +198,8 @@ export interface ChatComposerProps {
     submission: ComposerSubmission,
     options?: SubmitOptions
   ) => void | Promise<void>
+  /** ⌘↵ in an empty composer: steer the live run with the person's newest queued message. */
+  onSteerQueued?: () => void
   /** What a message sent while a run is live does; drives copy only. */
   followUpBehavior?: FollowUpBehavior
   /** Content to put back in front of whatever is being typed. */
@@ -378,6 +381,7 @@ export const ChatComposer = memo(function ChatComposer({
   onStop,
   stoppable,
   onSubmit,
+  onSteerQueued,
   followUpBehavior = "steer",
   restoreDraft = null,
   addedReply = null,
@@ -585,6 +589,7 @@ export const ChatComposer = memo(function ChatComposer({
     selectedModelSupportsImages &&
     !filesWhileBusy &&
     !composerEmpty
+  const alternateShortcut = useSubmitShortcutLabel()
   const run = useComposerRun({
     activeRun,
     canSubmit: readyToSubmit,
@@ -809,8 +814,11 @@ export const ChatComposer = memo(function ChatComposer({
       }
 
       if (key === "Enter" && !event.shiftKey) {
+        const alternate = event.metaKey || event.ctrlKey
         if (canSubmit) {
-          void handleSubmit({ alternate: event.metaKey || event.ctrlKey })
+          void handleSubmit({ alternate })
+        } else if (alternate && composerEmpty && onSteerQueued) {
+          onSteerQueued()
         }
         // Swallow it either way: a bare Enter must never insert a newline in a
         // composer whose Enter means "send".
@@ -824,7 +832,9 @@ export const ChatComposer = memo(function ChatComposer({
       trigger,
       canSubmit,
       commandItems,
+      composerEmpty,
       handleSubmit,
+      onSteerQueued,
       menuOpen,
       selectCommandItem,
       triggerKey,
@@ -1084,8 +1094,8 @@ export const ChatComposer = memo(function ChatComposer({
           placeholder={
             busy && !disabled
               ? followUpBehavior === "steer"
-                ? "Send a message to steer the run..."
-                : "Send a message to queue next..."
+                ? `Send a message to steer the run, or ${alternateShortcut} to queue it...`
+                : `Send a message to queue next, or ${alternateShortcut} to steer...`
               : placeholder
           }
           skillNames={skillNames}
