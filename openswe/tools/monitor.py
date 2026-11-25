@@ -12,6 +12,7 @@ from openswe.monitors.delivery import ThreadMonitorDelivery, ensure_monitor_poll
 from openswe.monitors.sandbox import ID_PREFIX, MonitorError, SandboxMonitors
 from openswe.run_config import RunConfig
 from openswe.tools.background_execute import current_backend, uses_completion_callback
+from openswe.ui_invalidations.topics import Topic
 from openswe.utils.background_task_state import RUNNING_MONITORS_KEY, update_background_task_state
 from openswe.utils.thread_ops import langgraph_client
 
@@ -113,6 +114,8 @@ async def monitor(
             except BaseException:
                 await _track(thread_id, finished=[new_id])
                 raise
+        # Tracking before launch changed the metadata while the monitor wasn't listed yet.
+        await Topic.THREAD_BACKGROUND_WORK.invalidate(key=thread_id)
         started = state.model_dump(mode="json")
         if window < timeout:
             started["note"] = (

@@ -149,6 +149,7 @@ export const Messages = memo(function MessagesComponent({
   streamIsLoading,
   isThinking,
   isWaitingForDelegatedWork = false,
+  idleActivity,
   settingUpSandbox,
   isOffloading = false,
   reconnectLabel = null,
@@ -253,6 +254,17 @@ export const Messages = memo(function MessagesComponent({
     (lastMessage.optimistic || !lastMessage.timestampIsFallback)
       ? Date.parse(lastMessage.timestamp)
       : undefined
+
+  const activityActive =
+    !!reconnectLabel ||
+    isOffloading ||
+    isWaitingForDelegatedWork ||
+    (!!(isThinking || streamIsLoading || isStreaming) &&
+      !(
+        isStreaming &&
+        lastAgentIndex >= 0 &&
+        lastAgentIndex === visibleMessages.length - 1
+      ))
 
   const renderMessage = (message: Message, index: number) => {
     if (!renderableMessageIds.has(message.id)) return null
@@ -419,17 +431,7 @@ export const Messages = memo(function MessagesComponent({
             )}
             {/* Above the queue: the live run's activity, then what waits for it. */}
             <ThinkingSpinner
-              isActive={
-                !!reconnectLabel ||
-                isOffloading ||
-                isWaitingForDelegatedWork ||
-                (!!(isThinking || streamIsLoading || isStreaming) &&
-                  !(
-                    isStreaming &&
-                    lastAgentIndex >= 0 &&
-                    lastAgentIndex === visibleMessages.length - 1
-                  ))
-              }
+              isActive={activityActive}
               settingUpSandbox={
                 settingUpSandbox && !isOffloading && !reconnectLabel
               }
@@ -443,6 +445,12 @@ export const Messages = memo(function MessagesComponent({
               }
               since={workingSince}
             />
+            {!(
+              activityActive ||
+              isThinking ||
+              streamIsLoading ||
+              isStreaming
+            ) && idleActivity}
             <QueuedMessages
               queuedMessages={queuedMessages}
               onRemove={onRemoveQueuedMessage}

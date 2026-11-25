@@ -52,6 +52,8 @@ export interface MessagesProps extends ApprovalCallbacks {
   /** When set, drives the thinking spinner (stream + pending). Falls back to streamIsLoading/isStreaming. */
   isThinking?: boolean
   isWaitingForDelegatedWork?: boolean
+  /** Takes the activity line's place while no run is live, such as background work the thread waits on. */
+  idleActivity?: React.ReactNode
   settingUpSandbox?: boolean
   isOffloading?: boolean
   /** Takes over the activity line while the event stream is reconnecting. */

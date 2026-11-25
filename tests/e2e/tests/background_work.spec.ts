@@ -9,7 +9,9 @@ import {
 // The real agent starts a `background_execute` command and a `monitor` in its
 // (local-provider) sandbox and subscribes to CI events; the thread's right
 // panel lists all three in its Background work surface, read live from the
-// sandbox and the thread's event subscriptions through the dashboard API.
+// sandbox and the thread's event subscriptions through the dashboard API. The
+// transcript's activity line says the ended run still waits on them and opens
+// that surface.
 test.describe("background work panel (real dashboard UI)", () => {
   test("lists the running monitor, background command and event listener", async ({
     page,
@@ -33,14 +35,20 @@ test.describe("background work panel (real dashboard UI)", () => {
     await expect(page).toHaveURL(/\/agents\//);
     await dismissOnboardingIfShown(page);
 
-    await page.getByRole("button", { name: "Show panel" }).click();
-    // The tools may still be starting when the page opens: the surface becomes
-    // available when the backend invalidates the thread's background work.
-    const launcher = page
-      .getByLabel("Open a surface")
-      .getByRole("button", { name: /Background work/ });
-    await expect(launcher).toBeVisible({ timeout: 60_000 });
-    await launcher.click();
+    // The run has ended, so the transcript says what the thread still waits on.
+    // The tools may still be starting when the page opens: the line appears
+    // when the backend invalidates the thread's background work.
+    const status = page.getByTestId("background-work-status");
+    await expect(status).toContainText("Waiting on 2 background tasks", {
+      timeout: 60_000,
+    });
+    const statusPath = testInfo.outputPath("background-work-status.png");
+    await page.screenshot({ path: statusPath });
+    await testInfo.attach("background-work-status", {
+      path: statusPath,
+      contentType: "image/png",
+    });
+    await status.click();
     const panel = page.getByTestId("background-work-panel");
     await expect(panel).toBeVisible();
     const monitors = panel.getByRole("region", { name: "Monitors" });

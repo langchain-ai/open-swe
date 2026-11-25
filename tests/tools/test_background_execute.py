@@ -448,11 +448,16 @@ async def test_background_execute_schedules_a_cron_only_without_callbacks(callba
         patch(
             "openswe.background_tasks.ensure_background_task_polling", AsyncMock()
         ) as ensure_cron,
+        patch(
+            "openswe.tools.background_execute.Topic.THREAD_BACKGROUND_WORK.invalidate", AsyncMock()
+        ) as invalidate,
     ):
         result = await background_execute("make test")
 
     assert result == {"success": True, "task_id": "cmd-1", "status": "running"}
     assert ensure_cron.await_count == int(not callback)
+    # A callback launch is tracked before it runs, so the dashboard must re-read once it does.
+    assert invalidate.await_count == int(callback)
 
 
 async def test_background_execute_reports_monitor_scheduling_failure() -> None:

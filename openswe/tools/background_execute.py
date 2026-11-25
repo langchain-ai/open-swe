@@ -13,6 +13,7 @@ from openswe.run_config import RunConfig
 from openswe.sandboxes.scripts import SandboxScript, SandboxScriptError
 from openswe.sandboxes.state import SandboxBackendProxy, get_or_create_sandbox_backend_proxy
 from openswe.sandboxes.tool_access import TOOLS_URL_ENV, TOOLS_URL_FILE
+from openswe.ui_invalidations.topics import Topic
 from openswe.utils.background_task_state import update_background_task_state
 from openswe.utils.thread_ops import langgraph_client
 
@@ -156,6 +157,8 @@ class CallbackLaunch:
             raise
         if state.get("status") == "running":
             await _track(self.thread_id, self.task_id)
+            # Tracking before launch changed the metadata while the task wasn't listed yet.
+            await Topic.THREAD_BACKGROUND_WORK.invalidate(key=self.thread_id)
         if not await self.still_running(state):
             await _track(self.thread_id, self.task_id, running=False)
         return {"success": True, **state}

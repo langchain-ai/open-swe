@@ -31,6 +31,7 @@ import type {
 } from "@/features/agents/lib/types"
 import type { ModelSelection } from "@/features/agents/lib/provider/useModelOptions"
 import { AgentGitPanel } from "@/features/agents/components/AgentGitPanel"
+import { BackgroundWorkStatus } from "@/features/agents/components/BackgroundWorkPanel"
 import { AgentThreadHeader } from "@/features/agents/components/AgentThreadHeader"
 import { LocalAccessGrantBanner } from "@/features/agents/components/LocalAccessGrantBanner"
 import { LocalAccessRequests } from "@/features/agents/components/LocalAccessRequests"
@@ -885,6 +886,24 @@ export function AgentThreadView({
                     isThinking={isThinking}
                     isWaitingForDelegatedWork={
                       thread.waitingForDelegatedWork && !source.isRunning
+                    }
+                    idleActivity={
+                      <BackgroundWorkStatus
+                        threadId={thread.id}
+                        onOpen={
+                          !embedded
+                            ? () => {
+                                useRightPanelStore
+                                  .getState()
+                                  .open(
+                                    { scope: "cloud", threadId: thread.id },
+                                    "background"
+                                  )
+                                handlePanelCollapsedChange(false)
+                              }
+                            : undefined
+                        }
+                      />
                     }
                     isOffloading={source.isOffloading}
                     reconnectLabel={reconnect.label}

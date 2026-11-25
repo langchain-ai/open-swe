@@ -1,4 +1,5 @@
 import { Button } from "@langchain/macaw-components/Button"
+import { ChatState } from "@langchain/macaw-components/ChatState"
 import { Spinner } from "@langchain/macaw-components/Spinner"
 import { CaretRightIcon } from "@langchain/macaw-components/icons"
 import { BellRingingIcon } from "@phosphor-icons/react/dist/ssr/BellRinging"
@@ -24,6 +25,58 @@ export function useHasBackgroundWork(threadId: string): boolean {
   const work = useAgentThreadBackgroundWork(threadId).data
   return Boolean(
     work?.monitors.length || work?.commands.length || work?.listeners?.length
+  )
+}
+
+/**
+ * The transcript's activity line while no run is live but commands or monitors
+ * the thread started keep running, so a turn that waits on them doesn't read
+ * as finished. Opens the Background work panel when `onOpen` is given.
+ */
+export function BackgroundWorkStatus({
+  threadId,
+  onOpen,
+}: {
+  threadId: string
+  onOpen?: () => void
+}) {
+  const work = useAgentThreadBackgroundWork(threadId).data
+  const commands = work?.commands.length ?? 0
+  const monitors = work?.monitors.length ?? 0
+  const total = commands + monitors
+  if (total === 0) return null
+  const noun =
+    monitors === 0
+      ? "background command"
+      : commands === 0
+        ? "monitor"
+        : "background task"
+  const label = `Waiting on ${total === 1 ? `a ${noun}` : `${total} ${noun}s`}`
+  const starts = [...(work?.commands ?? []), ...(work?.monitors ?? [])]
+    .map((item) => item.started_at)
+    .filter((startedAt) => startedAt !== null)
+  const status = (
+    <ChatState
+      status="streaming"
+      label={label}
+      showElapsed
+      startedAt={starts.length > 0 ? Math.min(...starts) * 1000 : undefined}
+    />
+  )
+  if (!onOpen) return <div className="my-space-2">{status}</div>
+  return (
+    <Button
+      color="secondary"
+      variant="plain"
+      size="sm"
+      type="button"
+      data-testid="background-work-status"
+      onClick={onOpen}
+      className="my-space-2 h-auto cursor-pointer gap-space-1 border-0 px-0 py-0 hover:bg-transparent"
+    >
+      {status}
+      <CaretRightIcon className="size-3 shrink-0 text-icon-secondary" />
+    </Button>
   )
 }
 
