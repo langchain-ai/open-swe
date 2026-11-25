@@ -1,8 +1,9 @@
 import { ArrowLeftIcon } from "@langchain/macaw-components/icons"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { Badge } from "@langchain/macaw-components/Badge"
 import { ChatState } from "@langchain/macaw-components/ChatState"
+import { HumanMessage } from "@langchain/core/messages"
 import { useMessages, useToolCalls } from "@langchain/react"
 import type { SubagentDiscoverySnapshot } from "@langchain/react"
 
@@ -12,7 +13,8 @@ import { useSidebarCollapsed } from "@/components/sidebar-layout"
 import { Messages } from "@/features/agents/components/messages"
 import type { MessagesProps } from "@/features/agents/components/messages"
 import { asString } from "@/features/agents/components/subagents/SubagentCard"
-import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
+import { MessageClock } from "@/features/agents/lib/messageTimestamps"
+import { useSubagentTimes } from "@/features/agents/lib/queries"
 import type { AgentStream } from "@/features/agents/lib/stream/connection"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { useThreadSource } from "@/features/agents/lib/threadSource/ThreadSourceProvider"
@@ -210,6 +212,7 @@ function StreamSubagentMessages({
   status,
   ...view
 }: Omit<MessagesProps, "messages"> & {
+  threadId: string
   stream: AgentStream
   toolCallId: string
   status: AcpToolStatus
@@ -231,6 +234,16 @@ function StreamSubagentMessages({
     }
   const messages = useMessages(stream, target)
   const toolCalls = useToolCalls(stream, target)
+  const [clock] = useState(() => new MessageClock())
+  const running = target.status === "running"
+  // The subagent's messages carry no time, so the transcript's stand in; its
+  // task prompt was sent as its `task` call started.
+  const { data: times } = useSubagentTimes(view.threadId, toolCallId, running)
+  const recorded = new Map(Object.entries(times?.messages ?? {}))
+  const promptId = messages.find((message) =>
+    HumanMessage.isInstance(message)
+  )?.id
+  if (promptId && times?.prompt) recorded.set(promptId, times.prompt)
   // A subagent starts from its task prompt, so an empty list is one not read yet.
   const timedOut = useLoadTimedOut(messages.length === 0)
 
@@ -249,7 +262,7 @@ function StreamSubagentMessages({
       messages={streamMessagesToUi(
         messages,
         toolCalls,
-        messageArrivalTimestamp
+        clock.reading(running, recorded)
       )}
       {...view}
     />

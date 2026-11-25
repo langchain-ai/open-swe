@@ -109,29 +109,36 @@ type MessageTimestamp = {
   isFallback: boolean
 }
 
-function messageTimestamp(
-  raw: BaseMessage,
-  msgId: string,
-  resolveCreatedAt?: (messageId: string) => string | undefined
-): MessageTimestamp {
+/** Resolves a message's time from the one it carries, if any; see {@link MessageClock}. */
+export type MessageTimeOf = (
+  messageId: string,
+  sentAt: string | undefined
+) => string | undefined
+
+function carriedCreatedAt(raw: BaseMessage): string | undefined {
   const msg = raw as unknown as Record<string, unknown>
   const createdAt = msg.created_at
-  if (typeof createdAt === "string" && createdAt) {
-    return { value: createdAt, isFallback: false }
-  }
+  if (typeof createdAt === "string" && createdAt) return createdAt
   const responseMetadata = msg.response_metadata
   if (responseMetadata && typeof responseMetadata === "object") {
     const metadataCreatedAt = (responseMetadata as Record<string, unknown>)
       .created_at
-    if (typeof metadataCreatedAt === "string" && metadataCreatedAt) {
-      return { value: metadataCreatedAt, isFallback: false }
-    }
+    if (typeof metadataCreatedAt === "string" && metadataCreatedAt)
+      return metadataCreatedAt
   }
-  const resolved = resolveCreatedAt?.(msgId)
-  if (typeof resolved === "string" && resolved) {
-    return { value: resolved, isFallback: true }
-  }
-  return { value: new Date().toISOString(), isFallback: true }
+  return undefined
+}
+
+function messageTimestamp(
+  raw: BaseMessage,
+  msgId: string,
+  timeOf: MessageTimeOf | undefined,
+  sentAt: string | undefined = carriedCreatedAt(raw)
+): MessageTimestamp {
+  const value = timeOf ? timeOf(msgId, sentAt) : sentAt
+  return value
+    ? { value, isFallback: false }
+    : { value: new Date().toISOString(), isFallback: true }
 }
 
 /**
@@ -320,7 +327,7 @@ function toolOutputText(
 export function streamMessagesToUi(
   messages: Array<BaseMessage>,
   toolCalls: ReadonlyArray<AssembledToolCall> = [],
-  resolveCreatedAt?: (messageId: string) => string | undefined
+  timeOf?: MessageTimeOf
 ): Array<Message> {
   const toolCallsById = new Map<string, AssembledToolCall>()
   for (const toolCall of toolCalls) {
@@ -369,19 +376,19 @@ export function streamMessagesToUi(
         chunks: [...chunks],
       }
     } else {
-      agentTurn.timestamp = timestamp
+      if (!timestampIsFallback) {
+        if (agentTurn.timestampIsFallback) agentTurn.startedAt = timestamp
+        agentTurn.timestamp = timestamp
+        agentTurn.timestampIsFallback = false
+      }
       if (invocationId && !agentTurn.invocationIds.includes(invocationId))
         agentTurn.invocationIds.push(invocationId)
-      agentTurn.timestampIsFallback =
-        agentTurn.timestampIsFallback || timestampIsFallback
       agentTurn.chunks.push(...chunks)
     }
   }
 
   messages.forEach((raw, index) => {
     const msgId = typeof raw.id === "string" && raw.id ? raw.id : `msg-${index}`
-    const { value: timestamp, isFallback: timestampIsFallback } =
-      messageTimestamp(raw, msgId, resolveCreatedAt)
 
     if (HumanMessage.isInstance(raw)) {
       if (raw.additional_kwargs.lc_source === "summarization") return
@@ -402,6 +409,15 @@ export function streamMessagesToUi(
       const replies = parsed.type === "message" ? parsed.replies : undefined
       if (text.trim()) chunks.push({ kind: "text", text })
       if (!chunks.length && !taskEvent && !replies) return
+      const { value: timestamp, isFallback: timestampIsFallback } =
+        messageTimestamp(
+          raw,
+          msgId,
+          timeOf,
+          parsed.type === "message" && parsed.slackOccurredAt !== undefined
+            ? new Date(parsed.slackOccurredAt * 1000).toISOString()
+            : undefined
+        )
       flushAgentTurn()
       turnKey = typeof raw.id === "string" ? raw.id : undefined
       uiMessages.push({
@@ -437,6 +453,8 @@ export function streamMessagesToUi(
     if (AIMessage.isInstance(raw)) {
       if (raw.response_metadata?.open_swe_superseded === true) return
       if (raw.additional_kwargs.lc_source === "summarization") return
+      const { value: timestamp, isFallback: timestampIsFallback } =
+        messageTimestamp(raw, msgId, timeOf)
       const chunks: Array<Chunk> = []
       const reasoning = reasoningText(raw)
       if (reasoning) chunks.push({ kind: "reasoning", text: reasoning })

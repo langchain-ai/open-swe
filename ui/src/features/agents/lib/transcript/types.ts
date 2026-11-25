@@ -154,6 +154,12 @@ export interface ToolOutputResponse {
   output: string
 }
 
+/** When a subagent was given its task, and when each of its replies was recorded. */
+export interface SubagentTimes {
+  prompt: string | null
+  messages: Record<string, string>
+}
+
 export interface TurnRequestedPayload {
   turn_id: string
   message_id: string

@@ -15,6 +15,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
 
 import { agentsApi } from "./api"
+import { fetchSubagentTimes } from "./transcript/api"
 import { pendingThreadStarts } from "./pendingThreadStarts"
 import type {
   InfiniteData,
@@ -72,6 +73,8 @@ export const agentThreadKeys = {
     ["agent-threads", threadId, "background-work"] as const,
   backgroundOutput: (threadId: string, taskId: string) =>
     ["agent-threads", threadId, "background-work", taskId, "output"] as const,
+  subagentTimes: (threadId: string, toolCallId: string, running: boolean) =>
+    ["agent-threads", threadId, "subagent-times", toolCallId, running] as const,
   branchDiff: (threadId: string) =>
     ["agent-threads", threadId, "branch-diff"] as const,
   workingTreeDiff: (threadId: string) =>
@@ -1270,6 +1273,23 @@ export function useAgentThreadBackgroundOutput(
     queryFn: () => agentsApi.getThreadBackgroundOutput(threadId, taskId),
     enabled,
     refetchInterval: 5_000,
+    retry: false,
+  })
+}
+
+/**
+ * A subagent's recorded times. Read again once it stops running, so the
+ * replies it recorded while open get their times too.
+ */
+export function useSubagentTimes(
+  threadId: string,
+  toolCallId: string,
+  running: boolean
+) {
+  return useQuery({
+    queryKey: agentThreadKeys.subagentTimes(threadId, toolCallId, running),
+    queryFn: () => fetchSubagentTimes(threadId, toolCallId),
+    staleTime: Infinity,
     retry: false,
   })
 }

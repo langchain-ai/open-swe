@@ -9802,6 +9802,37 @@
         "title": "SlackUserOption",
         "type": "object"
       },
+      "SubagentTimes": {
+        "description": "When a subagent was given its task, and when each of its replies was recorded.",
+        "properties": {
+          "messages": {
+            "additionalProperties": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "title": "Messages",
+            "type": "object"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          }
+        },
+        "required": [
+          "prompt",
+          "messages"
+        ],
+        "title": "SubagentTimes",
+        "type": "object"
+      },
       "SubmittedReview": {
         "properties": {
           "html_url": {
@@ -27466,6 +27497,58 @@
           }
         },
         "summary": "Api Stream Thread Transcript",
+        "tags": [
+          "dashboard",
+          "transcript"
+        ]
+      }
+    },
+    "/dashboard/api/threads/{thread_id}/transcript/subagents/{tool_call_id}/times": {
+      "get": {
+        "operationId": "api_get_subagent_times_dashboard_api_threads__thread_id__transcript_subagents__tool_call_id__times_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tool_call_id",
+            "required": true,
+            "schema": {
+              "title": "Tool Call Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubagentTimes"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Subagent Times",
         "tags": [
           "dashboard",
           "transcript"

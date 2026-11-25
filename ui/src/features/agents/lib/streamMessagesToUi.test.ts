@@ -4,8 +4,10 @@ import {
   HumanMessage,
   ToolMessage,
 } from "@langchain/core/messages"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import type { BaseMessage } from "@langchain/core/messages"
 
+import { MessageClock } from "./messageTimestamps"
 import { streamMessagesToUi } from "./streamMessagesToUi"
 import { attachmentUrl } from "./transcript/api"
 import { groupQuietRuns } from "@/features/agents/components/messages/quietRuns"
@@ -233,6 +235,80 @@ describe("streamMessagesToUi", () => {
         .filter((message) => message.author === "agent")
         .map((message) => message.turnKey)
     ).toEqual(["user-1", "user-2"])
+  })
+
+  it("times messages by the server or Slack, or by arrival only while live", () => {
+    vi.useFakeTimers({ now: new Date("2026-11-25T16:00:00.000Z") })
+    const clock = new MessageClock()
+    const read = (messages: Array<BaseMessage>, live: boolean) =>
+      streamMessagesToUi(messages, [], (id, sentAt) =>
+        clock.timeOf(id, sentAt, live)
+      ).map(({ id, timestamp, timestampIsFallback }) =>
+        timestampIsFallback ? { id } : { id, timestamp }
+      )
+    const history = [
+      new HumanMessage({
+        id: "slack",
+        content:
+          '<input-message sender="slack:U123" channel="slack:C123" surface="slack" kind="human" timestamp="1795579249.622689" slack_message_ts="1795579249.622689">Fix it</input-message>',
+      }),
+      new AIMessage({
+        id: "ai-1",
+        content: "timed",
+        response_metadata: { created_at: "2026-11-25T15:21:00.000Z" },
+      }),
+      new AIMessage({ id: "ai-untimed", content: "untimed" }),
+      new HumanMessage({ id: "old", content: "before the transcript" }),
+      new AIMessage({ id: "ai-old", content: "old reply" }),
+    ]
+    const timedHistory = [
+      { id: "slack", timestamp: "2026-11-25T04:00:49.622Z" },
+      { id: "ai-1", timestamp: "2026-11-25T15:21:00.000Z" },
+      { id: "old" },
+      { id: "ai-old" },
+    ]
+    expect(read(history, false)).toEqual(timedHistory)
+
+    // A stream update carries messages without the server's time.
+    vi.setSystemTime(new Date("2026-11-25T16:05:00.000Z"))
+    const streamed = [
+      history[0]!,
+      new AIMessage({ id: "ai-1", content: "timed" }),
+      ...history.slice(2),
+      new HumanMessage({ id: "follow-up", content: "and now?" }),
+      new AIMessage({ id: "ai-live", content: "live" }),
+    ]
+    expect(read(streamed, true)).toEqual([
+      ...timedHistory,
+      { id: "follow-up", timestamp: "2026-11-25T16:05:00.000Z" },
+      { id: "ai-live", timestamp: "2026-11-25T16:05:00.000Z" },
+    ])
+    vi.useRealTimers()
+  })
+
+  it("treats a running subagent's first read as history", () => {
+    vi.useFakeTimers({ now: new Date("2026-11-25T16:00:00.000Z") })
+    const clock = new MessageClock()
+    const read = (messages: Array<BaseMessage>) =>
+      streamMessagesToUi(messages, [], clock.reading(true)).map(
+        ({ id, timestampIsFallback }) => ({ id, timed: !timestampIsFallback })
+      )
+    const opened = [
+      new HumanMessage({ id: "task", content: "Look into it" }),
+      new AIMessage({ id: "step", content: "Looking" }),
+    ]
+    expect(read(opened)).toEqual([
+      { id: "task", timed: false },
+      { id: "step", timed: false },
+    ])
+    expect(
+      read([...opened, new HumanMessage({ id: "next", content: "Thanks" })])
+    ).toEqual([
+      { id: "task", timed: false },
+      { id: "step", timed: false },
+      { id: "next", timed: true },
+    ])
+    vi.useRealTimers()
   })
 
   it("keeps wake-up runs separate and groups their quiet work", () => {

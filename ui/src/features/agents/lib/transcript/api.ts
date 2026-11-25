@@ -19,6 +19,7 @@ import { readPreference as prefersSdkStream } from "@/lib/streamPreference"
 import type { ImageChunk } from "@/features/agents/lib/types"
 import type {
   StoredEvent,
+  SubagentTimes,
   ToolOutputResponse,
   TranscriptSnapshot,
   TranscriptTurnPage,
@@ -61,6 +62,19 @@ export function fetchToolOutput(
     transcriptPath(
       threadId,
       `/tool-calls/${encodeURIComponent(toolCallId)}/output`
+    )
+  )
+}
+
+/** The recorded times of the subagent the `task` call `toolCallId` started. */
+export function fetchSubagentTimes(
+  threadId: string,
+  toolCallId: string
+): Promise<SubagentTimes> {
+  return agentsRequest<SubagentTimes>(
+    transcriptPath(
+      threadId,
+      `/subagents/${encodeURIComponent(toolCallId)}/times`
     )
   )
 }

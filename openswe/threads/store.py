@@ -34,6 +34,7 @@ from openswe.threads.index import IndexedThread, ThreadStatus
 from openswe.threads.runtimes import RUNTIMES, ChannelThreadError, ChannelWrite, now_ms
 from openswe.threads.start_request import RunRefused, StartRequest
 from openswe.transcript.attachments import InlineImage, ThreadAttachments
+from openswe.transcript.message_times import MessageTimes
 from openswe.transcript.mirror import mirror_thread_metadata
 from openswe.utils.startup_trace import apm_span
 from openswe.utils.thread_pr_state import agent_thread_pr_state_lock
@@ -368,7 +369,8 @@ class ThreadStore:
         send back verbatim (:data:`_REPLAY_ONLY`) is left out, since no client reads it, and
         an image the transcript keeps a copy of is a link to that copy, which a client loads
         when it shows the image. On a long thread each is megabytes gzip can't shrink; the
-        thread's own state keeps both."""
+        thread's own state keeps both. Each message the transcript recorded carries when it
+        was sent (:class:`MessageTimes`), which the state itself doesn't."""
         state = await self.state_of(thread, select=select, timings=timings)
         values = state.get("values")
         messages = values.get("messages") if isinstance(values, dict) else None
@@ -386,6 +388,12 @@ class ThreadStore:
             with phase(timings if timings is not None else {}, "media_links"):
                 stored = await ThreadAttachments.of(thread.thread_id)
                 stored.link(images)
+        dicts = [m for m in messages if isinstance(m, dict)] if isinstance(messages, list) else []
+        ids = [message_id for m in dicts if isinstance(message_id := m.get("id"), str)]
+        if ids:
+            with phase(timings if timings is not None else {}, "message_times"):
+                times = await MessageTimes.of(thread.thread_id, ids)
+                times.stamp(dicts)
         return state
 
     async def with_latest_run(self, thread: IndexedThread) -> IndexedThread:

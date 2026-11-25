@@ -1,3 +1,5 @@
+import type { MessageTimeOf } from "./streamMessagesToUi"
+
 const STORAGE_KEY = "agent-message-timestamps-v1"
 const MAX_ENTRIES = 5000
 /**
@@ -80,11 +82,10 @@ function persist(): void {
 }
 
 /**
- * Stable client-side arrival timestamp for a message id. The LangGraph messages
- * we render carry no per-message creation time, so we stamp one the first time a
- * message id is observed and reuse it thereafter (persisted to survive reloads,
- * since message ids are server-assigned and stable). Real backend timestamps
- * (`created_at` / `response_metadata.created_at`) take precedence upstream.
+ * Stable client-side arrival timestamp for a tool call id. Tool calls carry no
+ * time of their own, so we stamp one the first time an id is observed and reuse
+ * it thereafter (persisted to survive reloads, since ids are server-assigned and
+ * stable). Messages are timed by {@link MessageClock} instead.
  *
  * The newest {@link MAX_ENTRIES} stamps are kept, oldest first, in memory and
  * in storage.
@@ -116,4 +117,56 @@ export function formatHoverTimestamp(value?: string): string | undefined {
   return Number.isNaN(date.getTime())
     ? undefined
     : hoverTimeFormatter.format(date)
+}
+
+/**
+ * When each message of one thread view was sent. The time the server gives a
+ * message wins and is kept, since a later stream update can carry the message
+ * without it. A message first seen while a run streams it is timed by its
+ * arrival, which is when it was sent; one first read from history without a
+ * time stays untimed, because its arrival is only when the page opened.
+ */
+export class MessageClock {
+  private readonly times = new Map<string, string>()
+  private readonly untimed = new Set<string>()
+  private opened = false
+
+  /**
+   * Times one read of a view that opens on messages already sent, such as a
+   * running subagent's: its first read is history, so none of it is live. A
+   * time `recorded` for a message stands in for one it does not carry.
+   */
+  reading(
+    live: boolean,
+    recorded: ReadonlyMap<string, string> = new Map()
+  ): MessageTimeOf {
+    const history = !this.opened
+    this.opened = true
+    return (messageId, sentAt) =>
+      this.timeOf(
+        messageId,
+        sentAt ?? recorded.get(messageId),
+        live && !history
+      )
+  }
+
+  timeOf(
+    messageId: string,
+    sentAt: string | undefined,
+    live: boolean
+  ): string | undefined {
+    if (sentAt) {
+      this.times.set(messageId, sentAt)
+      return sentAt
+    }
+    const known = this.times.get(messageId)
+    if (known || this.untimed.has(messageId)) return known
+    if (!live) {
+      this.untimed.add(messageId)
+      return undefined
+    }
+    const arrived = new Date().toISOString()
+    this.times.set(messageId, arrived)
+    return arrived
+  }
 }

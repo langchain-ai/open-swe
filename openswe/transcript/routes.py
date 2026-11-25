@@ -30,6 +30,7 @@ from openswe.threads.principals import Principal, PrincipalDep
 from openswe.transcript import attachments, listener, tool_output
 from openswe.transcript.cursor import decode_turn_cursor
 from openswe.transcript.events import StoredEvent
+from openswe.transcript.message_times import SubagentTimes
 from openswe.transcript.snapshot import (
     TranscriptTurnPage,
     load_access,
@@ -163,6 +164,16 @@ async def api_get_thread_tool_output(
     if output is None:
         raise HTTPException(404, "tool call not found")
     return {"output": output}
+
+
+@router.get("/threads/{thread_id}/transcript/subagents/{tool_call_id}/times")
+async def api_get_subagent_times(
+    thread_id: str,
+    tool_call_id: str,
+    principal: PrincipalDep,
+) -> SubagentTimes:
+    async with _authorized_read(thread_id, principal) as conn:
+        return await SubagentTimes.of(thread_id, tool_call_id, conn=conn)
 
 
 def _content_disposition(file_name: str | None, mime_type: str) -> str:

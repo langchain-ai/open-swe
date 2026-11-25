@@ -6,7 +6,7 @@ import {
 } from "@/features/agents/components/messages/quietRuns"
 
 import { latestContextUsage } from "@/features/agents/lib/contextUsage"
-import { messageArrivalTimestamp } from "@/features/agents/lib/messageTimestamps"
+import { MessageClock } from "@/features/agents/lib/messageTimestamps"
 import { queueEntryToTurn } from "@/features/agents/lib/queuedMessages"
 import { streamMessagesToUi } from "@/features/agents/lib/streamMessagesToUi"
 import { promptMessage } from "@/features/agents/lib/stream/promptMessage"
@@ -78,18 +78,20 @@ export function useAgentStreamSource(threadId: string): StreamThreadSource {
     )
   }, [cancelSubmission, client, queueEntries, queued, threadId, viewer])
 
+  const [clock] = useState(() => new MessageClock())
+  const live = stream.isLoading
   const messages = useMemo(() => {
     const started = perfNow()
     const built = streamMessagesToUi(
       stream.messages,
       stream.toolCalls,
-      messageArrivalTimestamp
+      (messageId, sentAt) => clock.timeOf(messageId, sentAt, live)
     )
     const elapsed = perfNow() - started
     threadTranscriptBuilt(threadId, elapsed)
     runTranscriptBuilt(threadId, elapsed)
     return built
-  }, [stream.messages, stream.toolCalls, threadId])
+  }, [clock, live, stream.messages, stream.toolCalls, threadId])
 
   const startRun = useCallback(
     async ({

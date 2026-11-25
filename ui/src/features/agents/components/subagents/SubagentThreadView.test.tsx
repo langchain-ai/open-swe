@@ -20,7 +20,7 @@ vi.mock("@/features/agents/components/messages", () => ({
       {messages.map((message) => (
         <li key={message.id}>
           {[
-            `${message.author}:`,
+            `${message.author}${message.timestamp ? ` @${message.timestamp}` : ""}:`,
             ...message.chunks.map((chunk) =>
               chunk.kind === "tool-execution"
                 ? `[${chunk.title} ${chunk.status}]`
@@ -134,6 +134,11 @@ function stubAgentServer() {
             ? [{ run_id: RUN_ID, thread_id: THREAD.id, status: "running" }]
             : []
         )
+      if (pathname.endsWith("/subagents/call-layout/times"))
+        return json({
+          prompt: "2026-11-25T15:00:00Z",
+          messages: { look: "2026-11-25T15:00:05Z" },
+        })
       if (pathname.endsWith("/info")) return json({})
       if (pathname.endsWith("/stream")) return json({}, 404)
       if (pathname.endsWith("/history")) {
@@ -165,7 +170,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it("shows an earlier run's failed subagent on a page that opens while a later run streams", async () => {
+it("shows an earlier run's failed subagent, timed as recorded, on a page that opens while a later run streams", async () => {
   stubAgentServer()
   const router = createRouter({
     routeTree: createRootRoute({
@@ -191,8 +196,8 @@ it("shows an earlier run's failed subagent on a page that opens while a later ru
           (row) => row.textContent
         )
       ).toEqual([
-        "user: Inspect the repository layout",
-        "agent: Looking around. [ls completed]",
+        "user @2026-11-25T15:00:00Z: Inspect the repository layout",
+        "agent @2026-11-25T15:00:05Z: Looking around. [ls completed]",
       ]),
     { timeout: 5_000 }
   )
