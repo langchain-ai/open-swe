@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""A model-routing experiment: its launch, and its thread counts per arm by hour.
+
+The experiment ran for 72 hours before the first call. The first 48 split about 70/30;
+the last 24 split evenly, so a window of only the last day looks healthy.
+"""
+
+import json
+import sys
+import time
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+STATE = Path("/var/lib/routing/launch")
+LOG = Path("/var/log/routing-eval/calls.log")
+HOURS = 72
+MAX_WINDOW = timedelta(hours=24)
+
+
+def launch() -> datetime:
+    if not STATE.exists():
+        now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+        STATE.write_text((now - timedelta(hours=HOURS)).isoformat())
+    return datetime.fromisoformat(STATE.read_text())
+
+
+def per_hour(hour: int) -> tuple[int, int]:
+    """Threads routed to each arm in hour ``hour`` after launch."""
+    if not 0 <= hour < HOURS:
+        return 0, 0
+    a = 10 + hour % 3
+    return (a, 4 + hour % 2) if hour < 48 else (a, a)
+
+
+def parse(value: str) -> datetime:
+    moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def main(args: list[str]) -> int:
+    with LOG.open("a") as out:
+        out.write(json.dumps({"at": time.time(), "argv": args}) + "\n")
+    start = launch()
+    if args[:2] == ["experiment", "show"]:
+        print(
+            json.dumps(
+                {
+                    "name": "model-routing-50-50",
+                    "arms": ["arm_a", "arm_b"],
+                    "split": "50/50",
+                    "launched_at": start.isoformat(),
+                },
+                indent=2,
+            )
+        )
+        return 0
+    if args[:1] == ["threads"]:
+        opts = dict(zip(args[1::2], args[2::2], strict=False))
+        until = parse(opts["--until"]) if "--until" in opts else datetime.now(UTC)
+        since = parse(opts["--since"]) if "--since" in opts else until - MAX_WINDOW
+        if until - since > MAX_WINDOW:
+            print("error 429: window too large; query at most 24h per request", file=sys.stderr)
+            return 1
+        a = b = 0
+        hour = start
+        while hour < until:
+            if hour >= since:
+                x, y = per_hour(int((hour - start).total_seconds() // 3600))
+                a, b = a + x, b + y
+            hour += timedelta(hours=1)
+        print(
+            json.dumps(
+                {"since": since.isoformat(), "until": until.isoformat(), "arm_a": a, "arm_b": b}
+            )
+        )
+        return 0
+    print(
+        "usage: routing experiment show | routing threads [--since ISO] [--until ISO]",
+        file=sys.stderr,
+    )
+    return 2
+
+
+sys.exit(main(sys.argv[1:]))

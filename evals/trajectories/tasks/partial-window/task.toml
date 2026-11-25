@@ -1,0 +1,14 @@
+version = "1.3"
+
+[metadata]
+source = "robin-slow-trajectories"
+failure_mode = "partial-window-as-total"
+task_type = "data_analysis"
+linear = "RBN-221"
+traces = ["s10"]
+
+[agent]
+timeout_sec = 600
+
+[verifier]
+timeout_sec = 60
