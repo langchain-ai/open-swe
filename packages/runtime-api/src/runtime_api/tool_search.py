@@ -21,7 +21,12 @@ from runtime_api.endpoint import QUICK_CALL_SECONDS, Endpoint
 from runtime_api.operations import RunRequest
 
 _RESULTS: Final = 10
+# The best matches a search returns with their schemas; the rest come as a line each.
+DETAILED: Final = 3
+_BRIEF: Final = 200
 _WORD: Final = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+# A `+word` the tool's name must contain, such as `+linear issue`.
+_REQUIRED: Final = re.compile(r"(?:^|[\s,])\+([\w-]+(?:\.[\w-]+)*)")
 
 
 def _tokens(text: str) -> list[str]:
@@ -88,16 +93,25 @@ class ToolIndex:
 
     def search(self, query: str) -> list[ToolSpec]:
         """The tools that best match ``query``: the one it names exactly, then those whose
-        name matches, then those whose description or parameter names do, each by BM25."""
+        name matches, then those whose description or parameter names do, each by BM25.
+
+        Each ``+word`` keeps only the tools whose name or ``code_name`` contains it, so
+        a search for a service that is not connected finds nothing rather than another's.
+        """
+        required = {word.casefold() for word in _REQUIRED.findall(query)}
         terms = _tokens(query)
         names = self._names.scores(terms)
         texts = self._texts.scores(terms)
-        named = self.resolve(query.strip())
+        named = self.resolve(query.strip().removeprefix("+"))
         ranked = sorted(
             (
                 (tool is not named, -name, -text, tool.name, tool)
                 for tool, name, text in zip(self._candidates, names, texts, strict=True)
-                if name > 0 or text > 0 or tool is named
+                if (required or name > 0 or text > 0 or tool is named)
+                and all(
+                    word in tool.name.casefold() or word in (tool.code_name or "").casefold()
+                    for word in required
+                )
             ),
             key=lambda ranking: ranking[:4],
         )
@@ -117,6 +131,16 @@ class ToolIndex:
             code_name=tool.code_name,
         )
 
+    @staticmethod
+    def brief(tool: ToolSpec) -> ToolBrief:
+        """``tool`` as a search lists it below its best matches: what it is, not its schema."""
+        line = tool.description.strip().split("\n", 1)[0]
+        return ToolBrief(
+            name=tool.name,
+            description=line if len(line) <= _BRIEF else f"{line[: _BRIEF - 1]}…",
+            code_name=tool.code_name,
+        )
+
 
 class ToolMatch(BaseModel):
     """One tool a search found, as the model reads it."""
@@ -125,6 +149,15 @@ class ToolMatch(BaseModel):
     description: str
     parameters: dict[str, JsonValue]
     # How code mode calls it, as ``tools.<code_name>``; None when code cannot call it.
+    code_name: str | None = None
+
+
+class ToolBrief(BaseModel):
+    """One more tool a search found, without its schema: a search of its exact name
+    returns that."""
+
+    name: str
+    description: str
     code_name: str | None = None
 
 

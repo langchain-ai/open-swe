@@ -67,7 +67,7 @@ from managed_deepagents.runtime import ManagedRunConfig, compile_managed_agent_a
 from managed_deepagents.sandbox import SandboxDefinition, SandboxMissingError
 from pydantic import BaseModel, JsonValue
 from rt import run_tools, search_tools
-from rt.backend import Run, current_run
+from rt.backend import OpenSweBackend, Run, current_run
 from rt.managed_sandbox import (
     EXECUTE_TIMEOUT_SECONDS,
     definition,
@@ -91,7 +91,7 @@ from runtime_api.endpoint import Endpoint
 from runtime_api.loop import SANDBOX_UNREACHABLE
 from runtime_api.operations import RunRequest
 from runtime_api.reports import Reports
-from runtime_api.tool_search import KeptTools, ResolvedTool, ToolSpecs
+from runtime_api.tool_search import KeptTools, ResolvedTool, ToolIndex, ToolSpecs
 
 _WORKERS = {"general-purpose": "open-swe--general-purpose"}
 # The proxy config the backend works out for a sandbox, which MDA writes there.
@@ -2079,3 +2079,27 @@ async def test_a_distributed_parent_keeps_graph_nodes_under_the_graph_run(
         ancestor = run
         while ancestor["id"] != root["id"]:
             ancestor = runs[ancestor["parent_run_id"]]
+
+
+async def test_search_tools_says_when_nothing_matches_and_lists_the_rest_briefly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def spec(name: str) -> ToolSpec:
+        return ToolSpec(
+            name=name,
+            description=f"Search {name}.\n" + "More detail. " * 100,
+            parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+        )
+
+    index = ToolIndex([spec(f"datadog_search_{n}") for n in range(5)])
+
+    async def read(_: object) -> ToolIndex:
+        return index
+
+    monkeypatch.setattr(search_tools, "run_tool_index", read)
+    tool = search_tools.search_tools_tool(cast(OpenSweBackend, None))
+    missing = await tool.ainvoke({"query": "+linear search issues"})
+    assert isinstance(missing, str) and "+linear search issues" in missing
+    found = await tool.ainvoke({"query": "+datadog search"})
+    assert [("parameters" in match) for match in found] == [True] * 3 + [False] * 2
+    assert all("\n" not in match["description"] for match in found[3:])

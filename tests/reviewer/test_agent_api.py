@@ -1437,6 +1437,7 @@ async def test_a_kept_tool_set_is_read_from_postgres_once_per_digest() -> None:
 
 def test_search_tools_ranks_name_matches_above_long_descriptions() -> None:
     from runtime_api.catalog import ToolSpec
+    from runtime_api.tool_search import ToolIndex
 
     from openswe.agent_api.tool_sets import ToolSet
 
@@ -1480,7 +1481,34 @@ def test_search_tools_ranks_name_matches_above_long_descriptions() -> None:
     assert tools.search("notion search")[0].name == "mcp_notion_notion-search"
     assert tools.search("mcpNotionNotionSearch")[0].name == "mcp_notion_notion-search"
     assert tools.search("kubernetes") == []
+    # A `+word` keeps only the tools named for it: another service's tools never stand in.
+    assert [spec.name for spec in tools.search("+notion search")] == [
+        "mcp_notion_notion-search",
+        "mcp_notion_notion-search-agents",
+        "mcp_notion_notion-search-sessions",
+    ]
+    assert tools.search("+linear search issues") == []
+    assert tools.search("+mcp_notion_notion-search")[0].name == "mcp_notion_notion-search"
+    brief = ToolIndex.brief(tools.search("+notion search")[0])
+    assert "\n" not in brief.description and len(brief.description) <= 200
     assert tools.resolve("saveIssue") == tools.resolve("save_issue") is not None
+    for name, code_name, service in [
+        ("mcp_github_create_issue", None, "GitHub"),
+        ("mcp_GitHub_create_issue", None, "github"),
+        ("mcp_hubspot_search", None, "HubSpot"),
+        ("mcp_pagerduty_list_incidents", None, "PagerDuty"),
+        ("create_issue", "mcpGithubCreateIssue", "github"),
+        ("mcp_custom.tools-find_issue", None, "custom.tools-find"),
+    ]:
+        connected = tool(name, "Manage connected resources.", code_name)
+        index = ToolIndex([connected, tool("datadog_search", "Search issues.", None)])
+        assert index.search(f"+{service}") == [connected]
+        assert index.search(f"+{service} search issues") == [connected]
+        assert index.search(f"+{service}: search issues") == [connected]
+        assert index.search(f"+{service}, search issues") == [connected]
+        assert index.search(f"+{service} +missing search") == []
+        assert index.search(f"+{service},+missing search") == []
+        assert index.search(f"+{service},+{name} search") == [connected]
 
 
 async def test_an_operation_gets_the_state_it_reads_and_answers_the_state_it_changed() -> None:

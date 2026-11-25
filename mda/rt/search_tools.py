@@ -16,9 +16,10 @@ from pydantic import JsonValue
 from runtime_api.catalog import SEARCH_TOOLS, ToolSpec
 from runtime_api.endpoint import call
 from runtime_api.operations import RunRequest
-from runtime_api.tool_search import RESOLVE, TOOL_SET, ToolIndex, ToolLookup
+from runtime_api.tool_search import DETAILED, RESOLVE, TOOL_SET, ToolIndex, ToolLookup
 
 from rt.backend import OpenSweBackend, current_run
+from rt.prompts import prompt
 from rt.tools import run_id
 
 # How many sets this process keeps read: a set never changes under its digest, and
@@ -65,11 +66,17 @@ async def resolve_tool(backend: OpenSweBackend, name: str) -> ToolSpec | None:
 def search_tools_tool(backend: OpenSweBackend, description: str | None = None) -> BaseTool:
     """``search_tools`` over every tool the run may call."""
 
-    async def search_tools(query: str) -> list[dict[str, JsonValue]]:
+    async def search_tools(query: str) -> list[dict[str, JsonValue]] | str:
         index = await run_tool_index(backend)
-        if index is None:
-            return []
-        return [ToolIndex.match(tool).model_dump(mode="json") for tool in index.search(query)]
+        found = [] if index is None else index.search(query)
+        if not found:
+            return prompt("tools/search-tools-empty", query=query)
+        return [
+            (ToolIndex.match(tool) if rank < DETAILED else ToolIndex.brief(tool)).model_dump(
+                mode="json"
+            )
+            for rank, tool in enumerate(found)
+        ]
 
     return StructuredTool.from_function(
         coroutine=search_tools,
