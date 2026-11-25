@@ -24,6 +24,7 @@ import { Fragment } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { SidebarFooter } from "@/components/SidebarFooter"
 import {
   SidebarCollapseButton,
   SidebarFrame,
@@ -148,7 +149,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
     <SidebarFrame
       {...layout}
       historyControls={false}
-      className="border-r border-default bg-surface-level-2 text-primary"
+      className="agents-ui border-r border-default bg-surface-level-2 text-primary"
     >
       <div
         className={cn(
@@ -203,9 +204,11 @@ export function AppSidebar({ user }: { user: SessionUser }) {
         )}
       </nav>
 
-      <div className="p-space-2">
-        <SidebarUserMenu user={user} />
-      </div>
+      <SidebarFooter
+        user={user}
+        onNavigate={layout.closeOnMobile}
+        account={<SidebarUserMenu user={user} />}
+      />
     </SidebarFrame>
   )
 }

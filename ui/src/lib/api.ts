@@ -265,6 +265,17 @@ async function loadPrDetails(
   }
 }
 
+/** One window of a personal gateway spend cap, with amounts as decimal strings. */
+export interface GatewaySpendLimit {
+  policy_id: string
+  name: string
+  window: string
+  providers: string[]
+  limit_usd: string
+  spend_usd: string | null
+  resets_at?: string | null
+}
+
 export interface SessionUser {
   login: string
   auth_provider?: "github" | "langsmith"
@@ -1637,15 +1648,7 @@ export const api = {
   gatewaySpend: () =>
     request<{
       status: "ready" | "sign_in_required" | "forbidden" | "unavailable"
-      limits: Array<{
-        policy_id: string
-        name: string
-        window: string
-        providers: string[]
-        limit_usd: string
-        spend_usd: string | null
-        resets_at?: string | null
-      }>
+      limits: Array<GatewaySpendLimit>
     }>("/analytics/gateway-spend"),
   usageLeaderboard: (
     period: UsageLeaderboardPeriod = "7d",

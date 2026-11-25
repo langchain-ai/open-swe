@@ -50,6 +50,7 @@ import type {
 } from "@/features/agents/lib/sidebarThreads"
 import type { SidebarLayout } from "@/components/sidebar-layout"
 import { SidebarUserMenu } from "@/components/SidebarUserMenu"
+import { SidebarFooter } from "@/components/SidebarFooter"
 import { SidebarNav } from "@/features/agents/components/SidebarNav"
 import { SidebarGroupHeading } from "@/features/agents/components/SidebarGroupHeading"
 import { ThreadDragDrop } from "@/features/agents/components/ThreadDragDrop"
@@ -955,9 +956,11 @@ export function AgentsSidebar({
           </div>
         </ThreadDragDrop>
       </SidebarThreadSelection>
-      <div className="flex items-center gap-space-2 p-space-2">
-        <div className="min-w-0 flex-1">
-          {user ? (
+      <SidebarFooter
+        user={user}
+        onNavigate={layout.closeOnMobile}
+        account={
+          user ? (
             <SidebarUserMenu user={user} showSettingsLink />
           ) : (
             <Button
@@ -969,27 +972,31 @@ export function AgentsSidebar({
             >
               Sign in for cloud mode
             </Button>
-          )}
-        </div>
-        {(updateState.status === "ready" || updateInstalling) && (
-          <Button
-            color="primary"
-            size="md"
-            title={
-              updateInstalling ? "Installing update…" : "Restart to update"
-            }
-            aria-label={
-              updateInstalling ? "Installing update" : "Restart to update"
-            }
-            disabled={updateInstalling}
-            onClick={() => void installUpdate()}
-            leftDecorator={updateInstalling ? SpinnerIcon : DownloadSimpleIcon}
-            className="shrink-0 rounded-full"
-          >
-            {updateInstalling ? "Installing…" : "Restart to update"}
-          </Button>
-        )}
-      </div>
+          )
+        }
+        action={
+          (updateState.status === "ready" || updateInstalling) && (
+            <Button
+              color="primary"
+              size="md"
+              title={
+                updateInstalling ? "Installing update…" : "Restart to update"
+              }
+              aria-label={
+                updateInstalling ? "Installing update" : "Restart to update"
+              }
+              disabled={updateInstalling}
+              onClick={() => void installUpdate()}
+              leftDecorator={
+                updateInstalling ? SpinnerIcon : DownloadSimpleIcon
+              }
+              className="shrink-0 rounded-full"
+            >
+              {updateInstalling ? "Installing…" : "Restart to update"}
+            </Button>
+          )
+        }
+      />
     </SidebarFrame>
   )
 }

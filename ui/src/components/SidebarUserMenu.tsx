@@ -118,7 +118,7 @@ export function SidebarUserMenu({
             variant="plain"
             size="md"
             aria-label={user.login}
-            className="h-auto w-full justify-start gap-space-3 py-space-1 text-left focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+            className="h-auto w-full justify-start gap-space-3 border-0 py-space-1 text-left hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-sidebar-row-hover"
           >
             <Avatar
               size="sm"
@@ -126,13 +126,8 @@ export function SidebarUserMenu({
               label={user.login || "?"}
               shape="circle"
             />
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-xs font-medium">{user.login}</span>
-              {user.email && (
-                <span className="truncate text-xxs text-secondary">
-                  {user.email}
-                </span>
-              )}
+            <span className="min-w-0 flex-1 truncate text-xs font-medium">
+              {user.login}
             </span>
           </Button>
         </DropdownMenuTrigger>

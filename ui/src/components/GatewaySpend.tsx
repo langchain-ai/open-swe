@@ -6,12 +6,7 @@ import { ProgressBar } from "@langchain/macaw-components/ProgressBar"
 import { Skeleton } from "@/components/Skeleton"
 import { Text } from "@langchain/macaw-components/Text"
 
-import { api } from "@/lib/api"
-
-const currency = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-})
+import { currency, gatewaySpendQueryOptions } from "@/lib/gatewaySpend"
 
 const resetTime = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -22,12 +17,7 @@ const resetTime = new Intl.DateTimeFormat(undefined, {
 })
 
 export function GatewaySpend({ userId }: { userId: string }) {
-  const spend = useQuery({
-    queryKey: ["gatewaySpend", userId],
-    queryFn: api.gatewaySpend,
-    staleTime: 60_000,
-    retry: false,
-  })
+  const spend = useQuery(gatewaySpendQueryOptions(userId))
   const data = spend.data
 
   return (
