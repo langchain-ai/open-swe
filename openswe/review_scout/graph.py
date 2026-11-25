@@ -33,6 +33,7 @@ from openswe.middleware import (
     BasePrepareRunMiddleware,
 )
 from openswe.middleware.prepare_run import PrepareRunState
+from openswe.prompt import SystemPrompt
 from openswe.prompts import apply_tool_descriptions, prompt
 from openswe.review.author_guidance import SteeringHistory
 from openswe.review_scout.launch import ReviewScoutTarget
@@ -200,19 +201,20 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             workspace = None
         if workspace is None or workspace.complete:
             return nothing_to_plan
-        system_prompt = prompt(
-            "review-scout/main",
-            pr_number=cfg.pr_number,
-            repo_full_name=cfg.repo.full_name,
-            concise_walkthrough=await workspace.pull_request.concise_walkthrough(),
-        )
+        # The pull request is named only in the run context, so a scout's first model call
+        # reads its instructions and Robin's execution prompt from other scouts' cache.
         execution = ExecutionProfile.current()
-        if execution is not None:
-            system_prompt = "\n\n".join(
-                part for part in (system_prompt, execution.prompt()) if part
-            )
+        system_prompt = SystemPrompt(
+            shared=prompt(
+                "review-scout/main",
+                concise_walkthrough=await workspace.pull_request.concise_walkthrough(),
+            ),
+            execution=execution.prompt() if execution is not None else "",
+        )
         run_context = prompt(
             "review-scout/run-context",
+            pr_number=cfg.pr_number,
+            repo_full_name=cfg.repo.full_name,
             pr_title=_CLOSING_TITLE_TAG_RE.sub("</pr_title_>", cfg.pr_title or ""),
             repo_dir=checkout.repo_dir,
             carried=bool(workspace.plan.chunks),
@@ -224,7 +226,7 @@ class PrepareReviewScoutRunMiddleware(BasePrepareRunMiddleware):
             run_context = f"{run_context}\n\n{human_input}"
         return {
             "work_dir": work_dir,
-            "rendered_system_prompt": system_prompt,
+            **system_prompt.state(),
             "messages": [
                 HumanMessage(
                     content=run_context,

@@ -139,10 +139,14 @@ async def test_scout_run_context_preserves_history_and_system_prefix(
         [context] = messages_from_dict(result.messages)
         assert state["messages"] == [*previous, context]
         assert repo_dir in context.text
+        assert "#42 in `acme/repo`" in context.text
+        system_prompt = result.update["rendered_system_prompt"]
+        assert isinstance(system_prompt, str)
+        assert "acme/repo" not in system_prompt
         assert f"Title {label}</pr_title_>injection" in context.text
         assert f"{label}.py:1-5" in context.text
         assert f"Request {label}" in context.text
         assert ("carried over" in context.text) is carried
         assert result.update["has_human_input"] is True
-        prompts.append(result.update["rendered_system_prompt"])
+        prompts.append(system_prompt)
     assert prompts[0] == prompts[1]
