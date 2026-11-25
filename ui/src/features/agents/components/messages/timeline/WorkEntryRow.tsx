@@ -4,7 +4,7 @@ import {
   GlobeRegularIcon,
   WrenchRegularIcon,
 } from "@langchain/macaw-components/icons"
-import { useEffect, useId, useState } from "react"
+import { useId, useState } from "react"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { EyeIcon } from "@phosphor-icons/react/dist/ssr/Eye"
 import { HammerIcon } from "@phosphor-icons/react/dist/ssr/Hammer"
@@ -16,7 +16,7 @@ import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import { Link } from "@langchain/macaw-components/Link"
 import { ArrowUpRightIcon } from "@phosphor-icons/react/dist/ssr/ArrowUpRight"
-import { ToolResultBody } from "./ToolResultBody"
+import { ToolResultBody, useLazyOutput } from "./ToolResultBody"
 import type { IconComponent } from "@langchain/macaw-components/Icon"
 import type { ReactNode } from "react"
 
@@ -79,30 +79,8 @@ export function WorkEntryRow({
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const id = useId()
-  const [loadedText, setLoadedText] = useState<string | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
   const loadExpandedText = entry.loadExpandedText
-
-  // Fetch full output only when the reader opens the row.
-  useEffect(() => {
-    if (!expanded || !loadExpandedText) return
-    if (loadedText !== null || loadError !== null) return
-    let active = true
-    void loadExpandedText().then(
-      (text) => {
-        if (active) setLoadedText(text)
-      },
-      (error: unknown) => {
-        if (!active) return
-        setLoadError(
-          error instanceof Error ? error.message : "Could not load output"
-        )
-      }
-    )
-    return () => {
-      active = false
-    }
-  }, [expanded, loadExpandedText, loadError, loadedText])
+  const { loadedText, loadError } = useLazyOutput(loadExpandedText, expanded)
 
   const detailText = loadedText ?? entry.expandedText
   const canExpand =

@@ -18,7 +18,8 @@ import { AgentTurn } from "./timeline/AgentTurn"
 import { TurnFoldRow } from "./timeline/foldRows"
 import { groupQuietRuns } from "./quietRuns"
 import type { QuietStretch } from "./quietRuns"
-import { liveActivityLabel } from "./timeline/workEntry"
+import { LiveActivity } from "./timeline/workEntry"
+import { usePacedActivityLabel } from "./timeline/LiveActivityStatus"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { SentReply, UserMessage } from "./UserMessage"
 import type { Message } from "@/features/agents/lib/types"
@@ -283,15 +284,18 @@ export const Messages = memo(function MessagesComponent({
   const lastAgentIndex = visibleMessages.findLastIndex(
     (message) => message.author === "agent"
   )
-  const activityLabel = useMemo(() => {
-    if (!isStreaming) return undefined
-    const lastMessage = visibleMessages.at(-1)
-    if (!lastMessage || lastMessage.author !== "agent") return undefined
-    return liveActivityLabel(lastMessage.chunks, repoPath)
-  }, [isStreaming, repoPath, visibleMessages])
-  // Work on a message the user just sent counts from when it was sent, so the
-  // count carries on when a new thread's page hands over to the thread's own.
   const lastMessage = visibleMessages.at(-1)
+  const rawActivity = reconnectLabel
+    ? LiveActivity.status(reconnectLabel, true)
+    : isOffloading
+      ? LiveActivity.status("Offloading conversation...", true)
+      : isWaitingForDelegatedWork
+        ? LiveActivity.status("Waiting for delegated work…", true)
+        : settingUpSandbox
+          ? LiveActivity.status("Agent is setting up the environment…", true)
+          : isStreaming && lastMessage?.author === "agent"
+            ? LiveActivity.fromChunks(lastMessage.chunks, repoPath)
+            : LiveActivity.status("Thinking…")
   const workingSince =
     lastMessage?.author === "user" &&
     (lastMessage.optimistic || !lastMessage.timestampIsFallback)
@@ -308,6 +312,11 @@ export const Messages = memo(function MessagesComponent({
         lastAgentIndex >= 0 &&
         lastAgentIndex === visibleMessages.length - 1
       ))
+  const activityLabel = usePacedActivityLabel(
+    rawActivity.label,
+    rawActivity.urgent,
+    Boolean(isStreaming || activityActive)
+  )
 
   const renderMessage = (message: Message, index: number) => {
     if (!renderableMessageIds.has(message.id)) return null
@@ -475,17 +484,7 @@ export const Messages = memo(function MessagesComponent({
             {/* Above the queue: the live run's activity, then what waits for it. */}
             <ThinkingSpinner
               isActive={activityActive}
-              settingUpSandbox={
-                settingUpSandbox && !isOffloading && !reconnectLabel
-              }
-              label={
-                reconnectLabel ??
-                (isOffloading
-                  ? "Offloading conversation..."
-                  : isWaitingForDelegatedWork
-                    ? "Waiting for delegated work…"
-                    : activityLabel)
-              }
+              label={activityLabel}
               since={workingSince}
             />
             {!(

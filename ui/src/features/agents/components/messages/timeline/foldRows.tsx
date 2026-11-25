@@ -3,8 +3,8 @@ import {
   CaretDownIcon,
   CaretRightIcon,
 } from "@langchain/macaw-components/icons"
-import { ChatState } from "@langchain/macaw-components/ChatState"
 import { cn } from "@/lib/utils"
+import { LiveActivityStatus } from "./LiveActivityStatus"
 
 /**
  * Collapses a settled turn's work log behind a single "Worked for …" line, so
@@ -31,7 +31,6 @@ export function TurnFoldRow({
   return (
     <div
       className={cn(
-        // The border is there while live too, so settling doesn't nudge what follows.
         "border-b pt-space-1 pb-space-2",
         active ? "border-transparent" : "border-subtle"
       )}
@@ -47,14 +46,7 @@ export function TurnFoldRow({
         className="h-auto max-w-full cursor-pointer justify-start gap-space-1 border-0 px-space-1 text-left text-secondary tabular-nums select-none hover:text-primary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
       >
         {active ? (
-          <ChatState
-            className="min-w-0"
-            status="streaming"
-            label={<span className="truncate">{label}</span>}
-            showElapsed
-            startedAt={since}
-            announce={false}
-          />
+          <LiveActivityStatus label={label} since={since} announce={false} />
         ) : (
           <span className="min-w-0 truncate">{label}</span>
         )}

@@ -1011,7 +1011,7 @@ describe("Messages", () => {
   it("shows run activity while a stream is starting with no messages", () => {
     const { rerender } = render(<Messages messages={[]} isStreaming />)
 
-    expect(screen.getByRole("status").textContent).toBe("Working…")
+    expect(screen.getByRole("status").textContent).toBe("Thinking…")
     const wake: Message = {
       id: "wake",
       author: "user",
@@ -1027,7 +1027,7 @@ describe("Messages", () => {
         emptyState={<p>No messages yet</p>}
       />
     )
-    expect(screen.getByRole("status").textContent).toContain("Working…")
+    expect(screen.getByRole("status").textContent).toContain("Thinking…")
     expect(screen.queryByText("No messages yet")).toBeNull()
     expect(screen.queryByText("Check CI")).toBeNull()
     rerender(
@@ -1045,7 +1045,7 @@ describe("Messages", () => {
       />
     )
     expect(screen.getByText("Previous answer")).toBeTruthy()
-    expect(screen.getByRole("status").textContent).toContain("Working…")
+    expect(screen.getByRole("status").textContent).toContain("Thinking…")
     rerender(
       <Messages
         messages={[wake]}
@@ -1054,6 +1054,106 @@ describe("Messages", () => {
       />
     )
     expect(screen.getByText("No messages yet")).toBeTruthy()
+  })
+
+  it("follows nested tools and keeps the run clock across replies", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-03T10:00:30Z"))
+    const call: ToolExecutionChunk = {
+      kind: "tool-execution",
+      toolCallId: "eval",
+      title: "Eval",
+      toolKind: "code",
+      status: "in_progress",
+      input: { display_description: "Checking documents" },
+      calls: [
+        {
+          kind: "tool-execution",
+          toolCallId: "slack-search",
+          title: "Slack: Search messages",
+          toolKind: "other",
+          status: "in_progress",
+        },
+      ],
+    }
+    const message: Message = {
+      id: "live-turn",
+      author: "agent",
+      runStartedAt: "2026-09-03T10:00:00Z",
+      startedAt: "2026-09-03T10:00:05Z",
+      timestamp: "2026-09-03T10:00:20Z",
+      chunks: [call, { kind: "reasoning", text: "**Next steps**" }],
+    }
+    const view = render(<Messages messages={[message]} isStreaming />, {
+      wrapper,
+    })
+    const activity = screen.getByRole("button", {
+      name: "Using Slack: Search Messages…",
+    })
+    expect(activity.textContent).toContain("30s")
+    expect(activity.textContent).not.toContain("action")
+    expect(
+      screen.queryByRole("button", { name: "Details for Eval" })
+    ).toBeNull()
+    expect(screen.queryByText("Next steps")).toBeNull()
+    fireEvent.click(activity)
+    expect(
+      screen.getByRole("button", { name: "Details for Eval" })
+    ).toBeTruthy()
+    fireEvent.click(activity)
+    expect(
+      screen.queryByRole("button", { name: "Details for Eval" })
+    ).toBeNull()
+    act(() => vi.advanceTimersByTime(5000))
+    const next: Message = {
+      ...message,
+      chunks: [
+        { ...call, status: "completed" },
+        {
+          kind: "text",
+          text: "I found the document.",
+          timestamp: "2026-09-03T10:00:32Z",
+        },
+        {
+          ...call,
+          toolCallId: "checks",
+          calls: undefined,
+          input: { display_description: "Running checks" },
+        },
+      ],
+    }
+    view.rerender(<Messages messages={[next]} isStreaming />)
+    expect(
+      screen.getByRole("button", { name: /Running checks/ }).textContent
+    ).toContain("3s")
+    view.rerender(
+      <Messages
+        messages={[
+          {
+            ...next,
+            chunks: next.chunks.map((chunk) =>
+              chunk.kind === "tool-execution"
+                ? { ...chunk, status: "completed" }
+                : chunk
+            ),
+          },
+        ]}
+        isStreaming
+      />
+    )
+    expect(screen.getByRole("button", { name: /Running checks/ })).toBeTruthy()
+    act(() => vi.advanceTimersByTime(600))
+    expect(
+      screen.getByRole("button", { name: /Thinking…/ }).textContent
+    ).toContain("3s")
+    view.rerender(<Messages messages={[next]} isStreaming settingUpSandbox />)
+    expect(
+      screen.getByRole("button", { name: /Agent is setting up/ })
+    ).toBeTruthy()
+    view.rerender(<Messages messages={[next]} isStreaming={false} />)
+    expect(screen.queryByRole("button", { name: /Running checks/ })).toBeNull()
+    view.unmount()
+    vi.useRealTimers()
   })
 
   it("shows reconnect activity in the existing status line", () => {
@@ -1106,7 +1206,7 @@ describe("Messages", () => {
       wrapper,
     })
     expect(
-      screen.getByRole("button", { name: /1 action/ }).textContent
+      screen.getByRole("button", { name: "Searching…" }).textContent
     ).toContain("35s")
     act(() => vi.advanceTimersByTime(5000))
     reopened.rerender(<Messages messages={messages} isStreaming={false} />)
@@ -1127,7 +1227,7 @@ describe("Messages", () => {
     vi.useRealTimers()
   })
 
-  it("times each live work stretch from its preceding reply", () => {
+  it("keeps live stretch elapsed time aligned with its settled duration", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-09-03T10:00:35Z"))
     const message: Message = {
@@ -1167,14 +1267,14 @@ describe("Messages", () => {
       screen.getByRole("button", { name: "Worked for 20s · 1 action" })
     ).toBeTruthy()
     expect(
-      screen.getAllByRole("button", { name: /1 action/ })[1]?.textContent
+      screen.getByRole("button", { name: "Searching…" }).textContent
     ).toContain("15s")
     view.unmount()
     const reopened = render(<Messages messages={[message]} isStreaming />, {
       wrapper,
     })
     expect(
-      screen.getAllByRole("button", { name: /1 action/ })[1]?.textContent
+      screen.getByRole("button", { name: "Searching…" }).textContent
     ).toContain("15s")
     act(() => vi.advanceTimersByTime(5000))
     reopened.rerender(<Messages messages={[message]} isStreaming={false} />)
@@ -1193,6 +1293,41 @@ describe("Messages", () => {
       screen.getAllByRole("button", { name: "Worked for 20s · 1 action" })
     ).toHaveLength(2)
     vi.useRealTimers()
+  })
+
+  it("exposes failed subagent task output behind the work fold disclosure", async () => {
+    const loadOutput = vi.fn().mockResolvedValue("Provider returned 503")
+    const message: Message = {
+      id: "subagent-turn",
+      author: "agent",
+      runStartedAt: "2026-09-03T10:00:00Z",
+      startedAt: "2026-09-03T10:00:00Z",
+      timestamp: "2026-09-03T10:00:05Z",
+      chunks: [
+        {
+          kind: "tool-execution",
+          toolCallId: "task-1",
+          title: "task",
+          toolKind: "task",
+          status: "error",
+          input: {
+            subagent_type: "general-purpose",
+            description: "Investigate test failure",
+          },
+          loadOutput,
+        },
+      ],
+    }
+
+    render(<Messages messages={[message]} isStreaming />, { wrapper })
+    fireEvent.click(screen.getByRole("button", { name: "Thinking…" }))
+    const details = screen.getByRole("button", { name: "Error details" })
+    expect(details.getAttribute("aria-expanded")).toBe("false")
+    expect(loadOutput).not.toHaveBeenCalled()
+    fireEvent.click(details)
+    expect(details.getAttribute("aria-expanded")).toBe("true")
+    expect(await screen.findByText("Provider returned 503")).toBeTruthy()
+    expect(loadOutput).toHaveBeenCalledTimes(1)
   })
 
   it("times work after an interjection from the new agent message", () => {
@@ -1244,7 +1379,7 @@ describe("Messages", () => {
       screen.getByRole("button", { name: "Worked for 20s · 1 action" })
     ).toBeTruthy()
     expect(
-      screen.getAllByRole("button", { name: /1 action/ })[1]?.textContent
+      screen.getByRole("button", { name: "Searching…" }).textContent
     ).toContain("10s")
     view.unmount()
     render(
@@ -1298,7 +1433,7 @@ describe("Messages", () => {
 
     const reply = screen.getByText("On it!")
     const work = screen.getByRole("button", {
-      name: "Running… · 1 action",
+      name: "Running…",
     })
     expect(
       reply.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING

@@ -9,7 +9,6 @@ import {
   formatToolDisplayParts,
 } from "@/features/agents/components/chat/toolExecutionDisplay"
 import { countLineChanges } from "@/features/agents/utils/diffStats"
-import { Thought } from "@/features/agents/components/messages/thought"
 
 export type WorkEntryIconName =
   | "bot"
@@ -224,28 +223,27 @@ export function describeWorkEntry(
 }
 
 function toolActivityVerb(chunk: ToolExecutionChunk): string {
-  const active = chunk.status === "in_progress" || chunk.status === "pending"
-
   switch (chunk.toolKind) {
     case "read":
+      return "Reading"
     case "search":
-      return active ? "Exploring" : "Explored"
+      return "Searching"
     case "sql":
-      return active ? "Querying" : "Queried"
+      return "Querying"
     case "execute":
-      return active ? "Running" : "Ran"
+      return "Running"
     case "background":
-      return active ? "Starting in background" : "Started in background"
+      return "Starting in background"
     case "edit":
     case "delete":
     case "move":
-      return active ? "Editing" : "Updated"
+      return "Editing"
     case "fetch":
-      return active ? "Researching" : "Researched"
+      return "Fetching"
     case "task":
-      return active ? "Delegating" : "Delegated"
+      return "Delegating"
     case "code":
-      return active ? "Running code" : "Ran code"
+      return "Running code"
     case "think":
       return "Thinking"
     case "slack":
@@ -258,59 +256,98 @@ function toolActivityVerb(chunk: ToolExecutionChunk): string {
   }
 }
 
+/** Live activity label and whether transition pacing should be bypassed. */
+export class LiveActivity {
+  readonly label: string
+  readonly urgent: boolean
+
+  constructor(label: string, urgent = false) {
+    this.label = label
+    this.urgent = urgent
+  }
+
+  static status(label: string, urgent = false): LiveActivity {
+    return new LiveActivity(label, urgent)
+  }
+
+  private static resolveActiveTool(
+    chunks: ReadonlyArray<Chunk>
+  ): ToolExecutionChunk | undefined {
+    let latestRunning: ToolExecutionChunk | undefined
+    for (let index = chunks.length - 1; index >= 0; index -= 1) {
+      const candidate = chunks[index]
+      if (candidate?.kind !== "tool-execution") continue
+      if (candidate.status === "pending") return candidate
+      if (candidate.status === "in_progress") {
+        if (candidate.toolKind === "code") {
+          const pendingChild = candidate.calls?.findLast(
+            (call) => call.status === "pending"
+          )
+          if (pendingChild) return pendingChild
+        }
+        latestRunning ??= candidate
+      }
+    }
+    if (latestRunning?.toolKind === "code") {
+      return (
+        latestRunning.calls?.findLast(
+          (call) => call.status === "in_progress"
+        ) ?? latestRunning
+      )
+    }
+    return latestRunning
+  }
+
+  static fromChunks(chunks: Array<Chunk>, repoPath?: string): LiveActivity {
+    const activeTool = LiveActivity.resolveActiveTool(chunks)
+    if (activeTool) {
+      if (activeTool.status === "pending")
+        return LiveActivity.status("Waiting for approval…", true)
+      if (activeTool.display?.type === "output_iframe")
+        return LiveActivity.status("Preparing preview…", true)
+
+      const entry = describeWorkEntry(activeTool, repoPath)
+      if (
+        typeof activeTool.input?.display_description === "string" &&
+        activeTool.input.display_description.trim() &&
+        entry.preview
+      ) {
+        return LiveActivity.status(entry.preview)
+      }
+      if (activeTool.toolKind === "other") {
+        return LiveActivity.status(`Using ${entry.heading}…`)
+      }
+      const verb = toolActivityVerb(activeTool)
+      return LiveActivity.status(
+        entry.preview ? `${verb} · ${entry.preview}` : `${verb}…`
+      )
+    }
+
+    for (let index = chunks.length - 1; index >= 0; index -= 1) {
+      const chunk = chunks[index]
+      if (!chunk) continue
+      if (chunk.kind === "text") {
+        if (chunk.text.trim())
+          return LiveActivity.status("Writing response…", true)
+        continue
+      }
+      if (
+        chunk.kind === "code" ||
+        chunk.kind === "list" ||
+        chunk.kind === "image"
+      ) {
+        return LiveActivity.status("Preparing response…", true)
+      }
+      return LiveActivity.status("Thinking…")
+    }
+
+    return LiveActivity.status("Thinking…")
+  }
+}
+
 export function liveActivityLabel(
   chunks: Array<Chunk>,
   repoPath?: string
 ): string {
-  for (let index = chunks.length - 1; index >= 0; index -= 1) {
-    let chunk = chunks[index]
-    if (!chunk) continue
-
-    if (chunk.kind === "reasoning") {
-      const label = new Thought(chunk.text).liveLabel
-      return label ? `${label}…` : "Thinking…"
-    }
-    if (chunk.kind === "text") {
-      if (chunk.text.trim()) return "Writing response…"
-      continue
-    }
-    if (chunk.kind === "error") return "Recovering from an error…"
-    if (
-      chunk.kind === "code" ||
-      chunk.kind === "list" ||
-      chunk.kind === "image"
-    ) {
-      return "Preparing response…"
-    }
-    if (chunk.kind === "todo") return "Planning next steps…"
-    if (chunk.kind === "task-event") return "Thinking…"
-
-    if (chunk.status === "completed") {
-      const activeTool = chunks.findLast(
-        (candidate): candidate is ToolExecutionChunk =>
-          candidate.kind === "tool-execution" &&
-          (candidate.status === "in_progress" || candidate.status === "pending")
-      )
-      if (!activeTool) return "Thinking…"
-      chunk = activeTool
-    }
-
-    // A running `eval` is doing whatever the call its code is waiting on does.
-    if (chunk.toolKind === "code") {
-      chunk =
-        chunk.calls?.findLast(
-          (call) => call.status === "in_progress" || call.status === "pending"
-        ) ?? chunk
-    }
-
-    if (chunk.status === "pending") return "Waiting for approval…"
-    if (chunk.status === "error") return "Recovering from an error…"
-    if (chunk.display?.type === "output_iframe") return "Preparing preview…"
-
-    const entry = describeWorkEntry(chunk, repoPath)
-    const verb = toolActivityVerb(chunk)
-    return entry.preview ? `${verb} · ${entry.preview}` : `${verb}…`
-  }
-
-  return "Working…"
+  return LiveActivity.fromChunks(chunks, repoPath).label
 }

@@ -178,7 +178,7 @@ describe("liveActivityLabel", () => {
       }),
     ]
 
-    expect(liveActivityLabel(chunks, repoPath)).toBe("Exploring · AGENTS.md")
+    expect(liveActivityLabel(chunks, repoPath)).toBe("Reading · AGENTS.md")
   })
 
   it("keeps showing an active parallel tool until all tools finish", () => {
@@ -188,29 +188,25 @@ describe("liveActivityLabel", () => {
       status: "in_progress",
       input: { command: "pnpm test" },
     })
-    expect(liveActivityLabel([running, chunk()])).toBe("Running · pnpm test")
+    expect(
+      liveActivityLabel([
+        running,
+        chunk(),
+        { kind: "reasoning", text: "**Planning the next step**" },
+      ])
+    ).toBe("Running · pnpm test")
     expect(
       liveActivityLabel([{ ...running, status: "completed" }, chunk()])
     ).toBe("Thinking…")
   })
 
-  it("names the thought by its latest finished heading", () => {
-    const reasoning = (text: string): Chunk => ({ kind: "reasoning", text })
-
-    expect(liveActivityLabel([reasoning("")])).toBe("Thinking…")
-    expect(liveActivityLabel([reasoning("Evaluating token budget")])).toBe(
-      "Evaluating token budget…"
-    )
-    expect(liveActivityLabel([reasoning("**Evaluating tok")])).toBe(
-      "Evaluating tok…"
-    )
+  it("does not present reasoning headings as actions", () => {
+    expect(liveActivityLabel([])).toBe("Thinking…")
     expect(
       liveActivityLabel([
-        reasoning(
-          "**Evaluating token budget**\n\nEnough left.\n\n**Running the e2e test**\n\nStarting"
-        ),
+        { kind: "reasoning", text: "**Running the e2e test**\n\nStarting" },
       ])
-    ).toBe("Running the e2e test…")
+    ).toBe("Thinking…")
   })
 
   it("switches to response status when final text starts streaming", () => {
@@ -222,12 +218,21 @@ describe("liveActivityLabel", () => {
     ).toBe("Writing response…")
   })
 
-  it("surfaces approval and error states", () => {
+  it("surfaces approval without claiming an error is being recovered", () => {
     expect(liveActivityLabel([chunk({ status: "pending" })])).toBe(
       "Waiting for approval…"
     )
-    expect(liveActivityLabel([chunk({ status: "error" })])).toBe(
-      "Recovering from an error…"
-    )
+    expect(
+      liveActivityLabel([
+        chunk({ toolCallId: "approve", status: "pending" }),
+        chunk({
+          toolCallId: "running",
+          toolKind: "execute",
+          status: "in_progress",
+          input: { command: "pnpm test" },
+        }),
+      ])
+    ).toBe("Waiting for approval…")
+    expect(liveActivityLabel([chunk({ status: "error" })])).toBe("Thinking…")
   })
 })

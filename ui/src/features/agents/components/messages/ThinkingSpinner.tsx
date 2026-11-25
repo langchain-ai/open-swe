@@ -1,28 +1,21 @@
-import { ChatState } from "@langchain/macaw-components/ChatState"
+import { LiveActivityStatus } from "./timeline/LiveActivityStatus"
 
 export function ThinkingSpinner({
   isActive,
-  settingUpSandbox = false,
   label,
   since,
 }: {
   isActive: boolean
-  settingUpSandbox?: boolean
   label?: string
   since?: number
 }) {
   if (!isActive) return null
   return (
-    <ChatState
+    <LiveActivityStatus
       className="my-space-2"
-      status="streaming"
-      label={
-        settingUpSandbox
-          ? "Agent is setting up the environment…"
-          : (label ?? "Working…")
-      }
-      showElapsed
-      startedAt={since}
+      label={label ?? "Thinking…"}
+      since={since}
+      announce
     />
   )
 }

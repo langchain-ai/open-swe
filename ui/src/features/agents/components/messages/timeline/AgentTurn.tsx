@@ -20,9 +20,7 @@ import {
   collapsedWorkItems,
   countWorkActions,
   segmentTurn,
-  WorkTail,
 } from "../renderItems"
-import { LiveWorkTail } from "./LiveWorkTail"
 import { WorkEntryRow } from "./WorkEntryRow"
 import { describeWorkEntry, hasToolCallDetail, latestDiff } from "./workEntry"
 import { TurnFoldRow } from "./foldRows"
@@ -445,12 +443,12 @@ export function AgentTurn({
     const expanded = expandedFolds[segment.key] ?? false
     const durationMs = live ? null : segmentDurationMs(index)
     const label = live
-      ? (activityLabel ?? "Working…")
+      ? (activityLabel ?? "Thinking…")
       : durationMs && durationMs >= 1000
         ? `Worked for ${formatElapsed(durationMs)}`
         : "Worked"
     const actionCount = countWorkActions(segment.items)
-    const startedAt = segmentStart(index)
+    const startedAt = segmentStart(index) ?? (live ? turnStart : undefined)
     const visible = expanded
       ? segment.items
       : collapsedWorkItems(segment.items, !isStreaming)
@@ -459,7 +457,7 @@ export function AgentTurn({
       <Fragment key={segment.key}>
         <TurnFoldRow
           label={
-            actionCount > 0
+            !live && actionCount > 0
               ? `${label} · ${actionCount} action${actionCount === 1 ? "" : "s"}`
               : label
           }
@@ -468,20 +466,6 @@ export function AgentTurn({
           expanded={expanded}
           onToggle={() => toggleFold(segment.key)}
         />
-        {live && !expanded && (
-          <LiveWorkTail
-            tail={
-              new WorkTail(
-                segment.items.filter(
-                  (item) =>
-                    item.type !== "worker-launch-item" &&
-                    item.type !== "task-event-item"
-                )
-              )
-            }
-            repoPath={repoPath}
-          />
-        )}
         {visible.map(renderItem)}
       </Fragment>
     )
