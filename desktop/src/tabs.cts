@@ -2,6 +2,7 @@ import path from "node:path";
 import type { BaseWindow, WebContentsView } from "electron";
 
 type Tab = WebContentsView;
+type MenuItem = Electron.MenuItemConstructorOptions;
 
 const THEME_TOKENS = [
   "--bg-surface-level-1",
@@ -25,6 +26,7 @@ interface Options {
   onActivate: (tab: Tab | null) => void;
   onNewTab: () => void;
   onTabsChanged: () => void;
+  showMenu: (items: MenuItem[]) => void;
   dark: () => boolean;
 }
 
@@ -158,23 +160,37 @@ class AppTabs {
   }
 
   close(tab: Tab): void {
-    const index = this.tabs.indexOf(tab);
-    if (index === -1) return;
-    if (this.tabs.length === 1) {
+    this.closeTabs([tab]);
+  }
+
+  closeOthers(keep: Tab): void {
+    this.closeTabs(this.tabs.filter((tab) => tab !== keep));
+  }
+
+  private closeTabs(closing: Tab[]): void {
+    closing = closing.filter((tab) => this.tabs.includes(tab));
+    if (!closing.length) return;
+    if (closing.length === this.tabs.length) {
       this.window.close();
       return;
     }
-    this.tabs.splice(index, 1);
-    const contents = tab.webContents;
-    if (this.opening === tab) this.opening = null;
+    const remaining = this.tabs.filter((tab) => !closing.includes(tab));
+    const next =
+      this.active && closing.includes(this.active)
+        ? (this.tabs
+            .slice(this.tabs.indexOf(this.active))
+            .find((tab) => remaining.includes(tab)) ?? remaining.at(-1))
+        : null;
+    this.tabs.splice(0, this.tabs.length, ...remaining);
+    if (this.opening && closing.includes(this.opening)) this.opening = null;
+    const contents = closing.map((tab) => tab.webContents);
     // The closing page stays on top until the next one is drawn over it.
-    const removed =
-      this.active === tab
-        ? this.activate(this.tabs[Math.min(index, this.tabs.length - 1)])
-        : (this.layout(), Promise.resolve());
+    const removed = next
+      ? this.activate(next)
+      : (this.layout(), Promise.resolve());
     void removed.then(() => {
-      this.window.contentView.removeChildView(tab);
-      if (!contents.isDestroyed()) contents.close();
+      for (const tab of closing) this.window.contentView.removeChildView(tab);
+      for (const closed of contents) if (!closed.isDestroyed()) closed.close();
     });
     this.options.onTabsChanged();
   }
@@ -194,6 +210,26 @@ class AppTabs {
     void this.activate(
       this.tabs[(index + step + this.tabs.length) % this.tabs.length],
     );
+  }
+
+  /** Shows the tab at `index`, counting from the end when negative. */
+  select(index: number): void {
+    const tab = this.tabs.at(index);
+    if (tab) void this.activate(tab);
+  }
+
+  /** A right-click outside any tab acts on the front tab. */
+  private menu(tab: Tab | undefined): MenuItem[] {
+    const keep = tab ?? this.active;
+    if (!keep) return [];
+    return [
+      ...(tab ? [{ label: "Close Tab", click: () => this.close(tab) }] : []),
+      {
+        label: "Close Other Tabs",
+        enabled: this.tabs.length > 1,
+        click: () => this.closeOthers(keep),
+      },
+    ];
   }
 
   tabFor(contents: unknown): Tab | undefined {
@@ -299,9 +335,15 @@ class AppTabs {
       (candidate) =>
         String(candidate.webContents.id) === action.searchParams.get("id"),
     );
+    if (action.hostname === "menu" && !action.searchParams.has("id")) {
+      const items = this.menu(undefined);
+      if (items.length) this.options.showMenu(items);
+      return;
+    }
     if (!tab) return;
     if (action.hostname === "activate") void this.activate(tab);
     else if (action.hostname === "close") this.close(tab);
+    else if (action.hostname === "menu") this.options.showMenu(this.menu(tab));
     else if (action.hostname === "move")
       this.move(tab, Number(action.searchParams.get("index")));
   }

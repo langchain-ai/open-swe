@@ -182,6 +182,11 @@
       document.querySelector(".new").addEventListener("click", () =>
         send("new"),
       );
+      // Anywhere in the bar: a tab's own menu, or the front tab's elsewhere.
+      document.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        send("menu", event.target.closest(".tab")?.dataset.id);
+      });
       list.addEventListener("pointermove", moveDrag);
       list.addEventListener("pointerup", endDrag);
       list.addEventListener("pointercancel", endDrag);
@@ -309,6 +314,7 @@
             const item = document.createElement("div");
             item.className = "tab";
             item.role = "tab";
+            item.dataset.id = tab.id;
             item.tabIndex = tab.active ? 0 : -1;
             item.title = tab.title;
             item.setAttribute("aria-selected", String(tab.active));

@@ -93,7 +93,12 @@ class FakeWindow extends EventEmitter {
 function harness() {
   const window = new FakeWindow();
   const strips: FakeView[] = [];
-  const events = { activated: [] as unknown[], added: 0, newTabs: 0 };
+  const events = {
+    activated: [] as unknown[],
+    added: 0,
+    newTabs: 0,
+    menus: [] as { label: string; click: () => void }[][],
+  };
   const tabs = new AppTabs(
     window,
     {
@@ -106,6 +111,8 @@ function harness() {
       onActivate: (tab: unknown) => events.activated.push(tab),
       onNewTab: () => events.newTabs++,
       onTabsChanged: () => events.added++,
+      showMenu: (items: (typeof events.menus)[number]) =>
+        events.menus.push(items),
       dark: () => true,
     },
     "darwin",
@@ -195,6 +202,53 @@ test("new tabs open after their opener and cycling wraps", () => {
   assert.equal(tabs.active, a);
   tabs.cycle(-1);
   assert.equal(tabs.active, b);
+  tabs.select(0);
+  assert.equal(tabs.active, a);
+  tabs.select(-1);
+  assert.equal(tabs.active, b);
+  tabs.select(5);
+  assert.equal(tabs.active, b);
+});
+
+test("closing other tabs from a tab's menu keeps that tab in front", async () => {
+  const { tabs, strips, events, window } = harness();
+  const a = tabs.add();
+  const b = tabs.add(a);
+  const c = tabs.add(b);
+  await tabs.activate(b);
+  strips[0].webContents.emit(
+    "will-navigate",
+    { preventDefault() {} },
+    `robin-tabs://menu?id=${a.webContents.id}`,
+  );
+  const items = events.menus.at(-1) ?? [];
+  items.find((item) => item.label === "Close Other Tabs")?.click();
+  assert.deepEqual(tabs.tabs, [a]);
+  assert.equal(tabs.active, a);
+  await settle();
+  assert.equal(b.webContents.destroyed, true);
+  assert.equal(c.webContents.destroyed, true);
+  assert.deepEqual(window.views, [strips[0], a]);
+  assert.equal(window.closed, false);
+});
+
+test("the tab bar's own menu closes the tabs behind the front one", async () => {
+  const { tabs, strips, events } = harness();
+  const a = tabs.add();
+  const b = tabs.add(a);
+  await tabs.activate(b);
+  strips[0].webContents.emit(
+    "will-navigate",
+    { preventDefault() {} },
+    "robin-tabs://menu",
+  );
+  const items = events.menus.at(-1) ?? [];
+  assert.deepEqual(
+    items.map((item) => item.label),
+    ["Close Other Tabs"],
+  );
+  items[0].click();
+  assert.deepEqual(tabs.tabs, [b]);
 });
 
 test("closing the last tab closes the window", () => {

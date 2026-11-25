@@ -1472,20 +1472,39 @@ function tabMenuItems() {
       // Only with another tab left: closing the last tab closes the window.
       ...(count > 1 ? { accelerator: "CmdOrCtrl+W" } : {}),
       enabled: count > 1,
-      click: () => activeTab && appTabs?.close(activeTab),
+      click: (_: unknown, window?: Electron.BaseWindow) =>
+        window === mainWindow && activeTab && appTabs?.close(activeTab),
     },
     {
-      label: "Show Next Tab",
-      accelerator: "Ctrl+Tab",
+      label: "Close Other Tabs",
+      accelerator: "CmdOrCtrl+Alt+W",
       enabled: count > 1,
-      click: () => appTabs?.cycle(1),
+      // The app menu also fires from other windows, such as settings.
+      click: (_: unknown, window?: Electron.BaseWindow) =>
+        window === mainWindow && activeTab && appTabs?.closeOthers(activeTab),
     },
-    {
-      label: "Show Previous Tab",
-      accelerator: "Ctrl+Shift+Tab",
+    { type: "separator" },
+    ...(
+      [
+        ["Show Next Tab", 1, "CmdOrCtrl+Alt+Right", "Ctrl+Tab"],
+        ["Show Previous Tab", -1, "CmdOrCtrl+Alt+Left", "Ctrl+Shift+Tab"],
+      ] as const
+    ).flatMap(([label, step, accelerator, alias]) =>
+      [accelerator, alias].map((key, index) => ({
+        label,
+        accelerator: key,
+        visible: index === 0,
+        enabled: count > 1,
+        click: () => appTabs?.cycle(step),
+      })),
+    ),
+    ...Array.from({ length: 9 }, (_, index) => ({
+      label: index === 8 ? "Show Last Tab" : `Show Tab ${index + 1}`,
+      accelerator: `CmdOrCtrl+${index + 1}`,
+      visible: false,
       enabled: count > 1,
-      click: () => appTabs?.cycle(-1),
-    },
+      click: () => appTabs?.select(index === 8 ? -1 : index),
+    })),
   ];
 }
 
@@ -1587,6 +1606,7 @@ function createWindow(initialUrl = APP_URL) {
     onActivate: onTabActivated,
     onNewTab: () => openTab(APP_URL),
     onTabsChanged: () => createMenu(),
+    showMenu: (items) => Menu.buildFromTemplate(items).popup(),
     dark: () => nativeTheme.shouldUseDarkColors,
   });
   lifecycleLog.record("window-created", { id: window.id });
