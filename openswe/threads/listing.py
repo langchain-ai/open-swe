@@ -239,6 +239,7 @@ async def _search_threads_batch(
     offset: int,
     sort_by: _ThreadSortBy = "updated_at",
     text: str | None = None,
+    status: index.ThreadStatus | None = None,
 ) -> list[ThreadLike]:
     """A page of threads, best ``text`` matches first when there is one.
 
@@ -255,6 +256,7 @@ async def _search_threads_batch(
                 sort_by=sort_by,
                 activity_order=sort_by == "updated_at",
                 text=text,
+                status=status,
             )
         )
     ]
@@ -806,7 +808,21 @@ async def _collect_thread_candidates(
     if order_ids:
         workers = await sidebar_memberships(list(order_ids), workers_of=True)
         order_ids = list(dict.fromkeys([*order_ids, *workers]))
-    for search_filter in searches:
+    # A thread reads as running only while the index marks it busy, from its run's start
+    # until the run settles, or while it is a review chat whose walkthrough is building;
+    # searching those alone spares summarizing, and asking the runtime about, the rest.
+    passes: list[tuple[dict[str, object], index.ThreadStatus | None]] = (
+        [
+            *((search_filter, "busy") for search_filter in searches),
+            *(
+                ({**search_filter, "walkthrough_state": "building"}, None)
+                for search_filter in searches
+            ),
+        ]
+        if status == "running"
+        else [(search_filter, None) for search_filter in searches]
+    )
+    for search_filter, index_status in passes:
         matched_for_search: set[str] = set()
         offset = 0
         metadata_filter = _search_metadata_filter(
@@ -826,13 +842,19 @@ async def _collect_thread_candidates(
                 offset=offset,
                 sort_by=sort_by,
                 text=query,
+                status=index_status,
             )
             batch_size = len(batch)
             if offset == 0 and order_ids:
                 for start in range(0, len(order_ids), _PINNED_THREADS_BATCH_SIZE):
                     ids = list(order_ids[start : start + _PINNED_THREADS_BATCH_SIZE])
                     ordered = await THREADS.search(
-                        index.ThreadSearch(metadata=metadata_filter, ids=ids, limit=len(ids))
+                        index.ThreadSearch(
+                            metadata=metadata_filter,
+                            ids=ids,
+                            limit=len(ids),
+                            status=index_status,
+                        )
                     )
                     batch = [*batch, *(thread.as_langgraph() for thread in ordered)]
             if not batch:

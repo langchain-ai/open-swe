@@ -2189,6 +2189,44 @@ async def test_status_filter_refreshes_threads_missing_run_status(monkeypatch) -
     assert set(run_list_thread_ids) == {"t0", "t1"}
 
 
+async def test_running_filter_reads_only_threads_that_can_run(monkeypatch) -> None:
+    threads = _make_threads(3, resolved_before=0)
+    threads[2]["metadata"] = {
+        **cast(dict[str, object], threads[2]["metadata"]),
+        "source": "review_chat",
+        "github_login": "octocat",
+        "repo_owner": "acme",
+        "repo_name": "widgets",
+        "pr_number": 7,
+        "walkthrough_state": "building",
+    }
+    await _index_threads(threads)
+    await thread_index.set_status("t1", "busy")
+    run_list_thread_ids: list[str] = []
+
+    class FakeThreads:
+        async def update(self, *, thread_id, metadata):
+            return None
+
+    class FakeRuns:
+        async def list(self, thread_id, limit=1):
+            run_list_thread_ids.append(thread_id)
+            return [{"id": f"run-{thread_id}", "status": "running"}]
+
+    class FakeClient:
+        threads = FakeThreads()
+        runs = FakeRuns()
+
+    patch_thread_module(monkeypatch, "langgraph_client", lambda: FakeClient())
+
+    result = await thread_listing.list_dashboard_threads_page(
+        "octocat", email=None, include_all=True, status="running"
+    )
+
+    assert {item["id"] for item in result["items"]} == {"t1", "t2"}
+    assert "t0" not in run_list_thread_ids
+
+
 @pytest.mark.parametrize("status", ["interrupted", "error"])
 async def test_flat_status_filter_applies_task_overrides_before_paging(
     monkeypatch: pytest.MonkeyPatch, status: Literal["interrupted", "error"]
