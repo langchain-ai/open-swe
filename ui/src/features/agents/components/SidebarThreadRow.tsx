@@ -1109,7 +1109,9 @@ function ThreadHoverCard({
   const prContent = item.pr && (
     <>
       <PullRequestIcon state={item.pr.state} live={live} />
-      <span className="min-w-0 truncate text-xxs">{item.pr.title}</span>
+      <span className="min-w-0 truncate text-xxs" title={item.pr.title}>
+        {item.pr.title}
+      </span>
     </>
   )
   const prClassName =
@@ -1136,7 +1138,9 @@ function ThreadHoverCard({
       {item.repoLabel && (
         <div className="flex min-w-0 items-center gap-space-2 text-secondary">
           <FolderIcon size={ICON_SIZE} weight="regular" className="shrink-0" />
-          <span className="min-w-0 truncate text-xxs">{item.repoLabel}</span>
+          <span className="min-w-0 truncate text-xxs" title={item.repoLabel}>
+            {item.repoLabel}
+          </span>
         </div>
       )}
       {item.pr &&

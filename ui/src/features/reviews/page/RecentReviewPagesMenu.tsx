@@ -1,4 +1,5 @@
 import { Avatar } from "@langchain/macaw-components/Avatar"
+import { Tooltip } from "@langchain/macaw-components/Tooltip"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,27 +58,29 @@ export function RecentReviewPagesMenu({
   )
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <a
-          href={githubUrls.pullRequest(pr)}
-          target="_blank"
-          rel="noreferrer"
-          onPointerDown={(event) => {
-            if (event.metaKey || event.ctrlKey) event.preventDefault()
-          }}
-          onClick={(event) => {
-            if (!event.metaKey && !event.ctrlKey) event.preventDefault()
-          }}
-          className="group flex min-w-0 items-center gap-space-1 rounded-sm text-left hover:underline"
-        >
-          <span className="min-w-0 truncate">{children}</span>
-          <CaretDownIcon
-            aria-label="Recently opened reviews"
-            size={14}
-            className="shrink-0 text-icon-secondary group-hover:text-icon-primary"
-          />
-        </a>
-      </DropdownMenuTrigger>
+      <Tooltip title={children} side="bottom" align="start">
+        <DropdownMenuTrigger asChild>
+          <a
+            href={githubUrls.pullRequest(pr)}
+            target="_blank"
+            rel="noreferrer"
+            onPointerDown={(event) => {
+              if (event.metaKey || event.ctrlKey) event.preventDefault()
+            }}
+            onClick={(event) => {
+              if (!event.metaKey && !event.ctrlKey) event.preventDefault()
+            }}
+            className="group flex min-w-0 items-center gap-space-1 rounded-sm text-left hover:underline"
+          >
+            <span className="min-w-0 truncate">{children}</span>
+            <CaretDownIcon
+              aria-label="Recently opened reviews"
+              size={14}
+              className="shrink-0 text-icon-secondary group-hover:text-icon-primary"
+            />
+          </a>
+        </DropdownMenuTrigger>
+      </Tooltip>
       <DropdownMenuContent
         align="start"
         className="max-h-[min(28rem,70vh)] w-[min(32rem,calc(100vw-2rem))] overflow-y-auto"
@@ -102,7 +105,10 @@ export function RecentReviewPagesMenu({
                   imageUrl={`https://github.com/${review.author}.png?size=40`}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-medium text-primary">
+                  <span
+                    title={review.title || `${review.repo} #${review.number}`}
+                    className="block truncate text-xs font-medium text-primary"
+                  >
                     {review.title || `${review.repo} #${review.number}`}
                   </span>
                   <span className="block truncate text-xs text-secondary">

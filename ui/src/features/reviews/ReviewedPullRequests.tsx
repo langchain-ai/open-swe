@@ -139,6 +139,7 @@ export function ReviewedPullRequests({
                 <div className="min-w-0">
                   <button
                     className="block w-full cursor-pointer truncate text-left text-xs font-medium text-primary hover:underline"
+                    title={review.title}
                     aria-pressed={
                       selected ===
                       `${review.owner}/${review.repo}#${review.number}`

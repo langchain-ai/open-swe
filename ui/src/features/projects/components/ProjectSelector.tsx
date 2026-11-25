@@ -122,7 +122,9 @@ export function ProjectSelector({
     <Popover open={open} onOpenChange={toggle}>
       <PopoverTrigger
         className={cn(COMPOSER_TRIGGER_CLASS_NAME, "max-w-[260px] min-w-0")}
-        title={selected?.repo_full_name ?? selectedRepo ?? undefined}
+        title={[label, selected?.repo_full_name ?? selectedRepo]
+          .filter(Boolean)
+          .join(" · ")}
       >
         <ComposerTriggerIcon icon={FolderIcon} />
         <span className="truncate">{label}</span>
@@ -210,7 +212,9 @@ export function ProjectSelector({
                     key={project.id}
                     onSelect={() => choose(() => onSelect(project.id))}
                     size="sm"
-                    title={project.repo_full_name ?? undefined}
+                    title={[project.name, project.repo_full_name]
+                      .filter(Boolean)
+                      .join(" · ")}
                     value={project.id}
                   >
                     <FolderIcon className={ROW_ICON_CLASS_NAME} />

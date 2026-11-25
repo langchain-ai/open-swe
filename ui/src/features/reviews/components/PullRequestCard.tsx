@@ -108,10 +108,15 @@ export function PullRequestCard({
         />
         <span id={contentId} className="min-w-0 flex-1">
           <span className="flex items-baseline gap-space-2 text-xs text-secondary">
-            <span className="min-w-0 truncate">{pr.repo}</span>
+            <span className="min-w-0 truncate" title={pr.repo}>
+              {pr.repo}
+            </span>
             <span className="font-mono tabular-nums">#{pr.number}</span>
           </span>
-          <span className="mt-0.5 block truncate text-xs font-medium text-primary">
+          <span
+            title={pr.title}
+            className="mt-0.5 block truncate text-xs font-medium text-primary"
+          >
             {pr.title}
           </span>
           {outcome ? (

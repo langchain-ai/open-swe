@@ -113,11 +113,14 @@ export function PullRequestCard({
           className={cn("shrink-0", tone)}
         />
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm font-medium text-primary">
+          <span
+            className="truncate text-sm font-medium text-primary"
+            title={title}
+          >
             {title}
           </span>
           <span className="flex min-w-0 items-center gap-space-2">
-            <span className="truncate">
+            <span className="truncate" title={`${repoFullName} #${number}`}>
               {repoFullName} #{number}
             </span>
             {pullRequest && (
