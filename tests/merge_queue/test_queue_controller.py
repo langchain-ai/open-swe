@@ -71,8 +71,14 @@ def native_response(
     }
 
 
-async def test_native_candidates_follow_commit_ancestry_through_recovery() -> None:
+@pytest.mark.parametrize("stacked", [False, True])
+async def test_native_candidates_follow_commit_ancestry_through_recovery(stacked: bool) -> None:
     response = native_response()
+    if stacked:
+        for number, entry in enumerate(response["mergeQueue"]["entries"]["nodes"], 1):
+            entry["pullRequest"]["stack"] = {"baseRefName": "main"}
+            if number > 1:
+                entry["pullRequest"]["baseRefName"] = f"pr-{number - 1}"
 
     def respond(request: httpx2.Request) -> httpx2.Response:
         assert request.url.path == "/graphql"
@@ -123,7 +129,9 @@ async def test_native_candidates_follow_commit_ancestry_through_recovery() -> No
         assert after_merge.candidates[acd].base_sha == ac
 
 
-@pytest.mark.parametrize("fault", ["changed_head", "unbuilt_prefix", "overflow", "graphql_error"])
+@pytest.mark.parametrize(
+    "fault", ["changed_head", "unbuilt_prefix", "overflow", "graphql_error", "stack_target"]
+)
 async def test_native_observation_never_infers_members_from_incomplete_state(fault: str) -> None:
     snapshot = NativeQueueSnapshot.model_validate(native_response())
     assert snapshot.queue is not None
@@ -134,6 +142,10 @@ async def test_native_observation_never_infers_members_from_incomplete_state(fau
         )
     elif fault == "unbuilt_prefix":
         first = first.model_copy(update={"head_sha": None, "base_sha": None, "parents": ()})
+    elif fault == "stack_target":
+        first = first.model_copy(
+            update={"pull": first.pull.model_copy(update={"stack_base": "release"})}
+        )
     entries = snapshot.queue.entries.model_copy(
         update={"nodes": (first, *rest), "has_next": fault == "overflow"}
     )

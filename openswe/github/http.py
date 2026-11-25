@@ -1318,6 +1318,7 @@ class RepoClient:
                       pullRequest {
                         mergeable
                         number headRefOid state reviewDecision isDraft baseRefName
+                        stack { baseRefName }
                         headRepository { nameWithOwner }
                       }
                     }

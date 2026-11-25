@@ -126,6 +126,11 @@ class NativePull(Snapshot):
     draft: bool = Field(validation_alias="isDraft")
     branch: str = Field(validation_alias="baseRefName")
     repository: str | None = Field(validation_alias=AliasPath("headRepository", "nameWithOwner"))
+    stack_base: str | None = Field(default=None, validation_alias=AliasPath("stack", "baseRefName"))
+
+    @property
+    def target_branch(self) -> str:
+        return self.stack_base or self.branch
 
 
 class NativeEntry(Snapshot):
@@ -206,7 +211,7 @@ class NativeQueueSnapshot(Snapshot):
             # GitHub can briefly return the old candidate after a head change or dequeue.
             if (
                 pull.state != "OPEN"
-                or pull.branch != self.branch
+                or pull.target_branch != self.branch
                 or (pull.repository or "").lower() != self.repository.lower()
                 or entry.head_sha is None
                 or entry.head_sha in candidates
