@@ -59,7 +59,7 @@ test("Settings Connections preserves Slack recovery and the main app has its own
   await expect(connections).toHaveAttribute("aria-current", "page");
 });
 
-test("Connections search finds core, built-in, and custom connections", async ({
+test("Connections search finds built-in and custom integrations, leaving accounts in place", async ({
   page,
 }) => {
   await page.route("**/dashboard/api/my-managed-tools", (route) =>
@@ -92,28 +92,31 @@ test("Connections search finds core, built-in, and custom connections", async ({
   );
   await loginAs(page, SAME_USER);
   await page.goto("/agents/connections");
-  const search = page.getByRole("textbox", { name: "Search connections" });
+  const search = page.getByRole("textbox", { name: "Search integrations" });
   await expect(page.getByText("Linear", { exact: true })).toBeVisible();
   await page.keyboard.press("ControlOrMeta+f");
   await expect(search).toBeFocused();
   await search.fill("  LiNeAr  ");
   await expect(page.getByText("Linear", { exact: true })).toBeVisible();
   await expect(page.getByText("Linear workspace MCP")).toBeVisible();
-  await expect(page.getByText("GitHub", { exact: true })).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("region", { name: "Accounts" })
+      .getByText("GitHub", { exact: true }),
+  ).toBeVisible();
 
   await page.keyboard.press("ControlOrMeta+f");
-  await page.keyboard.type("github");
-  await expect(search).toHaveValue("github");
-  await expect(page.getByText("GitHub", { exact: true })).toBeVisible();
+  await page.keyboard.type("workspace");
+  await expect(search).toHaveValue("workspace");
+  await expect(page.getByText("Linear workspace MCP")).toBeVisible();
   await expect(page.getByText("Linear", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Linear workspace MCP")).toHaveCount(0);
 
   await search.press("Escape");
   await expect(search).toHaveValue("");
   await expect(page.getByText("Linear", { exact: true })).toBeVisible();
   await search.fill("no-such-connection");
   await expect(
-    page.getByText("No connections match “no-such-connection”."),
+    page.getByText("No integrations match “no-such-connection”."),
   ).toBeVisible();
   await page.getByRole("button", { name: "Clear search" }).click();
   await expect(search).toBeFocused();

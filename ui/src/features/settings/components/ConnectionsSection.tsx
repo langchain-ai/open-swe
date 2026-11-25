@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { Button } from "@langchain/macaw-components/Button"
+import { Logo } from "@langchain/macaw-components/Logo"
 import { GithubLogoIcon } from "@phosphor-icons/react/dist/ssr/GithubLogo"
 
 import type { SessionUser, SlackRecovery } from "@/lib/api"
@@ -78,12 +79,14 @@ export function readSlackRecoveryFromUrl(): SlackRecovery | null {
 function CoreConnectionStatus({
   connected,
   action,
+  label = "Connect",
   connecting,
   onConnect,
 }: {
   connected: boolean
   /** Names the connect action, such as "Connect GitHub"; absent when it can't be connected here. */
   action?: string
+  label?: string
   connecting: boolean
   onConnect: () => void
 }) {
@@ -99,7 +102,7 @@ function CoreConnectionStatus({
       disabled={connecting}
       onClick={onConnect}
     >
-      <ConnectBadge>{connecting ? "Redirecting…" : "Connect"}</ConnectBadge>
+      <ConnectBadge>{connecting ? "Redirecting…" : label}</ConnectBadge>
     </Button>
   )
 }
@@ -249,6 +252,55 @@ export function GitHubRow({ user }: { user: SessionUser }) {
             ]
           : []
       }
+    />
+  )
+}
+
+/** The LangSmith sign-in whose grant Robin uses; `expired` when LangSmith no longer accepts it. */
+export function LangSmithRow({
+  user,
+  expired,
+}: {
+  user: SessionUser
+  expired: boolean
+}) {
+  const [connecting, setConnecting] = useState(false)
+  return (
+    <ConnectionRow
+      name="LangSmith"
+      logo={
+        <ConnectorLogo
+          name="LangSmith"
+          icon={
+            <Logo
+              brand="langsmith"
+              variant="logomark"
+              size="sm"
+              className="size-4"
+            />
+          }
+        />
+      }
+      detail={expired ? "Sign-in expired" : (user.email ?? "Signed in")}
+      detailTitle={
+        expired
+          ? "Sign in to LangSmith again so Robin can use your connections."
+          : "Robin signs you in and uses your tools through LangSmith."
+      }
+      showDetailInName
+      status={
+        <CoreConnectionStatus
+          connected={!expired}
+          action="Sign in to LangSmith again"
+          label="Sign in"
+          connecting={connecting}
+          onConnect={() => {
+            setConnecting(true)
+            window.location.assign(loginUrl())
+          }}
+        />
+      }
+      actions={[]}
     />
   )
 }

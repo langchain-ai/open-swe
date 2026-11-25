@@ -291,8 +291,8 @@ export function AddConnectionDialog({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        title="Add custom connection"
-        description="Connect any remote MCP server. Only you can see and use a connection you add. Your private threads load it; any sign-in or API key is stored in LangSmith."
+        title="Add custom integration"
+        description="Connect any remote MCP server. Only you can see and use an integration you add. Your private threads load it; any sign-in or API key is stored in LangSmith."
         className="w-[min(30rem,calc(100vw-2rem))]"
       >
         <form
@@ -359,7 +359,7 @@ export function AddConnectionDialog({
               loading={add.isPending}
               disabled={!ready || add.isPending}
             >
-              Add connection
+              Add integration
             </Button>
           </div>
         </form>

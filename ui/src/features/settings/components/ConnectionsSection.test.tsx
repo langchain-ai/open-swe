@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { TooltipProvider } from "@langchain/macaw-components/Tooltip"
@@ -60,7 +61,7 @@ it.each([null, "developer"])(
       </QueryClientProvider>
     )
     expect(screen.getByRole("button", { name: "Connect Slack" })).toBeTruthy()
-    expect(screen.queryByText("LangSmith")).toBeNull()
+    expect(screen.queryByRole("region", { name: "Integrations" })).toBeNull()
     expect(
       screen.queryByRole("button", { name: "Connect GitHub" }) !== null
     ).toBe(github_login === null)
@@ -188,12 +189,13 @@ it("shows the Slack member ID rather than the dashboard login email", () => {
       </TooltipProvider>
     </QueryClientProvider>
   )
-  expect(screen.getAllByText("U12345").length).toBeGreaterThan(0)
-  expect(screen.queryByText("login@example.com")).toBeNull()
+  const slack = screen.getByText("Slack").closest("tr")
+  expect(slack?.textContent).toContain("U12345")
+  expect(slack?.textContent).not.toContain("login@example.com")
   client.clear()
 })
 
-it("lists accounts, built-in services, and custom connections in one searchable table", async () => {
+it("keeps accounts apart from the searchable table of integrations", async () => {
   const base = {
     enabled: true,
     has_credential: false,
@@ -249,14 +251,21 @@ it("lists accounts, built-in services, and custom connections in one searchable 
     </QueryClientProvider>
   )
 
-  const table = screen.getByRole("table")
-  expect(table.textContent).toContain("GitHub")
-  expect(table.textContent).toContain("Slack")
+  const accounts = within(
+    screen.getByRole("region", { name: "Accounts" })
+  ).getByRole("table")
+  expect(accounts.textContent).toContain("GitHub")
+  expect(accounts.textContent).toContain("Slack")
+  expect(accounts.textContent).toContain("LangSmith")
+  const table = within(
+    screen.getByRole("region", { name: "Integrations" })
+  ).getByRole("table")
   expect(table.textContent).toContain("Linear")
   expect(table.textContent).toContain("Mine")
-  expect(screen.getByText("5 connections")).toBeTruthy()
+  expect(table.textContent).not.toContain("GitHub")
+  expect(screen.getByText("3 integrations")).toBeTruthy()
   expect(
-    screen.getByRole("button", { name: "Add custom connection" })
+    screen.getByRole("button", { name: "Add custom integration" })
   ).toBeTruthy()
   expect(
     screen
@@ -264,14 +273,14 @@ it("lists accounts, built-in services, and custom connections in one searchable 
       .getAttribute("href")
   ).toContain("/my-managed-tools/connect/e")
 
-  fireEvent.change(screen.getByLabelText("Search connections"), {
+  fireEvent.change(screen.getByLabelText("Search integrations"), {
     target: { value: "exc" },
   })
-  expect(screen.getByText("1 connection")).toBeTruthy()
+  expect(screen.getByText("1 integration")).toBeTruthy()
   expect(table.textContent).not.toContain("Linear")
-  expect(table.textContent).not.toContain("GitHub")
+  expect(accounts.textContent).toContain("GitHub")
 
-  fireEvent.change(screen.getByLabelText("Search connections"), {
+  fireEvent.change(screen.getByLabelText("Search integrations"), {
     target: { value: "" },
   })
 
@@ -337,23 +346,58 @@ it("reveals a newly added custom connection on page 1 even with 25+ connections 
     </QueryClientProvider>
   )
 
-  fireEvent.change(screen.getByLabelText("Search connections"), {
+  fireEvent.change(screen.getByLabelText("Search integrations"), {
     target: { value: "Service 00" },
   })
-  fireEvent.click(screen.getByRole("button", { name: "Add custom connection" }))
+  fireEvent.click(
+    screen.getByRole("button", { name: "Add custom integration" })
+  )
   fireEvent.change(screen.getByLabelText("Name"), {
     target: { value: "Zeta Custom" },
   })
   fireEvent.change(screen.getByLabelText("MCP server URL"), {
     target: { value: "https://mcp.example.com/mcp" },
   })
-  fireEvent.click(screen.getByRole("button", { name: "Add connection" }))
+  fireEvent.click(screen.getByRole("button", { name: "Add integration" }))
 
   expect(
     await screen.findByRole("link", { name: "Connect Zeta Custom" })
   ).toBeTruthy()
   expect(
-    (screen.getByLabelText("Search connections") as HTMLInputElement).value
+    (screen.getByLabelText("Search integrations") as HTMLInputElement).value
   ).toBe("")
+  client.clear()
+})
+
+it("asks to sign in to LangSmith again when its grant expired", () => {
+  const client = makeClient({
+    configured: true,
+    langsmith_connected: false,
+    servers: [],
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <ConnectionsPage
+          user={{
+            login: "person",
+            auth_provider: "langsmith",
+            github_login: "developer",
+            email: "person@example.com",
+            slack_user_id: "U12345",
+            avatar_url: null,
+            is_admin: false,
+            slack_oauth_enabled: true,
+          }}
+        />
+      </TooltipProvider>
+    </QueryClientProvider>
+  )
+  expect(
+    screen.getByRole("button", { name: "Sign in to LangSmith again" })
+  ).toBeTruthy()
+  expect(
+    screen.getByText("Sign in to LangSmith again to see your integrations.")
+  ).toBeTruthy()
   client.clear()
 })
