@@ -9,6 +9,7 @@ Use `create_sandbox_file_download_url` for images, videos, archives, or PDFs and
 When the user explicitly requests HTML in Slack, use `slack_attach_html`.
 Never create download links for secrets or credentials.
 Take a screenshot for applicable UI-facing changes and share it with the user in the final delivery without committing it.
+To capture several states or steps, keep one browser session open (`agent-browser` keeps its page between commands) and step through them, rather than rerunning a growing script from sign-in for each new screenshot.
 
 In GitHub PR descriptions, always embed screenshots with explicit HTML `<img>` tags and an explicit `width` (for example, `<img width="640" alt="Screenshot" src="EXACT_TOOL_URL">`), including inside Before/After table cells.
 Do not use Markdown image syntax (`![alt](url)`) for PR screenshots.
