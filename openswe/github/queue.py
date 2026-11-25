@@ -142,6 +142,11 @@ class NativeEntry(Snapshot):
         default=0, validation_alias=AliasPath("headCommit", "parents", "totalCount")
     )
 
+    @property
+    def skipped(self) -> bool:
+        """GitHub keeps an unmergeable entry queued but builds later entries without it."""
+        return self.state == "UNMERGEABLE" and self.head_sha is None
+
 
 class NativeEntries(Snapshot):
     nodes: tuple[NativeEntry, ...]
@@ -183,13 +188,19 @@ class NativeQueueSnapshot(Snapshot):
     observed_at: datetime | None = None
 
     @property
+    def buildable(self) -> tuple[NativeEntry, ...]:
+        """Queue entries in position order, without the ones GitHub skips while building."""
+        entries = self.queue.entries.nodes if self.queue else ()
+        return tuple(
+            sorted((entry for entry in entries if not entry.skipped), key=lambda e: e.position)
+        )
+
+    @property
     def candidates(self) -> dict[str, NativeCandidate]:
         candidates: dict[str, NativeCandidate] = {}
         previous = self.main_sha
         members: list[NativePull] = []
-        for entry in (
-            sorted(self.queue.entries.nodes, key=lambda e: e.position) if self.queue else ()
-        ):
+        for entry in self.buildable:
             pull = entry.pull
             # GitHub can briefly return the old candidate after a head change or dequeue.
             if (

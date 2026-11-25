@@ -117,9 +117,7 @@ class NativeSelection(BaseModel):
     entries: tuple[NativeEntry, ...]
 
     def candidate(self, snapshot: NativeQueueSnapshot) -> NativeCandidate | None:
-        current = (
-            {entry.id: entry for entry in snapshot.queue.entries.nodes} if snapshot.queue else {}
-        )
+        current = {entry.id for entry in snapshot.buildable}
         survivors = [entry for entry in self.entries if entry.id in current]
         if not survivors:
             return None
@@ -136,7 +134,7 @@ class NativeSelection(BaseModel):
         if snapshot.queue is None:
             return None
         selected = {entry.id for entry in self.entries}
-        ordered = sorted(snapshot.queue.entries.nodes, key=lambda entry: entry.position)
+        ordered = snapshot.buildable
         survivors = [entry for entry in ordered if entry.id in selected]
         if len(survivors) < 2:
             return None
@@ -154,9 +152,7 @@ class NativeSelection(BaseModel):
             RecoveryMember(
                 entry_id=entry.id, number=entry.pull.number, head_sha=entry.pull.head_sha
             )
-            for entry in sorted(snapshot.queue.entries.nodes, key=lambda entry: entry.position)[
-                : len(candidate.members)
-            ]
+            for entry in snapshot.buildable[: len(candidate.members)]
         )
 
 
@@ -518,11 +514,7 @@ class MergeQueue(Record):
             }
             if batch is not None:
                 selection = NativeSelection.model_validate(batch.candidate)
-                current_ids = (
-                    {entry.id for entry in snapshot.queue.entries.nodes}
-                    if snapshot.queue
-                    else set()
-                )
+                current_ids = {entry.id for entry in snapshot.buildable}
                 refreshing = batch.policy.get("workflow_policy_refresh") is True
                 if (
                     refreshing
@@ -551,9 +543,7 @@ class MergeQueue(Record):
             else:
                 if queue.paused or snapshot.queue is None:
                     return None
-                entries = tuple(
-                    sorted(snapshot.queue.entries.nodes, key=lambda entry: entry.position)
-                )
+                entries = snapshot.buildable
                 if not entries:
                     return None
                 selected = entries[: policy.max_batch_size]
@@ -587,7 +577,7 @@ class MergeQueue(Record):
                 if (
                     allow_main_advance
                     and snapshot.queue is not None
-                    and len(snapshot.candidates) == len(snapshot.queue.entries.nodes)
+                    and len(snapshot.candidates) == len(snapshot.buildable)
                 ):
                     await self._invalidate(session, batch, now, None)
                 return None
@@ -871,7 +861,7 @@ class MergeQueue(Record):
                 if (
                     not current
                     and snapshot.queue
-                    and len(snapshot.candidates) != len(snapshot.queue.entries.nodes)
+                    and len(snapshot.candidates) != len(snapshot.buildable)
                 ):
                     continue
                 state: Literal["in_progress", "recovering", "cancelled"]

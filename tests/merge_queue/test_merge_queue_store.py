@@ -1649,6 +1649,76 @@ async def test_native_selection_survives_restart_and_recovers_ac_before_def(queu
     assert (await queue.history(initial.batch_id)).batch.state == "landed"
 
 
+def with_unmergeable(
+    numbers: tuple[int, ...], position: int, state: str, *, number: int = 99
+) -> NativeQueueSnapshot:
+    """A queue whose entry at `position` has no candidate; later ones are built without it."""
+    from tests.merge_queue.test_queue_controller import native_response
+
+    response = native_response(numbers)
+    nodes = response["mergeQueue"]["entries"]["nodes"]
+    for node in nodes:
+        node["enqueuedAt"] = (datetime.now(UTC) - timedelta(seconds=90)).isoformat()
+        if node["position"] >= position:
+            node["position"] += 1
+    blocked = {
+        **nodes[0],
+        "id": f"entry-{number}",
+        "position": position,
+        "state": state,
+        "baseCommit": None,
+        "headCommit": None,
+        "pullRequest": {
+            **nodes[0]["pullRequest"],
+            "number": number,
+            "headRefOid": f"{number:040x}",
+        },
+    }
+    response["mergeQueue"]["entries"].update(nodes=[*nodes, blocked], totalCount=len(nodes) + 1)
+    return NativeQueueSnapshot.model_validate(response)
+
+
+@pytest.mark.parametrize("state", ["UNMERGEABLE", "AWAITING_CHECKS"])
+async def test_native_batches_skip_only_entries_github_leaves_out_of_candidates(queue, state):
+    policy, lease, _ = await enable_native_validation(queue)
+    snapshot = with_unmergeable((1, 3, 4, 5), 2, state)
+
+    work = await queue.prepare_native_validation(
+        snapshot, 600, lease, policy=policy, trust="trusted-policy", allow_main_advance=True
+    )
+
+    if state != "UNMERGEABLE":
+        assert work is None
+        return
+    assert work is not None and work.dispatch
+    assert work.request.candidate_sha == list(native_snapshot((1, 3, 4)).candidates)[-1]
+    assert [member.number for member in work.members] == [1, 3, 4]
+    assert work.batch.candidate is not None
+    assert [entry["pull"]["number"] for entry in work.batch.candidate["entries"]] == [1, 3, 4]
+
+
+async def test_native_batch_whose_entries_all_become_unmergeable_is_dropped(queue):
+    policy, lease, _ = await enable_native_validation(queue, cap=1)
+    work = await queue.prepare_native_validation(
+        native_snapshot((1, 2)), 600, lease, policy=policy, trust="trusted-policy"
+    )
+    assert work is not None
+    snapshot = with_unmergeable((2,), 1, "UNMERGEABLE", number=1)
+
+    assert (
+        await queue.prepare_native_validation(
+            snapshot, 600, lease, policy=policy, trust="trusted-policy"
+        )
+        is None
+    )
+    assert (await queue.history(work.batch.id)).batch.state == "invalidated"
+    replacement = await queue.prepare_native_validation(
+        snapshot, 600, lease, policy=policy, trust="trusted-policy"
+    )
+    assert replacement is not None and replacement.batch.id != work.batch.id
+    assert replacement.request.candidate_sha == list(native_snapshot((2,)).candidates)[-1]
+
+
 @pytest.mark.parametrize(
     ("cap", "age", "selected"), [(1, 0, True), (3, 0, False), (3, 90, True), (3, 700, True)]
 )
