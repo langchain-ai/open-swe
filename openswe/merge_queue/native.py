@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import logging
 from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager
+from contextlib import AbstractAsyncContextManager, nullcontext
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
@@ -13,17 +13,20 @@ from pydantic import BaseModel, Field
 
 from openswe.github.http import RepoClient
 from openswe.github.queue import NativeQueueSnapshot
+from openswe.jobs import queue as jobs
 from openswe.merge_queue.admission import QueuePolicy
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.dispatch import (
     CandidateAcceptance,
+    ConflictRemoval,
+    ConflictRemovalResult,
     DispatchEnvelope,
     DispatchGateway,
     DispatchRejected,
     WorkflowPolicyMismatch,
 )
 from openswe.merge_queue.models import Batch, Lease
-from openswe.merge_queue.runtime import QueueJob
+from openswe.merge_queue.runtime import JOB_KIND, QueueJob
 from openswe.merge_queue.store import LeaseLost, MergeQueue, NativeSelection
 from openswe.merge_queue.validation import InvalidValidation, ValidationEvidence
 from openswe.merge_queue.validation_contract import WORKFLOW
@@ -327,7 +330,8 @@ class NativeQueueRuntime:
                 }
             )
             current = await repo.native_queue(queue.target_branch)
-            if current != snapshot:
+            exclude = {"queue": {"entries": {"nodes": {"__all__": {"pull": {"mergeable"}}}}}}
+            if current.model_dump(exclude=exclude) != snapshot.model_dump(exclude=exclude):
                 raise ValueError("Queue changed during dependency checks; operator review required")
             await queue.renew(lease, timedelta(seconds=60))
             await queue.start_native_deferral(decision, current, lease)
@@ -410,6 +414,43 @@ class NativeQueueRuntime:
                 acceptance=update.acceptance,
             )
 
+    async def _schedule_conflict(
+        self, queue: MergeQueue, snapshot: NativeQueueSnapshot, lease: Lease
+    ) -> None:
+        if snapshot.queue is None or queue.paused:
+            return
+        entry = next(
+            (
+                entry
+                for entry in sorted(snapshot.queue.entries.nodes, key=lambda entry: entry.position)
+                if entry.pull.mergeable == "CONFLICTING"
+                and entry.pull.state == "OPEN"
+                and entry.pull.branch == queue.target_branch
+                and (entry.pull.repository or "").lower() == snapshot.repository.lower()
+            ),
+            None,
+        )
+        if entry is None:
+            return
+        request = ConflictRemoval(
+            repository_id=snapshot.repository_id,
+            entry_id=entry.id,
+            number=entry.pull.number,
+            head_sha=entry.pull.head_sha,
+            main_sha=snapshot.main_sha,
+            enqueued_at=entry.enqueued_at,
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        )
+        async with queue.native_publication(lease):
+            await jobs.schedule(
+                JOB_KIND,
+                QueueJob(
+                    queue_id=queue.id, routing_id=queue.bound_routing_id, conflict=request
+                ).model_dump(mode="json"),
+                key=f"merge-queue-conflict:{queue.id}:{entry.id}:{entry.pull.head_sha}:{snapshot.main_sha}",
+                replace=False,
+            )
+
     async def reconcile(self, payload: QueueJob) -> None:
         if payload.queue_id != self.queue_id:
             return
@@ -418,7 +459,11 @@ class NativeQueueRuntime:
             return
         lease = await queue.claim(uuid7(), timedelta(seconds=60), config=self.config)
         if lease is None:
+            if payload.conflict is not None:
+                raise LeaseLost("Conflict removal is waiting for the queue lease")
             return
+        result: ConflictRemovalResult | None = None
+        recovery = None
         try:
             async with asyncio.timeout(45), self.open_repo(queue) as repo:
                 snapshot = await repo.native_queue(queue.target_branch)
@@ -426,7 +471,22 @@ class NativeQueueRuntime:
                     raise ValueError("Native queue repository identity changed")
                 await queue.record_native_snapshot(snapshot, lease)
                 if self.dispatcher is not None:
+                    if payload.conflict is not None:
+                        request = payload.conflict.model_copy(
+                            update={
+                                "receipt_only": queue.paused
+                                or payload.conflict.expires_at <= datetime.now(UTC)
+                            }
+                        )
+                        async with (
+                            nullcontext()
+                            if request.receipt_only
+                            else queue.native_publication(lease, timeout_seconds=30)
+                        ):
+                            result = await self.dispatcher.remove_conflict(request)
+                        return
                     try:
+                        await self._schedule_conflict(queue, snapshot, lease)
                         if not await self._recover(queue, repo, snapshot, lease):
                             await self._validate(queue, repo, snapshot, lease)
                     finally:
@@ -477,3 +537,12 @@ class NativeQueueRuntime:
                     await queue.release(lease)
             except LeaseLost:
                 logger.info("Native queue lease no longer held", extra={"queue_id": str(queue.id)})
+
+            if (
+                payload.conflict is not None
+                and result is not None
+                and (result.removed is not None or result.uncertain or result.forbidden)
+                and recovery is not None
+            ):
+                async with asyncio.timeout(90):
+                    await recovery.notify_conflict(payload.conflict, result)

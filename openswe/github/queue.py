@@ -121,6 +121,7 @@ class NativePull(Snapshot):
     number: int = Field(gt=0)
     head_sha: GitSHA = Field(validation_alias="headRefOid")
     state: str
+    mergeable: str = "UNKNOWN"
     review_decision: str | None = Field(validation_alias="reviewDecision")
     draft: bool = Field(validation_alias="isDraft")
     branch: str = Field(validation_alias="baseRefName")

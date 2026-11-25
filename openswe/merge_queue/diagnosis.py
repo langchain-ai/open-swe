@@ -23,8 +23,14 @@ from openswe.github.token_scope import GITHUB_TOKEN_REPOSITORIES_KEY
 from openswe.jobs import queue as jobs
 from openswe.jobs.queue import Job
 from openswe.merge_queue.configuration import QueueConfiguration
+from openswe.merge_queue.dispatch import ConflictRemoval, ConflictRemovalResult
 from openswe.merge_queue.models import Decision, Lease
-from openswe.merge_queue.recovery import RecoveryDecision, RecoveryProposal, RecoveryThread
+from openswe.merge_queue.recovery import (
+    RecoveryDecision,
+    RecoveryMember,
+    RecoveryProposal,
+    RecoveryThread,
+)
 from openswe.merge_queue.store import BatchHistory, LeaseLost, MergeQueue, NativeSelection
 from openswe.prompts import prompt
 from openswe.run_config import RunConfig
@@ -177,6 +183,65 @@ class QueueRecovery:
             replace=replace,
         )
 
+    async def notify_conflict(
+        self, request: ConflictRemoval, result: ConflictRemovalResult
+    ) -> None:
+        if self.config.recovery is None:
+            return
+        removed = result.removed
+        number = removed.number if removed is not None else request.number
+        if request.repository_id != self.config.repository_id:
+            raise PermissionError("Conflict notification belongs to another repository")
+        operator = await self.operator()
+        owner, repo = self.config.repository.split("/", 1)
+        async with GitHubClient.as_app(
+            owner, repo, permissions={"metadata": "read", "pull_requests": "read"}
+        ) as github:
+            info = await github.repo(owner, repo).pull_request(number).pull()
+        author = info.get("user")
+        login = author.get("login") if isinstance(author, dict) else None
+        user = await User.for_login("github", login) if isinstance(login, str) else None
+        who = (
+            f"<@{user.slack_user_id}>"
+            if user and user.slack_user_id
+            else f"{escape(str(login or 'PR author'))} (<@{operator.slack_user_id}> please route)"
+        )
+        link = f"<https://github.com/{self.config.repository}/pull/{number}|#{number}>"
+        expected = RecoveryMember(
+            entry_id=request.entry_id, number=request.number, head_sha=request.head_sha
+        )
+        if result.forbidden:
+            text = (
+                f"Merge queue update: {who}, GitHub denied Robin's attempt to dequeue {link}.\n"
+                f"Suggested fix: <@{operator.slack_user_id}> fix the dispatch App's queue-removal permissions, then requeue the PR."
+            )
+        elif result.uncertain:
+            text = (
+                f"Merge queue update: {who}, Robin could not confirm automatic conflict removal for {link}.\n"
+                "Issue: The removal outcome is unknown; the PR may already be dequeued.\n"
+                f"Suggested fix: <@{operator.slack_user_id}> check its queue status and help requeue it after resolving conflicts."
+            )
+        elif removed == expected:
+            text = (
+                f"Merge queue update: {who}, Robin dequeued {link}.\n"
+                "Issue: GitHub reported merge conflicts.\n"
+                "Suggested fix: Resolve the conflicts, pass checks, and requeue the PR."
+            )
+        else:
+            assert removed is not None
+            text = (
+                f"Merge queue update: {who}, {link} changed during automatic conflict removal.\n"
+                f"GitHub removed the updated entry at `{removed.head_sha[:12]}`. "
+                f"<@{operator.slack_user_id}> please review and help requeue it."
+            )
+        outcome = hashlib.sha256(result.model_dump_json().encode()).hexdigest()
+        await self.post_once(
+            None,
+            f"conflict:{self.queue.id}:{request.entry_id}:{request.head_sha}:{outcome}",
+            text,
+            oldest=request.enqueued_at,
+        )
+
     async def reconcile(self, lease: Lease) -> None:
         for batch_id in await self.queue.recovery_batches(lease):
             history = await self.queue.history(batch_id)
@@ -226,12 +291,20 @@ class QueueRecovery:
         return keys - state.notices.keys()
 
     async def post_once(
-        self, state: RecoveryThread, event_id: str, text: str, *, oldest: datetime | None = None
+        self,
+        state: RecoveryThread | None,
+        event_id: str,
+        text: str,
+        *,
+        oldest: datetime | None = None,
     ) -> str:
         # Reconcile an uncertain send before posting again. The stable client id is a
         # second deduplication layer when Slack has not made its history visible yet.
+        settings = state.settings if state is not None else self.config.recovery
+        assert settings is not None
+        thread_ts = state.thread_ts if state is not None else None
         root = oldest is not None
-        assert root or state.thread_ts is not None
+        assert root or thread_ts is not None
         async with SlackClient.bot() as slack:
             assert slack is not None
             cursor = ""
@@ -239,17 +312,17 @@ class QueueRecovery:
                 if root:
                     assert oldest is not None
                     page = await slack.conversations_history(
-                        channel=state.settings.channel_id,
+                        channel=settings.channel_id,
                         cursor=cursor,
                         limit=200,
                         oldest=str(oldest.timestamp()),
                         include_all_metadata=True,
                     )
                 else:
-                    assert state.thread_ts is not None
+                    assert thread_ts is not None
                     page = await slack.conversations_replies(
-                        channel=state.settings.channel_id,
-                        ts=state.thread_ts,
+                        channel=settings.channel_id,
+                        ts=thread_ts,
                         cursor=cursor,
                         limit=200,
                         include_all_metadata=True,
@@ -270,9 +343,9 @@ class QueueRecovery:
                     break
 
             posted = await slack.chat_postMessage(
-                channel=state.settings.channel_id,
+                channel=settings.channel_id,
                 text=text,
-                thread_ts=None if root else state.thread_ts,
+                thread_ts=None if root else thread_ts,
                 client_msg_id=str(uuid5(NAMESPACE_URL, event_id)),
                 metadata={
                     "event_type": "merge_queue_recovery",

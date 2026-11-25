@@ -25,6 +25,7 @@ from openswe.merge_queue.controller import QueueController
 from openswe.merge_queue.diagnosis import JOB as RECOVERY_JOB
 from openswe.merge_queue.diagnosis import QueueRecovery
 from openswe.merge_queue.dispatch import (
+    ConflictRemovalResult,
     DeferralForbidden,
     DispatchGateway,
     DispatchRejected,
@@ -2908,6 +2909,8 @@ class TestNativeRecovery:
             "removed",
             "multi_removed",
             "multi_partial",
+            "mergeability_refreshed",
+            "head_changed_during_checks",
             "lost_response",
             "publication_timeout",
             "rejected",
@@ -2953,8 +2956,17 @@ class TestNativeRecovery:
             main="d" * 40 if advancing else snapshot.main_sha,
         )
         repo = Mock(spec=RepoClient)
+        current = snapshot
+        if outcome in {"mergeability_refreshed", "head_changed_during_checks"}:
+            assert snapshot.queue is not None
+            data = snapshot.model_dump()
+            for node in data["queue"]["entries"]["nodes"]:
+                node["pull"]["mergeable"] = "MERGEABLE"
+                if outcome == "head_changed_during_checks":
+                    node["pull"]["head_sha"] = "f" * 40
+            current = NativeQueueSnapshot.model_validate(data)
         repo.native_queue = AsyncMock(
-            side_effect=[snapshot, snapshot if outcome == "publication_timeout" else after]
+            side_effect=[current, snapshot if outcome == "publication_timeout" else after]
         )
         repo.merge_base = AsyncMock(return_value=snapshot.main_sha)
         repo.branch_rules = AsyncMock(
@@ -3073,6 +3085,12 @@ class TestNativeRecovery:
             assert saved.status == "pending"
             return
         assert await runner._recover(queue, repo, snapshot, lease)
+        if outcome == "head_changed_during_checks":
+            gateway.defer.assert_not_awaited()
+            history = await queue.history(work.batch.id)
+            assert history.decisions[0].plan["status"] == "escalated"
+            assert (await queue.snapshot(limit=1))[0]
+            return
 
         gateway.defer.assert_awaited_once()
         args, kwargs = gateway.defer.call_args
@@ -3564,3 +3582,52 @@ async def test_operator_controls_preserve_active_batch_and_reject_stale_changes(
     )
     current = await MergeQueue.load(queue.id, queue.bound_routing_id)
     assert current.paused and current.recovery_pause_id is None
+
+
+@pytest.mark.parametrize("state", ["CONFLICTING", "UNKNOWN", "MERGEABLE", "stack", "paused"])
+async def test_conflict_job_retries_contention_and_respects_pause(queue, state):
+    from openswe.jobs import queue as jobs
+    from tests.merge_queue.test_queue_controller import native_response
+
+    _, lease, operator = await enable_native_validation(queue)
+    response = native_response((1,), "a" * 40)
+    entry = response["mergeQueue"]["entries"]["nodes"][0]
+    entry["pullRequest"].update(
+        mergeable="CONFLICTING" if state == "stack" else state,
+        baseRefName="lower-pr" if state == "stack" else "main",
+    )
+    snapshot = NativeQueueSnapshot.model_validate(response)
+    repo = Mock(spec=RepoClient)
+    repo.native_queue.return_value = snapshot
+    gateway = Mock(spec=DispatchGateway)
+    gateway.remove_conflict.return_value = ConflictRemovalResult(removed=None)
+
+    @asynccontextmanager
+    async def open_repo(_queue):
+        yield repo
+
+    worker = NativeQueueRuntime(queue.id, 42, open_repo, dispatcher=gateway)
+    if state == "paused":
+        await queue.set_paused(True, actor=operator.id)
+    queue = await MergeQueue.load(queue.id, queue.bound_routing_id)
+    assert queue is not None
+    await worker._schedule_conflict(queue, snapshot, lease)
+    key = f"merge-queue-conflict:{queue.id}:{entry['id']}:{entry['pullRequest']['headRefOid']}:{snapshot.main_sha}"
+    job = await jobs.get(key)
+    if state != "CONFLICTING":
+        assert job is None
+        await queue.release(lease)
+        return
+    assert job is not None
+    await worker._schedule_conflict(queue, snapshot, lease)
+    assert (await jobs.get(key)).payload == job.payload
+    payload = QueueJob.model_validate(job.payload)
+    with pytest.raises(LeaseLost):
+        await worker.reconcile(payload)
+    gateway.remove_conflict.assert_not_called()
+    await queue.release(lease)
+    await worker.reconcile(payload)
+    gateway.remove_conflict.assert_awaited_once_with(payload.conflict)
+    await queue.set_paused(True, actor=operator.id)
+    await worker.reconcile(payload)
+    assert gateway.remove_conflict.call_args.args[0].receipt_only

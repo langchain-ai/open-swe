@@ -12,6 +12,7 @@ from tenacity import wait_none
 from openswe.merge_queue import diagnosis
 from openswe.merge_queue.configuration import QueueConfiguration
 from openswe.merge_queue.diagnosis import QueueBusy, QueueRecovery
+from openswe.merge_queue.dispatch import ConflictRemoval, ConflictRemovalResult
 from openswe.merge_queue.models import Lease
 from openswe.merge_queue.recovery import (
     RecoveryDecision,
@@ -31,7 +32,14 @@ class SlackDelivery:
         self.incomplete = False
 
     async def conversations_history(self, **kwargs: object) -> dict[str, JsonValue]:
-        return {"messages": list(self.messages), "has_more": self.incomplete}
+        return {
+            "messages": [
+                message
+                for message in self.messages
+                if float(str(message["ts"])) >= float(str(kwargs.get("oldest", 0)))
+            ],
+            "has_more": self.incomplete,
+        }
 
     async def conversations_replies(self, **kwargs: object) -> dict[str, JsonValue]:
         return await self.conversations_history(**kwargs)
@@ -40,9 +48,11 @@ class SlackDelivery:
         self.posts += 1
         self.messages.append(
             {
-                "ts": "123.456",
+                "ts": str(datetime.now(UTC).timestamp()),
                 "user": "UROBIN",
                 "metadata": kwargs["metadata"],
+                "text": kwargs["text"],
+                "channel": kwargs["channel"],
             }
         )
         raise TimeoutError("Slack accepted the message but the response was lost")
@@ -127,9 +137,65 @@ class TestRecoveryDelivery:
             await service.post_once(state, "event-1", "Confirmed outcome", oldest=oldest)
         assert (
             await service.post_once(state, "event-1", "Confirmed outcome", oldest=oldest)
-            == "123.456"
+            == slack.messages[0]["ts"]
         )
         assert slack.posts == 1
+
+    @pytest.mark.parametrize("outcome", ["confirmed", "replacement", "uncertain", "forbidden"])
+    async def test_conflict_notice_deduplicates_across_ticks(self, monkeypatch, outcome):
+        service, _, slack = await self.setup(monkeypatch)
+        service.config.repository, service.config.repository_id = "acme/widgets", 42
+        service.queue.id = uuid7()
+        service.operator = AsyncMock(return_value=Mock(slack_user_id="UOPERATOR"))
+        connection = AsyncMock()
+        connection.__aenter__.return_value.repo = Mock(
+            return_value=Mock(
+                pull_request=Mock(
+                    return_value=Mock(pull=AsyncMock(return_value={"user": {"login": "author"}}))
+                )
+            )
+        )
+        monkeypatch.setattr(diagnosis.GitHubClient, "as_app", lambda *args, **kwargs: connection)
+        monkeypatch.setattr(
+            diagnosis.User, "for_login", AsyncMock(return_value=Mock(slack_user_id="UAUTHOR"))
+        )
+        request = ConflictRemoval(
+            repository_id=42,
+            entry_id="entry-7",
+            number=7,
+            head_sha="b" * 40,
+            main_sha="a" * 40,
+            enqueued_at=datetime.now(UTC) - timedelta(minutes=10),
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        )
+        removed = RecoveryMember(
+            entry_id="entry-7",
+            number=7,
+            head_sha="c" * 40 if outcome == "replacement" else "b" * 40,
+        )
+        result = ConflictRemovalResult(
+            removed=None if outcome in {"uncertain", "forbidden"} else removed,
+            uncertain=outcome == "uncertain",
+            forbidden=outcome == "forbidden",
+        )
+        with pytest.raises(TimeoutError):
+            await service.notify_conflict(request, result)
+        later = request.model_copy(update={"expires_at": request.expires_at + timedelta(minutes=1)})
+        await service.notify_conflict(later, result)
+        assert slack.posts == 1
+        text = slack.messages[0]["text"]
+        assert isinstance(text, str)
+        assert "<@UAUTHOR>" in text
+        assert {
+            "confirmed": "Robin dequeued",
+            "replacement": "changed during automatic conflict removal",
+            "uncertain": "could not confirm",
+            "forbidden": "permissions",
+        }[outcome] in text
+        if outcome == "uncertain":
+            with pytest.raises(TimeoutError):
+                await service.notify_conflict(later, ConflictRemovalResult(removed=removed))
+            assert slack.posts == 2
 
     async def test_incomplete_history_does_not_resend(self, monkeypatch):
         service, state, slack = await self.setup(monkeypatch)

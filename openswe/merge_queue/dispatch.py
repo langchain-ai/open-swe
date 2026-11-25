@@ -32,6 +32,22 @@ class CandidateAcceptance(BaseModel):
     candidate_sha: SHA
 
 
+class ConflictRemoval(RecoveryMember):
+    repository_id: int = Field(gt=0, strict=True)
+    main_sha: SHA
+    enqueued_at: AwareDatetime
+    expires_at: AwareDatetime
+    receipt_only: bool = False
+
+
+class ConflictRemovalResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    removed: RecoveryMember | None
+    uncertain: bool = False
+    forbidden: bool = False
+
+
 class WorkflowPolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -108,6 +124,25 @@ class DispatchGateway:
         if policy.nonce != nonce:
             raise ValueError("Workflow policy response belongs to a different request")
         return policy
+
+    async def remove_conflict(self, request: ConflictRemoval) -> ConflictRemovalResult | None:
+        body = request.model_dump_json().encode()
+        async with httpx2.AsyncClient(transport=pooled_transport(), timeout=30) as client:
+            response = await client.post(
+                self._sibling_url("conflict-removals"),
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Merge-Queue-Signature": self._signature(body, b"conflict-removal:"),
+                },
+                follow_redirects=False,
+            )
+            if response.status_code in (409, 410):
+                return
+            response.raise_for_status()
+            if response.status_code != 200:
+                raise ValueError("Queue conflict removal was not acknowledged")
+            return ConflictRemovalResult.model_validate_json(response.content)
 
     async def defer(
         self,

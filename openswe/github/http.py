@@ -1316,6 +1316,7 @@ class RepoClient:
                       baseCommit { oid }
                       headCommit { oid parents(first:2) { totalCount nodes { oid } } }
                       pullRequest {
+                        mergeable
                         number headRefOid state reviewDecision isDraft baseRefName
                         headRepository { nameWithOwner }
                       }

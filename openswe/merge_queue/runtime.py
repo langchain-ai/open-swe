@@ -8,12 +8,12 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid7
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from openswe.github.http import RepoClient
 from openswe.jobs.queue import Job, cancel
 from openswe.merge_queue.admission import QueuePolicy
-from openswe.merge_queue.dispatch import DispatchGateway
+from openswe.merge_queue.dispatch import ConflictRemoval, DispatchGateway
 from openswe.merge_queue.scheduler import BatchScheduler
 from openswe.merge_queue.store import LeaseLost, MergeQueue
 from openswe.merge_queue.validation import CandidateValidation
@@ -29,6 +29,7 @@ class QueueJob(BaseModel):
     model_config = ConfigDict(extra="forbid")
     queue_id: UUID
     routing_id: UUID
+    conflict: ConflictRemoval | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class QueueRuntime:
