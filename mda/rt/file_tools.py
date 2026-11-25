@@ -43,7 +43,7 @@ from runtime_api.endpoint import call
 from runtime_api.operations import CHECK_SHELL, ShellCheck
 
 from rt.auto_review import PATH_ARGUMENTS
-from rt.backend import OpenSweBackend
+from rt.backend import OpenSweBackend, namespace
 from rt.git_evidence import OBSERVED_TOOLS, turn_git
 from rt.memory_policy import MemoryPolicy
 from rt.middleware import reported
@@ -120,22 +120,44 @@ class FileToolsMiddleware(AgentMiddleware):
         """Whether the run searches through ``execute``, its catalog keeping ``grep`` and ``glob`` out."""
         return {"grep", "glob"} <= {*self._backend.run.catalog.excluded}
 
-    def _described_tool(self, tool: BaseTool) -> BaseTool:
-        if tool.name != "execute" or not self._shell_search:
-            return tool
-        description = tool.description.replace(
-            "- You MUST avoid using search commands like find and grep. Instead use the grep, glob tools to search. Use read_file rather than cat/head/tail.\n"
-            "    - execute(command=\"find . -name '*.py'\")  # Use glob tool instead\n"
-            "    - execute(command=\"grep -r 'pattern' .\")  # Use grep tool instead",
-            "- Search repository contents through execute with `git grep -n`, which reads only "
-            "tracked files and skips dependency trees; list file names with `git ls-files`. "
-            "Use `grep -rn` only on specific source directories, never on the repository root "
-            "or a directory holding `node_modules`, `.venv` or other installed dependencies: "
-            "it walks every untracked file there (`--include` and `| grep -v` do not prevent "
-            "the walk) and can take minutes. There are no separate grep/glob tools. "
-            "Follow repository-specific search instructions, including restrictions on ripgrep. "
-            "Use read_file rather than cat/head/tail.",
+    @property
+    def _background_execute(self) -> bool:
+        """Whether this call offers ``background_execute`` for long-running commands."""
+        if namespace():
+            return False
+        catalog = self._backend.run.catalog
+        unavailable = {*catalog.excluded, *catalog.disabled}
+        return "background_execute" not in unavailable and any(
+            spec.name == "background_execute" for spec in catalog.operations
         )
+
+    def _described_tool(self, tool: BaseTool) -> BaseTool:
+        if tool.name != "execute":
+            return tool
+        description = tool.description
+        if self._shell_search:
+            description = description.replace(
+                "- You MUST avoid using search commands like find and grep. Instead use the grep, glob tools to search. Use read_file rather than cat/head/tail.\n"
+                "    - execute(command=\"find . -name '*.py'\")  # Use glob tool instead\n"
+                "    - execute(command=\"grep -r 'pattern' .\")  # Use grep tool instead",
+                "- Search repository contents through execute with `git grep -n`, which reads only "
+                "tracked files and skips dependency trees; list file names with `git ls-files`. "
+                "Use `grep -rn` only on specific source directories, never on the repository root "
+                "or a directory holding `node_modules`, `.venv` or other installed dependencies: "
+                "it walks every untracked file there (`--include` and `| grep -v` do not prevent "
+                "the walk) and can take minutes. There are no separate grep/glob tools. "
+                "Follow repository-specific search instructions, including restrictions on ripgrep. "
+                "Use read_file rather than cat/head/tail.",
+            )
+        if self._background_execute:
+            description = description.replace(
+                "use the optional timeout to override the default.",
+                f"default timeout is {self._execute_timeout}s (max {_FOREGROUND_SECONDS}s). "
+                "For builds, test suites, or commands expected to run longer than ~1-2 minutes, "
+                "use `background_execute` instead of blocking in `execute`.",
+            )
+        if description == tool.description:
+            return tool
         return tool.model_copy(update={"description": description})
 
     def code_tools(self, names: Iterable[str]) -> list[StructuredTool]:
@@ -169,7 +191,7 @@ class FileToolsMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        if self._shell_search:
+        if self._shell_search or self._background_execute:
             request = request.override(
                 tools=[
                     self._described_tool(tool) if isinstance(tool, BaseTool) else tool

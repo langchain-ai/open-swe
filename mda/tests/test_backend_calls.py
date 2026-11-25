@@ -2210,6 +2210,81 @@ async def test_execute_searches_through_the_shell_where_grep_and_glob_are_exclud
             assert description == original
 
 
+@pytest.mark.parametrize(
+    ("operations", "excluded", "disabled", "subagent", "expected"),
+    [
+        (
+            [ToolSpec(name="background_execute", description="Run", parameters={"type": "object"})],
+            [],
+            [],
+            False,
+            True,
+        ),
+        (
+            [ToolSpec(name="background_execute", description="Run", parameters={"type": "object"})],
+            ["background_execute"],
+            [],
+            False,
+            False,
+        ),
+        (
+            [ToolSpec(name="background_execute", description="Run", parameters={"type": "object"})],
+            [],
+            ["background_execute"],
+            False,
+            False,
+        ),
+        (
+            [ToolSpec(name="background_execute", description="Run", parameters={"type": "object"})],
+            [],
+            [],
+            True,
+            False,
+        ),
+        ([], [], [], False, False),
+    ],
+)
+async def test_execute_recommends_background_execute_only_when_offered(
+    monkeypatch: pytest.MonkeyPatch,
+    operations: list[ToolSpec],
+    excluded: list[str],
+    disabled: list[str],
+    subagent: bool,
+    expected: bool,
+) -> None:
+    """``execute`` points long commands to ``background_execute`` only when this call offers it."""
+    from deepagents.middleware.filesystem import FilesystemMiddleware
+    from langchain.agents.middleware.types import ModelRequest
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    monkeypatch.setattr("rt.file_tools.namespace", lambda: ["subagent"] if subagent else [])
+    backend = _run_backend(
+        catalog=Catalog(operations=operations, excluded=excluded, disabled=disabled)
+    )
+    tools = {tool.name: tool for tool in FilesystemMiddleware().tools}
+    files = FileToolsMiddleware(backend, 300)
+    request = ModelRequest(
+        model=FakeListChatModel(responses=["done"]),
+        messages=[],
+        tools=list(tools.values()),
+        state={"messages": []},
+    )
+    received = AsyncMock()
+
+    await files.awrap_model_call(request, received)
+
+    [offered] = received.call_args.args
+    descriptions = [tool.description for tool in offered.tools if tool.name == "execute"]
+    descriptions.extend(tool.description for tool in files.code_tools(["execute"]))
+    assert len(descriptions) == 2
+    for description in descriptions:
+        if expected:
+            assert "background_execute" in description
+            assert "300s (max 600s)" in description
+        else:
+            assert "background_execute" not in description
+
+
 async def test_a_command_code_mode_runs_is_put_to_the_guards_too(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
