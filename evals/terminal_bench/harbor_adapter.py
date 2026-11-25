@@ -20,7 +20,7 @@ import signal
 import tarfile
 import tempfile
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from hashlib import sha256
@@ -76,10 +76,39 @@ class RobinSandbox(LangSmithEnvironment):
         # Harbor; locally, Harbor's own LANGSMITH_API_KEY creates them.
         if key := os.environ.get("ROBIN_EVAL_SANDBOX_API_KEY"):
             kwargs.setdefault("api_key", key)
+        # Harbor constructs every trial's environment before Trial.run()'s error handling, so a
+        # RuntimeError here aborts the whole job instead of failing just the unsupported trial.
+        # Defer unsupported-capability checks into start() so compatible trials still run.
+        self._deferred_validation_error: str | None = None
         super().__init__(*args, **kwargs)
-        if self._compose_mode:
+        if self._compose_mode and self._deferred_validation_error is None:
             # Robin runs commands in the sandbox itself, not in a compose service inside it.
-            raise RuntimeError("Robin can't run a docker-compose task")
+            self._deferred_validation_error = "Robin can't run a docker-compose task"
+
+    def _defer_validation(self, validate: Callable[[], None]) -> None:
+        try:
+            validate()
+        except RuntimeError as error:
+            if self._deferred_validation_error is None:
+                self._deferred_validation_error = str(error)
+
+    @override
+    def _validate_gpu_support(self) -> None:
+        self._defer_validation(super()._validate_gpu_support)
+
+    @override
+    def _validate_tpu_support(self) -> None:
+        self._defer_validation(super()._validate_tpu_support)
+
+    @override
+    def _validate_windows_support(self) -> None:
+        self._defer_validation(super()._validate_windows_support)
+
+    @override
+    async def start(self, force_build: bool) -> None:
+        if self._deferred_validation_error is not None:
+            raise RuntimeError(self._deferred_validation_error)
+        await super().start(force_build=force_build)
 
     @property
     def sandbox_name(self) -> str:

@@ -123,5 +123,5 @@ Set with `--ak key=value` after `--`:
   Processes Robin left running in the background stay, as they do when Robin finishes on its own.
 - A trial counts as an attempt when Robin finishes or stops to ask a question; when the backend refuses the thread or the run fails, it is a Harbor error instead.
 - Setup installs nothing in the task's image, so musl (Alpine) images and images whose package sources no longer resolve run as any other.
-- A docker-compose task fails setup: Robin runs commands in the sandbox itself, not in a compose service inside it.
+- Unsupported tasks (docker-compose, GPU, TPU, or Windows) fail per-trial during `start()` rather than aborting the whole Harbor job.
 - Harbor records no trajectory for Robin; the verifier grades only the environment's final state.
