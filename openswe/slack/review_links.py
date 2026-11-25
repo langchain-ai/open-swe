@@ -26,6 +26,7 @@ _PR_PARTS = re.compile(r"github\.com/([\w.-]+)/([\w.-]+)/pull/(\d+)", re.IGNOREC
 _PR_LINK = re.compile(
     rf"\[(?P<md_label>[^\]\n]*)\]\((?P<angle><)?(?P<md>{_PR_URL})(?(angle)>)\)"
     rf"|<(?P<slack>{_PR_URL})(?:\|(?P<slack_label>[^<>]*))?>"
+    r"|<(?:[a-z][\w+.-]*:|[@#!])[^<>|\s]*\|[^<>]*>"
     rf"|(?P<bare>{_PR_URL})(?=$|[\s<>|)\].,!;:'\"])",
     re.IGNORECASE,
 )
@@ -53,6 +54,8 @@ class _PrLinks:
 
     def link(self, match: re.Match[str]) -> str:
         github = match["md"] or match["slack"] or match["bare"]
+        if not github:
+            return match.group()
         label = match["md_label"] or match["slack_label"]
         if label in (_GITHUB_MARK, f"({_GITHUB_LABEL})", ":arrow_upper_right:") or (
             label == _GITHUB_LABEL and match.string[: match.start()].endswith("> (")

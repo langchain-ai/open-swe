@@ -402,7 +402,10 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
     monkeypatch.setenv("DASHBOARD_BASE_URL", "https://openswe.example/prefix/")
     url = "https://github.com/acme/app/pull/7"
     target = "https://openswe.example/prefix/agents/reviews/acme/app/7"
-    unchanged = f"{url}/files {url}?diff=split {url}#discussion https://example.com/acme/app/pull/7"
+    unchanged = (
+        f"{url}/files {url}?diff=split {url}#discussion https://example.com/acme/app/pull/7"
+        f" <https://openswe.example/prefix/agents/automations/a1|Watch {url}>"
+    )
     destination = f"<{url}>" if angled else url
     text = f"[PR]({destination}), <{url}|PR> and {url}.\n`{url}`\n```bash\n{url}\n```\n{unchanged}"
     blocks = block_payload(
@@ -455,6 +458,11 @@ async def test_review_links_default_to_open_swe_without_changing_code_or_button_
     assert blocks[0]["text"] == text
     resent = await review_links.pr_review_links(payload["text"], sent_blocks)
     assert resent == (payload["text"], sent_blocks)
+    table = f"| < 10 MB | [PR]({url}) | > 10 MB |"
+    assert await review_links.pr_review_links(table, None) == (
+        f"| < 10 MB | [PR]({target}) - [(GitHub)]({url}) | > 10 MB |",
+        None,
+    )
 
     fetched: list[dict[str, object]] = [
         {

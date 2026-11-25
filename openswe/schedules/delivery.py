@@ -3,6 +3,7 @@
 import logging
 from dataclasses import dataclass
 from typing import Final, Self
+from urllib.parse import quote
 
 from fastapi import HTTPException
 
@@ -20,7 +21,7 @@ from openswe.slack.dm import post_dm
 from openswe.slack.markdown import markdown_blocks, markdown_to_mrkdwn
 from openswe.slack.records import lookup_slack_thread_id
 from openswe.users import User
-from openswe.utils.dashboard_links import dashboard_thread_url
+from openswe.utils.dashboard_links import dashboard_base_url, dashboard_thread_url
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,11 @@ class CreatorDelivery:
         )
 
     def _footer(self) -> str:
-        parts = [f"From the automation *{escape(self.schedule_name)}*"]
+        name = escape(self.schedule_name)
+        if base_url := dashboard_base_url():
+            url = f"{base_url}/agents/automations/{quote(self.schedule_id, safe='')}"
+            name = f"<{url}|{name}>"
+        parts = [f"From the automation *{name}*"]
         if url := dashboard_thread_url(self.thread_id):
             parts.append(f"<{url}|Web thread>")
         return " · ".join(parts)

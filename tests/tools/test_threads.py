@@ -432,9 +432,13 @@ def _creator_dm(
     return post, recorded
 
 
+@pytest.mark.parametrize("dashboard_url", ["https://robin.example.com/", ""])
 async def test_automation_run_delivers_only_to_its_creator(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, dashboard_url: str
 ) -> None:
+    monkeypatch.setenv("DASHBOARD_BASE_URL", dashboard_url)
+    monkeypatch.setenv("DASHBOARD_DEV_SERVER_URL", "")
+    monkeypatch.setenv("DASHBOARD_STATIC_DIR", "/nonexistent-dashboard-build")
     _automation_run(
         monkeypatch,
         {"owner_type": "system", "visibility": "public", "schedule_id": _AUTOMATION_ID},
@@ -454,6 +458,18 @@ async def test_automation_run_delivers_only_to_its_creator(
     assert awaited is not None
     assert awaited.args[0] == "U_CREATOR"
     assert "12" in awaited.args[1]
+    footer = "From the automation *CI watch*"
+    if dashboard_url:
+        footer = (
+            f"From the automation *<https://robin.example.com/agents/automations/"
+            f"{_AUTOMATION_ID}|CI watch>* · "
+            "<https://robin.example.com/agents/automation-thread|Web thread>"
+        )
+    assert awaited.args[1].endswith(footer)
+    assert awaited.kwargs["blocks"][-1] == {
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": footer}],
+    }
 
 
 async def test_automation_delivery_refuses_creator_failing_login_gate(
