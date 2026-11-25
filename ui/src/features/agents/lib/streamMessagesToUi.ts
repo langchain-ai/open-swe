@@ -13,6 +13,7 @@ import type { AssembledToolCall } from "@langchain/react"
 import { dashboardApiUrl } from "@/lib/dashboard-fetch"
 
 import type { StructuredEntity } from "./structuredInputMessages"
+import type { PassageReply } from "@/features/agents/utils/passageReply"
 import type { AnyImageChunk, Chunk, Message, ToolExecutionChunk } from "./types"
 
 function senderNote(entity: StructuredEntity | undefined): string | undefined {
@@ -406,7 +407,14 @@ export function streamMessagesToUi(
       if (entity?.senderType === "self") return
       const taskEvent = parsed.type === "message" ? parsed.taskEvent : undefined
       const text = taskEvent?.content ?? parsed.content
-      const replies = parsed.type === "message" ? parsed.replies : undefined
+      // The copy this tab sent has no envelope yet; its replies ride beside its text.
+      const sentReplies: unknown = raw.additional_kwargs.replies
+      const replies =
+        parsed.type === "message"
+          ? parsed.replies
+          : Array.isArray(sentReplies) && sentReplies.length
+            ? (sentReplies as Array<PassageReply>)
+            : undefined
       if (text.trim()) chunks.push({ kind: "text", text })
       if (!chunks.length && !taskEvent && !replies) return
       const { value: timestamp, isFallback: timestampIsFallback } =
@@ -430,6 +438,7 @@ export function streamMessagesToUi(
         timestamp,
         timestampIsFallback,
         chunks,
+        ...(replies ? { replies } : {}),
         ...(parsed.type === "message"
           ? {
               structuredSenderId: parsed.sender,
@@ -438,7 +447,6 @@ export function streamMessagesToUi(
               ...(parsed.slackMessageUrl
                 ? { slackMessageUrl: parsed.slackMessageUrl }
                 : {}),
-              ...(replies ? { replies } : {}),
               structuredSenderName:
                 entity?.displayName ??
                 (entity?.handle ? `@${entity.handle}` : undefined),

@@ -222,6 +222,28 @@ describe("streamMessagesToUi", () => {
     ])
   })
 
+  it("keeps the replies of a message this tab sent beside its text", () => {
+    const reply = {
+      source: "conversation" as const,
+      before: "",
+      selection: "Opening a pull request.",
+      after: "",
+      comment: "",
+    }
+    const messages = streamMessagesToUi([
+      new HumanMessage({
+        id: "sent",
+        content: [{ type: "text", text: "Which branch?" }],
+        additional_kwargs: { replies: [reply] },
+      }),
+    ])
+
+    expect(messages[0]?.chunks).toEqual([
+      { kind: "text", text: "Which branch?" },
+    ])
+    expect(messages[0]?.replies).toEqual([reply])
+  })
+
   it("keys each agent turn by the user message that opened it", () => {
     const messages = streamMessagesToUi([
       new HumanMessage({ id: "user-1", content: "first" }),
