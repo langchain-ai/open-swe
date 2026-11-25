@@ -2073,7 +2073,9 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     ("command", "timeout"),
     [
         ("make build", 1500),
+        ("make build", 1500.0),
         ("make build", 0),
+        ("make build", 0.0),
         ("sleep 295; cat /tmp/open-swe-background-tasks/cmd-1/output.log", 300),
         ("sleep 5m; cat /tmp/open-swe-background-tasks/cmd-1/output.log", 360),
         ("sleep 295 >/dev/null 2>&1; cat output.log", 300),
@@ -2129,7 +2131,7 @@ async def test_a_command_the_guards_refuse_is_recorded_with_their_reason(
     ],
 )
 async def test_a_foreground_command_past_the_limit_is_sent_to_the_background(
-    monkeypatch: pytest.MonkeyPatch, command: str, timeout: int
+    monkeypatch: pytest.MonkeyPatch, command: str, timeout: int | float
 ) -> None:
     monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
     for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
@@ -2334,6 +2336,109 @@ async def test_execute_recommends_background_execute_only_when_offered(
             assert "300s (max 600s)" in description
         else:
             assert "background_execute" not in description
+
+
+@pytest.mark.parametrize(
+    ("timeout_arg", "elapsed", "exit_code", "background_execute", "subagent", "expected_timeout"),
+    [
+        (None, 300.1, -1, True, False, 300),
+        (60.0, 60.1, -1, True, False, 60),
+        (60, 60.1, -1, True, True, 60),
+        (60, 60.1, -1, False, False, 60),
+        (600, 600.1, -1, False, False, 600),
+        (300, 2.0, -1, True, False, None),
+        (300, 300.1, 1, True, False, None),
+    ],
+)
+async def test_execute_explains_timeout_when_killed_at_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    timeout_arg: int | float | None,
+    elapsed: float,
+    exit_code: int,
+    background_execute: bool,
+    subagent: bool,
+    expected_timeout: int | None,
+) -> None:
+    """An ``execute`` killed with ``exit_code == -1`` at its deadline gets a timeout explanation."""
+    from deepagents.middleware.filesystem import FilesystemMiddleware
+    from langchain.agents.middleware.types import ModelRequest
+    from rt.backend import subagent_of
+
+    monkeypatch.setenv("OPEN_SWE_BACKEND_URL", "https://backend.invalid")
+    for module in ("rt.middleware", "rt.tools", "rt.file_tools"):
+        monkeypatch.setattr(f"{module}.run_id", lambda: "run-1")
+    now = 1000.0
+    monkeypatch.setattr("rt.file_tools.monotonic", lambda: now)
+    operations = (
+        [ToolSpec(name="background_execute", description="Run", parameters={"type": "object"})]
+        if background_execute
+        else []
+    )
+    backend = _run_backend(catalog=Catalog(operations=operations, sandbox=_IN_SANDBOX))
+    monkeypatch.setattr(backend.outbox, "started", MagicMock())
+    monkeypatch.setattr(backend.outbox, "finished", MagicMock())
+    seen_timeouts: list[int | None] = []
+
+    class _TimedShell(LocalShellBackend):
+        def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+            nonlocal now
+            seen_timeouts.append(timeout)
+            now += elapsed
+            return ExecuteResponse(output="partial output", exit_code=exit_code, truncated=False)
+
+    tools = {
+        tool.name: tool
+        for tool in FilesystemMiddleware(backend=_TimedShell(root_dir=tmp_path)).tools
+    }
+    files = FileToolsMiddleware(backend, 300)
+    model_request = ModelRequest(
+        model=FakeListChatModel(responses=["done"]),
+        messages=[],
+        tools=list(tools.values()),
+        state={"messages": []},
+    )
+    await files.awrap_model_call(model_request, AsyncMock())
+    args: dict[str, object] = {"command": "python3 train.py"}
+    if timeout_arg is not None:
+        args["timeout"] = timeout_arg
+    runtime = ToolRuntime(
+        state={"messages": []},
+        context=None,
+        config={},
+        stream_writer=lambda event: None,
+        tool_call_id="call-1",
+        store=None,
+    )
+    request = ToolCallRequest(
+        tool_call={"name": "execute", "args": args, "id": "call-1", "type": "tool_call"},
+        tool=tools["execute"],
+        state={"messages": []},
+        runtime=runtime,
+    )
+
+    if subagent:
+        with subagent_of("task-1"):
+            result = await files.awrap_tool_call(request, files._run_own)
+    else:
+        result = await files.awrap_tool_call(request, files._run_own)
+
+    assert seen_timeouts == [None if timeout_arg is None else int(timeout_arg)]
+    expected_prefix = f"partial output\n[Command failed with exit code {exit_code}]"
+    assert isinstance(result, ToolMessage)
+    assert result.status == "success"
+    assert result.artifact == {"exit_code": exit_code, "truncated": False}
+    if expected_timeout is None:
+        assert result.content == expected_prefix
+    else:
+        assert isinstance(result.content, str)
+        assert result.content.startswith(expected_prefix)
+        assert f"timed out after {expected_timeout}s" in result.content
+        if background_execute and not subagent:
+            assert "background_execute" in result.content
+        else:
+            assert "background_execute" not in result.content
+            assert ("up to 600s" in result.content) is (expected_timeout < 600)
 
 
 async def test_a_command_code_mode_runs_is_put_to_the_guards_too(

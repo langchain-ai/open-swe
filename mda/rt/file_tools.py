@@ -24,6 +24,7 @@ import shlex
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from functools import partial, wraps
+from time import monotonic
 from typing import Final
 
 from deepagents.middleware.filesystem import FilesystemMiddleware
@@ -37,7 +38,7 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 from langsmith import get_current_run_tree
 from langsmith.sandbox import SandboxRetryableConnectionError
-from pydantic import JsonValue
+from pydantic import JsonValue, TypeAdapter, ValidationError
 from runtime_api.catalog import FilesSpec
 from runtime_api.endpoint import call
 from runtime_api.operations import CHECK_SHELL, ShellCheck
@@ -73,6 +74,10 @@ _QUOTING: Final = re.compile(r"\\\n|[\"'\\]")
 # As the backend's sandbox: the client gives up on a command the sandbox never
 # answers 30 seconds past its own timeout.
 _EXECUTE_GRACE_SECONDS: Final = 30
+# Tolerance when attributing an `exit_code == -1` command result to the sandbox timeout.
+_TIMEOUT_SLACK_SECONDS: Final = 5
+# Matches deepagents' non-strict `ExecuteSchema.timeout: int | None` coercion (e.g. `60.0` -> `60`).
+_EXECUTE_TIMEOUT: Final = TypeAdapter(int)
 # The longest an ``execute`` may hold the turn; longer work goes to ``background_execute``.
 _FOREGROUND_SECONDS: Final = 600
 # A foreground command that starts by sleeping this long or longer is waiting on something
@@ -230,9 +235,18 @@ class FileToolsMiddleware(AgentMiddleware):
         if _under(("/memories/", *SKILL_ROUTES), call_["name"], call_["args"]):
             run: Handler = handler
         else:
+            # Capture before `reported` pushes this tool call's id onto `namespace()`.
+            background_execute = self._background_execute
             run = partial(
                 self._observed,
-                handler=partial(_retried, handler=partial(self._within_deadline, handler=handler)),
+                handler=partial(
+                    _retried,
+                    handler=partial(
+                        self._within_deadline,
+                        handler=handler,
+                        background_execute=background_execute,
+                    ),
+                ),
             )
         # Any call may reach memory, a search from ``/`` included, so each meets its policy.
         run = partial(self._in_memory, handler=run)
@@ -247,12 +261,12 @@ class FileToolsMiddleware(AgentMiddleware):
         self, request: ToolCallRequest, handler: Handler
     ) -> ToolMessage | Command:
         args = request.tool_call["args"]
-        timeout = args.get("timeout")
+        timeout = self._parsed_timeout(args.get("timeout"))
         command = args.get("command")
         refusal = None
         if request.tool_call["name"] == "execute":
             # 0 turns a command's timeout off, so it is past the limit too.
-            if isinstance(timeout, int) and not 0 < timeout <= _FOREGROUND_SECONDS:
+            if timeout is not None and not 0 < timeout <= _FOREGROUND_SECONDS:
                 refusal = prompt(
                     "tools/foreground-limit", timeout=timeout, limit=_FOREGROUND_SECONDS
                 )
@@ -513,17 +527,32 @@ class FileToolsMiddleware(AgentMiddleware):
                 checked = partial(check.awrap_tool_call, handler=checked)
         return await checked(request)
 
+    @staticmethod
+    def _parsed_timeout(value: object) -> int | None:
+        """Parse `timeout` the same way deepagents' `ExecuteSchema` validates it."""
+        if value is None:
+            return None
+        try:
+            return _EXECUTE_TIMEOUT.validate_python(value)
+        except ValidationError:
+            return None
+
     async def _within_deadline(
-        self, request: ToolCallRequest, handler: Handler
+        self,
+        request: ToolCallRequest,
+        handler: Handler,
+        *,
+        background_execute: bool | None = None,
     ) -> ToolMessage | Command:
-        """Give up on a command the sandbox never answers, as the backend's sandbox does."""
-        timeout = request.tool_call["args"].get("timeout")
-        seconds = timeout if isinstance(timeout, int) else self._execute_timeout
+        """Give up on a command the sandbox never answers, and explain one killed at its timeout."""
+        timeout = self._parsed_timeout(request.tool_call["args"].get("timeout"))
+        seconds = timeout if timeout is not None else self._execute_timeout
         if request.tool_call["name"] != "execute" or seconds <= 0:
             return await handler(request)
         deadline = seconds + _EXECUTE_GRACE_SECONDS
+        started = monotonic()
         try:
-            return await asyncio.wait_for(handler(request), deadline)
+            result = await asyncio.wait_for(handler(request), deadline)
         except TimeoutError:
             logger.warning("The sandbox never answered a command", extra={"deadline": deadline})
             return ToolMessage(
@@ -532,6 +561,41 @@ class FileToolsMiddleware(AgentMiddleware):
                 name=request.tool_call["name"],
                 status="error",
             )
+        return self._annotate_timeout(
+            result,
+            seconds,
+            monotonic() - started,
+            background_execute=self._background_execute
+            if background_execute is None
+            else background_execute,
+        )
+
+    def _annotate_timeout(
+        self,
+        result: ToolMessage | Command,
+        seconds: int,
+        elapsed: float,
+        *,
+        background_execute: bool,
+    ) -> ToolMessage | Command:
+        """Explain an `exit_code == -1` result when the command ran to its timeout."""
+        if (
+            not isinstance(result, ToolMessage)
+            or not isinstance(result.content, str)
+            or not isinstance(result.artifact, Mapping)
+            or result.artifact.get("exit_code") != -1
+        ):
+            return result
+        if elapsed < max(seconds - _TIMEOUT_SLACK_SECONDS, seconds * 0.9):
+            return result
+        hint = prompt(
+            "tools/foreground-timeout",
+            timeout=seconds,
+            limit=_FOREGROUND_SECONDS,
+            background_execute=background_execute,
+        )
+        content = f"{result.content}\n{hint}" if result.content else hint
+        return result.model_copy(update={"content": content})
 
 
 async def _invoked(tool: BaseTool, request: ToolCallRequest) -> ToolMessage | Command:

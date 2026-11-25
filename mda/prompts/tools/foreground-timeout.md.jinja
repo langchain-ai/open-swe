@@ -1,0 +1,8 @@
+[Command timed out after {{ timeout }}s and was killed.]
+{% if background_execute %}
+Start long-running commands with `background_execute`, which wakes you when they finish, or split the work into shorter steps.
+{% elif timeout < limit %}
+Split the work into shorter steps or pass a larger `timeout` (up to {{ limit }}s).
+{% else %}
+Split the work into shorter steps.
+{% endif %}
