@@ -9,7 +9,7 @@ resolution-markers = [
 [manifest]
 constraints = [
     { name = "langgraph-api", specifier = "==0.19.0.dev3" },
-    { name = "langgraph-runtime-inmem", specifier = "==0.39.0rc9" },
+    { name = "langgraph-runtime-inmem", specifier = "==0.39.0rc10" },
 ]
 
 [[package]]
@@ -1814,7 +1814,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-runtime-inmem"
-version = "0.39.0rc9"
+version = "0.39.0rc10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blockbuster" },
@@ -1826,9 +1826,9 @@ dependencies = [
     { name = "starlette" },
     { name = "structlog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/05/fa/f822ceac7e233d211bb94893b9421a44561acecc708366e7993e0f6bc6ab/langgraph_runtime_inmem-0.39.0rc9.tar.gz", hash = "sha256:14437954dc38e380a2f658ea787eb95415a728485e06fc002f89c04f9b6acc86", size = 211520, upload-time = "2026-11-23T13:51:26.344Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/10/05/9c8ac6a89175a49f890ea51c5f55e3e84a51603f2e62b7f7b0b752848884/langgraph_runtime_inmem-0.39.0rc10.tar.gz", hash = "sha256:299084a3009656572661fe237094256a87f22642ad82196329507e5ab9e34960", size = 211519, upload-time = "2026-11-24T13:52:57.07Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/84/7a/6fac622f545499ec8722dc7eb4becce00b1f95f13328ff6879a6e85aa0bb/langgraph_runtime_inmem-0.39.0rc9-py3-none-any.whl", hash = "sha256:9b79887d698c86d38af0790da2bfa7c62fe6ee3edfd236c3b1349af935c5f631", size = 66268, upload-time = "2026-11-23T13:51:25.228Z" },
+    { url = "https://files.pythonhosted.org/packages/73/21/b040439acbeb1c28b36be805b9c4787ab26960e8c46df7506ee4f9118bc7/langgraph_runtime_inmem-0.39.0rc10-py3-none-any.whl", hash = "sha256:2151eae7072dd44f2d32953e1c684d28b2525fa362c310b9d8afcbc8709fad18", size = 66272, upload-time = "2026-11-24T13:52:55.882Z" },
 ]
 
 [[package]]
@@ -1849,7 +1849,7 @@ wheels = [
 
 [[package]]
 name = "langsmith"
-version = "0.16.1"
+version = "0.16.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1867,9 +1867,9 @@ dependencies = [
     { name = "xxhash" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/34/96/8b1ed7d37bae1f9cd9bd42a4588d26d3855ea80a5932294101feef09cad2/langsmith-0.16.1.tar.gz", hash = "sha256:20f09ff3cc2c26dd0af94a1306c988e48e46bdea2268d8e24f63bfd54f10e6a8", size = 5124903, upload-time = "2026-11-23T20:32:24.686Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bb/6b/83233750eaa407df7d1c14df1fd0ed3be866fac5d185d7f879aa434b6b2f/langsmith-0.16.2.tar.gz", hash = "sha256:991592265e5ae7087d5ce0b77545ea593f0e4648e8f23178b12bb44be4ac3f96", size = 5128033, upload-time = "2026-11-24T15:03:07.309Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/63/79/b2b50b0a6c6ac21c85411d4c5f02e27a5ea965c73ec2836011930d28e65b/langsmith-0.16.1-py3-none-any.whl", hash = "sha256:6d7ca07f254839309b6f797062271f5447c25112eda0cec9a0e7606eef77d5ee", size = 1037706, upload-time = "2026-11-23T20:32:22.367Z" },
+    { url = "https://files.pythonhosted.org/packages/e6/1f/019524e293177be400f4f2e35c757e633763020e8d5dead75729b93a276a/langsmith-0.16.2-py3-none-any.whl", hash = "sha256:9553b6fa4d7520d4a0e597ffa2630002b3d5878248baa815917dab2d3e89bc4c", size = 1041005, upload-time = "2026-11-24T15:03:05.057Z" },
 ]
 
 [package.optional-dependencies]
@@ -2248,7 +2248,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.24" },
     { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'dev'", specifier = ">=0.4.43" },
     { name = "langgraph-sdk", specifier = ">=0.4.14" },
-    { name = "langsmith", extras = ["sandbox-auth"], specifier = ">=0.16.1" },
+    { name = "langsmith", extras = ["sandbox-auth"], specifier = ">=0.16.2" },
     { name = "managed-deepagents", git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=ce54e2e03a7d903b5450f059e5551cff17c1cf71" },
     { name = "markdown-it-py", specifier = "==4.3.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
