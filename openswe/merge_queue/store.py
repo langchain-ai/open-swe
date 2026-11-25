@@ -107,6 +107,11 @@ class ValidationWork:
     dispatch: bool = False
 
 
+SPENT_BATCH_RECOVERY_GRACE = timedelta(minutes=15)
+# Split this long before an attempt or batch deadline, whose expiry cancels live checks.
+SPENT_BATCH_DEADLINE_MARGIN = timedelta(minutes=5)
+
+
 class NativeSelection(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     entries: tuple[NativeEntry, ...]
@@ -125,6 +130,21 @@ class NativeSelection(BaseModel):
             ):
                 return candidate
         return None
+
+    def split(self, snapshot: NativeQueueSnapshot) -> Self | None:
+        """Select the front half of the surviving entries, which GitHub has already built."""
+        if snapshot.queue is None:
+            return None
+        selected = {entry.id for entry in self.entries}
+        ordered = sorted(snapshot.queue.entries.nodes, key=lambda entry: entry.position)
+        survivors = [entry for entry in ordered if entry.id in selected]
+        if len(survivors) < 2:
+            return None
+        front = ordered[: len(survivors) // 2]
+        if any(entry.id not in selected for entry in front):
+            return None
+        half = type(self)(entries=tuple(front))
+        return half if half.candidate(snapshot) is not None else None
 
     async def members(self, snapshot: NativeQueueSnapshot) -> tuple[RecoveryMember, ...]:
         candidate = self.candidate(snapshot)
@@ -483,6 +503,7 @@ class MergeQueue(Record):
         allow_main_advance: bool = False,
         main_advance_from: str | None = None,
     ) -> NativeWork | None:
+        configured = policy
         async with self._locked(lease) as (session, queue, now):
             if queue.mode != "native" or snapshot.branch != queue.target_branch:
                 raise ValueError("Queue is not validating this native target")
@@ -544,23 +565,19 @@ class MergeQueue(Record):
                 selection = NativeSelection(entries=selected)
                 if selection.candidate(snapshot) is None:
                     return None
-                deadline = now + timedelta(
-                    seconds=min(timeout_seconds - 30, policy.deadline_seconds)
+                created = await self._native_batch(
+                    session,
+                    queue.id,
+                    snapshot,
+                    selection,
+                    policy,
+                    saved_policy,
+                    timeout_seconds,
+                    now,
                 )
-                if deadline <= now:
+                if created is None:
                     return None
-                batch = Batch(
-                    queue_id=queue.id,
-                    request_key=f"native:{uuid7()}",
-                    base_sha=snapshot.main_sha,
-                    policy=saved_policy,
-                    candidate=selection.model_dump(mode="json"),
-                    deadline=deadline,
-                    max_attempts=policy.max_attempts,
-                    max_plans=policy.max_plans,
-                )
-                session.add(batch)
-                await session.flush()
+                batch = created
             if queue.paused:
                 return None
             if allow_main_advance:
@@ -574,12 +591,58 @@ class MergeQueue(Record):
                 ):
                     await self._invalidate(session, batch, now, None)
                 return None
-            members = await selection.members(snapshot) if allow_main_advance else ()
             attempts = list(
                 await session.scalars(
                     select(Attempt).where(Attempt.batch_id == batch.id).order_by(Attempt.number)
                 )
             )
+            # Recovery cannot retry a batch whose attempts are spent, so holding it would block
+            # every later entry until its deadline. After recovery has had time to pause,
+            # escalate or except tests, validate the front half instead; no PR leaves the
+            # queue, and a lone failing PR stays for recovery to attribute. Recovery's window
+            # ends early near a deadline, because expiry would cancel the queued candidates.
+            # Only the latest attempt's check can still expire on a queued candidate; earlier
+            # ones were superseded by a retry or tested a candidate that left the queue.
+            cutoff = (
+                min([batch.deadline] + [a.deadline for a in attempts[-1:] if a.deadline > now])
+                - SPENT_BATCH_DEADLINE_MARGIN
+            )
+            half = (
+                selection.split(snapshot)
+                if len(attempts) >= batch.max_attempts
+                and all(a.state in {"failed", "timed_out", "cancelled"} for a in attempts)
+                and all(a.finished_at is not None for a in attempts)
+                and (
+                    now >= cutoff
+                    or all(
+                        a.finished_at is not None
+                        and a.finished_at <= now - SPENT_BATCH_RECOVERY_GRACE
+                        for a in attempts
+                    )
+                )
+                else None
+            )
+            if half is not None:
+                await self._invalidate(session, batch, now, None)
+                await session.flush()
+                split = await self._native_batch(
+                    session,
+                    queue.id,
+                    snapshot,
+                    half,
+                    configured,
+                    saved_policy,
+                    timeout_seconds,
+                    now,
+                )
+                if split is None:
+                    return None
+                batch, selection, policy, attempts = split, half, configured, []
+                if allow_main_advance:
+                    batch.policy = {**batch.policy, "observed_main_sha": snapshot.main_sha}
+                candidate = selection.candidate(snapshot)
+                assert candidate is not None
+            members = await selection.members(snapshot) if allow_main_advance else ()
             superseded = batch.policy.get("superseded_attempts", 0)
             if type(superseded) is not int:
                 raise ValueError("Invalid workflow policy attempt boundary")
@@ -656,6 +719,34 @@ class MergeQueue(Record):
                     {"members": [member.model_dump(mode="json") for member in members]},
                 )
             return NativeWork(batch, attempt, request, None, dispatch=True, members=members)
+
+    @staticmethod
+    async def _native_batch(
+        session: AsyncSession,
+        queue_id: UUID,
+        snapshot: NativeQueueSnapshot,
+        selection: NativeSelection,
+        policy: QueuePolicy,
+        saved_policy: dict[str, JsonValue],
+        timeout_seconds: int,
+        now: datetime,
+    ) -> Batch | None:
+        deadline = now + timedelta(seconds=min(timeout_seconds - 30, policy.deadline_seconds))
+        if deadline <= now:
+            return None
+        batch = Batch(
+            queue_id=queue_id,
+            request_key=f"native:{uuid7()}",
+            base_sha=snapshot.main_sha,
+            policy=saved_policy,
+            candidate=selection.model_dump(mode="json"),
+            deadline=deadline,
+            max_attempts=policy.max_attempts,
+            max_plans=policy.max_plans,
+        )
+        session.add(batch)
+        await session.flush()
+        return batch
 
     async def finish_native_validation(
         self, work: NativeWork, evidence: dict[str, JsonValue], lease: Lease, *, succeeded: bool
@@ -785,6 +876,7 @@ class MergeQueue(Record):
                     continue
                 state: Literal["in_progress", "recovering", "cancelled"]
                 pending: list[str] = []
+                live: set[str] = set()
                 if not current or expired:
                     state = "cancelled"
                     targets: dict[str, CandidateAcceptance | None] = {request.candidate_sha: None}
@@ -794,11 +886,23 @@ class MergeQueue(Record):
                         ):
                             target = CandidateAcceptance.model_validate(reference)
                             targets[target.candidate_sha] = target
-                    pending = [sha for sha in targets if f"check-cancelled:{sha}" not in references]
+                    # An invalidated batch's replacement may still be queued and is validated
+                    # again by a later batch; cancelling its check would make GitHub drop it.
+                    live = (
+                        {sha for sha in targets if sha in current_shas}
+                        if batch.state != "active"
+                        else set()
+                    )
+                    pending = [
+                        sha
+                        for sha in targets
+                        if f"check-cancelled:{sha}" not in references and sha not in live
+                    ]
                     if not pending:
-                        await self._save_evidence(
-                            session, attempt, "check-cancelled", {"reported": True}
-                        )
+                        if not live:
+                            await self._save_evidence(
+                                session, attempt, "check-cancelled", {"reported": True}
+                            )
                         continue
                     acceptance = targets[pending[-1]]
                 elif batch.state == "active" and attempt.state == "failed" and not queue.paused:
@@ -842,7 +946,7 @@ class MergeQueue(Record):
                     marker,
                     acceptance.model_dump(mode="json") if acceptance else {"reported": True},
                 )
-                if state == "cancelled" and len(pending) == 1:
+                if state == "cancelled" and len(pending) == 1 and not live:
                     await self._save_evidence(
                         session, attempt, "check-cancelled", {"reported": True}
                     )

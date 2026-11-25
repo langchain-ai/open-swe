@@ -2429,8 +2429,13 @@ class TestNativeRecovery:
         )
         if change == "budget":
             async with postgres.session() as session:
+                batch = await session.get(Batch, work.batch.id)
+                assert batch is not None
+                batch.max_attempts = 1
                 await session.execute(
-                    update(Batch).where(Batch.id == work.batch.id).values(max_attempts=1)
+                    update(Attempt)
+                    .where(Attempt.id == work.attempt.id)
+                    .values(deadline=batch.deadline)
                 )
         elif change == "expired":
             async with postgres.session() as session:
@@ -2473,6 +2478,150 @@ class TestNativeRecovery:
             assert history.attempts[0].state == "timed_out"
         else:
             assert history.batch.state == "invalidated"
+
+    @pytest.mark.parametrize(
+        ("main_advanced", "near_deadline"), [(False, False), (True, False), (False, True)]
+    )
+    async def test_spent_batch_validates_its_front_half_without_more_attempts(
+        self, queue, main_advanced, near_deadline
+    ):
+        policy, lease, _, initial, work, _ = await self.failed(queue, allow_main_advance=True)
+        async with postgres.session() as session:
+            await session.execute(
+                update(Batch).where(Batch.id == work.batch.id).values(max_attempts=1)
+            )
+            await session.execute(
+                update(Attempt)
+                .where(Attempt.id == work.attempt.id)
+                .values(
+                    deadline=func.clock_timestamp() + timedelta(minutes=3)
+                    if near_deadline
+                    else Attempt.deadline,
+                    finished_at=func.clock_timestamp()
+                    if near_deadline
+                    else func.clock_timestamp() - timedelta(minutes=16),
+                )
+            )
+        main = "d" * 40 if main_advanced else initial.main_sha
+        current = native_snapshot((1, 2, 3, 4, 5, 6), main=main)
+        replacement = None
+        if main_advanced:
+            async with queue.native_check_update(
+                current, lease, main_advance_from=initial.main_sha
+            ) as recovering:
+                assert recovering is not None and recovering.state == "recovering"
+                assert recovering.acceptance is not None
+                replacement = recovering.acceptance.candidate_sha
+
+        split = await queue.prepare_native_validation(
+            current,
+            600,
+            lease,
+            policy=policy,
+            trust="trusted-policy",
+            allow_main_advance=True,
+            main_advance_from=initial.main_sha,
+        )
+
+        assert split is not None and split.dispatch
+        assert split.batch.id != work.batch.id
+        assert split.request.candidate_sha == list(native_snapshot((1,), main=main).candidates)[-1]
+        assert split.batch.max_attempts == policy.max_attempts
+        spent = await queue.history(work.batch.id)
+        assert spent.batch.state == "invalidated"
+        assert [attempt.state for attempt in spent.attempts] == ["failed"]
+        if near_deadline:
+            async with queue.native_check_update(
+                current, lease, main_advance_from=initial.main_sha
+            ) as queued:
+                assert queued is None
+        if replacement is None:
+            return
+        async with queue.native_check_update(
+            current, lease, main_advance_from=initial.main_sha
+        ) as stale:
+            assert stale is not None and stale.state == "cancelled"
+            assert stale.acceptance is None
+            assert stale.envelope.contract.candidate_sha == work.request.candidate_sha
+        async with queue.native_check_update(
+            current, lease, main_advance_from=initial.main_sha
+        ) as queued:
+            assert queued is None
+        emptied = native_snapshot((), main=main)
+        cancelled = set()
+        for _ in range(3):
+            async with queue.native_check_update(
+                emptied, lease, main_advance_from=initial.main_sha
+            ) as cleanup:
+                if cleanup is None:
+                    break
+                assert cleanup.state == "cancelled"
+                cancelled.add(
+                    cleanup.acceptance.candidate_sha
+                    if cleanup.acceptance
+                    else cleanup.envelope.contract.candidate_sha
+                )
+        assert replacement in cancelled
+
+    async def test_superseded_deadline_does_not_cut_recovery_short(self, queue):
+        policy, lease, _, snapshot, work, proposal = await self.failed(queue)
+        await queue.decide_native_recovery(
+            proposal, "recovery-thread", snapshot, lease, trust="trusted-policy"
+        )
+        retry = await queue.prepare_native_validation(
+            snapshot, 600, lease, policy=policy, trust="trusted-policy"
+        )
+        assert retry is not None and retry.attempt.number == 2
+        await queue.finish_native_validation(retry, {"error": "again"}, lease, succeeded=False)
+        async with postgres.session() as session:
+            batch = await session.get(Batch, work.batch.id)
+            assert batch is not None
+            batch.max_attempts = 2
+            await session.execute(
+                update(Attempt)
+                .where(Attempt.id == work.attempt.id)
+                .values(deadline=func.clock_timestamp() + timedelta(minutes=3))
+            )
+            await session.execute(
+                update(Attempt)
+                .where(Attempt.id == retry.attempt.id)
+                .values(deadline=batch.deadline)
+            )
+
+        assert (
+            await queue.prepare_native_validation(
+                snapshot, 600, lease, policy=policy, trust="trusted-policy"
+            )
+            is None
+        )
+        assert (await queue.history(work.batch.id)).batch.state == "active"
+
+    async def test_spent_single_pr_batch_waits_for_recovery(self, queue):
+        policy, lease, _ = await enable_native_validation(queue, cap=1)
+        snapshot = native_snapshot((1, 2, 3))
+        work = await queue.prepare_native_validation(
+            snapshot, 600, lease, policy=policy, trust="trusted-policy"
+        )
+        assert work is not None
+        await queue.finish_native_validation(work, {"error": "PR 1 breaks"}, lease, succeeded=False)
+        async with postgres.session() as session:
+            await session.execute(
+                update(Batch).where(Batch.id == work.batch.id).values(max_attempts=1)
+            )
+            await session.execute(
+                update(Attempt)
+                .where(Attempt.id == work.attempt.id)
+                .values(finished_at=func.clock_timestamp() - timedelta(minutes=16))
+            )
+
+        assert (
+            await queue.prepare_native_validation(
+                snapshot, 600, lease, policy=policy, trust="trusted-policy"
+            )
+            is None
+        )
+        history = await queue.history(work.batch.id)
+        assert history.batch.state == "active" and len(history.attempts) == 1
 
     @staticmethod
     async def failed(
