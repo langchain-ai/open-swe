@@ -86,8 +86,8 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     ? permalink
       ? null
       : availability.data?.awaiting_ready
-        ? "Only the author can open this review request until its Slack card is posted."
-        : "Open SWE could not find this review request in Slack."
+        ? "Waiting for the author to mark this PR ready. Until then, only the author can open the review request in their Slack DM."
+        : "Robin could not find this review request in Slack."
     : channel
       ? null
       : availability.isPending
@@ -109,7 +109,6 @@ export function RequestHumanReview({ pr }: { pr: OpenPullRequest }) {
     <span
       className="inline-flex items-center gap-space-2"
       onClick={(event) => event.stopPropagation()}
-      title={hint ?? (active ? "Open the review request in Slack" : undefined)}
     >
       {(needsChannel || (availability.isError && !active)) && (
         <SlackChannelCombobox

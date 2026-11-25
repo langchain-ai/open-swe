@@ -169,16 +169,18 @@ it.each([
 )
 
 it.each([
-  { draft: false, permalink: "" },
-  { draft: true, permalink: "" },
+  { draft: false, permalink: "", awaiting_ready: false },
+  { draft: true, permalink: "", awaiting_ready: false },
+  { draft: true, permalink: "", awaiting_ready: true },
   ...[false, true].map((draft) => ({
     draft,
     permalink:
       "https://workspace.slack.com/archives/C0123456789/p1234567890123456",
+    awaiting_ready: false,
   })),
 ])(
-  "reuses persisted status $permalink with draft=$draft on remount and focus",
-  async ({ draft, permalink }) => {
+  "reuses persisted status $permalink with draft=$draft and awaiting_ready=$awaiting_ready on remount and focus",
+  async ({ draft, permalink, awaiting_ready }) => {
     const successToast = vi.spyOn(toast, "success")
     const request = vi.spyOn(api, "requestHumanReview")
     const result =
@@ -211,6 +213,7 @@ it.each([
         available: false,
         active: true,
         permalink,
+        awaiting_ready,
         blockers: [],
       })
     )
@@ -230,6 +233,19 @@ it.each([
       screen.getByRole(role, { name: "Review requested" }),
       permalink
     )
+    expect(
+      screen.getByRole(role, { name: "Review requested" }).closest("[title]")
+    ).toBeNull()
+    if (awaiting_ready) {
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Why the review request can't be opened",
+        })
+      )
+      await screen.findByText(
+        "Waiting for the author to mark this PR ready. Until then, only the author can open the review request in their Slack DM."
+      )
+    }
     expect(request).not.toHaveBeenCalled()
     expect(successToast).not.toHaveBeenCalled()
     expect(availability).toHaveBeenCalledTimes(2)
