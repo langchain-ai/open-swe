@@ -403,7 +403,23 @@ async def api_set_thread_read_state(
     if thread is None:
         raise HTTPException(404, "thread not found")
     assert_thread_readable(thread.metadata, session["sub"], session.get("email"))
-    latest = await RUNTIMES.runs_on(thread.runtime).latest_run(thread_id) if body.viewed else None
+    latest = None
+    if body.viewed:
+        try:
+            latest = await RUNTIMES.runs_on(thread.runtime).latest_run(thread_id)
+        except (httpx.HTTPError, httpx2.HTTPError) as exc:
+            # Refreshing the latest run is best effort: while the runtime is down or
+            # unreachable, the read is saved against the run the index last recorded.
+            if (
+                isinstance(exc, (httpx.HTTPStatusError, httpx2.HTTPStatusError))
+                and exc.response.status_code < 500
+            ):
+                raise
+            logger.warning(
+                "Could not refresh the latest run while saving read state",
+                extra={"thread_id": thread_id},
+                exc_info=True,
+            )
     if latest is not None and (
         latest.run_id != thread.metadata.get("latest_run_id")
         or latest.status != thread.metadata.get("latest_run_status")

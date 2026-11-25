@@ -3,6 +3,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import httpx2
 import pytest
 from fastapi import FastAPI
 
@@ -183,6 +184,31 @@ class TestThreadReadState:
             assert response.json()["viewed"] is False
             assert (await thread_api.get_dashboard_thread("tid", "other"))["viewed"] is True
             assert "last_viewed_run_id" not in self.client.threads.thread["metadata"]
+
+    @pytest.mark.parametrize(
+        "outage",
+        [
+            httpx2.HTTPStatusError(
+                "Service Unavailable",
+                request=httpx2.Request("GET", "http://mda/threads/tid/runs"),
+                response=httpx2.Response(503),
+            ),
+            httpx2.ConnectTimeout("timed out"),
+        ],
+    )
+    async def test_read_is_saved_while_the_runtime_is_unavailable(
+        self, monkeypatch, outage: Exception
+    ) -> None:
+        monkeypatch.setattr(self.client.runs, "latest_run", AsyncMock(side_effect=outage))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=self.app), base_url="http://test"
+        ) as client:
+            response = await client.put(
+                "/dashboard/api/threads/tid/read-state", json={"viewed": True}
+            )
+        assert response.status_code == 200
+        assert response.json() == {"viewed": True}
+        assert self.client.threads.updates == []
 
     @pytest.mark.parametrize("action", ["mark_read", "mark_unread"])
     async def test_tool_changes_only_requesting_persons_read_state(
