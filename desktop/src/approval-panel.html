@@ -142,6 +142,9 @@
         border-color: var(--accent);
         color: var(--accent-text);
       }
+      .card:focus {
+        outline: none;
+      }
       button:focus-visible {
         outline: 2px solid var(--accent);
         outline-offset: 2px;
@@ -152,7 +155,14 @@
     </style>
   </head>
   <body>
-    <main class="card" role="dialog" aria-modal="true" aria-labelledby="title">
+    <main
+      class="card"
+      id="card"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="title"
+      tabindex="-1"
+    >
       <header>
         <h1 id="title">Approve a local action</h1>
         <p class="from" id="from" hidden></p>
@@ -220,7 +230,8 @@
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") decide("later")
       })
-      document.getElementById("cancel").focus()
+      // Focus the dialog, not a button, so a keystroke meant for the composer chooses nothing.
+      document.getElementById("card").focus()
     </script>
   </body>
 </html>

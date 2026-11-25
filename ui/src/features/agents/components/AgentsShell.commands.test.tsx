@@ -564,7 +564,7 @@ it("always shows the Recents organize and new thread controls", async () => {
     expect(control.className).not.toMatch(/\bopacity-0\b/)
 })
 
-it("suspends approvals behind mobile navigation and opens embedded requests in their thread", async () => {
+it("suspends approvals behind mobile navigation and composer writing, and opens embedded requests in their thread", async () => {
   vi.stubGlobal("innerWidth", 700)
   vi.stubGlobal(
     "ResizeObserver",
@@ -585,7 +585,7 @@ it("suspends approvals behind mobile navigation and opens embedded requests in t
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  const content = (collapsed: boolean, embedded: boolean) => (
+  const content = (collapsed: boolean, embedded: boolean, writing = false) => (
     <QueryClientProvider client={client}>
       <SidebarLayoutProvider
         value={{
@@ -600,7 +600,10 @@ it("suspends approvals behind mobile navigation and opens embedded requests in t
       >
         <EmbeddedThreadContext.Provider value={embedded ? {} : null}>
           <div data-chat-drop-zone>
-            <LocalAccessRequests threadId="thread-1" />
+            <LocalAccessRequests
+              threadId="thread-1"
+              composerWriting={writing}
+            />
           </div>
         </EmbeddedThreadContext.Provider>
       </SidebarLayoutProvider>
@@ -611,6 +614,10 @@ it("suspends approvals behind mobile navigation and opens embedded requests in t
   expect(review).toHaveBeenCalledWith("request")
   expect(setThread.mock.lastCall?.[1]).not.toBeNull()
   rerender(content(false, false))
+  expect(setThread).toHaveBeenLastCalledWith("thread-1", null)
+  rerender(content(true, false))
+  expect(setThread.mock.lastCall?.[1]).not.toBeNull()
+  rerender(content(true, false, true))
   expect(setThread).toHaveBeenLastCalledWith("thread-1", null)
   rerender(content(true, false))
   expect(setThread.mock.lastCall?.[1]).not.toBeNull()

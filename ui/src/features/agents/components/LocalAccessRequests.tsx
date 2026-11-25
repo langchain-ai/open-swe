@@ -20,8 +20,16 @@ const VERBS: Record<string, string> = {
 /**
  * The thread's local actions waiting on the person. Deciding happens in the desktop
  * app's own approval panel, which Review opens; this page can't answer a request.
+ * The panel stays away while the person is writing in the composer, so a keystroke
+ * can't land on it.
  */
-export function LocalAccessRequests({ threadId }: { threadId: string }) {
+export function LocalAccessRequests({
+  threadId,
+  composerWriting,
+}: {
+  threadId: string
+  composerWriting: boolean
+}) {
   const desktop = window.openSweDesktop
   const embedded = useContext(EmbeddedThreadContext)
   const collapsed = useSidebarCollapsed()
@@ -32,7 +40,11 @@ export function LocalAccessRequests({ threadId }: { threadId: string }) {
     const thread = region.current?.closest<HTMLElement>("[data-chat-drop-zone]")
     if (!thread) return
     const update = () => {
-      if (embedded || (!collapsed && window.innerWidth < 768)) {
+      if (
+        composerWriting ||
+        embedded ||
+        (!collapsed && window.innerWidth < 768)
+      ) {
         void desktop.setLocalAccessThread?.(threadId, null)
         return
       }
@@ -48,7 +60,7 @@ export function LocalAccessRequests({ threadId }: { threadId: string }) {
       window.removeEventListener("resize", update)
       void desktop.setLocalAccessThread?.(threadId, null)
     }
-  }, [collapsed, desktop, embedded, threadId])
+  }, [collapsed, composerWriting, desktop, embedded, threadId])
   const queryClient = useQueryClient()
   const requests = useQuery({
     queryKey: [REQUESTS_QUERY, threadId],

@@ -229,6 +229,8 @@ export interface ChatComposerProps {
   contextUsage?: ContextWindowMeterProps
   /** Route/model the Auto router picked for the current run. */
   routed?: { route?: string; modelId?: string | null } | null
+  /** Told whether the person is writing: focus is in the composer and its editor holds text. */
+  onWritingChange?: (writing: boolean) => void
 }
 
 function attachmentMimeType(file: File): string {
@@ -402,6 +404,7 @@ export const ChatComposer = memo(function ChatComposer({
   skills = [],
   contextUsage,
   routed,
+  onWritingChange,
 }: ChatComposerProps) {
   const [value, setValue] = useState(
     () => composerDrafts.read(draftKey)?.text ?? ""
@@ -427,6 +430,13 @@ export const ChatComposer = memo(function ChatComposer({
   }
   const [draggingPath, setDraggingPath] = useState(false)
   const composerRef = useRef<HTMLDivElement>(null)
+  const [focused, setFocused] = useState(false)
+  const writing = focused && value.length > 0
+  useEffect(() => {
+    if (!writing || !onWritingChange) return
+    onWritingChange(true)
+    return () => onWritingChange(false)
+  }, [onWritingChange, writing])
   const [fileDropTarget, setFileDropTarget] = useState<HTMLElement | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
@@ -975,6 +985,11 @@ export const ChatComposer = memo(function ChatComposer({
   return (
     <div
       ref={composerRef}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget))
+          setFocused(false)
+      }}
       className={cn(
         "relative w-full font-sans text-xs",
         compact ? "max-w-none" : "max-w-2xl"

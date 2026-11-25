@@ -122,6 +122,22 @@ describe("ChatComposer focus", () => {
     expect(document.activeElement).toBe(search)
   })
 
+  it("reports writing only while focus is in a composer holding text", async () => {
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(),
+    })
+    render(<button>Elsewhere</button>)
+    const onWritingChange = vi.fn()
+    renderComposer(false, {
+      restoreDraft: { key: 1, text: "Draft", images: [] },
+      onWritingChange,
+    })
+    await waitFor(() => expect(onWritingChange).toHaveBeenLastCalledWith(true))
+    screen.getByRole("button", { name: "Elsewhere" }).focus()
+    await waitFor(() => expect(onWritingChange).toHaveBeenLastCalledWith(false))
+  })
+
   it("preserves focus inside a dialog", () => {
     render(
       <div role="dialog" aria-label="Settings">

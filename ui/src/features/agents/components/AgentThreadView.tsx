@@ -243,6 +243,7 @@ export function AgentThreadView({
   )
 
   const [restoreDraft, setRestoreDraft] = useState<RestoredDraft | null>(null)
+  const [composerWriting, setComposerWriting] = useState(false)
   const followUpBehavior = session.data?.follow_up_behavior ?? "steer"
   const queueByDefault = followUpBehavior === "queue"
   const submitMessage = useCallback(
@@ -881,7 +882,10 @@ export function AgentThreadView({
             thread={thread}
           />
         )}
-        <LocalAccessRequests threadId={thread.id} />
+        <LocalAccessRequests
+          threadId={thread.id}
+          composerWriting={composerWriting}
+        />
         <LocalAccessGrantBanner threadId={thread.id} />
         {thread.status === "error" && !reconnect.label && (
           <div className="mx-auto w-full max-w-3xl shrink-0 px-space-4 pt-space-3 empty:hidden">
@@ -1070,6 +1074,7 @@ export function AgentThreadView({
                 followUpBehavior={followUpBehavior}
                 restoreDraft={restoreDraft}
                 addedReply={addedReply}
+                onWritingChange={setComposerWriting}
                 models={models}
                 modelSelectionEnabled={modelSelectionEnabled}
                 routed={routed}
