@@ -568,12 +568,6 @@ def build_chat_model(
     acts for; without it the deployment's LangSmith API key does.
     """
     init_model_id, model_kwargs = model_init_kwargs(model_id, kwargs, gateway=gateway)
-    if (
-        gateway is not None
-        and gateway.authenticates(model_kwargs)
-        and model_id.startswith("anthropic:")
-    ):
-        return gateway.chat_anthropic(model_id.split(":", 1)[1], model_kwargs)
     return init_chat_model(model=init_model_id, **cast(dict[str, Any], model_kwargs))
 
 

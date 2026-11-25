@@ -7,7 +7,7 @@ dependencies = [
     "managed-deepagents>=0.10.1",
     "deepagents==0.7.41",
     "langchain[mcp]>=1.5.2",
-    "langchain-anthropic>=1.7.12",
+    "langchain-anthropic>=1.7.13",
     # Fireworks models the dashboard offers, such as Kimi.
     "langchain-fireworks>=1.8.0,<2.0.0",
     # Gemini models the dashboard offers; it arrived only through deepagents before.

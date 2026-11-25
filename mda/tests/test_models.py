@@ -24,7 +24,6 @@ from rt.run_tools import RunSubagentMiddleware, RunToolsets
 from runtime_api.catalog import Catalog, LoopRules, ModelSpec, RoutingRules, RunModels
 from runtime_api.gateway_auth import (
     GatewayBearer,
-    GatewayChatAnthropic,
     GatewayFailure,
     _Httpx2BearerAuth,
     _HttpxBearerAuth,
@@ -80,18 +79,13 @@ def test_the_runtime_builds_each_model_with_the_backends_settings(
     monkeypatch.setattr(shared, "init_chat_model", init_chat_model)
     spec = _spec(option["id"], option["default_effort"])
 
-    model = build_model(spec)
+    build_model(spec)
 
     # The spec's kwargs crossed the wire as JSON, as the backend's never do.
     kwargs = provider_model_kwargs(option["id"], option["default_effort"], max_tokens=64_000)
     provider = option["id"].split(":", 1)[0]
     if provider in _SDK_RETRY_DISABLE:
         kwargs = {**kwargs, "max_retries": _SDK_RETRY_DISABLE[provider]}
-    if provider == "anthropic":
-        # Its every request asks the run's gateway credential, which init_chat_model can't.
-        assert built == []
-        assert isinstance(model, GatewayChatAnthropic)
-        return
     expected_id, expected = model_init_kwargs(option["id"], kwargs, gateway=GATEWAY_BEARER)
     # Clients that carry the run's credential are built anew for each model.
     fresh = {"async_client", "client_args", "http_async_client"}
@@ -112,9 +106,18 @@ def test_an_openai_model_has_the_window_codex_serves_it_at(model_id: str) -> Non
 
 def test_an_anthropic_model_streams() -> None:
     model = build_model(_spec("anthropic:claude-opus-5-5", "high"))
-    assert isinstance(model, ChatAnthropic)
+    assert type(model) is ChatAnthropic
     assert model.streaming is True
     assert model.max_retries == 0
+
+
+def test_an_anthropic_model_builds_with_an_anthropic_proxy_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_PROXY", "http://proxy.example:8080")
+    model = build_model(_spec("anthropic:claude-opus-5-5", "high"))
+    assert type(model) is ChatAnthropic
+    assert model.anthropic_proxy is None
 
 
 def test_a_baseten_model_uses_the_gateway() -> None:

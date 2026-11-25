@@ -12,7 +12,6 @@ The provider SDKs wired by ``GatewayBearer`` stay the caller's dependencies.
 import re
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
 from dataclasses import dataclass
-from functools import cached_property
 
 import anthropic
 import httpx
@@ -20,8 +19,6 @@ import httpx2
 import openai
 from fireworks import AsyncFireworks
 from fireworks import DefaultAsyncHttpxClient as FireworksAsyncHttpxClient
-from langchain_anthropic import ChatAnthropic
-from pydantic import ConfigDict, Field
 
 from runtime_api.models import GATEWAY_MODEL_ROUTE_HEADER, GatewayModelRoute
 
@@ -123,11 +120,16 @@ class GatewayBearer:
     def sdk_overrides(
         self, provider: str, base_url: str, *, timeout: float | None
     ) -> dict[str, object]:
-        """``init_chat_model`` kwargs that authenticate ``provider``'s SDK this way.
-
-        Anthropic needs ``GatewayChatAnthropic`` as well, which ``chat_anthropic`` builds.
-        """
+        """``init_chat_model`` kwargs that authenticate ``provider``'s SDK this way."""
         match provider:
+            case "anthropic":
+                return {
+                    "api_key": PLACEHOLDER_API_KEY,
+                    "anthropic_proxy": None,
+                    "http_async_client": anthropic.DefaultAsyncHttpxClient(
+                        timeout=timeout, auth=_Httpx2BearerAuth(self)
+                    ),
+                }
             case "openai" | "baseten":
                 return {
                     "api_key": PLACEHOLDER_API_KEY,
@@ -156,13 +158,6 @@ class GatewayBearer:
                 }
             case _:
                 return {"api_key": PLACEHOLDER_API_KEY}
-
-    def authenticates(self, model_kwargs: dict[str, object]) -> bool:
-        """Whether ``sdk_overrides`` set up these kwargs, so the model was routed this way."""
-        return model_kwargs.get("api_key") == PLACEHOLDER_API_KEY
-
-    def chat_anthropic(self, model: str, kwargs: dict[str, object]) -> ChatAnthropic:
-        return GatewayChatAnthropic.model_validate({**kwargs, "model": model, "gateway": self})
 
 
 class _HttpxBearerAuth(httpx.Auth):
@@ -195,31 +190,3 @@ class _Httpx2BearerAuth(httpx2.Auth):
     ) -> AsyncGenerator[httpx2.Request, httpx2.Response]:
         await self._bearer.authorize(request.headers)
         yield request
-
-
-class GatewayChatAnthropic(ChatAnthropic):
-    """``ChatAnthropic`` whose requests carry the gateway token asked for just before each.
-
-    A subclass rather than a wrapper, so code that checks for ``ChatAnthropic`` (prompt
-    caching, thinking sanitizers) still sees one.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    gateway: GatewayBearer = Field(exclude=True)
-
-    @cached_property
-    def _client(self) -> anthropic.Client:
-        raise NotImplementedError("Gateway bearer auth is async-only")
-
-    @cached_property
-    def _async_client(self) -> anthropic.AsyncClient:
-        params = self._client_params
-        return anthropic.AsyncClient(
-            **params,
-            http_client=anthropic.DefaultAsyncHttpxClient(
-                base_url=params["base_url"],
-                timeout=params.get("timeout"),
-                auth=_Httpx2BearerAuth(self.gateway),
-            ),
-        )

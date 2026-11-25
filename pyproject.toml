@@ -23,7 +23,7 @@ dependencies = [
     "langgraph>=1.2.24",
     "markdownify>=1.2.3",
     "markdown-it-py==4.3.0",
-    "langchain-anthropic>=1.7.12",
+    "langchain-anthropic>=1.7.13",
     "langsmith[sandbox-auth]>=0.16.2",
     "langchain-openai>=1.8.5,<2.0.0",
     "openai>=3.10.0",
