@@ -1004,6 +1004,7 @@ function RowHoverCard({
   const cardRef = useRef<HTMLDivElement>(null)
   const safeAreaRef = useRef<SVGSVGElement>(null)
   const triangleRef = useRef<SVGPolygonElement>(null)
+  const dismissedUntilPointerLeave = useRef(false)
 
   useEffect(() => () => onOpenChange(id, false), [id, onOpenChange])
 
@@ -1021,6 +1022,7 @@ function RowHoverCard({
   }, [activeCardId, id, onOpenChange])
 
   const onPointerLeave = (event: React.PointerEvent) => {
+    dismissedUntilPointerLeave.current = false
     if (activeCardId !== id || event.pointerType === "touch") return
 
     const cardNode = cardRef.current?.getBoundingClientRect()
@@ -1053,13 +1055,24 @@ function RowHoverCard({
       open={!dragging && activeCardId === id}
       openDelay={activeCardId === null ? 500 : 0}
       closeDelay={100}
-      onOpenChange={(open) => onOpenChange(id, open)}
+      onOpenChange={(open) =>
+        onOpenChange(id, open && !dismissedUntilPointerLeave.current)
+      }
     >
       <HoverCardTrigger
         asChild
         data-hover-preview={activeCardId === id ? "open" : "closed"}
+        onClickCapture={(event) => {
+          dismissedUntilPointerLeave.current = event.detail > 0
+          onOpenChange(id, false)
+        }}
         onPointerEnter={(event) => {
-          if (dragging || event.pointerType === "touch") return
+          if (
+            dragging ||
+            dismissedUntilPointerLeave.current ||
+            event.pointerType === "touch"
+          )
+            return
           const title = event.currentTarget.querySelector<HTMLElement>(
             "[data-sidebar-row-title]"
           )

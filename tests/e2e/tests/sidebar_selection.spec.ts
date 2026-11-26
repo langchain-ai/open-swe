@@ -65,6 +65,33 @@ test("sidebar selection supports ranges, modifier toggles and ordinary navigatio
   await expect(page.getByText("1 selected", { exact: true })).toBeHidden();
 });
 
+test("clicking a thread dismisses its preview until the pointer leaves the row", async ({
+  page,
+}) => {
+  const row = page.locator(`[data-selectable-thread="${ids[0]}"]`);
+  const preview = page.locator("[data-radix-popper-content-wrapper]").filter({
+    has: page.getByText("Selection fixture 1", { exact: true }),
+  });
+
+  await page.clock.install();
+  await row.hover();
+  await page.clock.runFor(600);
+  await expect(preview).toBeVisible();
+
+  await row.click();
+  await expect(page).toHaveURL(new RegExp(ids[0]));
+  await expect(preview).toBeHidden();
+  await row.hover({ position: { x: 20, y: 10 } });
+  await row.focus();
+  await page.clock.runFor(1000);
+  await expect(preview).toBeHidden();
+
+  await page.mouse.move(0, 0);
+  await row.hover();
+  await page.clock.runFor(600);
+  await expect(preview).toBeVisible();
+});
+
 for (const action of ["Archive", "Delete"] as const) {
   test(`bulk ${action.toLowerCase()} retains failed threads and confirms deletion count`, async ({
     page,
