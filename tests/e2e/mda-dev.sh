@@ -11,6 +11,9 @@ BUILD="$E2E/.mda-build"
 PORT="${E2E_MDA_PORT:-2025}"
 
 make -C "$ROOT" --no-print-directory mda-cli
+# mda/README.md, "Agent Server version".
+MDA_LANGGRAPH_API_VERSION="$(cat "$ROOT/mda/langgraph-api-version" 2>/dev/null || true)"
+export MDA_LANGGRAPH_API_VERSION
 (cd "$ROOT/mda" && uv run --locked mda build --out "$BUILD")
 
 # The generated config, serving mda_entrypoint.py instead of the generated entry.
@@ -33,6 +36,7 @@ EOF
 
 cd "$BUILD"
 exec env MDA_LOCAL_DEV=1 \
+  FF_TRANSCRIPT_API=true \
   OPEN_SWE_BACKEND_URL="${E2E_BASE:-http://127.0.0.1:${E2E_PORT:-2024}}" \
   LANGSMITH_TRACING=false \
   uv run --project "$ROOT/mda" --locked \

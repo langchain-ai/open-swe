@@ -237,7 +237,7 @@ To deploy one by hand from the repository root, with `mda/.env` holding that dep
 ```bash
 make mda-cli
 cd mda
-uv run --locked mda deploy --name open-swe-mda-staging --deployment-type prod
+MDA_LANGGRAPH_API_VERSION="$(cat langgraph-api-version)" uv run --locked mda deploy --name open-swe-mda-staging --deployment-type prod
 ```
 
 The deploy workflow writes the deployed commit (`git rev-parse HEAD`) into `mda/.env` as `LANGSMITH_REVISION_ID`; a manual deploy sets it there too.
@@ -255,6 +255,11 @@ Nothing here is generated from the backend: operations, subagents and models com
 
 Locally, each fresh `mda dev` start rebuilds `.mda/build` and starts with empty checkpoints.
 MDA's dev server also refuses loopback webhooks, so the completion webhook (`COMPLETION_WEBHOOK_URL`) needs the backend at a non-loopback URL.
+
+### Agent Server version
+
+`mda/langgraph-api-version` sets the Agent Server version Robin's MDA runs, so Robin can try a release before MDA's default moves to it.
+The deploys, `make dev-mda` and `tests/e2e/mda-dev.sh` pass it to the `mda` CLI as `MDA_LANGGRAPH_API_VERSION`; an empty file means MDA's default.
 
 ## Who a channel's run is for
 

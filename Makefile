@@ -20,6 +20,8 @@ dev: $(if $(POSTGRES_URI),,postgres)
 	uv run --extra dev langgraph dev --no-browser --port 2024 --n-jobs-per-worker 10
 
 # The Managed Deep Agents runtime `make dev` sends every agent run to (mda/README.md).
+dev-mda: export MDA_LANGGRAPH_API_VERSION = $(shell cat mda/langgraph-api-version 2>/dev/null)
+dev-mda: export FF_TRANSCRIPT_API = true
 dev-mda: mda-cli
 	cd mda && uv run --locked mda dev --port 2025 --no-browser
 
