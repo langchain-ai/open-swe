@@ -1,5 +1,9 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { Dialog, DialogContent } from "@langchain/macaw-components/Dialog"
+import { IconButton } from "@langchain/macaw-components/IconButton"
+import { ArchiveIcon } from "@phosphor-icons/react/dist/ssr/Archive"
+import { TrashIcon } from "@phosphor-icons/react/dist/ssr/Trash"
+import { XIcon } from "@phosphor-icons/react/dist/ssr/X"
 import { useIsFetching, useQueryClient } from "@tanstack/react-query"
 import { createContext, useContext, useEffect, useRef, useState } from "react"
 import type { MouseEvent, ReactNode } from "react"
@@ -23,7 +27,13 @@ export function useSidebarThreadSelection() {
   return useContext(SelectionContext)
 }
 
-export function SidebarThreadSelection({ children }: { children: ReactNode }) {
+export function SidebarThreadSelection({
+  children,
+  newThreadControl,
+}: {
+  children: ReactNode
+  newThreadControl: ReactNode
+}) {
   const root = useRef<HTMLDivElement>(null)
   const anchor = useRef<string | null>(null)
   const [selected, setSelected] = useState(new Map<string, string>())
@@ -138,40 +148,54 @@ export function SidebarThreadSelection({ children }: { children: ReactNode }) {
           if (event.key === "Escape" && !busy && !deleteOpen) clear()
         }}
       >
-        {selected.size > 0 && (
-          <div className="flex flex-wrap items-center gap-space-2 px-space-4 py-space-2">
-            <span className="w-full text-xs text-secondary" role="status">
-              {selected.size} selected
-            </span>
-            <Button
-              size="xs"
-              color="secondary"
-              variant="plain"
-              disabled={busy}
-              onClick={() => void apply("archive")}
-            >
-              Archive
-            </Button>
-            <Button
-              size="xs"
-              color="error"
-              variant="plain"
-              disabled={busy}
-              onClick={() => setDeleteOpen(true)}
-            >
-              Delete
-            </Button>
-            <Button
-              size="xs"
-              color="secondary"
-              variant="plain"
-              disabled={busy}
-              onClick={clear}
-            >
-              Clear
-            </Button>
+        <div className="relative shrink-0">
+          <div
+            className={selected.size > 0 ? "invisible" : undefined}
+            inert={selected.size > 0}
+          >
+            {newThreadControl}
           </div>
-        )}
+          {selected.size > 0 && (
+            <div className="absolute inset-0 flex items-center gap-space-1 bg-surface-level-2 px-space-4 pb-space-1">
+              <span
+                className="mr-auto text-xs whitespace-nowrap text-secondary"
+                role="status"
+              >
+                {selected.size} selected
+              </span>
+              <IconButton
+                icon={ArchiveIcon}
+                label="Archive"
+                size="xs"
+                color="secondary"
+                variant="plain"
+                disabled={busy}
+                className="disabled:bg-transparent"
+                onClick={() => void apply("archive")}
+              />
+              <IconButton
+                icon={TrashIcon}
+                label="Delete"
+                size="xs"
+                color="error"
+                variant="plain"
+                disabled={busy}
+                className="disabled:bg-transparent"
+                onClick={() => setDeleteOpen(true)}
+              />
+              <IconButton
+                icon={XIcon}
+                label="Clear"
+                size="xs"
+                color="secondary"
+                variant="plain"
+                disabled={busy}
+                className="disabled:bg-transparent"
+                onClick={clear}
+              />
+            </div>
+          )}
+        </div>
         {children}
         <Dialog
           open={deleteOpen}

@@ -46,7 +46,21 @@ test("sidebar selection supports ranges, modifier toggles and ordinary navigatio
 }) => {
   const row = (index: number) =>
     page.locator(`[data-selectable-thread="${ids[index]}"]`);
+  const newThread = page.getByRole("link", { name: "New", exact: true });
+  const newThreadBounds = await newThread.boundingBox();
+  const rowBounds = await row(0).boundingBox();
   await row(0).click({ modifiers: ["Control"] });
+  await expect(newThread).toBeHidden();
+  expect(await row(0).boundingBox()).toEqual(rowBounds);
+  const archiveBounds = await page
+    .getByRole("button", { name: "Archive", exact: true })
+    .boundingBox();
+  expect(archiveBounds?.y).toBeGreaterThanOrEqual(newThreadBounds?.y ?? 0);
+  expect(
+    (archiveBounds?.y ?? 0) + (archiveBounds?.height ?? 0),
+  ).toBeLessThanOrEqual(
+    (newThreadBounds?.y ?? 0) + (newThreadBounds?.height ?? 0),
+  );
   await row(2).click({ modifiers: ["Shift"] });
   await expect(
     page.getByRole("status", { name: "" }).filter({ hasText: "3 selected" }),
@@ -56,6 +70,8 @@ test("sidebar selection supports ranges, modifier toggles and ordinary navigatio
   await expect(page.getByText("2 selected", { exact: true })).toBeVisible();
   await row(2).press("Escape");
   await expect(page.getByText("2 selected", { exact: true })).toBeHidden();
+  await expect(newThread).toBeVisible();
+  expect(await row(0).boundingBox()).toEqual(rowBounds);
   await row(0).click({ modifiers: ["Control"] });
   await page.getByRole("button", { name: "Clear", exact: true }).click();
   await expect(page.getByText("1 selected", { exact: true })).toBeHidden();

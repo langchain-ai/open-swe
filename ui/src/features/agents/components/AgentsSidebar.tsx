@@ -760,24 +760,26 @@ export function AgentsSidebar({
         </div>
       </div>
 
-      <div className="shrink-0 px-space-2 pb-space-1">
-        <Link
-          to="/agents"
-          onClick={layout.closeOnMobile}
-          className={cn(NAV_ROW_CLASS, "group")}
-        >
-          <PlusIcon size={20} className="-mx-0.5" />
-          New
-          <Kbd
-            aria-hidden
-            className="ml-auto opacity-0 transition-opacity group-hover:opacity-100"
-          >
-            {newThreadShortcut}
-          </Kbd>
-        </Link>
-      </div>
-
-      <SidebarThreadSelection>
+      <SidebarThreadSelection
+        newThreadControl={
+          <div className="px-space-2 pb-space-1">
+            <Link
+              to="/agents"
+              onClick={layout.closeOnMobile}
+              className={cn(NAV_ROW_CLASS, "group")}
+            >
+              <PlusIcon size={20} className="-mx-0.5" />
+              New
+              <Kbd
+                aria-hidden
+                className="ml-auto opacity-0 transition-opacity group-hover:opacity-100"
+              >
+                {newThreadShortcut}
+              </Kbd>
+            </Link>
+          </div>
+        }
+      >
         <ThreadDragDrop
           pinnedSectionRef={pinnedSectionRef}
           onAction={(actions) => {
