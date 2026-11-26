@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }
 dependencies = [
-    "deepagents==0.7.41",
+    "deepagents==0.7.42",
     # The types of the event endpoint requests the MDA deployment's channels send (mda/),
     # from the SDK commit the deployment runs, pinned below as mda/ pins it (vendor/README.md).
     "managed-deepagents>=0.10.1",
@@ -30,7 +30,7 @@ dependencies = [
     "langchain-fireworks>=1.8.0",
     # langchain-fireworks 1.4.2 pins a pre-release fireworks-ai; opt in explicitly so uv resolves it.
     "fireworks-ai>=1.2.9",
-    "langchain-google-genai>=4.5.2",
+    "langchain-google-genai>=4.5.3",
     "websockets>=16.1.1",
     "slack-sdk>=3.44.1",
     "aiohttp>=3.14.3",
@@ -51,7 +51,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "langgraph-cli[inmem]>=0.4.43",
+    "langgraph-cli[inmem]>=0.4.44",
     "ty==0.0.95",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
@@ -68,7 +68,7 @@ managed-deepagents = { git = "https://github.com/langchain-ai/langchainplus", re
 [tool.uv]
 constraint-dependencies = [
     "langgraph-api==0.19.0.dev3",
-    "langgraph-runtime-inmem==0.39.0rc11",
+    "langgraph-runtime-inmem==0.39.0",
 ]
 
 [build-system]
