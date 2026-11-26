@@ -1,6 +1,7 @@
 Schedule a one-shot re-trigger of the current thread after a delay.
 
-Use this when you need to poll or check back on something later — e.g. waiting for CI to finish, a deploy to complete, or an external process to settle.
+Use this when you need to poll or check back on something later — e.g. waiting for a deploy to complete or an external process to settle.
+To wait on a GitHub pull request's CI, start a `/baby-sit` watch instead: GitHub's check events wake you when CI finishes or fails, without polling.
 The current thread will be re-invoked with the given prompt (or a default wakeup message) after the specified delay.
 
 Args:

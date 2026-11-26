@@ -1,0 +1,14 @@
+#!/bin/sh
+# Installed ahead of /usr/bin: logs how long each shell sleep asked for, and whether one of
+# Robin's background jobs ran it, then sleeps.
+background=0
+pid=$PPID
+while [ "$pid" -gt 1 ] 2>/dev/null; do
+    if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q /tmp/open-swe-background-tasks/; then
+        background=1
+        break
+    fi
+    pid=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null) || break
+done
+printf '%s %s %s\n' "$(date +%s)" "$background" "$*" >> /var/log/ci-eval/sleeps.log
+exec /usr/bin/sleep "$@"
