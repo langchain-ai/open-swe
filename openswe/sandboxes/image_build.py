@@ -23,7 +23,9 @@ logger = logging.getLogger(__name__)
 RefreshStatus = Literal["never", "refreshing", "success", "failed"]
 RefreshKind = Literal["full", "update"]
 StepStatus = Literal["running", "success", "failed"]
-DEFAULT_SCRIPT_TIMEOUT_SECONDS = 30 * 60
+# Room for a setup that prebuilds a repository's compiled output (smithdb's target/), on top of
+# the ~24 minutes the global image's setup takes without it.
+DEFAULT_SCRIPT_TIMEOUT_SECONDS = 60 * 60
 DEFAULT_UPDATE_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_CAPTURE_TIMEOUT_SECONDS = 30 * 60
 UPDATE_INTERVAL_SECONDS = 60 * 60
