@@ -206,21 +206,6 @@ Do not store content requiring secrecy from those members.
 Deployment reconciliation/deletion leaves these repositories alone; departing-user cleanup is a manual operator follow-up, including history.
 Deleting a skill removes only its current `SKILL.md`, not old commits.
 
-The Skill ORM model and all ORM paths are removed; the SQL `skill` table stays, with no migration, as the backfill's source.
-Copy each environment's rows (NULL user = organization) into its Context Hub repositories with skill edits paused, from `open-swe/` with that environment's `POSTGRES_URI`, Hub credentials and `OPENSWE_ENV` (`production`, `staging`, `preview`) set:
-
-```bash
-uv run python -m openswe.skill_store.backfill --dry-run
-uv run python -m openswe.skill_store.backfill --apply
-```
-
-The script refuses to run without `OPENSWE_ENV` or `ROBIN_SKILLS_HUB_PREFIX`, and prints the repositories it writes to first.
-No flag means dry run; bounded raw-SQL pages release their transactions before Hub I/O and never modify SQL.
-It copies description and **instructions, never rendered content**, skips identical skills and reports differing destinations without overwriting (nonzero exit).
-Deploy the backend and runtime together, verify the mounts, then resume edits.
-Drop the table in a separate PR once every environment is copied; it holds no Hub edits made after the copy.
-No real Hub, backfill or production verification was performed for this change.
-
 ## Run locally
 
 1. In the repository root `.env`, add `REMOTE_RUNTIME_TOKEN_SECRET` (any random string) and `MDA_RUNTIME_URL=http://localhost:2025`, then start the backend with `make dev`.

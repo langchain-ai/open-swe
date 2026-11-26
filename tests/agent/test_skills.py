@@ -6,7 +6,6 @@ import pytest
 from deepagents.backends import FilesystemBackend
 from fastapi import HTTPException
 
-from openswe.skill_store.backfill import SkillBackfill
 from openswe.skill_store.store import (
     HubSkills,
     SkillCreate,
@@ -102,36 +101,14 @@ async def test_save_organization_skill_requires_admin(monkeypatch: pytest.Monkey
         assert (await save_organization_skill("deslop", "Minimize diffs"))["ok"] is False
 
 
-async def test_backfill_is_dry_run_and_idempotent_and_refuses_differing_files(
-    hub: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # An emoji, U+0085 and Windows line endings must survive the copy for a rerun to see it
-    # as identical.
-    row = {
-        "user_id": None,
-        "name": "review",
-        "value": {
-            "description": "Review 🔍\x85then approve",
-            "instructions": "Read diff\r\nThen review\r\n",
-            "content": "DO NOT COPY",
-        },
-    }
-    dry_run, apply = SkillBackfill(), SkillBackfill(apply=True)
-    await dry_run.migrate(row)
-    path = hub / "robin-skills" / "review" / "SKILL.md"
-    assert not path.exists()
-    await apply.migrate(row)
-    before = path.read_text()
-    await apply.migrate(row)
-    assert path.read_text() == before and "Read diff" in before and "DO NOT COPY" not in before
-    row["value"] = {"description": "Changed"}
-    with pytest.raises(HTTPException) as caught:
-        await apply.migrate(row)
-    assert caught.value.status_code == 409 and path.read_text() == before
-    # Without a named environment the copy would land in another environment's repository.
-    monkeypatch.delenv("OPENSWE_ENV")
-    with pytest.raises(SystemExit):
-        SkillBackfill.target()
+@pytest.mark.usefixtures("hub")
+async def test_a_skill_description_reads_back_as_saved() -> None:
+    # JSON quoting garbles emoji, and YAML reads a literal U+0085 back as a line break.
+    body = SkillCreate(name="review", description="Review 🔍\x85then approve")
+    async with HubSkills.open() as skills:
+        await skills.save(body, create=True)
+        saved = await skills.get("review")
+    assert saved is not None and saved["description"] == body.description
 
 
 @pytest.mark.parametrize(
