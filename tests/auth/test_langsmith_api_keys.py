@@ -7,7 +7,7 @@ import httpx2
 import pytest
 from fastapi import FastAPI, HTTPException
 
-from openswe.dashboard import langsmith_api_keys
+from openswe.dashboard import authentication, langsmith_api_keys
 from openswe.dashboard.langsmith_api_keys import LANGSMITH_API_KEYS, LangSmithApiKey
 from openswe.threads.principals import Principal, PrincipalDep
 from tests.conftest import LangSmithUsers
@@ -302,9 +302,25 @@ async def test_a_personal_access_token_gets_only_what_its_person_may_reach(
     assert "linked GitHub account" in response.json()["detail"]
 
 
-async def test_a_refused_key_is_unauthorized(langsmith: _LangSmith) -> None:
-    response = await _get(
-        "/dashboard/api/threads/whoami", {"Authorization": "Bearer lsv2_sk_unknown"}
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"Authorization": "Bearer lsv2_sk_unknown"},
+        {"Authorization": "Bearer agent-key"},
+        {"Cookie": "osw_session=invalid"},
+    ],
+)
+async def test_thread_authentication_failures_include_a_bearer_challenge(
+    langsmith: _LangSmith, headers: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "test-session-signing-key-at-least-32-bytes")
+    langsmith.status = 401
+    monkeypatch.setattr(authentication, "LANGSMITH_ORG_DISCOVERY", _Discovery())
+    monkeypatch.setattr(
+        authentication, "pooled_transport", lambda: httpx2.MockTransport(langsmith.respond)
     )
+    response = await _get("/dashboard/api/threads/whoami", headers)
 
     assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"

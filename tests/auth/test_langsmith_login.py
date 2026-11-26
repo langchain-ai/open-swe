@@ -8,16 +8,18 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import httpx2
+import jwt
 import pytest
 from cryptography.fernet import Fernet
-from fastapi import FastAPI, HTTPException
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from langchain_core.runnables import RunnableConfig
 from runtime_api.loop import GatewayCredential
 from sqlalchemy import event, update
 
 from openswe.agent_api.connections import SENDER_USER_KEY
-from openswe.dashboard import auth_routes, langsmith_login, langsmith_oauth, oauth
+from openswe.dashboard import auth_routes, authentication, langsmith_login, langsmith_oauth, oauth
 from openswe.dashboard.langsmith_login import LangSmithAccount
 from openswe.dashboard.oauth_credentials import load_credential, save_credential
 from openswe.dashboard.principal import DashboardPrincipal
@@ -34,6 +36,25 @@ from openswe.users import AccountConflict, UnauthorizedUser, User
 from openswe.users.models import UserIdentity
 
 ISSUER = "https://api.smith.langchain.com"
+LANGSMITH_TOKEN = jwt.encode({"iss": ISSUER}, Ed25519PrivateKey.generate(), algorithm="EdDSA")
+LANGSMITH_BEARERS = [
+    LANGSMITH_TOKEN,
+    "opaque-login-token",
+    *[
+        jwt.encode(
+            {
+                "aud": "authenticated",
+                "sub": "11111111-1111-4111-8111-111111111111",
+                "email": "login@example.com",
+                "exp": 4102444800,
+                **claims,
+            },
+            "test-login-signing-key-at-least-32-bytes",
+            algorithm="HS256",
+        )
+        for claims in [{"iss": "https://supabase.example/auth/v1"}, {"aud": ["authenticated"]}]
+    ],
+]
 ALLOWED_ORG = "f5c798a2-2155-4999-ad27-6d466bd26e1c"
 CALLBACK = "https://dashboard.example/dashboard/api/langsmith/callback"
 
@@ -53,6 +74,9 @@ class LangSmithServer:
     rate_limited: int = 0
     refreshes: int = 0
     authorizations: int = 0
+    request_identity: dict[str, object] = field(default_factory=dict)
+    request_status: int = 200
+    request_headers: list[httpx2.Headers] = field(default_factory=list)
     revocations: list[str] = field(default_factory=list)
     checking_membership: asyncio.Event | None = None
     resume_membership: asyncio.Event | None = None
@@ -65,6 +89,18 @@ class LangSmithServer:
         )
 
     async def respond(self, request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/auth":
+            self.request_headers.append(request.headers)
+            return httpx2.Response(
+                self.request_status,
+                json={
+                    "organization_id": self.organization,
+                    "tenant_id": self.deployment_workspace,
+                    "ls_user_id": self.subject,
+                    "user_email": "same@example.com",
+                    **self.request_identity,
+                },
+            )
         if request.url.path == "/auth/public":
             self.discoveries += 1
             if self.discovery_unavailable:
@@ -186,6 +222,12 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         langsmith_login, "pooled_transport", lambda: httpx2.MockTransport(server.respond)
     )
+    monkeypatch.setattr(
+        authentication, "LANGSMITH_ORG_DISCOVERY", langsmith_login.LANGSMITH_ORG_DISCOVERY
+    )
+    monkeypatch.setattr(
+        authentication, "pooled_transport", lambda: httpx2.MockTransport(server.respond)
+    )
     app = FastAPI()
     app.add_exception_handler(
         AccountConflict,
@@ -199,6 +241,224 @@ async def langsmith_client(registry_db, monkeypatch: pytest.MonkeyPatch):
         transport=httpx.ASGITransport(app=app), base_url="https://dashboard.example"
     ) as client:
         yield server, client
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        *[{"Authorization": f"Bearer {token}"} for token in LANGSMITH_BEARERS],
+        {"Authorization": "Bearer lsv2_pt_personal"},
+        {"X-Api-Key": "lsv2_pt_personal"},
+        {"X-Api-Key": "legacy-personal-key"},
+        {"Cookie": "_ls_oauth_user=langsmith-session; analytics_id=abc; osw_oauth_state=private"},
+    ],
+)
+@pytest.mark.parametrize("existing", [False, True])
+async def test_langsmith_credentials_authenticate_without_a_robin_cookie(
+    langsmith_client, headers: dict[str, str], existing: bool
+) -> None:
+    from openswe.api import agent_server_auth
+    from openswe.threads.principals import require_principal
+
+    server, client = langsmith_client
+    other = await User.sign_in(
+        "langsmith",
+        server.subject if existing else "same-email-other-person",
+        email="same@example.com",
+        authorization=LangSmithAccount(
+            sub=server.subject if existing else "same-email-other-person",
+            ls_org_id=ALLOWED_ORG,
+        ),
+    )
+    response = await client.get("/dashboard/api/me", headers=headers)
+    assert response.status_code == 200
+    user = await User.for_identity("langsmith", server.subject)
+    assert user is not None
+    assert (user.id == other.id) is existing
+    assert response.json()["user_id"] == str(user.id)
+    assert not response.json()["is_admin"]
+    assert "set-cookie" not in response.headers
+    assert oauth.COOKIE_NAME not in client.cookies
+    assert await load_credential("langsmith_login", user.session_login) is None
+    profile = await client.get("/dashboard/api/profile", headers=headers)
+    assert profile.status_code == 200
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/dashboard/api/threads",
+            "headers": [(key.lower().encode(), value.encode()) for key, value in headers.items()],
+        }
+    )
+    assert (await oauth.require_session(request))["user_id"] == str(user.id)
+    if (
+        headers.get("Authorization") in {f"Bearer {token}" for token in LANGSMITH_BEARERS}
+        or "Cookie" in headers
+    ):
+        assert (await require_principal(request)).person == user.session_login
+    assert await agent_server_auth.authenticate(request.scope) == {
+        "identity": user.session_login,
+        "permissions": [],
+    }
+    forwarded = server.request_headers[0]
+    assert forwarded["x-tenant-id"] == server.deployment_workspace
+    for key, value in headers.items():
+        assert forwarded[key] == ("_ls_oauth_user=langsmith-session" if key == "Cookie" else value)
+
+
+@pytest.mark.parametrize("cookie", ["analytics_id=abc", '_ls_oauth_user=" "'])
+async def test_langsmith_passthrough_requires_a_session_cookie(
+    langsmith_client, cookie: str
+) -> None:
+    server, client = langsmith_client
+    response = await client.get("/dashboard/api/me", headers={"Cookie": cookie})
+    assert response.status_code == 401
+    assert "set-cookie" not in response.headers
+    assert not server.request_headers
+
+
+@pytest.mark.parametrize(
+    "authorization",
+    [
+        "Bearer ghs_github-token",
+        "Bearer github_pat_github-token",
+        "Bearer agent-key",
+        "Bearer machine-token",
+        "Bearer lsv2_tr_tracing-key",
+        "Bearer eyJ.malformed.jwt",
+        "Basic other-credential",
+        "Bearer "
+        + jwt.encode(
+            {"sub": "alice"}, "test-session-signing-key-at-least-32-bytes", algorithm="HS256"
+        ),
+        "Bearer "
+        + jwt.encode(
+            {"iss": "https://other-issuer.example", "aud": "authenticated"},
+            Ed25519PrivateKey.generate(),
+            algorithm="EdDSA",
+        ),
+    ],
+    ids=[
+        "github-app",
+        "github-pat",
+        "agent-key",
+        "machine-token",
+        "tracing-key",
+        "malformed-jwt",
+        "basic-auth",
+        "robin-session",
+        "foreign-issuer",
+    ],
+)
+async def test_langsmith_passthrough_delegates_credential_rejection_to_langsmith(
+    langsmith_client, authorization: str
+) -> None:
+    server, client = langsmith_client
+    server.request_status = 401
+    response = await client.get(
+        "/dashboard/api/me",
+        headers={
+            "Authorization": authorization,
+            "Cookie": "_ls_oauth_user=ambient-session",
+        },
+    )
+    assert response.status_code == 401
+    (forwarded,) = server.request_headers
+    assert forwarded["authorization"] == authorization
+    assert "cookie" not in forwarded
+    assert server.discoveries == 1
+    assert await User.for_identity("langsmith", server.subject) is None
+
+
+@pytest.mark.parametrize(
+    "identity,status",
+    [
+        ({"organization_id": "other-org"}, 403),
+        ({"tenant_id": "other-workspace"}, 403),
+        ({"ls_user_id": ""}, 403),
+        ({"service_identity": "service"}, 403),
+        ({"is_code_evaluator_jwt": True}, 403),
+        ({"tenant_id": None}, 502),
+    ],
+)
+@pytest.mark.parametrize(
+    "token", LANGSMITH_BEARERS, ids=["oauth", "opaque", "supabase", "basic-login"]
+)
+async def test_langsmith_passthrough_refuses_untrusted_identities(
+    langsmith_client, identity: dict[str, object], status: int, token: str
+) -> None:
+    server, client = langsmith_client
+    server.request_identity = identity
+    response = await client.get("/dashboard/api/me", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == status
+    assert "set-cookie" not in response.headers
+    assert await User.for_identity("langsmith", server.subject) is None
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 503])
+@pytest.mark.parametrize(
+    "token", LANGSMITH_BEARERS, ids=["oauth", "opaque", "supabase", "basic-login"]
+)
+async def test_langsmith_passthrough_does_not_fall_back_to_ambient_cookies(
+    langsmith_client, status: int, token: str
+) -> None:
+    server, client = langsmith_client
+    await User.sign_in(
+        "langsmith",
+        server.subject,
+        email="same@example.com",
+        authorization=LangSmithAccount(sub=server.subject, ls_org_id=ALLOWED_ORG),
+    )
+    assert (
+        await client.get("/dashboard/api/me", headers={"Authorization": f"Bearer {token}"})
+    ).status_code == 200
+    server.request_status = status
+    response = await client.get(
+        "/dashboard/api/me",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Cookie": "_ls_oauth_user=ambient-session",
+            "X-User-Id": server.subject,
+            "X-Organization-Id": "other-org",
+        },
+    )
+    assert response.status_code == (status if status in {401, 403} else 503)
+    assert len(server.request_headers) == 2
+    forwarded = server.request_headers[-1]
+    assert "cookie" not in forwarded
+    assert "x-user-id" not in forwarded
+    assert "x-organization-id" not in forwarded
+
+
+async def test_langsmith_passthrough_keeps_robin_path_and_csrf_checks(langsmith_client) -> None:
+    server, client = langsmith_client
+    await User.sign_in(
+        "langsmith",
+        server.subject,
+        email="same@example.com",
+        authorization=LangSmithAccount(sub=server.subject, ls_org_id=ALLOWED_ORG),
+    )
+    headers = {"Cookie": "_ls_oauth_user=langsmith-session"}
+    response = await client.get("/dashboard/api/me", headers=headers)
+    assert response.status_code == 200
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/dashboard/api/threads",
+            "headers": [(b"cookie", headers["Cookie"].encode()), (b"host", b"dashboard.example")],
+        }
+    )
+    with pytest.raises(HTTPException, match="CSRF check failed"):
+        oauth.require_same_origin_for_mutations(request)
+    request = Request({**request.scope, "path": "/dashboard/api/review"})
+    with pytest.raises(HTTPException, match="linked GitHub account"):
+        await oauth.require_session(request)
+    response = await client.get(
+        "/dashboard/api/me",
+        headers={"Authorization": f"Bearer {LANGSMITH_TOKEN}", "X-Tenant-Id": "other-workspace"},
+    )
+    assert response.status_code == 403
 
 
 async def test_desktop_login_is_independent_and_pkce_bound(langsmith_client) -> None:

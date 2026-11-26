@@ -19,6 +19,7 @@ from starlette.requests import HTTPConnection
 from starlette.types import Scope
 
 from openswe.config import ENV
+from openswe.dashboard.authentication import DashboardAuthentication
 from openswe.dashboard.oauth import optional_session
 from openswe.dashboard.principal import DashboardPrincipal
 
@@ -81,7 +82,11 @@ async def authenticate(scope: Scope) -> Auth.types.MinimalUserDict:
                 status_code=exc.status_code, detail=exc.detail
             ) from exc
         return {"identity": principal.subject.strip(), "permissions": []}
-    raise Auth.exceptions.HTTPException(status_code=401, detail="not authenticated")
+    try:
+        async with DashboardAuthentication(conn).authorized_person() as (_db, claims):
+            return {"identity": str(claims["sub"]), "permissions": []}
+    except HTTPException as exc:
+        raise Auth.exceptions.HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @auth.on.threads.read

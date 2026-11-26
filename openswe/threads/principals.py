@@ -24,8 +24,9 @@ from fastapi import Depends, HTTPException, Request
 
 from openswe.audit_logs.middleware import bind_actor
 from openswe.audit_logs.models import AuditLogEnrichments
+from openswe.dashboard.authentication import DashboardAuthentication
 from openswe.dashboard.langsmith_api_keys import LANGSMITH_API_KEYS, LangSmithApiKey
-from openswe.dashboard.oauth import bind_audit_session, optional_session
+from openswe.dashboard.oauth import bind_audit_session
 from openswe.dashboard.principal import DashboardPrincipal
 from openswe.threads.identity import ThreadIdentity
 from openswe.threads.summary import _assert_thread_postable, assert_thread_readable
@@ -39,7 +40,6 @@ ThreadType = Literal["system", "workspace", "private"]
 STARTED_BY_ID = "started_by_id"
 STARTED_BY_NAME = "started_by_name"
 
-_UNAUTHENTICATED = "authenticate with a LangSmith API key or a session"
 _PAT_NEEDS_SIGN_IN = (
     "Sign in to Robin with LangSmith before using a personal access token: its runs "
     "call models through your LangSmith login"
@@ -178,31 +178,23 @@ def _bearer(request: Request) -> str:
 
 
 async def require_principal(request: Request) -> Principal:
-    """The principal behind this request, whichever credential it brought.
-
-    A token is sent to LangSmith only when it is shaped like a LangSmith key, so no
-    credential is shown to an issuer that did not mint it.
-    """
+    """Resolve a bot key or person authenticated by Robin or LangSmith."""
     token = _bearer(request)
     if token:
         key = await LANGSMITH_API_KEYS.verify(token)
         if key is not None:
             return await Principal.of_langsmith_key(request, key)
-    session = optional_session(request)
-    if session is None:
-        raise HTTPException(401, _UNAUTHENTICATED, headers={"WWW-Authenticate": "Bearer"})
-    from openswe.dashboard.principal import DashboardPrincipal
-
-    dashboard = DashboardPrincipal.from_session(session)
-    if request.url.path.startswith("/dashboard/api/"):
-        dashboard.authorize_path(request.url.path, request.method)
-    from openswe.dashboard.langsmith_login import LangSmithLogin
-
-    with phase(RequestTimings.of(request), "auth"):
-        async with LangSmithLogin().authorized_person(dashboard):
-            pass
-    principal = Principal.of_person(session)
-    bind_audit_session(request, session)
+    try:
+        with phase(RequestTimings.of(request), "auth"):
+            async with DashboardAuthentication(request).authorized_person() as (_db, claims):
+                principal = Principal.of_person(claims)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            raise HTTPException(
+                401, exc.detail, headers={**(exc.headers or {}), "WWW-Authenticate": "Bearer"}
+            ) from exc
+        raise
+    bind_audit_session(request, claims)
     return principal
 
 

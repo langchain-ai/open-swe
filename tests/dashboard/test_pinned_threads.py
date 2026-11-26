@@ -342,7 +342,6 @@ async def test_folder_order_precedes_pagination_and_keeps_access_and_scope(
         response = await client.put(
             "/threads/order",
             json={**scope, "thread_ids": ["t0"]},
-            headers={"Authorization": "Bearer machine-token"},
         )
         assert response.status_code == 401
     page_scope = listing.SidebarOrderScope.model_validate(scope)

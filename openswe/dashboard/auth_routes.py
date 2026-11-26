@@ -287,18 +287,22 @@ async def auth_logout(request: Request) -> Response:
 
 
 @router.get("/me")
-async def me(response: Response, reader: DashboardReadDep) -> dict[str, Any]:
+async def me(request: Request, response: Response, reader: DashboardReadDep) -> dict[str, Any]:
     session = reader.claims
     principal = reader.principal
     user = reader.user
-    if user is not None and session_user_id(session) != user.id:
+    if (
+        request.cookies.get(COOKIE_NAME)
+        and user is not None
+        and session_user_id(session) != user.id
+    ):
         # The dashboard boots here, so every stale cookie is repaired on its next load.
         set_session_cookie(response, rebind_session(session, str(user.id)))
         logger.info(
             "Rebound a stale session to its user",
             extra={"github_login": session["sub"], "user_id": str(user.id)},
         )
-    if principal.provider == "langsmith" and user is not None:
+    if principal.provider == "langsmith" and user is not None and request.cookies.get(COOKIE_NAME):
         set_session_cookie(response, GitHubLink.session(principal, user, reader.email))
         principal = DashboardPrincipal.from_session({**session, "sub": user.session_login})
     preferences = await get_user_preferences(principal.subject, session=reader.session)

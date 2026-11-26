@@ -566,6 +566,28 @@ Every creating command names the kind of thread it wants in `config.configurable
 | `workspace` | any signed-in person, or their personal access token |
 | `private` | any signed-in person, or their personal access token |
 
+**LangSmith credential passthrough.**
+Dashboard APIs also accept a LangSmith bearer token, a personal API key in `X-Api-Key`, or a LangSmith session cookie without an `osw_session` cookie.
+Robin verifies the credentials with LangSmith's `/auth` endpoint, pins the request to its deployment's workspace, and resolves the Robin person by LangSmith user ID, never email.
+Verified human users are automatically signed up on their first request; no prior browser sign-in is needed.
+GitHub linking, admin access, and thread ownership rules remain unchanged.
+These requests neither create a Robin cookie nor save or refresh the supplied credential; starting model runs still requires the person's saved LangSmith login.
+Service keys retain the bot-only thread access described below and cannot act as dashboard users.
+
+An existing `osw_session` takes precedence on dashboard APIs, except thread APIs retain their API-key-first behavior.
+Without it, explicit authentication headers take precedence over LangSmith cookies; Robin does not forward ambient cookies alongside those headers.
+Robin treats the configured LangSmith `/auth` endpoint as the trusted authentication authority, without locally filtering credential formats or interpreting JWT claims.
+All credentials supplied in `Authorization`, `X-Api-Key`, or `X-Service-Key` are forwarded to that endpoint, even if they are unrelated to LangSmith; Robin's own deployment keys are rejected locally.
+Only LangSmith's verified response establishes the caller's identity.
+Passthrough authentication is revalidated on every request, without an additional local cache of accepted identities.
+Cookie-authenticated mutations still require an allowed `Origin`.
+An optional `X-Tenant-Id` must match the deployment's workspace; caller-supplied user IDs are not trusted or forwarded.
+
+```bash
+curl "<URL>/dashboard/api/me" \
+  -H "Authorization: Bearer $LANGSMITH_ACCESS_TOKEN"
+```
+
 **LangSmith API keys.**
 Robin mints no keys of its own.
 Send a LangSmith key as `Authorization: Bearer <key>` or `X-Api-Key: <key>`, and Robin asks LangSmith (its tenant `/auth` endpoint) who it is, pinned to the LangSmith workspace Robin signs people in to: the workspace of the deployment's own `LANGSMITH_API_KEY`.

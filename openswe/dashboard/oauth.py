@@ -531,19 +531,10 @@ def build_settings_url() -> str | None:
 async def require_session(
     request: HTTPConnection, _cookie: str | None = Depends(SESSION_COOKIE)
 ) -> dict[str, Any]:
-    token = request.cookies.get(COOKIE_NAME)
-    if not token:
-        raise HTTPException(401, "not authenticated")
-    session = decode_session(token)
-    from openswe.dashboard.principal import DashboardPrincipal
+    from openswe.dashboard.authentication import DashboardAuthentication
 
-    principal = DashboardPrincipal.from_session(session)
-    principal.authorize_path(request.url.path, request.scope.get("method", "GET"))
-    from openswe.dashboard.langsmith_login import LangSmithLogin
-    from openswe.dashboard.principal import AuthorizedClaims
-
-    async with LangSmithLogin().authorized_person(principal) as (_db, user):
-        authorized = AuthorizedClaims(session, user)
+    async with DashboardAuthentication(request).authorized_person() as (_db, authorized):
+        pass
     bind_audit_session(request, authorized)
     return authorized
 

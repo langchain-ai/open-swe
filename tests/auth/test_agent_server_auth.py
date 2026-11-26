@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock
 from uuid import UUID
 
+import httpx2
 import pytest
 from fastapi import HTTPException
 from langgraph_api.auth.custom import normalize_user
@@ -8,6 +9,7 @@ from langgraph_sdk import Auth
 from starlette.types import Scope
 
 from openswe.api import agent_server_auth
+from openswe.dashboard import authentication
 from openswe.dashboard.oauth import COOKIE_NAME, issue_session
 
 BACKEND_KEY = "lsv2_backend_key"
@@ -33,7 +35,9 @@ def _ctx(permissions: list[str], resource: str, action: str) -> Auth.types.AuthC
     )
 
 
-async def test_only_the_backend_key_or_a_dashboard_session_authenticates(langsmith_users) -> None:
+async def test_backend_key_and_verified_people_have_separate_permissions(
+    langsmith_users, monkeypatch: pytest.MonkeyPatch
+) -> None:
     langsmith_users.add("ada")
     backend = await agent_server_auth.authenticate(_scope((b"x-api-key", BACKEND_KEY.encode())))
     assert backend["permissions"] == [agent_server_auth.BACKEND_PERMISSION]
@@ -44,6 +48,16 @@ async def test_only_the_backend_key_or_a_dashboard_session_authenticates(langsmi
     )
     assert person == {"identity": "ada", "permissions": []}
 
+    monkeypatch.setattr(
+        authentication.LANGSMITH_ORG_DISCOVERY,
+        "resolve",
+        AsyncMock(return_value=("org-robin", "ws-robin")),
+    )
+    monkeypatch.setattr(
+        authentication,
+        "pooled_transport",
+        lambda: httpx2.MockTransport(lambda _request: httpx2.Response(401)),
+    )
     for headers in ([(b"x-api-key", b"lsv2_someone_elses_key")], [(b"cookie", b"osw_session=x")]):
         with pytest.raises(Auth.exceptions.HTTPException) as exc:
             await agent_server_auth.authenticate(_scope(*headers))

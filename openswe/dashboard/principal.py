@@ -12,7 +12,7 @@ from openswe.users import User
 
 
 class AuthorizedClaims(dict[str, object]):
-    """Verified cookie claims carrying the person resolved during this request."""
+    """Verified request claims carrying the resolved person."""
 
     def __init__(self, claims: Mapping[str, object], user: User) -> None:
         super().__init__(claims)

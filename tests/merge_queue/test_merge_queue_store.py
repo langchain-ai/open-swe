@@ -1336,9 +1336,7 @@ async def test_queue_dashboard_authorization(
         base_url="http://testserver",
         headers={"Origin": "http://testserver"},
     ) as client:
-        assert (
-            await client.get(path, headers={"Authorization": "Bearer agent-key"})
-        ).status_code == 401
+        assert (await client.get(path)).status_code == 401
         client.cookies.set(
             "osw_session",
             issue_session(

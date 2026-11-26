@@ -12,13 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import HTTPConnection
 
 from openswe.dashboard.admin import is_admin
-from openswe.dashboard.oauth import (
-    COOKIE_NAME,
-    SESSION_COOKIE,
-    bind_audit_session,
-    decode_session,
-    require_session,
-)
+from openswe.dashboard.authentication import DashboardAuthentication
+from openswe.dashboard.oauth import SESSION_COOKIE, bind_audit_session, require_session
 from openswe.dashboard.principal import AuthorizedClaims, DashboardPrincipal
 from openswe.dashboard.repo_access import require_repo_access_for_user
 from openswe.users import User
@@ -89,24 +84,17 @@ class DashboardRead:
     async def open(
         cls, request: HTTPConnection, _cookie: str | None = Depends(SESSION_COOKIE)
     ) -> AsyncIterator[DashboardRead]:
-        from openswe.dashboard.langsmith_login import LangSmithLogin
-
-        token = request.cookies.get(COOKIE_NAME)
-        if not token:
-            raise HTTPException(401, "not authenticated")
-        claims = decode_session(token)
-        principal = DashboardPrincipal.from_session(claims)
-        principal.authorize_path(request.url.path, request.scope.get("method", "GET"))
-        login = LangSmithLogin()
         async with AsyncExitStack() as scope:
-            session, user = await scope.enter_async_context(login.authorized_person(principal))
+            session, claims = await scope.enter_async_context(
+                DashboardAuthentication(request).authorized_person()
+            )
+            principal = DashboardPrincipal.from_session(claims)
             bind_audit_session(request, claims)
             email = claims.get("email")
-            authorized = AuthorizedClaims(claims, user)
             yield cls(
                 principal,
-                user,
-                authorized,
+                claims.user,
+                claims,
                 email if isinstance(email, str) else None,
                 session,
                 scope,
