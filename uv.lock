@@ -9,7 +9,7 @@ resolution-markers = [
 [manifest]
 constraints = [
     { name = "langgraph-api", specifier = "==0.19.0.dev3" },
-    { name = "langgraph-runtime-inmem", specifier = "==0.39.0rc10" },
+    { name = "langgraph-runtime-inmem", specifier = "==0.39.0rc11" },
 ]
 
 [[package]]
@@ -1814,7 +1814,7 @@ wheels = [
 
 [[package]]
 name = "langgraph-runtime-inmem"
-version = "0.39.0rc10"
+version = "0.39.0rc11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blockbuster" },
@@ -1826,9 +1826,9 @@ dependencies = [
     { name = "starlette" },
     { name = "structlog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/10/05/9c8ac6a89175a49f890ea51c5f55e3e84a51603f2e62b7f7b0b752848884/langgraph_runtime_inmem-0.39.0rc10.tar.gz", hash = "sha256:299084a3009656572661fe237094256a87f22642ad82196329507e5ab9e34960", size = 211519, upload-time = "2026-11-24T13:52:57.07Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/4e/eec51445e468e76044c647b449d2eaa782a0691ea09e808d22b1d4575ca7/langgraph_runtime_inmem-0.39.0rc11.tar.gz", hash = "sha256:b78ea812d303d32e2e3c8c6eb8a4f3f96f7b95aff7f84d9051c9a8d025d20132", size = 211518, upload-time = "2026-11-25T20:50:28.642Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/73/21/b040439acbeb1c28b36be805b9c4787ab26960e8c46df7506ee4f9118bc7/langgraph_runtime_inmem-0.39.0rc10-py3-none-any.whl", hash = "sha256:2151eae7072dd44f2d32953e1c684d28b2525fa362c310b9d8afcbc8709fad18", size = 66272, upload-time = "2026-11-24T13:52:55.882Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/ed/3dff2ea57aa24a35c38fc123c71dcc33f3ba61f92e8a706f922a62f1d8c2/langgraph_runtime_inmem-0.39.0rc11-py3-none-any.whl", hash = "sha256:7b91ea52e0ca26d5ae54fd732f2c6b9c1c86455bc0b7c5c454819846075793cb", size = 66273, upload-time = "2026-11-25T20:50:27.272Z" },
 ]
 
 [[package]]
@@ -1897,7 +1897,7 @@ wheels = [
 [[package]]
 name = "managed-deepagents"
 version = "0.10.4"
-source = { git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=ce54e2e03a7d903b5450f059e5551cff17c1cf71#ce54e2e03a7d903b5450f059e5551cff17c1cf71" }
+source = { git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=941040f7fb4b6c8fde6ee81e3d5f563f5a3eb8cf#941040f7fb4b6c8fde6ee81e3d5f563f5a3eb8cf" }
 dependencies = [
     { name = "deepagents" },
     { name = "httpx" },
@@ -2249,7 +2249,7 @@ requires-dist = [
     { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'dev'", specifier = ">=0.4.43" },
     { name = "langgraph-sdk", specifier = ">=0.4.14" },
     { name = "langsmith", extras = ["sandbox-auth"], specifier = ">=0.16.2" },
-    { name = "managed-deepagents", git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=ce54e2e03a7d903b5450f059e5551cff17c1cf71" },
+    { name = "managed-deepagents", git = "https://github.com/langchain-ai/langchainplus?subdirectory=sdks%2Fmanaged-deepagents%2Fpackages%2Fpypi&rev=941040f7fb4b6c8fde6ee81e3d5f563f5a3eb8cf" },
     { name = "markdown-it-py", specifier = "==4.3.0" },
     { name = "markdownify", specifier = ">=1.2.3" },
     { name = "open-swe-runtime-api", editable = "packages/runtime-api" },

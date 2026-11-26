@@ -42,7 +42,7 @@ test = [
 # `make mda-cli` builds the `mda` CLI from the same commit into the installed runtime,
 # and the backend's pyproject.toml pins the same commit (vendor/README.md).
 [tool.uv.sources]
-managed-deepagents = { git = "https://github.com/langchain-ai/langchainplus", rev = "ce54e2e03a7d903b5450f059e5551cff17c1cf71", subdirectory = "sdks/managed-deepagents/packages/pypi" }
+managed-deepagents = { git = "https://github.com/langchain-ai/langchainplus", rev = "941040f7fb4b6c8fde6ee81e3d5f563f5a3eb8cf", subdirectory = "sdks/managed-deepagents/packages/pypi" }
 # The code mode, vendored so Robin can change it before upstream does.
 langchain-quickjs = { path = "../vendor/langchain-quickjs", editable = true }
 # Shared with the backend; `mda build` bundles it as a local package.
