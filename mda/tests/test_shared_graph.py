@@ -7,7 +7,7 @@ from collections import OrderedDict
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Final, Literal, cast
+from typing import Annotated, Final, Literal, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import agent
@@ -32,7 +32,7 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables.config import var_child_runnable_config
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import BaseTool, InjectedToolCallId, tool
 from langchain_core.tracers.langchain import LangChainTracer
 from langchain_quickjs._repl import _Slot, _SlotConfig
 from langchain_quickjs.middleware import REPLState
@@ -41,6 +41,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 from langgraph.store.memory import InMemoryStore
+from langgraph.types import Command
 from langgraph_sdk.auth.types import AuthContext, BaseUser, ThreadsCreate, ThreadsRead
 from langgraph_sdk.runtime import _ExecutionRuntime, _ReadRuntime
 from langsmith import Client, tracing_context
@@ -2022,6 +2023,37 @@ async def test_a_tool_result_the_interpreter_cannot_take_fails_the_eval_not_the_
         failed = await slot.eval_async("globalThis.kept = 1; await tools.nest({})", tools=[nest])
         assert failed.error_type == "MarshalError"
         assert (await slot.eval_async("kept")).result == "1"
+    finally:
+        await slot.aclose()
+
+
+async def test_a_tool_error_rejects_only_its_own_call() -> None:
+    @tool
+    def lookup(
+        name: str, tool_call_id: Annotated[str, InjectedToolCallId]
+    ) -> ToolMessage | Command:
+        """Answer like a Robin tool, failing for some names."""
+        if name == "slow":
+            return ToolMessage("Error: timed out", tool_call_id=tool_call_id, status="error")
+        if name == "stateful":
+            failed = ToolMessage("Error: refused", tool_call_id=tool_call_id, status="error")
+            return Command(update={"messages": [failed]})
+        return ToolMessage(json.dumps({"name": name}), tool_call_id=tool_call_id)
+
+    slot = _Slot("lookup", _SlotConfig())
+    try:
+        outcome = await slot.eval_async(
+            "JSON.stringify(await Promise.allSettled("
+            "['a', 'slow', 'stateful', 'b'].map((name) => tools.lookup({ name }))))",
+            tools=[lookup],
+        )
+        assert outcome.result is not None, outcome.error_message
+        assert json.loads(outcome.result) == [
+            {"status": "fulfilled", "value": '{"name": "a"}'},
+            {"status": "rejected", "reason": "Error: timed out"},
+            {"status": "rejected", "reason": "Error: refused"},
+            {"status": "fulfilled", "value": '{"name": "b"}'},
+        ]
     finally:
         await slot.aclose()
 

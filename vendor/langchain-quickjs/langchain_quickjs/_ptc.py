@@ -450,6 +450,9 @@ TOOLS_RESOLVES = "__tools_resolves"
 # Marks what `__tools_call` answers for a tool that raised `UnresolvedToolError`,
 # which the call then throws as a `TypeError`.
 UNRESOLVED_KEY = "__tools_unresolved"
+# Marks what `__tools_call` answers for a tool result with `status="error"`,
+# which the call then throws as an `Error` so its promise rejects.
+FAILED_KEY = "__tools_failed"
 
 
 def render_tools_namespace(*, resolves: bool = False) -> str:
@@ -467,21 +470,26 @@ def render_tools_namespace(*, resolves: bool = False) -> str:
     """
     call = json.dumps(TOOLS_CALL)
     names = json.dumps(TOOLS_NAMES)
+    unresolved = json.dumps(UNRESOLVED_KEY)
+    failed = json.dumps(FAILED_KEY)
+    fn = (
+        f"const fn = (name) => (input) => globalThis[{call}](name, input)"
+        ".then((result) => { if (result !== null && typeof result === 'object') {"
+        " const own = (key) => Object.prototype.hasOwnProperty.call(result, key);"
+        f" if (own({unresolved})) throw new TypeError(result[{unresolved}]);"
+        f" if (own({failed})) throw Object.assign(new Error(result[{failed}]),"
+        " { toJSON() { return this.message; } }); }"
+        " return result; });"
+    )
     if resolves:
         found = json.dumps(TOOLS_RESOLVES)
-        unresolved = json.dumps(UNRESOLVED_KEY)
-        fn = (
-            f"const fn = (name) => (input) => globalThis[{call}](name, input)"
-            ".then((result) => { if (result !== null && typeof result === 'object'"
-            f" && Object.prototype.hasOwnProperty.call(result, {unresolved}))"
-            f" throw new TypeError(result[{unresolved}]); return result; }});"
+        fn += (
             " const resolves = (target, name) => typeof name === 'string'"
             " && !(name in target) && name !== 'then' && name !== 'toJSON'"
             f" && globalThis[{found}](name);"
         )
         get = "has(name) || resolves(target, name)"
     else:
-        fn = f"const fn = (name) => (input) => globalThis[{call}](name, input);"
         get = "has(name)"
     return (
         f"{{ {fn}"

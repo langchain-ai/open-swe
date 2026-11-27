@@ -119,6 +119,31 @@ def coerce_tool_output_for_ptc(value: Any) -> Any:
     return _coerce_for_marshal(value)
 
 
+def ptc_tool_error(value: Any) -> str | None:
+    """Return the error text of a tool result whose last `ToolMessage` failed, if any."""
+    message = _last_tool_message(value)
+    if message is not None and message.status == "error":
+        return _coerce_tool_message_output(message)
+    return None
+
+
+def _last_tool_message(value: Any) -> ToolMessage | None:
+    """Return the last `ToolMessage` of a result: bare, in a list or in a `Command`."""
+    if isinstance(value, list):
+        value = next(
+            (e for e in reversed(value) if isinstance(e, (ToolMessage, Command))), None
+        )
+    if isinstance(value, Command):
+        update = value.update
+        messages = update.get("messages") if isinstance(update, dict) else None
+        if not isinstance(messages, list):
+            return None
+        value = next(
+            (m for m in reversed(messages) if isinstance(m, ToolMessage)), None
+        )
+    return value if isinstance(value, ToolMessage) else None
+
+
 def _coerce_for_marshal(value: Any) -> Any:
     """Convert *value* into a shape the quickjs_rs bridge can marshal."""
     if isinstance(value, _NATIVE_JS_SCALARS):
