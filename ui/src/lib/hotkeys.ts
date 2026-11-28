@@ -170,7 +170,7 @@ function closestElement(target: EventTarget | null): Element | null {
 export function isTypingContext(target: EventTarget | null): boolean {
   return Boolean(
     closestElement(target)?.closest(
-      'input, textarea, select, iframe, [role="textbox"], [role="searchbox"], [contenteditable]:not([contenteditable="false"])'
+      'input:not([type="range"]), textarea, select, iframe, [role="textbox"], [role="searchbox"], [contenteditable]:not([contenteditable="false"])'
     )
   )
 }

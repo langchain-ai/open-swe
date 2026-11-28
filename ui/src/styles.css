@@ -92,6 +92,33 @@
     display: none;
 }
 
+.review-diff-scrollbar {
+    appearance: none;
+    writing-mode: vertical-lr;
+    direction: ltr;
+    width: 10px;
+    margin: 0;
+    background: transparent;
+    cursor: ns-resize;
+    touch-action: none;
+}
+
+.review-diff-scrollbar::-webkit-slider-thumb {
+    appearance: none;
+    width: 6px;
+    height: var(--review-scrollbar-thumb, 24px);
+    border-radius: 999px;
+    background: var(--border-strong);
+}
+
+.review-diff-scrollbar::-moz-range-thumb {
+    width: 6px;
+    height: var(--review-scrollbar-thumb, 24px);
+    border: 0;
+    border-radius: 999px;
+    background: var(--border-strong);
+}
+
 /* CodeView measures the overview and toolbar together. The negative inset
    lets the overview scroll above the pane before the toolbar sticks. */
 .review-code-view > [data-diffs-code-view-header] {

@@ -37,6 +37,7 @@ import {
 } from "@/features/agents/components/SelectionReply"
 import { useAskAboutLines } from "./askAboutLines"
 import { ChangesToolbar } from "./ChangesToolbar"
+import { DiffScrollbar } from "./DiffScrollbar"
 import {
   buildEntries,
   entryNotes,
@@ -627,13 +628,14 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
                 items={detailQuery.isPending ? NO_ITEMS : items}
                 options={options}
                 // The outline separates files without adding to CodeView's measured height.
-                className="review-code-view h-full overflow-y-auto [&_diffs-container]:overflow-clip sm:[&_diffs-container]:mx-space-4 [&_diffs-container:has([data-step-header])]:bg-transparent [&_diffs-container:not(:has([data-step-header]))]:shadow-[0_0_0_1px_var(--border-default)] sm:[&_diffs-container:not(:has([data-step-header]))]:rounded-lg"
+                className="review-code-view no-scrollbar h-full overflow-y-auto [&_diffs-container]:overflow-clip [&_diffs-container:has([data-step-header])]:bg-surface-level-1 [&_diffs-container:not(:has([data-step-header]))]:shadow-[0_0_0_1px_var(--border-secondary)]"
                 renderCodeViewHeader={renderHeader}
                 renderCodeViewFooter={renderFooter}
                 renderCustomHeader={renderCustomHeader}
                 renderAnnotation={renderAnnotation}
                 onScroll={onScroll}
               />
+              <DiffScrollbar viewportRef={scrollRef} />
               <SelectionReply
                 containerRef={containerRef}
                 readPassage={pullRequestPassage}

@@ -146,6 +146,10 @@ export const DIFF_UNSAFE_CSS = `
   --mix-light: 75%;
 }
 
+[data-gutter-buffer="buffer"] {
+  --diffs-line-bg: var(--diffs-surface);
+}
+
 [data-file-info] {
   background-color: var(--bg-surface-level-1-hover) !important;
   border-block-color: var(--border-default) !important;

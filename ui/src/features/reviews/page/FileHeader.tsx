@@ -83,7 +83,7 @@ export function FileHeader({ pr, id }: { pr: PullRequestRef; id: string }) {
       }}
       style={{ height: FILE_HEADER_HEIGHT }}
       className={cn(
-        "group/header flex items-center gap-space-2 border-b border-default bg-surface-level-2 px-space-2 font-sans text-xs",
+        "group/header flex items-center gap-space-2 border-b border-secondary bg-surface-level-2 px-space-3 font-sans text-xs",
         folded && "border-b-transparent"
       )}
     >
