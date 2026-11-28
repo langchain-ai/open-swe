@@ -73,7 +73,10 @@ export function ReviewedPullRequests({
       </div>
       <div
         aria-busy={reviews.isFetching}
-        className="mt-space-3 min-h-0 flex-1 overflow-y-auto rounded-lg border border-default bg-surface-level-1"
+        className={cn(
+          "mt-space-3 min-h-0 flex-1 overflow-y-auto rounded-lg border border-default bg-surface-level-1",
+          selected && "-mx-space-3 px-space-3"
+        )}
       >
         {reviews.isFetching && reviews.data && (
           <LinearProgress

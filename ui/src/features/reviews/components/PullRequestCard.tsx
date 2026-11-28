@@ -8,10 +8,16 @@ import {
 } from "react"
 
 import { Skeleton } from "@/components/Skeleton"
+import { PullRequestPreviewHoverCard } from "@/features/agents/components/PullRequestPreview"
+import {
+  PullRequestIssueCounts,
+  PullRequestNumber,
+} from "@/features/agents/components/ThreadPullRequests"
 import type { OpenPullRequest } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { dateLabel } from "../lib/dateLabel"
-import { statusDetail, statusLabels } from "../lib/status"
+import { githubUrls } from "../lib/githubUrls"
+import { isConflicted, statusDetail, statusLabels } from "../lib/status"
 import { Diffstat } from "./Diffstat"
 import {
   PullRequestActions,
@@ -81,65 +87,80 @@ export function PullRequestCard({
 }) {
   const contentId = useId()
   if (compact) {
+    const [owner = "", repo = ""] = pr.repo.split("/")
+    const failingCount = pr.failingChecks.length
+    const commentCount = pr.unresolvedThreads ?? 0
+    const conflicted = isConflicted(pr)
+    const detail = statusDetail(pr)
     return (
-      <Button
-        color="secondary"
-        variant="plain"
-        size="sm"
-        aria-labelledby={contentId}
-        type="button"
-        aria-current={selected ? "true" : undefined}
-        onClick={onSelect}
-        className={cn(
-          "h-auto justify-start whitespace-normal",
-          "w-full gap-space-3 py-space-2 pr-space-2 pl-space-2 text-left",
-          selected
-            ? "bg-selected hover:bg-selected dark:hover:bg-selected"
-            : "hover:bg-surface-level-1-hover",
-          outcome && "opacity-60"
-        )}
+      <PullRequestPreviewHoverCard
+        mention={{
+          href: githubUrls.pullRequest({ owner, repo, number: pr.number }),
+          repoFullName: pr.repo,
+          number: pr.number,
+        }}
+        createdAt={pr.createdAt}
+        mergeConflictState={conflicted ? "conflicting" : null}
+        sidebar
       >
-        <span
-          aria-hidden="true"
+        <Button
+          color="secondary"
+          variant="plain"
+          size="sm"
+          aria-labelledby={contentId}
+          type="button"
+          aria-current={selected ? "true" : undefined}
+          onClick={onSelect}
           className={cn(
-            "mt-0.5 w-0.5 shrink-0 self-stretch rounded-full",
-            selected ? "bg-brand" : "bg-transparent"
+            "h-auto w-full justify-start border-0 py-space-2 pr-space-3 pl-space-2 text-left whitespace-normal",
+            selected
+              ? "bg-selected hover:bg-selected dark:hover:bg-selected"
+              : "hover:bg-surface-level-1-hover dark:hover:bg-surface-level-1-hover",
+            outcome && "opacity-60"
           )}
-        />
-        <span id={contentId} className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-space-2 text-xs text-secondary">
-            <span className="min-w-0 truncate" title={pr.repo}>
-              {pr.repo}
+        >
+          <span id={contentId} className="min-w-0 flex-1">
+            <span className="flex items-center gap-space-2 text-xs text-secondary">
+              <PullRequestNumber
+                number={pr.number}
+                tone={
+                  failingCount || commentCount || conflicted
+                    ? "text-warning-secondary"
+                    : undefined
+                }
+              />
+              <span className="min-w-0 truncate">{pr.repo}</span>
             </span>
-            <span className="font-mono tabular-nums">#{pr.number}</span>
-          </span>
-          <span
-            title={pr.title}
-            className="mt-0.5 block truncate text-xs font-medium text-primary"
-          >
-            {pr.title}
-          </span>
-          {outcome ? (
-            <span className="mt-0.5 block truncate text-xs text-secondary">
-              {outcomeLabels[outcome]}
+            <span className="mt-0.5 block truncate text-xs font-medium text-primary">
+              {pr.title}
             </span>
-          ) : (
-            <>
-              <span className="mt-space-1 flex flex-wrap gap-space-1">
-                <AssignmentBadge pr={pr} />
-                {statusLabels(pr).map((status) => (
-                  <StatusPill key={status} status={status} />
-                ))}
+            {outcome ? (
+              <span className="mt-0.5 block truncate text-xs text-secondary">
+                {outcomeLabels[outcome]}
               </span>
-              {statusDetail(pr) && (
-                <span className="mt-0.5 block truncate text-xs text-secondary">
-                  {statusDetail(pr)}
+            ) : (
+              <>
+                <span className="mt-space-1 flex flex-wrap items-center gap-x-space-2 gap-y-space-1 text-xs text-secondary">
+                  <AssignmentBadge pr={pr} />
+                  {statusLabels(pr).map((status) => (
+                    <StatusPill key={status} status={status} />
+                  ))}
+                  <PullRequestIssueCounts
+                    failingChecks={failingCount}
+                    unresolvedComments={commentCount}
+                    showLabels
+                  />
                 </span>
-              )}
-            </>
-          )}
-        </span>
-      </Button>
+                {detail && (
+                  <span className="mt-0.5 block truncate text-xs text-secondary">
+                    {detail}
+                  </span>
+                )}
+              </>
+            )}
+          </span>
+        </Button>
+      </PullRequestPreviewHoverCard>
     )
   }
 
@@ -242,13 +263,10 @@ export function PullRequestCard({
 export function PullRequestCardSkeleton({ compact }: { compact?: boolean }) {
   if (compact) {
     return (
-      <div className="flex gap-space-3 py-space-2 pr-space-2 pl-space-2">
-        <span aria-hidden="true" className="w-0.5 shrink-0" />
-        <div className="min-w-0 flex-1 space-y-space-2 py-0.5">
-          <Skeleton className="h-3 w-32" />
-          <Skeleton className="h-3 w-4/5" />
-          <Skeleton className="h-4 w-20 rounded-full" />
-        </div>
+      <div className="space-y-space-2 px-space-3 py-space-2">
+        <Skeleton className="h-3 w-32" />
+        <Skeleton className="h-3 w-4/5" />
+        <Skeleton className="h-4 w-20 rounded-full" />
       </div>
     )
   }

@@ -5,14 +5,15 @@ import {
   HoverCardTrigger,
 } from "@langchain/macaw-components/HoverCard"
 import { useQuery } from "@tanstack/react-query"
-import { createContext, useContext, useMemo, useState } from "react"
-import type { ComponentProps, ReactNode } from "react"
+import { createContext, useContext, useMemo } from "react"
+import type { ComponentProps, ReactElement, ReactNode } from "react"
 
 import {
   PullRequestCard,
   PullRequestChip,
 } from "@/features/agents/components/PullRequestMention"
 import type { PullRequestMentionProps } from "@/features/agents/components/PullRequestMention"
+import { SidebarRowHoverCard } from "@/features/agents/components/SidebarRowHoverCard"
 import {
   PULL_REQUEST_HOVER_CARD_CLASS,
   PullRequestHoverCard,
@@ -150,15 +151,87 @@ function PullRequestPreviewLink({
   ...props
 }: ComponentProps<"a"> & { mention: PullRequestMentionProps }) {
   const previews = useContext(PullRequestPreviewContext)
-  const [open, setOpen] = useState(false)
+  return (
+    <PullRequestPreviewHoverCard
+      mention={mention}
+      healthUnavailable={previews?.healthUnavailable ?? false}
+      showHealth={mention.pullRequest !== undefined}
+    >
+      <PullRequestChip {...props} {...mention}>
+        {children}
+      </PullRequestChip>
+    </PullRequestPreviewHoverCard>
+  )
+}
+
+const failingCheckConclusions = new Set([
+  "failure",
+  "error",
+  "timed_out",
+  "action_required",
+  "startup_failure",
+])
+
+interface PullRequestPreviewContentProps {
+  mention: PullRequestMentionProps
+  createdAt?: string | null
+  healthUnavailable?: boolean
+  mergeConflictState?: AgentPullRequestHealth["mergeConflictState"]
+  showHealth?: boolean
+}
+
+export function PullRequestPreviewHoverCard({
+  sidebar = false,
+  children,
+  ...props
+}: PullRequestPreviewContentProps & {
+  sidebar?: boolean
+  children: ReactElement
+}) {
+  const card = <PullRequestPreviewContent {...props} />
+  if (sidebar) {
+    return (
+      <SidebarRowHoverCard
+        trigger={children}
+        card={card}
+        className={PULL_REQUEST_HOVER_CARD_CLASS}
+        openDelay={250}
+      />
+    )
+  }
+
+  return (
+    <HoverCard openDelay={250} closeDelay={100}>
+      <HoverCardTrigger asChild>{children}</HoverCardTrigger>
+      <HoverCardContent
+        side="top"
+        align="start"
+        sideOffset={8}
+        className={PULL_REQUEST_HOVER_CARD_CLASS}
+      >
+        {card}
+      </HoverCardContent>
+    </HoverCard>
+  )
+}
+
+function PullRequestPreviewContent({
+  mention,
+  createdAt = null,
+  healthUnavailable = false,
+  mergeConflictState = null,
+  showHealth = true,
+}: PullRequestPreviewContentProps) {
   const preview = useQuery({
     ...pullRequestPreviewQuery({
       repo: mention.repoFullName,
       number: mention.number,
     }),
-    enabled: open && !mention.pullRequest,
+    enabled: !mention.pullRequest,
   })
   const data = preview.data
+  const state =
+    data?.state === "merged" || data?.state === "closed" ? data.state : "open"
   const pullRequest: AgentPullRequest | undefined =
     mention.pullRequest ??
     (data
@@ -167,17 +240,12 @@ function PullRequestPreviewLink({
           number: mention.number,
           url: mention.href,
           title: data.title,
-          state:
-            data.state === "merged" || data.state === "closed"
-              ? data.state
-              : data.draft
-                ? "draft"
-                : "open",
+          state: state === "open" && data.draft ? "draft" : state,
           headRef: data.head_ref,
           baseRef: data.base_ref,
           author: data.author,
           authorAvatarUrl: data.author_avatar_url,
-          createdAt: null,
+          createdAt,
           diffStats: {
             files: data.changed_files,
             additions: data.additions,
@@ -186,41 +254,45 @@ function PullRequestPreviewLink({
         }
       : undefined)
 
-  const chip = (
-    <PullRequestChip {...props} {...mention}>
-      {children}
-    </PullRequestChip>
-  )
-  return (
-    <HoverCard
-      open={open}
-      onOpenChange={setOpen}
-      openDelay={250}
-      closeDelay={100}
-    >
-      <HoverCardTrigger asChild>{chip}</HoverCardTrigger>
-      <HoverCardContent
-        side="top"
-        align="start"
-        sideOffset={8}
-        className={PULL_REQUEST_HOVER_CARD_CLASS}
-      >
-        {pullRequest ? (
-          <PullRequestHoverCard
-            pullRequest={pullRequest}
-            health={mention.health}
-            healthUnavailable={previews?.healthUnavailable ?? false}
-            showHealth={mention.pullRequest !== undefined}
-          />
-        ) : (
-          <p role="status" className="p-space-2 text-xs text-secondary">
-            {preview.isError
-              ? "Pull request preview unavailable."
-              : "Loading pull request preview…"}
-          </p>
-        )}
-      </HoverCardContent>
-    </HoverCard>
+  const health: AgentPullRequestHealth | undefined =
+    mention.health ??
+    (showHealth && data
+      ? {
+          repoFullName: mention.repoFullName,
+          number: mention.number,
+          url: mention.href,
+          statusAvailable: true,
+          state,
+          isDraft: data.draft,
+          mergeConflictState,
+          checksAvailable: data.checks != null,
+          failingChecks:
+            data.checks?.filter(
+              (check) =>
+                check.name !== "Robin Approves" &&
+                check.status === "completed" &&
+                failingCheckConclusions.has(check.conclusion ?? "")
+            ) ?? [],
+          pendingCheckCount: null,
+          inconclusiveCheckCount: null,
+          commentsAvailable: data.unresolved != null,
+          unresolvedReviewThreadCount: data.unresolved?.length ?? null,
+          unresolvedReviewThreads: data.unresolved ?? [],
+        }
+      : undefined)
+  return pullRequest ? (
+    <PullRequestHoverCard
+      pullRequest={pullRequest}
+      health={health}
+      healthUnavailable={healthUnavailable}
+      showHealth={showHealth}
+    />
+  ) : (
+    <p role="status" className="p-space-2 text-xs text-secondary">
+      {preview.isError
+        ? "Pull request preview unavailable."
+        : "Loading pull request preview…"}
+    </p>
   )
 }
 

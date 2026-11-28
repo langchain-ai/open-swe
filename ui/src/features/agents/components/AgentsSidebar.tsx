@@ -55,9 +55,9 @@ import { SidebarNav } from "@/features/agents/components/SidebarNav"
 import { SidebarGroupHeading } from "@/features/agents/components/SidebarGroupHeading"
 import { ThreadDragDrop } from "@/features/agents/components/ThreadDragDrop"
 import { SortableThreadList } from "@/features/agents/components/SortableThreadList"
+import { SidebarRowHoverProvider } from "@/features/agents/components/SidebarRowHoverCard"
 import {
   PendingSidebarThreadRow,
-  SidebarThreadHoverProvider,
   SidebarThreadRow,
 } from "@/features/agents/components/SidebarThreadRow"
 import { SidebarThreadSelection } from "@/features/agents/components/SidebarThreadSelection"
@@ -1456,7 +1456,7 @@ export function AgentsShell({
   return (
     <SidebarLayoutProvider value={layout}>
       <TooltipProvider delayDuration={500} skipDelayDuration={100}>
-        <SidebarThreadHoverProvider>
+        <SidebarRowHoverProvider>
           <div className="agents-ui flex h-svh overflow-hidden bg-surface-level-1">
             <AgentsSidebar
               user={user}
@@ -1468,7 +1468,7 @@ export function AgentsShell({
               {children}
             </main>
           </div>
-        </SidebarThreadHoverProvider>
+        </SidebarRowHoverProvider>
       </TooltipProvider>
     </SidebarLayoutProvider>
   )

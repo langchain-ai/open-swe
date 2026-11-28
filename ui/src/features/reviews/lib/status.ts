@@ -38,18 +38,10 @@ export function statusLabels(pr: OpenPullRequest): string[] {
 /** What a compact row adds under its pills: the specifics no pill names. */
 export function statusDetail(pr: OpenPullRequest): string | null {
   if (pr.detailsLoading || pr.detailsError) return null
-  if (pr.failingChecks.length)
-    return pr.failingChecks.length === 1
-      ? `${pr.failingChecks[0]} failing`
-      : `${pr.failingChecks.length} checks failing`
   if (pr.missingChecks.length)
     return pr.missingChecks.length === 1
       ? `${pr.missingChecks[0]} not reported`
       : `${pr.missingChecks.length} required checks not reported`
-  if (pr.unresolvedThreads !== null && pr.unresolvedThreads > 0)
-    return pr.unresolvedThreads === 1
-      ? "1 unresolved comment"
-      : `${pr.unresolvedThreads} unresolved comments`
   if (pr.pendingChecks.length)
     return pr.pendingChecks.length === 1
       ? `${pr.pendingChecks[0]} running`

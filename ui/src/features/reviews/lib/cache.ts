@@ -11,14 +11,18 @@ import { BROWSER_CACHE_MAX_AGE_MS, expiresInBrowser } from "@/lib/query"
 type PullRequestRef = { repo: string; number: number }
 
 export const PULL_REQUEST_STATUS = "pull-request-status"
+export const PULL_REQUEST_PREVIEW = "pr-preview"
 
 export function pullRequestPreviewQuery(pr: PullRequestRef) {
   const [owner = "", name = ""] = pr.repo.split("/")
   return {
-    queryKey: ["pr-preview", owner, name, pr.number],
+    queryKey: [PULL_REQUEST_PREVIEW, owner, name, pr.number],
     queryFn: () => api.getPullRequestPreview(owner, name, pr.number),
     ...expiresInBrowser,
     gcTime: BROWSER_CACHE_MAX_AGE_MS,
+    meta: {
+      invalidatedBy: [pullRequestTopic(pr), pullRequestChecksTopic(pr)],
+    },
   } as const
 }
 

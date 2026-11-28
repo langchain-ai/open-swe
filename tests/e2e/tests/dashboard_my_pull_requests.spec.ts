@@ -170,7 +170,7 @@ test.describe("my pull requests", () => {
       files: { "change.py": "VALUE = 1\n" },
       ...approved,
     });
-    const other = await seedOpenPullRequest(page, {
+    await seedOpenPullRequest(page, {
       repo: DEMO,
       title: "Another authored change",
       head: "another-authored-change",
@@ -239,11 +239,12 @@ test.describe("my pull requests", () => {
     await expect(
       page.getByRole("textbox", { name: "Search pull requests" }),
     ).toHaveValue("authored");
-    await page
-      .getByRole("button", {
-        name: `fakeorg/demo #${other.number} Another authored change Approved`,
-        exact: true,
-      })
+    const mineList = page.getByRole("region", {
+      name: "My open pull requests",
+      exact: true,
+    });
+    await mineList
+      .getByRole("button", { name: /Another authored change/ })
       .click();
     await expect(
       page.getByRole("heading", { name: /Another authored change/ }),
@@ -253,10 +254,7 @@ test.describe("my pull requests", () => {
     await prList.click();
     await expect
       .poll(async () => {
-        const rows = await page
-          .getByRole("region", { name: "My open pull requests", exact: true })
-          .getByRole("listitem")
-          .all();
+        const rows = await mineList.getByRole("listitem").all();
         if (rows.length < 2) return false;
         const first = await rows[0]!.boundingBox();
         const second = await rows[1]!.boundingBox();
@@ -314,6 +312,51 @@ test.describe("my pull requests", () => {
     await expect(page).toHaveURL(/\/agents$/);
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(pullRequests).toBeVisible();
+  });
+
+  test("refreshes a cached compact preview after a pull request title changes", async ({
+    page,
+  }) => {
+    const pr = await seedOpenPullRequest(page, {
+      repo: DEMO,
+      title: "Draft migration",
+      head: "migration",
+      ...approved,
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`/agents/reviews/fakeorg/demo/${pr.number}`);
+    await page
+      .getByRole("button", { name: "Pull request list, Mine", exact: true })
+      .click();
+
+    const list = page.getByRole("region", { name: "My open pull requests" });
+    const row = list.getByRole("button", { name: /migration/ });
+    const preview = page.getByTestId(`pr-hover-card-${DEMO}-${pr.number}`);
+    await row.hover();
+    await expect(preview).toContainText("Draft migration");
+    await page.mouse.move(0, 0);
+    await expect(preview).toBeHidden();
+
+    await page.getByRole("button", { name: "Edit title", exact: true }).click();
+    await page.getByRole("textbox", { name: "PR title" }).fill("Fix migration");
+    await page.getByRole("button", { name: "Save title", exact: true }).click();
+    await expect(row).toContainText("Fix migration");
+    await row.hover();
+    await expect(preview).toContainText("Fix migration");
+    await page.mouse.move(0, 0);
+    await expect(preview).toBeHidden();
+
+    // An edit on GitHub with no webhook delivery needs a manual refresh.
+    const edit = await page.request.patch(
+      `/fake-gh/repos/${DEMO}/pulls/${pr.number}`,
+      { data: { title: "Finish migration" } },
+    );
+    expect(edit.ok()).toBeTruthy();
+    const refresh = list.getByRole("button", { name: "Refresh", exact: true });
+    await refresh.click();
+    await expect(refresh).toBeEnabled();
+    await row.hover();
+    await expect(preview).toContainText("Finish migration");
   });
 
   test("queues requested reviews before own drafts and keeps marked-ready PRs open", async ({

@@ -15,6 +15,7 @@ import { PullRequestCardSkeleton } from "./PullRequestCard"
 
 const estimatedCardHeight = 208
 const estimatedRowHeight = 68
+const compactRowGap = 8
 const rowGap = 12
 
 /**
@@ -58,7 +59,8 @@ export function PullRequestList({
     count: rows.length,
     initialOffset: scrollEntry?.scrollY,
     getScrollElement: () => scroller,
-    estimateSize: () => (compact ? estimatedRowHeight : estimatedCardHeight),
+    estimateSize: () =>
+      compact ? estimatedRowHeight + compactRowGap : estimatedCardHeight,
     overscan: 4,
     getItemKey: (index) => pullRequestKey(rows[index]!),
   })
@@ -84,7 +86,10 @@ export function PullRequestList({
     <div
       ref={setScroller}
       data-scroll-restoration-id="pull-request-list"
-      className="min-h-0 flex-1 overflow-y-auto"
+      className={cn(
+        "scroll-mask-t scroll-mask-b min-h-0 flex-1 overflow-y-auto",
+        compact && "-mx-space-3 pl-space-1"
+      )}
     >
       {viewport > 0 ? (
         <ul className="relative" style={{ height: virtualizer.getTotalSize() }}>
@@ -96,7 +101,7 @@ export function PullRequestList({
               className="absolute top-0 left-0 w-full"
               style={{
                 transform: `translateY(${row.start}px)`,
-                paddingBottom: compact ? 0 : rowGap,
+                paddingBottom: compact ? compactRowGap : rowGap,
               }}
             >
               {children(rows[row.index]!)}
@@ -104,7 +109,7 @@ export function PullRequestList({
           ))}
         </ul>
       ) : (
-        <ul className={compact ? undefined : "space-y-space-3"}>
+        <ul className={compact ? "space-y-space-2" : "space-y-space-3"}>
           {rows.map((pr) => (
             <li key={pullRequestKey(pr)}>{children(pr)}</li>
           ))}
@@ -129,7 +134,7 @@ export function PullRequestListSkeleton({
       aria-label={label}
       className={cn(
         "min-h-0 flex-1 overflow-hidden",
-        !compact && "space-y-space-3"
+        compact ? "space-y-space-2" : "space-y-space-3"
       )}
     >
       {Array.from({ length: compact ? 8 : 4 }, (_, index) => (

@@ -33,6 +33,7 @@ import {
 import { PullRequestReview } from "./components/PullRequestReview"
 import {
   leftOpenList,
+  PULL_REQUEST_PREVIEW,
   PULL_REQUEST_STATUS,
   pullRequestStatusQuery,
   refreshPullRequest,
@@ -273,14 +274,14 @@ export function OpenPullRequests({
 
   return (
     <section
-      className="mt-space-4 flex min-h-0 flex-1 flex-col gap-space-3"
+      className="flex min-h-0 flex-1 flex-col gap-space-3"
       aria-label={
         scope === "mine" ? "My open pull requests" : "Pull requests to review"
       }
     >
       {scope !== "mine" && (
         <div className="flex flex-wrap items-center gap-space-2 text-xs text-secondary">
-          <span>
+          <span className="text-quaternary">
             {scope === "review-assigned"
               ? "Requested reviews, your drafts, then speculative reviews"
               : "GitHub review requests"}
@@ -468,6 +469,9 @@ export function OpenPullRequests({
             })
             void queryClient.invalidateQueries({
               queryKey: [PULL_REQUEST_STATUS, login],
+            })
+            void queryClient.invalidateQueries({
+              queryKey: [PULL_REQUEST_PREVIEW],
             })
             void queryClient.invalidateQueries({
               queryKey: ["pr-thread-status", login],

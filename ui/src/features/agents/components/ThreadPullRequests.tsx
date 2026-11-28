@@ -124,17 +124,19 @@ function HealthItem({
   iconClassName,
   count,
   label,
+  showLabel = false,
 }: {
   icon: IconComponent
   iconClassName: string
   count?: number
   label: string
+  showLabel?: boolean
 }) {
   return (
     <span className="flex items-center gap-space-1 whitespace-nowrap">
-      <Icon size={14} weight="regular" className={iconClassName} />
+      <Icon aria-hidden size={14} weight="regular" className={iconClassName} />
       {count}
-      <span className="hidden @xl:inline">
+      <span className={showLabel ? undefined : "hidden @xl:inline"}>
         {count === undefined ? label : ` ${label}`}
       </span>
     </span>
@@ -144,33 +146,52 @@ function HealthItem({
 const plural = (count: number, noun: string) =>
   `${noun}${count === 1 ? "" : "s"}`
 
+export function PullRequestIssueCounts({
+  failingChecks,
+  unresolvedComments,
+  showLabels = false,
+}: {
+  failingChecks: number
+  unresolvedComments: number
+  showLabels?: boolean
+}) {
+  return (
+    <>
+      {failingChecks > 0 && (
+        <HealthItem
+          icon={XCircleIcon}
+          iconClassName="text-icon-error"
+          count={failingChecks}
+          label={plural(failingChecks, "check")}
+          showLabel={showLabels}
+        />
+      )}
+      {unresolvedComments > 0 && (
+        <HealthItem
+          icon={ChatCircleIcon}
+          iconClassName="text-icon-warning"
+          count={unresolvedComments}
+          label={plural(unresolvedComments, "comment")}
+          showLabel={showLabels}
+        />
+      )}
+    </>
+  )
+}
+
 function HealthSummary({
   health,
 }: {
   health: AgentPullRequestHealth | undefined
 }) {
   if (!health) return null
-  const failingCount = health.failingChecks.length
-  const commentCount = health.unresolvedReviewThreadCount ?? 0
   const pendingCount = health.pendingCheckCount ?? 0
   return (
     <>
-      {failingCount > 0 && (
-        <HealthItem
-          icon={XCircleIcon}
-          iconClassName="text-icon-error"
-          count={failingCount}
-          label={plural(failingCount, "check")}
-        />
-      )}
-      {commentCount > 0 && (
-        <HealthItem
-          icon={ChatCircleIcon}
-          iconClassName="text-icon-warning"
-          count={commentCount}
-          label={plural(commentCount, "comment")}
-        />
-      )}
+      <PullRequestIssueCounts
+        failingChecks={health.failingChecks.length}
+        unresolvedComments={health.unresolvedReviewThreadCount ?? 0}
+      />
       {health.mergeConflictState === "conflicting" && (
         <HealthItem
           icon={WarningRegularIcon}
@@ -376,6 +397,26 @@ export function PullRequestHoverCard({
   )
 }
 
+export function PullRequestNumber({
+  number,
+  tone = "text-secondary",
+}: {
+  number: number
+  tone?: string
+}) {
+  return (
+    <>
+      <GitPullRequestIcon
+        aria-hidden
+        size={14}
+        weight="regular"
+        className={cn("shrink-0", tone)}
+      />
+      <span className="shrink-0 font-medium text-primary">#{number}</span>
+    </>
+  )
+}
+
 function PullRequestLink({
   pullRequest,
   health,
@@ -425,14 +466,7 @@ function PullRequestLink({
             data-pr-tone={tone}
             className="flex min-w-0 flex-1 items-center gap-space-2 overflow-hidden rounded-lg px-space-2 py-space-1 transition-colors hover:bg-surface-level-1-hover"
           >
-            <GitPullRequestIcon
-              size={14}
-              weight="regular"
-              className={cn("shrink-0", tone)}
-            />
-            <span className="shrink-0 font-medium text-primary">
-              #{pullRequest.number}
-            </span>
+            <PullRequestNumber number={pullRequest.number} tone={tone} />
             <span className="min-w-0 flex-1 truncate">{pullRequest.title}</span>
             <span className="flex shrink-0 items-center gap-space-2 @xl:gap-space-3">
               <HealthSummary health={health} />
