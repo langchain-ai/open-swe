@@ -92,6 +92,22 @@
     display: none;
 }
 
+/* CodeView measures the overview and toolbar together. The negative inset
+   lets the overview scroll above the pane before the toolbar sticks. */
+.review-code-view > [data-diffs-code-view-header] {
+    position: sticky;
+    top: var(--review-changes-sticky-top, auto);
+    z-index: 20;
+    background-color: var(--bg-surface-level-1);
+    /* Cover fractional rounding between the two sticky surfaces. */
+    box-shadow: 0 1px 0 var(--bg-surface-level-1);
+}
+
+/* Let keyboard focus scroll overview controls back into view. */
+.review-code-view > [data-diffs-code-view-header]:has(:focus-visible):not(:has([data-review-changes-toolbar] :focus-visible)) {
+    top: auto;
+}
+
 /* A class, not `body:has(.version-mismatch-banner)`: Chrome restyles the whole
    document for a `:has()` on `body` after every DOM change. */
 body.version-mismatch {

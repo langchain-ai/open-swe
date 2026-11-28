@@ -95,8 +95,10 @@ export function FindBar() {
     <div
       role="search"
       aria-label="Find in the changes"
-      // Under the sticky file header, so its Viewed box stays reachable.
-      style={{ top: FILE_HEADER_HEIGHT + 8 }}
+      // Below the sticky rows, so the file's Viewed box stays reachable.
+      style={{
+        top: `calc(${FILE_HEADER_HEIGHT + 8}px + var(--review-changes-toolbar-height, 0px))`,
+      }}
       className="absolute right-4 z-floating-bar flex items-center gap-space-1 rounded-lg border border-default bg-surface-level-1 py-space-1 pr-space-1 pl-space-3 shadow-md"
     >
       <Input

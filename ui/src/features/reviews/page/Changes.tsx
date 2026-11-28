@@ -58,8 +58,6 @@ import { reviewQueries, useFileMarkers, type PullRequestRef } from "./queries"
 import { isCollapsed, useReviewPage, type DiffTarget } from "./store"
 import { SelectionBar, type TextSelection } from "./SelectionBar"
 import {
-  isStepItem,
-  ReadNudge,
   StepHeader,
   StepIntro,
   stepItemId,
@@ -151,6 +149,9 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const fileFilter = useReviewPage((state) => state.fileFilter)
   const setComposer = useReviewPage((state) => state.setComposer)
   const setActive = useReviewPage((state) => state.setActive)
+  const setWalkthroughToolbar = useReviewPage(
+    (state) => state.setWalkthroughToolbar
+  )
   const setEntryOrder = useReviewPage((state) => state.setEntryOrder)
   const replyInChat = useReviewPage((state) => state.replyInChat)
   const theme = useResolvedTheme()
@@ -165,6 +166,11 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       : storedOverflow
   const handle = useRef<CodeViewHandle<Note>>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [changesToolbar, setChangesToolbar] = useState<HTMLDivElement | null>(
+    null
+  )
+  const changesToolbarHeight = useRef(0)
   const paintFind = useFindHighlights(containerRef)
   const askAboutLines = useAskAboutLines(pr)
   const markers = useFileMarkers(pr)
@@ -271,12 +277,21 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     return {
       ...base,
       // FileHeader draws its own rule; rows are pinned to the gutter's height so measured = laid out.
-      // Step items are the only plain files: no gutter, no surface, their placeholder line unseen.
-      unsafeCSS: `${base.unsafeCSS}${FIND_HIGHLIGHT_CSS}[data-diffs-header]{border-bottom:0 !important}pre[data-file],pre[data-file] :is([data-gutter],[data-content],[data-line-annotation],[data-line]){--diffs-line-bg:transparent;background:transparent !important}pre[data-file] [data-code]{grid-template-columns:0 minmax(0,1fr)}pre[data-file] [data-gutter]{visibility:hidden;overflow:hidden}pre[data-file] [data-line]{visibility:hidden}pre[data-file] [data-annotation-content]{left:0;width:auto}[data-line-annotation],[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-surface)}[data-gutter-buffer="annotation"]{border-right-color:transparent}[data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-top:${DIFF_VIRTUAL_METRICS.spacing}px}${
-        overflow === "scroll"
-          ? `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
-          : ""
-      }`,
+      // Step items are the only plain files. Hide their gutter and placeholder line.
+      unsafeCSS: `${base.unsafeCSS}${FIND_HIGHLIGHT_CSS}
+        [data-diffs-header]{border-bottom:0 !important}
+        [data-diffs-header][data-change-type][data-sticky]{top:var(--review-changes-toolbar-height,0px)}
+        [data-diffs-header]:not([data-change-type]){position:static !important}
+        pre[data-file]{background:var(--bg-surface-level-1) !important}
+        pre[data-file] :is([data-gutter],[data-content],[data-line-annotation],[data-line]){--diffs-line-bg:transparent;background:transparent !important}
+        pre[data-file] [data-code]{grid-template-columns:0 minmax(0,1fr)}pre[data-file] [data-gutter]{visibility:hidden;overflow:hidden}pre[data-file] [data-line]{visibility:hidden}
+        pre[data-file] [data-annotation-content]{position:relative;left:0;width:auto}
+        [data-line-annotation],[data-gutter-buffer="annotation"]{--diffs-annotation-bg:var(--diffs-surface)}[data-gutter-buffer="annotation"]{border-right-color:transparent}
+        [data-code],[data-diff-type=split]:is([data-overflow=wrap],[data-dehydrated]){padding-block:0}${
+          overflow === "scroll"
+            ? `[data-line]{height:${DIFF_ROW_HEIGHT}px !important;min-height:${DIFF_ROW_HEIGHT}px !important;max-height:${DIFF_ROW_HEIGHT}px !important;line-height:${DIFF_ROW_HEIGHT}px !important}`
+            : ""
+        }`,
       disableFileHeader: false,
       stickyHeaders: true,
       // Exact heights: CodeView positions every file from them, so an estimate
@@ -284,10 +299,11 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       itemMetrics: {
         lineHeight: DIFF_ROW_HEIGHT,
         spacing: DIFF_VIRTUAL_METRICS.spacing,
-        paddingTop: DIFF_VIRTUAL_METRICS.spacing,
+        paddingTop: 0,
+        paddingBottom: 0,
         diffHeaderHeight: FILE_HEADER_HEIGHT,
       },
-      layout: { paddingTop: 0, paddingBottom: 0, gap: 10 },
+      layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
       __devOnlyValidateItemHeights: import.meta.env.DEV,
       loadDiffFiles,
       // Hunks highlighted alone lose multi-line string state; hydrate once shown.
@@ -316,7 +332,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     () => (
       <>
         <Overview pr={pr} />
-        <ChangesToolbar pr={pr} />
+        <ChangesToolbar pr={pr} rowRef={setChangesToolbar} />
       </>
     ),
     [pr]
@@ -331,13 +347,15 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
     [stepGroups]
   )
   const renderCustomHeader = useCallback(
-    (item: Item) =>
-      isStepItem(item.id) ? (
-        <StepHeader id={item.id} />
+    (item: Item) => {
+      const group = stepItems.get(item.id)
+      return group ? (
+        <StepHeader group={group} />
       ) : (
         <FileHeader pr={pr} id={item.id} />
-      ),
-    [pr]
+      )
+    },
+    [pr, stepItems]
   )
   const renderAnnotation = useCallback(
     (
@@ -367,12 +385,14 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
       const opensStep =
         entry.step && stepsByIndex.get(entry.step.index)?.entries[0] === entry
       requestAnimationFrame(() => {
+        const toolbarHeight = changesToolbarHeight.current
         if (target.kind !== "line") {
           view.scrollTo({
             type: "item",
             id:
               opensStep && entry.step ? stepItemId(entry.step.index) : entry.id,
             align: "start",
+            offset: toolbarHeight,
             behavior: "instant",
           })
           return
@@ -384,6 +404,7 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
           lineNumber: target.line,
           side,
           align: "center",
+          offset: -toolbarHeight / 2,
           behavior: "smooth",
         })
         view.setSelectedLines({
@@ -431,18 +452,65 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
   const spyFrame = useRef(0)
   const onScroll = useCallback(
     (scrollTop: number, viewer: CoreCodeView<Note>) => {
+      const container = viewer.getContainerElement()
+      if (!container) return
+
+      const viewport =
+        stepItems.size > 0 ? container.getBoundingClientRect() : null
+      const toolbar = viewport && changesToolbar?.getBoundingClientRect()
+
+      let walkthroughStep: StepGroup | null = null
+      // Switch in the scroll event using the sticky toolbar's current geometry.
+      if (
+        viewport &&
+        toolbar &&
+        toolbar.top <= viewport.top + 1 &&
+        toolbar.bottom > viewport.top
+      ) {
+        const cutoff = scrollTop + toolbar.bottom - viewport.top
+        let stepId: string | undefined
+        for (const [id, group] of stepItems) {
+          const top = viewer.getTopForItem(id)
+          if (top === undefined) continue
+          if (top > cutoff) break
+          stepId = id
+          walkthroughStep = group
+        }
+        const title = stepId
+          ? viewer
+              .getRenderedItems()
+              .find((item) => item.id === stepId)
+              ?.element.querySelector("[data-walkthrough-step-title]")
+              ?.getBoundingClientRect()
+          : undefined
+        if (
+          title &&
+          title.bottom > toolbar.bottom &&
+          title.top < viewport.bottom
+        ) {
+          walkthroughStep = null
+        }
+      }
+
+      setWalkthroughToolbar(walkthroughStep)
       cancelAnimationFrame(spyFrame.current)
+
       spyFrame.current = requestAnimationFrame(() => {
+        // oxlint-disable-next-line no-shadow
         const container = viewer.getContainerElement()
         if (!container) return
         const atEnd =
           scrollTop + container.clientHeight >= container.scrollHeight - 2
-        const edge = container.getBoundingClientRect().top + FILE_HEADER_HEIGHT
+        const edge =
+          container.getBoundingClientRect().top +
+          changesToolbarHeight.current +
+          FILE_HEADER_HEIGHT
         let active: DiffEntry | null = null
         let best = -Infinity
         for (const rendered of viewer.getRenderedItems()) {
           const top = rendered.element.getBoundingClientRect().top
-          if (top <= edge && top > best) {
+          // The next file starts at the band's far edge when an aligned file is folded.
+          if (top < edge && top > best) {
             best = top
             active =
               entryMap.get(rendered.id) ??
@@ -454,24 +522,57 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
         paintFind()
       })
     },
-    [entryMap, stepItems, setActive, paintFind]
+    [
+      changesToolbar,
+      entryMap,
+      stepItems,
+      setActive,
+      setWalkthroughToolbar,
+      paintFind,
+    ]
   )
-
   const [selection, setSelection] = useState<TextSelection | null>(null)
   // Notes size themselves to the visible pane, not to the widest code line.
   useEffect(() => {
     const node = containerRef.current
-    if (!node) return
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry)
+    const scrollViewport = scrollRef.current
+
+    const viewer = handle.current?.getInstance()
+    if (!node || !scrollViewport || !viewer) return
+    const header = viewer.getHeaderElement()
+
+    const observer = new ResizeObserver((observations) => {
+      const viewportSize = observations.find(
+        ({ target }) => target === scrollViewport
+      )
+      if (viewportSize) {
         node.style.setProperty(
           "--review-pane-width",
-          `${Math.round(entry.contentRect.width)}px`
+          `${Math.round(viewportSize.contentRect.width)}px`
         )
+      }
+
+      if (header && changesToolbar) {
+        const height = changesToolbar.getBoundingClientRect().height
+        changesToolbarHeight.current = height
+        node.style.setProperty("--review-changes-toolbar-height", `${height}px`)
+        node.style.setProperty(
+          "--review-changes-sticky-top",
+          `${height - header.getBoundingClientRect().height}px`
+        )
+      }
+      onScroll(viewer.getScrollTop(), viewer)
     })
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [])
+
+    observer.observe(scrollViewport)
+    if (header) observer.observe(header)
+    if (changesToolbar) observer.observe(changesToolbar)
+
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(spyFrame.current)
+    }
+  }, [changesToolbar, onScroll])
   const onMouseUp = useCallback(
     (event: React.MouseEvent) => {
       const host = event.nativeEvent
@@ -521,12 +622,11 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
             >
               <CodeView<Note>
                 ref={handle}
+                containerRef={scrollRef}
                 // Files wait for the overview above them, so they're never pushed down once painted.
                 items={detailQuery.isPending ? NO_ITEMS : items}
                 options={options}
-                // Each file is a card on the page's gutter, as on GitHub; a step
-                // opens with a bare heading over its cards. The outline is a
-                // shadow, so it adds nothing CodeView must measure.
+                // The outline separates files without adding to CodeView's measured height.
                 className="review-code-view h-full overflow-y-auto [&_diffs-container]:overflow-clip sm:[&_diffs-container]:mx-space-4 [&_diffs-container:has([data-step-header])]:bg-transparent [&_diffs-container:not(:has([data-step-header]))]:shadow-[0_0_0_1px_var(--border-default)] sm:[&_diffs-container:not(:has([data-step-header]))]:rounded-lg"
                 renderCodeViewHeader={renderHeader}
                 renderCodeViewFooter={renderFooter}
@@ -539,7 +639,6 @@ export const Changes = memo(function Changes({ pr }: { pr: PullRequestRef }) {
                 readPassage={pullRequestPassage}
                 onReply={replyInChat}
               />
-              <ReadNudge groups={stepGroups} />
               <FindBar />
               {diff.isError && (
                 <p

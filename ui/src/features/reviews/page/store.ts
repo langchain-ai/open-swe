@@ -19,6 +19,7 @@ import {
   findEntry,
   isRenderable,
   type DiffEntry,
+  type StepGroup,
 } from "./diffEntries"
 
 export const INLINE_NAVIGATOR_QUERY = "(min-width: 1000px)"
@@ -90,6 +91,8 @@ interface VisitState {
   /** The file, and its diff entry, under the top of the diff viewport. */
   activePath: string | null
   activeEntry: string | null
+  /** The current walkthrough step once its title has scrolled out of view. */
+  walkthroughToolbar: StepGroup | null
   /** Walkthrough steps the reader scrolled into, so passing one can suggest marking it read. */
   visitedSteps: ReadonlySet<number>
   /** Whether the end of the diff is on screen, which passes the last step. */
@@ -145,6 +148,7 @@ interface ReviewPageActions {
   setDiffStyle: (style: DiffStyle) => void
   /** What the scroll position shows: the entry under the top edge, and whether the end is in view. */
   setActive: (entry: DiffEntry | null, atEnd: boolean) => void
+  setWalkthroughToolbar: (step: StepGroup | null) => void
   /**
    * Scrolls to a target. Only `reveal` opens a folded file there; a line
    * target always does, since a folded file has no line to show.
@@ -308,6 +312,7 @@ function freshVisit(): VisitState {
     reviewVerdict: "COMMENT",
     activePath: null,
     activeEntry: null,
+    walkthroughToolbar: null,
     visitedSteps: new Set(),
     atEnd: false,
     jump: null,
@@ -445,7 +450,7 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     setReviewOpen: (reviewOpen) => set({ reviewOpen }),
     setOrder: (order) => {
       writePreference(ORDER_KEY, order)
-      set({ order })
+      set({ order, ...(order === "files" && { walkthroughToolbar: null }) })
     },
     setDiffStyle: (diffStyle) => {
       writePreference(DIFF_STYLE_KEY, diffStyle)
@@ -467,6 +472,11 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
         atEnd,
         ...(visit ? { visitedSteps: new Set(visitedSteps).add(step) } : {}),
       })
+    },
+    setWalkthroughToolbar: (step) => {
+      const { order, walkthroughToolbar } = get()
+      const next = order === "guide" ? step : null
+      if (walkthroughToolbar !== next) set({ walkthroughToolbar: next })
     },
     jumpTo: (target, { reveal = target.kind === "line" } = {}) => {
       // Claim the target now so a key pressed before the scroll settles moves on from it.

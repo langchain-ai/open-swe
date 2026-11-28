@@ -1,8 +1,11 @@
 import { Checkbox } from "@langchain/macaw-components/Checkbox"
-import { Button } from "@langchain/macaw-components/Button"
-import { CheckIcon, XIcon } from "@langchain/macaw-components/icons"
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  CheckIcon,
+} from "@langchain/macaw-components/icons"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { useState } from "react"
+import { Text } from "@langchain/macaw-components/Text"
 
 import { cn } from "@/lib/utils"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
@@ -10,7 +13,7 @@ import type { StepGroup } from "./diffEntries"
 import { useStepGroup } from "./entries"
 import { FILE_HEADER_HEIGHT } from "./FileHeader"
 import { InlineCode } from "./inlineCode"
-import { activeStep, isPassed, isRead, useReviewPage } from "./store"
+import { isRead, useReviewPage } from "./store"
 import { plural } from "./text"
 
 const STEP_ITEM_PREFIX = "step:"
@@ -20,14 +23,9 @@ export function stepItemId(index: number): string {
   return `${STEP_ITEM_PREFIX}${index}`
 }
 
-export function isStepItem(id: string): boolean {
-  return id.startsWith(STEP_ITEM_PREFIX)
-}
-
-function useStepRead(group: StepGroup | undefined): boolean {
-  return useReviewPage(
-    (state) =>
-      !!group && group.entries.every((entry) => isRead(state.viewed, entry))
+function useStepRead(group: StepGroup): boolean {
+  return useReviewPage((page) =>
+    group.entries.every((entry) => isRead(page.viewed, entry))
   )
 }
 
@@ -61,59 +59,143 @@ export function StepBadge({
 }
 
 /** The step's toggle: one click marks every part of it read, or unread again. */
-export function MarkStepRead({
-  index,
-  read,
-  className,
-}: {
-  index: number
-  read: boolean
-  className?: string
-}) {
+export function MarkStepRead({ group }: { group: StepGroup }) {
+  const { index } = group.step
+  const read = useStepRead(group)
   const markStepRead = useReviewPage((state) => state.markStepRead)
   return (
-    <Checkbox
-      checked={read}
-      onCheckedChange={() => markStepRead(index)}
-      label={
-        <>
-          {read ? "Read" : "Mark step read"}
-          <span className="sr-only">: step {index}</span>
-        </>
-      }
-      labelClassName="text-xxs text-secondary"
-      containerClassName={cn("shrink-0", className)}
-      size="sm"
-    />
+    <div className="relative isolate grid min-h-6 shrink-0 items-center">
+      <Text
+        variant="sm"
+        aria-hidden
+        className="invisible col-start-1 row-start-1 flex items-center gap-space-2 text-xxs whitespace-nowrap"
+      >
+        <span className="size-4 shrink-0" />
+        Mark step read
+      </Text>
+      <Checkbox
+        checked={read}
+        onCheckedChange={() => markStepRead(index)}
+        className="z-floating-bar rounded-full after:hidden"
+        label={
+          <>
+            {read ? "Read" : "Mark step read"}
+            <span className="sr-only">: step {index}</span>
+          </>
+        }
+        labelClassName="whitespace-nowrap text-xxs text-secondary before:absolute before:inset-0"
+        containerClassName="col-start-1 row-start-1 justify-self-end"
+        size="sm"
+      />
+    </div>
   )
 }
 
 /** The step's bar: where it sits in the walkthrough, what it covers, and whether it's read. */
-export function StepHeader({ id }: { id: string }) {
-  const group = useStepGroup(id)
-  const read = useStepRead(group)
-  if (!group) return null
+export function StepHeader({
+  group,
+  inToolbar = false,
+}: {
+  group: StepGroup
+  inToolbar?: boolean
+}) {
   const { step, entries } = group
+  const read = useStepRead(group)
+  const entryOrder = useReviewPage((page) => page.entryOrder)
+  const jumpTo = useReviewPage((page) => page.jumpTo)
+  const previousStep = entryOrder.findLast(
+    (entry) => entry.step && entry.step.index < step.index
+  )?.step
+  const previous =
+    previousStep &&
+    entryOrder.find((entry) => entry.step?.index === previousStep.index)
+  const next = entryOrder.find(
+    (entry) => entry.step && entry.step.index > step.index
+  )
+  const showInlineReadToggle = useReviewPage(
+    (page) =>
+      page.order !== "guide" ||
+      page.walkthroughToolbar?.step.index !== step.index
+  )
   const files = new Set(entries.map((entry) => entry.file.path)).size
   const additions = entries.reduce((sum, entry) => sum + entry.additions, 0)
   const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0)
+  const detailsClassName = inToolbar
+    ? "@max-[420px]:hidden"
+    : "any-pointer-coarse:@max-[420px]:hidden"
   return (
     <div
-      data-step-header={step.index}
-      style={{ height: FILE_HEADER_HEIGHT }}
-      // The first step sits right under the Changes rule; later ones start with their own.
+      data-step-header={inToolbar ? undefined : step.index}
+      style={inToolbar ? undefined : { height: FILE_HEADER_HEIGHT }}
       className={cn(
-        "flex items-center gap-space-2 bg-surface-level-1 pt-space-1 font-sans text-xxs max-sm:px-space-4",
-        step.index > 1 && "border-t border-default"
+        "flex min-w-0 items-center gap-space-2 font-sans text-xxs",
+        inToolbar
+          ? "w-full"
+          : "@container bg-surface-level-1 px-space-4 pt-space-2",
+        !inToolbar && step.index > 1 && "border-t border-default"
       )}
     >
       <StepBadge index={step.index} read={read} />
-      <span className="font-medium text-brand-primary">
-        Step {step.index} of {step.count}
+      <div className="group/step-navigation relative isolate flex shrink-0 items-center gap-space-1">
+        <span className="font-medium text-brand-primary">
+          Step {step.index} of {step.count}
+        </span>
+        {(previous || next) && (
+          <div
+            className={cn(
+              "pointer-events-none absolute inset-x-0 top-1/2 z-floating-bar flex h-6 -translate-y-1/2 items-center justify-end bg-surface-level-1 opacity-0 transition-opacity duration-normal motion-reduce:transition-none",
+              "group-focus-within/step-navigation:pointer-events-auto group-focus-within/step-navigation:opacity-100 group-hover/step-navigation:pointer-events-auto group-hover/step-navigation:opacity-100",
+              "any-pointer-coarse:pointer-events-auto any-pointer-coarse:static any-pointer-coarse:h-8 any-pointer-coarse:translate-none any-pointer-coarse:opacity-100 any-pointer-coarse:[&_button]:size-8"
+            )}
+          >
+            <IconButton
+              icon={ArrowUpIcon}
+              label="Previous step"
+              size="xs"
+              variant="plain"
+              color="secondary"
+              disabled={!previous}
+              onClick={() =>
+                previous && jumpTo({ kind: "entry", id: previous.id })
+              }
+            />
+            <IconButton
+              icon={ArrowDownIcon}
+              label="Next step"
+              size="xs"
+              variant="plain"
+              color="secondary"
+              disabled={!next}
+              onClick={() => next && jumpTo({ kind: "entry", id: next.id })}
+            />
+          </div>
+        )}
+      </div>
+      {inToolbar && (
+        <>
+          <span aria-hidden className="text-tertiary">
+            ·
+          </span>
+          <span
+            className="min-w-0 truncate font-medium text-primary"
+            title={step.title}
+          >
+            <InlineCode text={step.title} />
+          </span>
+        </>
+      )}
+      <span aria-hidden className={cn("text-tertiary", detailsClassName)}>
+        ·
       </span>
-      <span className="text-tertiary">·</span>
-      <span className="text-secondary">{plural(files, "file")}</span>
-      <span className="flex gap-space-2 font-mono tabular-nums">
+      <span className={cn("shrink-0 text-secondary", detailsClassName)}>
+        {plural(files, "file")}
+      </span>
+      <span
+        className={cn(
+          "flex shrink-0 gap-space-2 font-mono tabular-nums",
+          detailsClassName
+        )}
+      >
         {additions > 0 && (
           <span className="text-success-secondary">+{additions}</span>
         )}
@@ -121,8 +203,8 @@ export function StepHeader({ id }: { id: string }) {
           <span className="text-error-secondary">−{deletions}</span>
         )}
       </span>
-      <span className="flex-1" />
-      <MarkStepRead index={step.index} read={read} />
+      {!inToolbar && <span className="flex-1" />}
+      {!inToolbar && showInlineReadToggle && <MarkStepRead group={group} />}
     </div>
   )
 }
@@ -136,9 +218,12 @@ export function StepIntro({ id }: { id: string }) {
     // Pulled down over the step item's hidden placeholder line, so the files follow closely.
     <div
       data-reply-part={`walkthrough step ${step.index}: ${step.title}`}
-      className="-mb-5 pt-space-1 font-sans max-sm:px-space-4"
+      className="-mb-5 px-space-4 pt-space-1 font-sans"
     >
-      <h3 className="text-sm leading-6 font-semibold text-primary">
+      <h3
+        data-walkthrough-step-title
+        className="text-sm leading-6 font-semibold text-primary"
+      >
         <InlineCode text={step.title} />
       </h3>
       {step.summary && (
@@ -169,55 +254,5 @@ export function WalkthroughEnd({
       <StepBadge index={total} read={read === total} className="size-4" />
       End of the walkthrough · {read} of {plural(total, "step")} read
     </p>
-  )
-}
-
-/**
- * Once the reader scrolls past a step without marking it, a quiet offer to mark it read.
- * Scrolling past is never taken as reading; only the click marks it.
- */
-export function ReadNudge({ groups }: { groups: ReadonlyArray<StepGroup> }) {
-  const [dismissed, setDismissed] = useState<ReadonlySet<number>>(new Set())
-  const candidate = useReviewPage((state) => {
-    const current = activeStep(state)
-    const last = groups.at(-1)
-    const index =
-      state.atEnd && last
-        ? last.step.index
-        : current === null
-          ? null
-          : current - 1
-    const group = groups.find((item) => item.step.index === index)
-    if (!group || !isPassed(state, group.step)) return null
-    return group.entries.every((entry) => isRead(state.viewed, entry))
-      ? null
-      : group.step.index
-  })
-  const markStepRead = useReviewPage((state) => state.markStepRead)
-  if (candidate === null || dismissed.has(candidate)) return null
-  return (
-    <div className="absolute right-6 bottom-6 z-floating-bar flex items-center gap-space-1 rounded-full border border-subtle bg-surface-level-1/80 py-0.5 pr-0.5 pl-space-3 font-sans text-xxs text-tertiary opacity-80 backdrop-blur-sm transition-opacity focus-within:opacity-100 hover:opacity-100">
-      Done with step {candidate}?
-      <Button
-        color="secondary"
-        variant="plain"
-        size="sm"
-        aria-label="Mark read"
-        type="button"
-        onClick={() => markStepRead(candidate)}
-        className="gap-space-1 rounded-full px-space-2 py-0.5 font-medium text-brand-primary hover:bg-brand-subtle"
-      >
-        <CheckIcon weight="bold" className="size-3" />
-        Mark read
-      </Button>
-      <IconButton
-        icon={XIcon}
-        label={`Don't ask about step ${candidate}`}
-        size="xxs"
-        color="secondary"
-        variant="plain"
-        onClick={() => setDismissed(new Set(dismissed).add(candidate))}
-      />
-    </div>
   )
 }
