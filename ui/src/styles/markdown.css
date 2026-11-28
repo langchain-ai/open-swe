@@ -258,7 +258,6 @@
 .chat-markdown thead th {
   border-bottom: 1px solid var(--border-default);
   font-weight: 600;
-  white-space: nowrap;
 }
 
 .chat-markdown tbody tr + tr td {
