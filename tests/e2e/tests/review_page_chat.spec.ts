@@ -3,6 +3,7 @@ import {
   SAME_ORIGIN_HEADERS,
   SAME_USER,
   loginAs,
+  openReviewChatTab,
   seedOpenPullRequest,
   typeIntoComposer,
   type SeededPullRequest,
@@ -112,14 +113,6 @@ function chatPanel(page: Page): Locator {
 
 function diffColumn(page: Page): Locator {
   return page.getByRole("region", { name: "Changes" });
-}
-
-async function openChatTab(page: Page) {
-  const tab = page.getByRole("tab", { name: "Chat", exact: true });
-  if (!(await tab.isVisible()))
-    await page.getByRole("button", { name: "Chat", exact: true }).click();
-  await tab.click();
-  await expect(page.getByTestId("composer-editor")).toBeVisible();
 }
 
 async function sendChat(page: Page, text: string) {
@@ -635,7 +628,7 @@ test.describe("review page", () => {
     page,
   }) => {
     await openReview(page, pr);
-    await openChatTab(page);
+    await openReviewChatTab(page);
     await expect(chatPanel(page).getByTestId("composer-editor")).toBeEditable();
     await expect(page.getByText("I've reviewed this PR")).toHaveCount(0);
     await expect(
@@ -669,7 +662,7 @@ test.describe("review page", () => {
     page,
   }) => {
     await openReview(page, pr);
-    await openChatTab(page);
+    await openReviewChatTab(page);
     await sendChat(page, "E2E_REVIEW_CHAT_COMMENTS leave comments on zeta.py");
 
     const chatCard = (location: string) =>
@@ -802,7 +795,7 @@ test.describe("review page", () => {
 
   test("discarding the pending review drops its comments", async ({ page }) => {
     await openReview(page, pr);
-    await openChatTab(page);
+    await openReviewChatTab(page);
     await sendChat(page, "E2E_REVIEW_CHAT_COMMENTS leave comments on zeta.py");
     const card = chatPanel(page)
       .getByTestId("proposed-comment")
@@ -837,7 +830,6 @@ test.describe("review page", () => {
     page,
   }) => {
     await openReview(page, pr);
-    await page.getByRole("button", { name: "Chat", exact: true }).click();
     await page.getByRole("tab", { name: /Discussion/ }).click();
     const conversation = page.getByRole("region", { name: "Conversation" });
     await expect(conversation).toBeVisible();
@@ -851,7 +843,9 @@ test.describe("review page", () => {
       .getByRole("button", { name: "Close", exact: true })
       .click();
     await expect(conversation).toBeHidden();
-    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Open chat and discussion" })
+      .click();
     await page.getByRole("tab", { name: /Discussion/ }).click();
     await expect(
       conversation.getByRole("textbox", {
@@ -895,7 +889,7 @@ test.describe("review page", () => {
     page,
   }) => {
     await openReview(page, pr);
-    await openChatTab(page);
+    await openReviewChatTab(page);
     await sendChat(page, "E2E_REVIEW_CHAT_REVIEW draft a review for me");
 
     const card = chatPanel(page).getByTestId("proposed-review");
@@ -940,7 +934,7 @@ test.describe("review page", () => {
     page,
   }) => {
     await openReview(page, pr);
-    await openChatTab(page);
+    await openReviewChatTab(page);
     await sendChat(page, "E2E_REVIEW_PAGE_TOOLS point me at ZETA_44");
 
     // Each tool answers at once with its command's place in the page's queue;
@@ -998,7 +992,7 @@ test.describe("review page", () => {
       localStorage.setItem("open-swe.review.view", "files"),
     );
     await page.reload();
-    await openChatTab(page);
+    await openReviewChatTab(page);
     await expect(
       page.getByRole("button", { name: "0 / 2 viewed", exact: true }),
     ).toBeVisible();
@@ -1018,9 +1012,9 @@ test.describe("review page", () => {
   });
 
   test("opens the chat in place on a narrow window", async ({ page }) => {
-    await page.setViewportSize({ width: 1000, height: 800 });
+    await page.setViewportSize({ width: 900, height: 800 });
     await openReview(page, pr);
-    const open = page.getByRole("button", { name: "Chat", exact: true });
+    const open = page.getByRole("button", { name: "Open chat and discussion" });
     await expect(open).toBeVisible();
     await expect(page.getByTestId("composer-editor")).toBeHidden();
 
@@ -1028,7 +1022,15 @@ test.describe("review page", () => {
     const chat = chatPanel(page);
     await expect(diffColumn(page)).toBeHidden();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await openChatTab(page);
+    await page.getByRole("button", { name: "Show sidebar" }).click();
+    const sidebar = page.getByRole("group", { name: "Sidebar view" });
+    await expect(sidebar).toBeVisible();
+    await expect(chat).toBeHidden();
+    await expect(open).toHaveAttribute("aria-expanded", "false");
+    await open.click();
+    await expect(sidebar).toBeHidden();
+    await expect(chat).toBeVisible();
+    await openReviewChatTab(page);
     await sendChat(page, "E2E_REVIEW_CHAT_PLAIN what does this add?");
     await expect(
       chat.getByText("The pull request adds two constant modules."),
@@ -1038,7 +1040,7 @@ test.describe("review page", () => {
     await expect(open).toBeVisible();
     await open.click();
     await expect(chat).toBeVisible();
-    await openChatTab(page);
+    await openReviewChatTab(page);
     await expect(
       chat.getByText("The pull request adds two constant modules."),
     ).toBeVisible();

@@ -12,7 +12,6 @@ import {
 import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Skeleton } from "@/components/Skeleton"
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/ssr/ArrowSquareOut"
-import { ChatsCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatsCircle"
 import { CopyIcon } from "@phosphor-icons/react/dist/ssr/Copy"
 import { DotsThreeIcon } from "@phosphor-icons/react/dist/ssr/DotsThree"
 import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
@@ -72,11 +71,13 @@ export function Header({
   onCloseDetails,
   titleBar,
   leading,
+  trailing,
 }: {
   pr: PullRequestRef
   onCloseDetails: () => void
   titleBar: boolean
   leading: ReactNode
+  trailing: ReactNode
 }) {
   const refresh = useRefreshPullRequest(pr)
   const detailQuery = useQuery(reviewQueries.detail(pr))
@@ -91,7 +92,6 @@ export function Header({
   const reviewVerdict = useReviewPage((state) => state.reviewVerdict)
   const setReviewOpen = useReviewPage((state) => state.setReviewOpen)
   const openReview = useReviewPage((state) => state.openReview)
-  const setRailTab = useReviewPage((state) => state.setRailTab)
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const jumpToUnviewed = useReviewPage((state) => state.jumpToUnviewed)
   const setNavigatorOpen = useReviewPage((state) => state.setNavigatorOpen)
@@ -367,19 +367,6 @@ export function Header({
           </div>
         )}
         {queue && <ReviewQueueControls queue={queue} />}
-        <Button
-          size="sm"
-          color="secondary"
-          variant="outlined"
-          leftDecorator={ChatsCircleIcon}
-          aria-label="Chat"
-          onClick={() => {
-            revealPullRequest()
-            setRailTab("chat")
-          }}
-        >
-          <span className="max-sm:hidden">Chat</span>
-        </Button>
         {detail && !isLive(detail) && queue && (
           <Button size="sm" onClick={queue.advance}>
             {queue.next ? "Next" : "Finish"}
@@ -462,6 +449,7 @@ export function Header({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {trailing}
       </div>
     </header>
   )

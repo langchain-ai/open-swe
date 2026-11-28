@@ -1,6 +1,6 @@
-import { XIcon } from "@langchain/macaw-components/icons"
 import { Button } from "@langchain/macaw-components/Button"
 import { IconButton } from "@langchain/macaw-components/IconButton"
+import { XIcon } from "@langchain/macaw-components/icons"
 import { Skeleton } from "@/components/Skeleton"
 import {
   TabGroup,
@@ -19,6 +19,7 @@ import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
 import { ReviewChatActionsContext } from "@/features/reviews/components/ReviewChatActions"
 import type { DiffRange } from "@/features/reviews/lib/chatDiffActions"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
+import { PILL_TAB_CLASS } from "@/features/reviews/lib/styles"
 import { useShortcutLabel } from "@/lib/hotkeys"
 import { AgentMark } from "./AgentMark"
 import { Discussion } from "./Discussion"
@@ -37,10 +38,10 @@ const TABS: ReadonlyArray<RailTab> = ["chat", "discussion"]
 /** The right column: the agent you can talk to about this PR, and the people who already did. */
 export function Rail({
   pr,
-  onClose,
+  onRailClose,
 }: {
   pr: PullRequestRef
-  onClose?: () => void
+  onRailClose?: () => void
 }) {
   const tab = useReviewPage((state) => state.railTab)
   const setRailTab = useReviewPage((state) => state.setRailTab)
@@ -56,15 +57,23 @@ export function Rail({
       aria-label="Chat and discussion"
       className="flex h-full min-h-0 flex-col bg-surface-level-1"
     >
-      <div className="flex h-11 shrink-0 items-center gap-space-2 border-b border-default px-space-3">
-        <TabList className="self-stretch border-0">
-          <TabLabel label="Chat" icon={AgentMark} className="pb-0" />
+      <div className="flex h-11 shrink-0 items-center gap-space-2 px-space-2">
+        <TabList className="items-center gap-space-1 border-0">
           <TabLabel
-            label="Discussion"
-            className="pb-0"
+            label={<span>Chat</span>}
+            icon={AgentMark}
+            className={PILL_TAB_CLASS}
+          />
+          <TabLabel
+            label={<span>Discussion</span>}
+            className={PILL_TAB_CLASS}
             badgeProps={
               open > 0
-                ? { children: String(open), color: "secondary" }
+                ? {
+                    children: String(open),
+                    color: "secondary",
+                    className: "min-w-4 max-h-4 text-xxs px-0",
+                  }
                 : undefined
             }
           />
@@ -87,14 +96,14 @@ export function Rail({
             Full thread
           </Button>
         )}
-        {onClose && (
+        {onRailClose && (
           <IconButton
             icon={XIcon}
             label="Close"
             size="sm"
             color="secondary"
             variant="plain"
-            onClick={onClose}
+            onClick={onRailClose}
           />
         )}
       </div>
@@ -207,7 +216,10 @@ function ReviewChatPanel({ pr }: { pr: PullRequestRef }) {
       takeReply,
     ]
   )
-  const embedded = { emptyState: <ChatStarters pr={pr} /> }
+  const embedded = {
+    emptyState: <ChatStarters pr={pr} />,
+    transcriptScrollClassName: "scroll-mask-t",
+  }
   if (meta.isPending)
     return (
       <div className="flex h-full flex-col justify-end gap-space-3 p-space-4">

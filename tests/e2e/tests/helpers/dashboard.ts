@@ -98,6 +98,17 @@ export async function readyComposerEditor(page: Page): Promise<Locator> {
   return editor;
 }
 
+// The rail toggle flips state, so wait until either the Chat tab or the
+// closed toggle has rendered before deciding whether to click it.
+export async function openReviewChatTab(page: Page) {
+  const tab = page.getByRole("tab", { name: "Chat", exact: true });
+  const open = page.getByRole("button", { name: "Open chat and discussion" });
+  await expect(tab.or(open).first()).toBeVisible();
+  if (!(await tab.isVisible())) await open.click();
+  await tab.click();
+  await expect(page.getByTestId("composer-editor")).toBeVisible();
+}
+
 // Typing goes through real key events rather than `fill()`: the editor builds
 // its state from beforeinput/keydown, and `fill()`'s single bulk insert leaves
 // it out of sync with the DOM.

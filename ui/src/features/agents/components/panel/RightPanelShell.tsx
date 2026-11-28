@@ -56,6 +56,7 @@ export function RightPanelShell(props: {
   widthStorageKey?: string
   /** Overrides the initial width (px) before the user has resized the panel. */
   defaultWidth?: number
+  className?: string
   /** Kept mounted out of sight, such as a collapsed panel whose app still runs. */
   hidden?: boolean
   children: ReactNode
@@ -79,14 +80,12 @@ export function RightPanelShell(props: {
   return (
     <div
       ref={hostRef}
+      data-inline={isInline ? "true" : undefined}
       className={cn(
-        "relative flex h-full min-h-0 max-w-full min-w-0 flex-col self-stretch bg-surface-level-1",
-        isInline
-          ? props.maximized
-            ? "flex-1 border-l border-default"
-            : "shrink-0 border-l border-default"
-          : "w-full",
-        props.hidden && "hidden"
+        "relative flex h-full min-h-0 max-w-full min-w-0 flex-col self-stretch bg-surface-level-1 data-inline:border-l data-inline:border-default",
+        isInline ? (props.maximized ? "flex-1" : "shrink-0") : "w-full",
+        props.hidden && "hidden",
+        props.className
       )}
       style={isInline && !props.maximized ? { width: `${width}px` } : undefined}
       data-right-panel-mode={props.mode}

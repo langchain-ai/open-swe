@@ -18,7 +18,13 @@ import { INLINE_CHAT_QUERY, useReviewPage } from "./store"
 import { useReviewPageTools } from "./useReviewPageTools"
 
 /** The selected PR, with changes and chat. */
-export function ReviewPage({ pr }: { pr: PullRequestRef }) {
+export function ReviewPage({
+  pr,
+  onRailClose,
+}: {
+  pr: PullRequestRef
+  onRailClose?: () => void
+}) {
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
   const [refreshError, setRefreshError] = useState<string | null>(null)
@@ -30,7 +36,6 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const railOpen = useReviewPage((state) =>
     wide ? state.railOpen : state.narrowRailOpen
   )
-  const setRailOpen = useReviewPage((state) => state.setRailOpen)
   const headSha = detail.data?.head_sha ?? null
 
   useLayoutEffect(() => open(pr, headSha), [open, pr, headSha])
@@ -102,8 +107,9 @@ export function ReviewPage({ pr }: { pr: PullRequestRef }) {
               hidden={!railOpen}
               widthStorageKey="open-swe.review-panel.width"
               defaultWidth={420}
+              className="data-inline:border-secondary"
             >
-              <Rail pr={pr} onClose={() => setRailOpen(false)} />
+              <Rail pr={pr} onRailClose={onRailClose} />
             </RightPanelShell>
           </div>
         )}

@@ -6,7 +6,15 @@ import {
   XIcon,
 } from "@langchain/macaw-components/icons"
 import { Kbd } from "@langchain/macaw-components/Kbd"
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { ConversationFind } from "./ConversationFind"
 import { ReviewChatActions } from "@/features/reviews/components/ReviewChatActions"
 import { ClockIcon } from "@phosphor-icons/react/dist/ssr/Clock"
@@ -22,11 +30,12 @@ import { LiveActivity } from "./timeline/workEntry"
 import { usePacedActivityLabel } from "./timeline/LiveActivityStatus"
 import { ThinkingSpinner } from "./ThinkingSpinner"
 import { SentReply, UserMessage } from "./UserMessage"
+import { EmbeddedThreadContext } from "@/features/agents/lib/embeddedThread"
 import type { Message } from "@/features/agents/lib/types"
 import { useTranscriptScroll } from "./useTranscriptScroll"
 import { turnCosts } from "@/features/agents/lib/contextUsage"
 import type { MessagesProps } from "./types"
-import { formatElapsed } from "@/lib/utils"
+import { cn, formatElapsed } from "@/lib/utils"
 import { useSubmitShortcutLabel } from "@/components/SubmitShortcut"
 import { SelectionReply } from "@/features/agents/components/SelectionReply"
 import { InlinePlanArtifact } from "@/features/agents/components/InlinePlanArtifact"
@@ -210,6 +219,7 @@ export const Messages = memo(function MessagesComponent({
   onAutoApprove,
   onOpenFile,
 }: MessagesProps) {
+  const embedded = useContext(EmbeddedThreadContext)
   const {
     scrollRef,
     contentRef,
@@ -395,7 +405,10 @@ export const Messages = memo(function MessagesComponent({
           ref={scrollRef}
           // Gutter on both edges: the centered column keeps its position when the
           // scrollbar appears, so it stays aligned with the composer below it.
-          className="h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-space-5 text-sm leading-[1.6] antialiased"
+          className={cn(
+            "h-full min-h-0 min-w-0 [scrollbar-gutter:stable_both-edges] overflow-x-hidden overflow-y-auto py-space-5 text-sm leading-[1.6] antialiased",
+            embedded?.transcriptScrollClassName
+          )}
         >
           <div
             ref={contentRef}

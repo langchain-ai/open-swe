@@ -1,6 +1,6 @@
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import {
-  ArrowDownIcon,
+  ArrowUpIcon,
   CaretRightIcon,
   CheckIcon,
 } from "@langchain/macaw-components/icons"
@@ -8,7 +8,7 @@ import { Button } from "@langchain/macaw-components/Button"
 import { Skeleton } from "@/components/Skeleton"
 import { Textarea } from "@langchain/macaw-components/Textarea"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { GitCommitIcon } from "@phosphor-icons/react/dist/ssr/GitCommit"
 
 import { SubmitShortcut } from "@/components/SubmitShortcut"
@@ -197,37 +197,43 @@ function toBlocks(
 export function Discussion({ pr }: { pr: PullRequestRef }) {
   const conversation = useQuery(reviewQueries.conversation(pr))
   const threads = conversation.data?.threads
+  // Group chronologically so repeated bot posts fold into the newest one.
   const blocks = useMemo(
-    () => toBlocks(conversation.data?.items ?? [], threads ?? []),
+    () => toBlocks(conversation.data?.items ?? [], threads ?? []).reverse(),
     [conversation.data?.items, threads]
   )
   const open = useOpenConversations(pr)?.threads ?? []
   const scroller = useRef<HTMLDivElement>(null)
   const replyInChat = useReviewPage((state) => state.replyInChat)
   const [awayFromLatest, setAwayFromLatest] = useState(false)
-  const measure = (node: HTMLElement) =>
-    setAwayFromLatest(
-      node.scrollHeight - node.scrollTop - node.clientHeight > 400
-    )
-  // The tab mounts hidden, so measure again whenever it is shown or its content grows.
-  useEffect(() => {
-    const node = scroller.current
-    if (!node) return
-    const observer = new ResizeObserver(() => measure(node))
-    observer.observe(node)
-    if (node.firstElementChild) observer.observe(node.firstElementChild)
-    return () => observer.disconnect()
-  }, [blocks])
-
   return (
     <section
       aria-label="Conversation"
       className="relative flex h-full min-h-0 flex-col"
     >
+      <CommentBox pr={pr} />
+      {awayFromLatest && (
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label="Jump to the latest"
+          type="button"
+          onClick={() =>
+            scroller.current?.scrollTo({ top: 0, behavior: "smooth" })
+          }
+          className="shrink-0 justify-center gap-space-1 border-b border-default py-space-1 font-medium text-secondary hover:bg-surface-level-1-hover hover:text-primary"
+        >
+          Jump to the latest
+          <ArrowUpIcon className="size-3" />
+        </Button>
+      )}
       <div
         ref={scroller}
-        onScroll={(event) => measure(event.currentTarget)}
-        className="min-h-0 flex-1 overflow-y-auto px-space-4 py-space-4"
+        onScroll={(event) =>
+          setAwayFromLatest(event.currentTarget.scrollTop > 400)
+        }
+        className="scroll-mask-t min-h-0 flex-1 overflow-y-auto px-space-4 py-space-4"
       >
         {conversation.isPending ? (
           <div className="flex flex-col gap-space-4">
@@ -282,26 +288,6 @@ export function Discussion({ pr }: { pr: PullRequestRef }) {
         readPassage={pullRequestPassage}
         onReply={replyInChat}
       />
-      {awayFromLatest && (
-        <Button
-          color="secondary"
-          variant="plain"
-          size="xs"
-          aria-label="Jump to the latest"
-          type="button"
-          onClick={() =>
-            scroller.current?.scrollTo({
-              top: scroller.current.scrollHeight,
-              behavior: "smooth",
-            })
-          }
-          className="shrink-0 justify-center gap-space-1 border-t border-default py-space-1 font-medium text-secondary hover:bg-surface-level-1-hover hover:text-primary"
-        >
-          Jump to the latest
-          <ArrowDownIcon className="size-3" />
-        </Button>
-      )}
-      <CommentBox pr={pr} />
     </section>
   )
 }
@@ -372,11 +358,17 @@ function OpenConversations({
       </div>
       {!folded && (
         <ul className="flex flex-col gap-space-2">
-          {threads.map((thread) => (
-            <li key={thread.id}>
-              <ThreadRow pr={pr} thread={thread} />
-            </li>
-          ))}
+          {threads
+            .toSorted(
+              (a, b) =>
+                Date.parse(b.comments.at(-1)!.created_at) -
+                Date.parse(a.comments.at(-1)!.created_at)
+            )
+            .map((thread) => (
+              <li key={thread.id}>
+                <ThreadRow pr={pr} thread={thread} />
+              </li>
+            ))}
         </ul>
       )}
     </div>
@@ -439,7 +431,7 @@ function CommitsBlock({ commits }: { commits: Array<ConversationCommit> }) {
       </Button>
       {open && (
         <ul className="mt-space-1 flex flex-col gap-0.5">
-          {commits.map((commit) => (
+          {commits.toReversed().map((commit) => (
             <li key={commit.sha}>
               <a
                 href={commit.html_url}
@@ -486,7 +478,7 @@ function RepliesBlock({
         verb={`replied in ${plural(threadCount, "thread")}`}
       />
       <ul className="mt-space-1 flex flex-col gap-space-1">
-        {replies.map((reply) => (
+        {replies.toReversed().map((reply) => (
           <li key={reply.comment.id}>
             <ReplyRow pr={pr} reply={reply} />
           </li>
@@ -590,7 +582,7 @@ function ItemBlock({
       </div>
       {showEarlier && (
         <ul className="mt-space-1 flex flex-col gap-0.5 text-xxs text-secondary">
-          {earlier.map((said) => (
+          {earlier.toReversed().map((said) => (
             <li key={said.id}>
               <MacawLink
                 variant="xs"
@@ -684,7 +676,7 @@ function CommentBox({ pr }: { pr: PullRequestRef }) {
     if (text && !post.isPending) post.mutate(text)
   }
   return (
-    <div className="border-t border-default p-space-3">
+    <div className="shrink-0 border-b border-secondary p-space-3 pt-0">
       <Textarea
         size="sm"
         aria-label="Comment on this pull request"

@@ -12,7 +12,11 @@ import { cn } from "@/lib/utils"
 import { OpenPullRequestInput } from "./OpenPullRequestInput"
 import { PILL_TAB_CLASS } from "./lib/styles"
 import type { PullRequestRef } from "./page/queries"
-import { INLINE_NAVIGATOR_QUERY, useReviewPage } from "./page/store"
+import {
+  INLINE_CHAT_QUERY,
+  INLINE_NAVIGATOR_QUERY,
+  useReviewPage,
+} from "./page/store"
 import { ReviewTabs } from "./ReviewTabs"
 
 const ReviewPage = lazy(async () => ({
@@ -45,10 +49,17 @@ export function PullRequestWorkspace({
   const setPrListOpen = useReviewPage((state) => state.setPrListOpen)
   const setNavigatorOpen = useReviewPage((state) => state.setNavigatorOpen)
 
+  const inlineChat = useMediaQuery(INLINE_CHAT_QUERY)
+  const railOpen = useReviewPage((state) =>
+    inlineChat ? state.railOpen : state.narrowRailOpen
+  )
+  const setRailOpen = useReviewPage((state) => state.setRailOpen)
   const hasPullRequest = pr !== null
   const listShown = !hasPullRequest || prListOpen
   const navigatorShown = hasPullRequest && navigatorOpen
   const sidebarShown = listShown || navigatorShown
+  const pullRequestShown = inline || !sidebarShown
+  const railShown = railOpen && pullRequestShown
   const prKey = pr && `${pr.owner}/${pr.repo}/${pr.number}`
   const titleBar =
     typeof window !== "undefined" && Boolean(window.openSweDesktop)
@@ -88,6 +99,25 @@ export function PullRequestWorkspace({
               <SidebarNavigation
                 sidebarShown={sidebarShown}
                 onToggleSidebar={() => setNavigatorOpen(!sidebarShown)}
+              />
+            }
+            trailing={
+              <IconButton
+                icon={SidebarSimpleIcon}
+                label={
+                  railShown
+                    ? "Close chat and discussion"
+                    : "Open chat and discussion"
+                }
+                aria-expanded={railShown}
+                size="md"
+                color="secondary"
+                className="[&_svg]:rotate-180"
+                variant="plain"
+                onClick={() => {
+                  if (!pullRequestShown) setNavigatorOpen(false)
+                  setRailOpen(!railShown)
+                }}
               />
             }
           />
@@ -194,11 +224,15 @@ export function PullRequestWorkspace({
             aria-label="Selected pull request"
             className={cn(
               "min-h-0 min-w-0 flex-1 flex-col",
-              inline || !sidebarShown ? "flex" : "hidden"
+              pullRequestShown ? "flex" : "hidden"
             )}
           >
             <Suspense fallback={<Skeleton className="m-space-3 h-56" />}>
-              <ReviewPage key={prKey} pr={pr} />
+              <ReviewPage
+                key={prKey}
+                pr={pr}
+                onRailClose={titleBar ? undefined : () => setRailOpen(false)}
+              />
             </Suspense>
           </section>
         )}

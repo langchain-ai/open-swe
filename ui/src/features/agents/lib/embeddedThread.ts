@@ -11,6 +11,7 @@ import type { ThreadRun } from "@/features/agents/lib/threadRunConfig"
 export const EmbeddedThreadContext = createContext<{
   /** What an empty thread shows: ways in, specific to the page around it. */
   emptyState?: ReactNode
+  transcriptScrollClassName?: string
   /** What every message sent from here carries. */
   run?: ThreadRun
 } | null>(null)
