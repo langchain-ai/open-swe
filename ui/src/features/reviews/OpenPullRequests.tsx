@@ -25,7 +25,6 @@ import {
   PullRequestCard,
   type PullRequestOutcome,
 } from "./components/PullRequestCard"
-import { PullRequestWorkspace } from "./PullRequestWorkspace"
 import { reviewKeys } from "./lib/reviewKeys"
 import {
   PullRequestList,
@@ -80,11 +79,13 @@ export function OpenPullRequests({
   scope,
   filters,
   onFiltersChange,
+  onSelect,
 }: {
   login: string
   scope: "mine" | "review-assigned" | "review-requested"
   filters: ReviewsSearch
   onFiltersChange: (changes: Partial<ReviewsSearch>, replace?: boolean) => void
+  onSelect: () => void
 }) {
   const preferenceKey = `open-swe.reviews.sort.${login}`
   const savedSort = readPreference(preferenceKey)?.split(":")
@@ -239,7 +240,7 @@ export function OpenPullRequests({
   const reviewOneByOne = () =>
     firstInQueue && onFiltersChange({ pr: queue[0], queue })
 
-  const card = (pr: OpenPullRequest, onSelect: () => void) => {
+  const card = (pr: OpenPullRequest) => {
     const key = pullRequestKey(pr)
     return (
       <PullRequestCard
@@ -271,319 +272,304 @@ export function OpenPullRequests({
   }
 
   return (
-    <PullRequestWorkspace
-      pr={selection}
-      onClose={() => onFiltersChange({ pr: undefined, queue: undefined })}
+    <section
+      className="mt-space-4 flex min-h-0 flex-1 flex-col gap-space-3"
+      aria-label={
+        scope === "mine" ? "My open pull requests" : "Pull requests to review"
+      }
     >
-      {(onSelect) => (
-        <section
-          className="mt-space-4 flex min-h-0 flex-1 flex-col gap-space-3"
-          aria-label={
-            scope === "mine"
-              ? "My open pull requests"
-              : "Pull requests to review"
-          }
-        >
-          {scope !== "mine" && (
-            <div className="flex flex-wrap items-center gap-space-2 text-xs text-secondary">
-              <span>
-                {scope === "review-assigned"
-                  ? "Requested reviews, your drafts, then speculative reviews"
-                  : "GitHub review requests"}
-              </span>
-              {scope === "review-requested" && (
-                <Button
-                  size="xs"
-                  variant="underlined"
-                  onClick={() =>
-                    onFiltersChange({ github: undefined, pr: undefined })
-                  }
-                >
-                  Back to full review queue
-                </Button>
-              )}
-              {firstInQueue && (
-                <Button
-                  size="xs"
-                  className="ml-auto"
-                  onClick={() => {
-                    reviewOneByOne()
-                    onSelect()
-                  }}
-                >
-                  Review one by one ({queue.length})
-                </Button>
-              )}
-            </div>
-          )}
-          <div className="flex flex-wrap items-center gap-space-2">
-            <div
-              className={cn("max-w-full shrink-0", railed ? "w-full" : "w-96")}
-            >
-              <Typeahead
-                multiple
-                disableCloseOnSelect
-                size="sm"
-                className="h-6 flex-nowrap"
-                renderTags={(values) =>
-                  selectionSummary(values.map((name) => repoLabels.label(name)))
-                }
-                aria-label="Filter by repository"
-                placeholder="All repositories"
-                emptyText={
-                  knownRepos.isPending
-                    ? "Loading repositories…"
-                    : knownRepos.isError
-                      ? "Could not load repositories"
-                      : "No matches"
-                }
-                options={repoNames}
-                getOptionLabel={(name) => repoLabels.label(name)}
-                renderOption={(name, { selected: isSelected }) => {
-                  const label = repoLabels.label(name)
-                  const middle = Math.max(
-                    Math.ceil(label.length / 2),
-                    label.length - 16
-                  )
-                  return (
-                    <>
-                      <Icon
-                        aria-hidden
-                        icon={CheckIcon}
-                        size="md"
-                        className={cn(
-                          "shrink-0 text-icon-primary",
-                          isSelected ? "opacity-100" : "opacity-0"
-                        )}
-                      />
-                      <Text
-                        as="span"
-                        variant="sm"
-                        className="flex min-w-0 flex-1 overflow-hidden leading-4 tracking-normal whitespace-nowrap"
-                        title={name}
-                        aria-label={label}
-                      >
-                        <span className="min-w-0 truncate">
-                          {label.slice(0, middle)}
-                        </span>
-                        <span className="shrink-0">{label.slice(middle)}</span>
-                      </Text>
-                    </>
-                  )
-                }}
-                filterOptions={(options, { inputValue }) =>
-                  options.filter((name) => repoLabels.matches(name, inputValue))
-                }
-                value={repo}
-                onChange={(chosen) =>
-                  onFiltersChange({ repo: chosen.length ? chosen : undefined })
-                }
-              />
-            </div>
-            <Input
-              size="sm"
-              className={cn(
-                "min-w-40 flex-1 [&_input:placeholder-shown]:text-ellipsis",
-                railed && "basis-full"
-              )}
-              leftIcon={MagnifyingGlassRegularIcon}
-              aria-label="Search pull requests"
-              title="Search title, description, or PR number"
-              placeholder="Search title, description, or PR number…"
-              value={search}
-              onChange={(next) =>
-                onFiltersChange({ q: next || undefined }, true)
-              }
-            />
-            <div className={cn("shrink-0", railed ? "min-w-0 flex-1" : "w-48")}>
-              <Typeahead
-                multiple
-                disableCloseOnSelect
-                size="sm"
-                className="h-6 flex-nowrap"
-                renderTags={selectionSummary}
-                aria-label="Filter by status"
-                placeholder="All statuses"
-                options={[...reviewStatuses]}
-                value={filter ?? []}
-                onChange={(chosen) => {
-                  const status = reviewStatuses.filter((option) =>
-                    chosen.includes(option)
-                  )
-                  onFiltersChange({
-                    status: status.length ? status : undefined,
-                  })
-                }}
-              />
-            </div>
-            {!railed && (
-              <span className="flex items-center gap-space-1 text-xs text-secondary">
-                Sort
-                {sortOptions.map(([label, key]) => (
-                  <Button
-                    key={key}
-                    size="xs"
-                    color="secondary"
-                    variant={sort === key ? "outlined" : "plain"}
-                    aria-pressed={sort === key}
-                    rightDecorator={
-                      sort !== key
-                        ? ArrowsDownUpIcon
-                        : direction === "asc"
-                          ? ArrowUpIcon
-                          : ArrowDownIcon
-                    }
-                    onClick={() => toggleSort(key)}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </span>
-            )}
-            {!railed && (
-              <span
-                aria-live="polite"
-                className="text-xs whitespace-nowrap text-secondary"
-              >
-                {refreshing
-                  ? "Refreshing from GitHub…"
-                  : latest
-                    ? `Refreshed ${dateLabel(latest.updatedAt)}`
-                    : scope === "review-assigned"
-                      ? "Robin review assignments"
-                      : "Live open pull requests from GitHub"}
-              </span>
-            )}
+      {scope !== "mine" && (
+        <div className="flex flex-wrap items-center gap-space-2 text-xs text-secondary">
+          <span>
+            {scope === "review-assigned"
+              ? "Requested reviews, your drafts, then speculative reviews"
+              : "GitHub review requests"}
+          </span>
+          {scope === "review-requested" && (
             <Button
               size="xs"
-              color="secondary"
-              variant="outlined"
-              leftDecorator={ArrowClockwiseIcon}
-              disabled={query.isFetching}
-              loading={query.isFetching}
+              variant="underlined"
+              onClick={() =>
+                onFiltersChange({ github: undefined, pr: undefined })
+              }
+            >
+              Back to full review queue
+            </Button>
+          )}
+          {firstInQueue && (
+            <Button
+              size="xs"
+              className="ml-auto"
               onClick={() => {
-                setSettled({})
-                for (const [
-                  queryKey,
-                  status,
-                ] of queryClient.getQueriesData<OpenPullRequest | null>({
-                  queryKey: [PULL_REQUEST_STATUS, login],
-                })) {
-                  if (leftOpenList(status))
-                    queryClient.removeQueries({ queryKey, exact: true })
-                }
-                void query.refetch()
-                void queryClient.invalidateQueries({
-                  queryKey: ["pull-request-search", login],
-                })
-                void queryClient.invalidateQueries({
-                  queryKey: [PULL_REQUEST_STATUS, login],
-                })
-                void queryClient.invalidateQueries({
-                  queryKey: ["pr-thread-status", login],
-                })
-                void queryClient.invalidateQueries({
-                  queryKey: ["my-pr-review-summaries", login],
-                })
-                if (selection)
-                  for (const queryKey of [
-                    reviewKeys.detail(selection),
-                    reviewKeys.checks(selection),
-                    reviewKeys.conversation(selection),
-                  ])
-                    void queryClient.invalidateQueries({ queryKey })
+                reviewOneByOne()
+                onSelect()
               }}
             >
-              Refresh
+              Review one by one ({queue.length})
             </Button>
-          </div>
-          {query.error && (
-            <p role="alert" className="text-sm text-error-secondary">
-              {latest &&
-                (query.isFetchNextPageError
-                  ? "Could not load more PRs; showing the pages loaded so far. "
-                  : "Refresh failed; showing the previous snapshot. ")}
-              {query.error.message}
-            </p>
           )}
-          {search.trim() && descriptionSearch.isError && (
-            <p role="alert" className="text-sm text-error-secondary">
-              Title and description search is unavailable; showing repository,
-              title, and PR number matches only.
-            </p>
-          )}
-          {query.isLoading ? (
-            <PullRequestListSkeleton compact={railed} />
-          ) : incomplete ? (
-            <p
-              role="status"
-              className="rounded-lg border border-default bg-surface-level-1 px-space-4 py-space-8 text-center text-xs text-warning-secondary"
-            >
-              GitHub&rsquo;s pull request search timed out, and the partial
-              answer it returned would have hidden most of your PRs. Filter by
-              repository to narrow the search, or refresh to try again.
-            </p>
-          ) : (
-            latest && (
-              <>
-                {visible.length === 0 ? (
-                  detailsLoading ||
-                  query.isFetchingNextPage ||
-                  descriptionSearch.isSearching ? (
-                    <PullRequestListSkeleton
-                      compact={railed}
-                      label="Loading matching PRs"
-                    />
-                  ) : (
-                    <EmptyState
-                      size="sm"
-                      className="rounded-lg border border-default py-space-8"
-                      title={
-                        all.length
-                          ? "No PRs match these filters"
-                          : scope === "mine"
-                            ? "No open PRs found"
-                            : scope === "review-assigned"
-                              ? "Nothing to review. You’re all caught up."
-                              : "No pending GitHub review requests"
-                      }
-                    />
-                  )
-                ) : (
-                  <PullRequestList
-                    rows={visible}
-                    available={matchingRows.length}
-                    compact={railed}
-                    // Unclamped: asking for more rows than are loaded is what
-                    // makes the next GitHub page arrive, and reaching the end
-                    // again is the only other thing that would grow it.
-                    onEndReached={() =>
-                      setGrowth({ key: listKey, rows: requested + chunkSize })
-                    }
-                  >
-                    {(pr) => card(pr, onSelect)}
-                  </PullRequestList>
-                )}
-                <div className="flex items-center gap-space-3 text-xs text-secondary">
-                  <span>
-                    {visible.length} of {filtered.length}
-                    {query.hasNextPage ? "+" : ""} PRs
-                    {!railed &&
-                      " · Added/deleted lines include tests and docs. PRs with checks still running are Pending."}
-                  </span>
-                  {query.isFetchingNextPage ? (
-                    <span role="status">Loading more PRs from GitHub…</span>
-                  ) : (
-                    detailsLoading && (
-                      <span role="status">Loading PR details…</span>
-                    )
-                  )}
-                </div>
-              </>
-            )
-          )}
-        </section>
+        </div>
       )}
-    </PullRequestWorkspace>
+      <div className="flex flex-wrap items-center gap-space-2">
+        <div className={cn("max-w-full shrink-0", railed ? "w-full" : "w-96")}>
+          <Typeahead
+            multiple
+            disableCloseOnSelect
+            size="sm"
+            className="h-6 flex-nowrap"
+            renderTags={(values) =>
+              selectionSummary(values.map((name) => repoLabels.label(name)))
+            }
+            aria-label="Filter by repository"
+            placeholder="All repositories"
+            emptyText={
+              knownRepos.isPending
+                ? "Loading repositories…"
+                : knownRepos.isError
+                  ? "Could not load repositories"
+                  : "No matches"
+            }
+            options={repoNames}
+            getOptionLabel={(name) => repoLabels.label(name)}
+            renderOption={(name, { selected: isSelected }) => {
+              const label = repoLabels.label(name)
+              const middle = Math.max(
+                Math.ceil(label.length / 2),
+                label.length - 16
+              )
+              return (
+                <>
+                  <Icon
+                    aria-hidden
+                    icon={CheckIcon}
+                    size="md"
+                    className={cn(
+                      "shrink-0 text-icon-primary",
+                      isSelected ? "opacity-100" : "opacity-0"
+                    )}
+                  />
+                  <Text
+                    as="span"
+                    variant="sm"
+                    className="flex min-w-0 flex-1 overflow-hidden leading-4 tracking-normal whitespace-nowrap"
+                    title={name}
+                    aria-label={label}
+                  >
+                    <span className="min-w-0 truncate">
+                      {label.slice(0, middle)}
+                    </span>
+                    <span className="shrink-0">{label.slice(middle)}</span>
+                  </Text>
+                </>
+              )
+            }}
+            filterOptions={(options, { inputValue }) =>
+              options.filter((name) => repoLabels.matches(name, inputValue))
+            }
+            value={repo}
+            onChange={(chosen) =>
+              onFiltersChange({ repo: chosen.length ? chosen : undefined })
+            }
+          />
+        </div>
+        <Input
+          size="sm"
+          className={cn(
+            "min-w-40 flex-1 [&_input:placeholder-shown]:text-ellipsis",
+            railed && "basis-full"
+          )}
+          leftIcon={MagnifyingGlassRegularIcon}
+          aria-label="Search pull requests"
+          title="Search title, description, or PR number"
+          placeholder="Search title, description, or PR number…"
+          value={search}
+          onChange={(next) => onFiltersChange({ q: next || undefined }, true)}
+        />
+        <div className={cn("shrink-0", railed ? "min-w-0 flex-1" : "w-48")}>
+          <Typeahead
+            multiple
+            disableCloseOnSelect
+            size="sm"
+            className="h-6 flex-nowrap"
+            renderTags={selectionSummary}
+            aria-label="Filter by status"
+            placeholder="All statuses"
+            options={[...reviewStatuses]}
+            value={filter ?? []}
+            onChange={(chosen) => {
+              const status = reviewStatuses.filter((option) =>
+                chosen.includes(option)
+              )
+              onFiltersChange({
+                status: status.length ? status : undefined,
+              })
+            }}
+          />
+        </div>
+        {!railed && (
+          <span className="flex items-center gap-space-1 text-xs text-secondary">
+            Sort
+            {sortOptions.map(([label, key]) => (
+              <Button
+                key={key}
+                size="xs"
+                color="secondary"
+                variant={sort === key ? "outlined" : "plain"}
+                aria-pressed={sort === key}
+                rightDecorator={
+                  sort !== key
+                    ? ArrowsDownUpIcon
+                    : direction === "asc"
+                      ? ArrowUpIcon
+                      : ArrowDownIcon
+                }
+                onClick={() => toggleSort(key)}
+              >
+                {label}
+              </Button>
+            ))}
+          </span>
+        )}
+        {!railed && (
+          <span
+            aria-live="polite"
+            className="text-xs whitespace-nowrap text-secondary"
+          >
+            {refreshing
+              ? "Refreshing from GitHub…"
+              : latest
+                ? `Refreshed ${dateLabel(latest.updatedAt)}`
+                : scope === "review-assigned"
+                  ? "Robin review assignments"
+                  : "Live open pull requests from GitHub"}
+          </span>
+        )}
+        <Button
+          size="xs"
+          color="secondary"
+          variant="outlined"
+          leftDecorator={ArrowClockwiseIcon}
+          disabled={query.isFetching}
+          loading={query.isFetching}
+          onClick={() => {
+            setSettled({})
+            for (const [
+              queryKey,
+              status,
+            ] of queryClient.getQueriesData<OpenPullRequest | null>({
+              queryKey: [PULL_REQUEST_STATUS, login],
+            })) {
+              if (leftOpenList(status))
+                queryClient.removeQueries({ queryKey, exact: true })
+            }
+            void query.refetch()
+            void queryClient.invalidateQueries({
+              queryKey: ["pull-request-search", login],
+            })
+            void queryClient.invalidateQueries({
+              queryKey: [PULL_REQUEST_STATUS, login],
+            })
+            void queryClient.invalidateQueries({
+              queryKey: ["pr-thread-status", login],
+            })
+            void queryClient.invalidateQueries({
+              queryKey: ["my-pr-review-summaries", login],
+            })
+            if (selection)
+              for (const queryKey of [
+                reviewKeys.detail(selection),
+                reviewKeys.checks(selection),
+                reviewKeys.conversation(selection),
+              ])
+                void queryClient.invalidateQueries({ queryKey })
+          }}
+        >
+          Refresh
+        </Button>
+      </div>
+      {query.error && (
+        <p role="alert" className="text-sm text-error-secondary">
+          {latest &&
+            (query.isFetchNextPageError
+              ? "Could not load more PRs; showing the pages loaded so far. "
+              : "Refresh failed; showing the previous snapshot. ")}
+          {query.error.message}
+        </p>
+      )}
+      {search.trim() && descriptionSearch.isError && (
+        <p role="alert" className="text-sm text-error-secondary">
+          Title and description search is unavailable; showing repository,
+          title, and PR number matches only.
+        </p>
+      )}
+      {query.isLoading ? (
+        <PullRequestListSkeleton compact={railed} />
+      ) : incomplete ? (
+        <p
+          role="status"
+          className="rounded-lg border border-default bg-surface-level-1 px-space-4 py-space-8 text-center text-xs text-warning-secondary"
+        >
+          GitHub&rsquo;s pull request search timed out, and the partial answer
+          it returned would have hidden most of your PRs. Filter by repository
+          to narrow the search, or refresh to try again.
+        </p>
+      ) : (
+        latest && (
+          <>
+            {visible.length === 0 ? (
+              detailsLoading ||
+              query.isFetchingNextPage ||
+              descriptionSearch.isSearching ? (
+                <PullRequestListSkeleton
+                  compact={railed}
+                  label="Loading matching PRs"
+                />
+              ) : (
+                <EmptyState
+                  size="sm"
+                  className="rounded-lg border border-default py-space-8"
+                  title={
+                    all.length
+                      ? "No PRs match these filters"
+                      : scope === "mine"
+                        ? "No open PRs found"
+                        : scope === "review-assigned"
+                          ? "Nothing to review. You’re all caught up."
+                          : "No pending GitHub review requests"
+                  }
+                />
+              )
+            ) : (
+              <PullRequestList
+                rows={visible}
+                available={matchingRows.length}
+                compact={railed}
+                // Unclamped: asking for more rows than are loaded is what
+                // makes the next GitHub page arrive, and reaching the end
+                // again is the only other thing that would grow it.
+                onEndReached={() =>
+                  setGrowth({ key: listKey, rows: requested + chunkSize })
+                }
+              >
+                {card}
+              </PullRequestList>
+            )}
+            <div className="flex items-center gap-space-3 text-xs text-secondary">
+              <span>
+                {visible.length} of {filtered.length}
+                {query.hasNextPage ? "+" : ""} PRs
+                {!railed &&
+                  " · Added/deleted lines include tests and docs. PRs with checks still running are Pending."}
+              </span>
+              {query.isFetchingNextPage ? (
+                <span role="status">Loading more PRs from GitHub…</span>
+              ) : (
+                detailsLoading && <span role="status">Loading PR details…</span>
+              )}
+            </div>
+          </>
+        )
+      )}
+    </section>
   )
 }

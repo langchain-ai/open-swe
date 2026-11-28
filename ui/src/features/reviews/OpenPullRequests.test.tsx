@@ -126,6 +126,7 @@ function mount(client = makeQueryClient()) {
         login="octocat"
         scope="mine"
         filters={filters}
+        onSelect={() => {}}
         onFiltersChange={(changes) =>
           setFilters((previous) => ({ ...previous, ...changes }))
         }

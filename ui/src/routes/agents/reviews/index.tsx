@@ -169,15 +169,13 @@ function ReviewsPage() {
         >
           {!isDesktop && header}
 
-          {session.data &&
-            (tab === "all" ? (
-              <PullRequestWorkspace
-                pr={selection}
-                onClose={() =>
-                  changeFilters({ pr: undefined, queue: undefined })
-                }
-              >
-                {(onSelect) => (
+          {session.data && (
+            <PullRequestWorkspace
+              pr={selection}
+              onClose={() => changeFilters({ pr: undefined, queue: undefined })}
+            >
+              {(onSelect) =>
+                tab === "all" ? (
                   <ReviewedPullRequests
                     page={filters.page ?? 0}
                     selected={filters.pr}
@@ -189,23 +187,25 @@ function ReviewsPage() {
                       changeFilters({ page: page || undefined })
                     }
                   />
-                )}
-              </PullRequestWorkspace>
-            ) : (
-              <OpenPullRequests
-                key={`${tab}-${Boolean(filters.github)}`}
-                login={session.data.login}
-                scope={
-                  tab === "mine"
-                    ? "mine"
-                    : filters.github
-                      ? "review-requested"
-                      : "review-assigned"
-                }
-                filters={filters}
-                onFiltersChange={changeFilters}
-              />
-            ))}
+                ) : (
+                  <OpenPullRequests
+                    key={`${tab}-${Boolean(filters.github)}`}
+                    login={session.data!.login}
+                    scope={
+                      tab === "mine"
+                        ? "mine"
+                        : filters.github
+                          ? "review-requested"
+                          : "review-assigned"
+                    }
+                    filters={filters}
+                    onFiltersChange={changeFilters}
+                    onSelect={onSelect}
+                  />
+                )
+              }
+            </PullRequestWorkspace>
+          )}
         </div>
       </div>
     </main>
