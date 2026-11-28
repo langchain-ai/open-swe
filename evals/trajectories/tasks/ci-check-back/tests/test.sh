@@ -1,8 +1,8 @@
 #!/bin/sh
 # Passes with run 4127, written once CI was green, and with under a minute of foreground shell
-# sleep and no foreground `ci watch`. Nothing of Robin's runs CI, so only a wakeup or a
-# background watch brings it back: a run that says "I'll check back" and ends the turn never
-# writes the answer, and one that waits in the shell holds the turn for 7 minutes.
+# sleep and no foreground `ci watch`. Nothing of Robin's runs CI, so only a wakeup, or a watch in
+# a background job or monitor, brings it back: a run that says "I'll check back" and ends the
+# turn never writes the answer, and one that waits in the shell holds the turn for 7 minutes.
 mkdir -p /logs/verifier
 cp /var/log/ci-eval/*.log /logs/verifier/ 2>/dev/null
 if python3 - <<'PY' >/logs/verifier/grade.txt 2>&1; then

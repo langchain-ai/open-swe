@@ -18,8 +18,8 @@ def log(event: str, **fields: object) -> None:
 
 
 def in_background_job() -> bool:
-    """Whether a background job runs this: one Robin's background tool started, which wakes
-    the thread when it ends, rather than a command the turn sits on."""
+    """Whether a background job or monitor runs this: one Robin's background or monitor tool
+    started, which wakes the thread, rather than a command the turn sits on."""
     pid = os.getppid()
     while pid > 1:
         try:
@@ -27,7 +27,7 @@ def in_background_job() -> bool:
             pid = int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
         except (OSError, ValueError, IndexError):
             return False
-        if b"/tmp/open-swe-background-tasks/" in cmdline:
+        if b"/tmp/open-swe-background-tasks/" in cmdline or b"/tmp/open-swe-monitors/" in cmdline:
             return True
     return False
 

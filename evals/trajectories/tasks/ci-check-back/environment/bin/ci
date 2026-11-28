@@ -17,7 +17,7 @@ JOBS = {"lint": 50, "build": 200, "test": 420}
 
 
 def in_background_job() -> bool:
-    """Whether one of Robin's background jobs runs this, which wakes the thread when it ends."""
+    """Whether one of Robin's background jobs or monitors runs this, which wake the thread."""
     pid = os.getppid()
     while pid > 1:
         try:
@@ -25,7 +25,7 @@ def in_background_job() -> bool:
             pid = int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
         except (OSError, ValueError, IndexError):
             return False
-        if b"/tmp/open-swe-background-tasks/" in cmdline:
+        if b"/tmp/open-swe-background-tasks/" in cmdline or b"/tmp/open-swe-monitors/" in cmdline:
             return True
     return False
 

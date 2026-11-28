@@ -1,10 +1,10 @@
 #!/bin/sh
 # Installed ahead of /usr/bin: logs how long each shell sleep asked for, and whether one of
-# Robin's background jobs ran it, then sleeps.
+# Robin's background jobs or monitors ran it, then sleeps.
 background=0
 pid=$PPID
 while [ "$pid" -gt 1 ] 2>/dev/null; do
-    if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q /tmp/open-swe-background-tasks/; then
+    if tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qE '/tmp/open-swe-(background-tasks|monitors)/'; then
         background=1
         break
     fi
