@@ -12,20 +12,13 @@ import { ChatDraftsProvider } from "@/features/reviews/lib/chatDrafts"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { useReviewChat } from "@/features/reviews/lib/reviewKeys"
 import { Changes } from "./Changes"
-import { Header } from "./Header"
 import { reviewQueries, type PullRequestRef } from "./queries"
 import { Rail } from "./Rail"
 import { INLINE_CHAT_QUERY, useReviewPage } from "./store"
 import { useReviewPageTools } from "./useReviewPageTools"
 
 /** The selected PR, with changes and chat. */
-export function ReviewPage({
-  pr,
-  header = true,
-}: {
-  pr: PullRequestRef
-  header?: boolean
-}) {
+export function ReviewPage({ pr }: { pr: PullRequestRef }) {
   const queryClient = useQueryClient()
   const detail = useQuery(reviewQueries.detail(pr))
   const [refreshError, setRefreshError] = useState<string | null>(null)
@@ -81,7 +74,6 @@ export function ReviewPage({
   return (
     <ChatDraftsProvider>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-level-1 text-primary">
-        {header && <Header pr={pr} leftInset="pl-space-3" />}
         {errorMessage !== null ? (
           <PullRequestUnavailable
             pr={pr}

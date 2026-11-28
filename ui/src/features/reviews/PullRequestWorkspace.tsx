@@ -1,14 +1,16 @@
 import { Button } from "@langchain/macaw-components/Button"
 import { IconButton } from "@langchain/macaw-components/IconButton"
-import { ArrowLeftIcon, XIcon } from "@langchain/macaw-components/icons"
+import { ArrowLeftIcon } from "@langchain/macaw-components/icons"
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/ssr/SidebarSimple"
+import { useRouter } from "@tanstack/react-router"
 import { Skeleton } from "@/components/Skeleton"
-import { lazy, Suspense, type ReactNode } from "react"
+import { lazy, Suspense, useLayoutEffect, useRef, type ReactNode } from "react"
 
 import { useContextReturn } from "@/lib/contextNavigation"
 import { useMediaQuery } from "@/lib/useIsMobile"
 import { cn } from "@/lib/utils"
 import { OpenPullRequestInput } from "./OpenPullRequestInput"
+import { PILL_TAB_CLASS } from "./lib/styles"
 import type { PullRequestRef } from "./page/queries"
 import { INLINE_NAVIGATOR_QUERY, useReviewPage } from "./page/store"
 import { ReviewTabs } from "./ReviewTabs"
@@ -22,9 +24,6 @@ const Navigator = lazy(async () => ({
 const Header = lazy(async () => ({
   default: (await import("./page/Header")).Header,
 }))
-const NavigatorSwitch = lazy(async () => ({
-  default: (await import("./page/ReadingOrderTabs")).NavigatorSwitch,
-}))
 
 export function PullRequestWorkspace({
   pr,
@@ -35,6 +34,7 @@ export function PullRequestWorkspace({
   onClose: () => void
   children: (onSelect: () => void) => ReactNode
 }) {
+  const router = useRouter()
   const inline = useMediaQuery(INLINE_NAVIGATOR_QUERY)
   const prListOpen = useReviewPage((state) => state.prListOpen)
   const navigatorOpen = useReviewPage(
@@ -44,146 +44,150 @@ export function PullRequestWorkspace({
   )
   const setPrListOpen = useReviewPage((state) => state.setPrListOpen)
   const setNavigatorOpen = useReviewPage((state) => state.setNavigatorOpen)
-  const selectPr = () => setPrListOpen(false)
-  const listShown = !pr || prListOpen
-  const navigatorShown = Boolean(pr) && navigatorOpen
+
+  const hasPullRequest = pr !== null
+  const listShown = !hasPullRequest || prListOpen
+  const navigatorShown = hasPullRequest && navigatorOpen
   const sidebarShown = listShown || navigatorShown
   const prKey = pr && `${pr.owner}/${pr.repo}/${pr.number}`
-  // On desktop an open PR's header is the title bar, and one switch in the sidebar picks the list, walkthrough or files.
   const titleBar =
-    Boolean(pr) &&
-    typeof window !== "undefined" &&
-    Boolean(window.openSweDesktop)
+    typeof window !== "undefined" && Boolean(window.openSweDesktop)
+
+  const sidebarViewport = useRef<HTMLDivElement>(null)
+  const swipingSidebar = useRef(false)
+  const selectPr = () => {
+    if (inline || hasPullRequest) setNavigatorOpen(true)
+    else setPrListOpen(false)
+  }
+
+  useLayoutEffect(() => {
+    const viewport = sidebarViewport.current
+    if (!prKey || !sidebarShown || !viewport) return
+
+    const scrollToPane = () => {
+      swipingSidebar.current = false
+      viewport.scrollTo({ left: listShown ? 0 : viewport.clientWidth })
+    }
+    scrollToPane()
+    // Router restoration can carry the previous PR's horizontal offset into this viewport.
+    return router.subscribe("onRendered", scrollToPane)
+  }, [router, prKey, sidebarShown, listShown])
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {pr && titleBar && (
+      {pr && (
         <Suspense
           fallback={<div className="h-11 shrink-0 border-b border-muted" />}
         >
           <Header
             key={prKey}
             pr={pr}
-            titleBar
-            leftInset="pl-[80px] [.desktop-fullscreen_&]:pl-space-3 [.version-mismatch_&]:pl-space-3"
+            titleBar={titleBar}
+            onCloseDetails={onClose}
             leading={
-              <TitleBarNavigation
+              <SidebarNavigation
                 sidebarShown={sidebarShown}
                 onToggleSidebar={() => setNavigatorOpen(!sidebarShown)}
-              />
-            }
-            trailing={
-              <IconButton
-                icon={XIcon}
-                label="Close PR details"
-                size="sm"
-                color="secondary"
-                variant="plain"
-                onClick={onClose}
               />
             }
           />
         </Suspense>
       )}
-      {pr && !titleBar && (
-        <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-space-1 border-b border-muted px-space-3">
-          <Button
-            size="sm"
-            color="secondary"
-            variant={listShown ? "normal" : "plain"}
-            aria-pressed={listShown}
-            onClick={() => setPrListOpen(!listShown)}
-          >
-            PR list
-          </Button>
-          <Button
-            size="sm"
-            color="secondary"
-            variant={navigatorShown ? "normal" : "plain"}
-            aria-pressed={navigatorShown}
-            title="Show or hide Files & Walkthrough (F)"
-            onClick={() => setNavigatorOpen(!navigatorShown)}
-          >
-            Files &amp; Walkthrough
-          </Button>
-          {!inline && (
-            <Button
-              size="sm"
-              color="secondary"
-              variant={sidebarShown ? "plain" : "normal"}
-              aria-pressed={!sidebarShown}
-              onClick={() => {
-                setNavigatorOpen(false)
-                useReviewPage.getState().setRailOpen(false)
-              }}
-            >
-              Review
-            </Button>
-          )}
-          <IconButton
-            className="ml-auto"
-            icon={XIcon}
-            label="Close PR details"
-            size="sm"
-            color="secondary"
-            variant="plain"
-            onClick={onClose}
-          />
-        </div>
-      )}
       <div className="flex min-h-0 min-w-0 flex-1">
         <div
           className={cn(
-            "grid min-h-0 min-w-0 grid-cols-1",
-            titleBar ? "grid-rows-[auto_minmax(0,1fr)]" : "grid-rows-1",
+            "flex min-h-0 min-w-0 flex-col",
             pr
-              ? "w-full shrink-0 bg-surface-level-2 min-[1000px]:w-80"
+              ? "review-sidebar w-full shrink-0 overflow-hidden overscroll-x-none bg-surface-level-2 min-[1000px]:w-80 min-[1000px]:border-r min-[1000px]:border-secondary"
               : "flex-1",
             !sidebarShown && "hidden"
           )}
         >
-          {pr && titleBar && (
-            <Suspense fallback={<div className="h-11" />}>
-              <NavigatorSwitch
-                pr={pr}
-                listShown={listShown}
+          {pr ? (
+            <div
+              role="group"
+              aria-label="Sidebar view"
+              className="flex h-11 shrink-0 items-center gap-space-1 px-space-2"
+            >
+              <ReviewTabs
+                variant="dropdown"
+                active={listShown}
                 onShowList={() => setPrListOpen(true)}
               />
-            </Suspense>
-          )}
+              <Button
+                size="sm"
+                color="secondary"
+                variant="plain"
+                className={cn(PILL_TAB_CLASS, "review-sidebar-pr-pill")}
+                aria-label={`PR #${pr.number} files and walkthrough`}
+                aria-pressed={navigatorShown}
+                data-selected={navigatorShown ? "" : undefined}
+                onClick={() => setNavigatorOpen(true)}
+              >
+                {`#${pr.number}`}
+              </Button>
+            </div>
+          ) : null}
           <div
-            inert={!listShown}
-            aria-hidden={!listShown}
+            ref={sidebarViewport}
+            onWheel={(event) => {
+              if (event.deltaX !== 0 || event.shiftKey) {
+                swipingSidebar.current = true
+              }
+            }}
+            onTouchMove={() => {
+              swipingSidebar.current = true
+            }}
+            onScrollEnd={(event) => {
+              if (!swipingSidebar.current) return
+              if (event.target !== event.currentTarget) return
+              swipingSidebar.current = false
+
+              if (!hasPullRequest || !event.currentTarget.clientWidth) return
+              const showList =
+                event.currentTarget.scrollLeft <
+                event.currentTarget.clientWidth / 2
+              if (showList === listShown) return
+              if (showList) {
+                setPrListOpen(true)
+              } else {
+                setNavigatorOpen(true)
+              }
+            }}
             className={cn(
-              "col-start-1 flex min-h-0 min-w-0 flex-col motion-safe:transition-[opacity,visibility] motion-safe:duration-normal",
-              titleBar ? "row-start-2" : "row-start-1",
-              pr && "px-space-3 pb-space-3",
-              !listShown && "invisible opacity-0"
+              "flex min-h-0 min-w-0 flex-1",
+              pr != null &&
+                "review-sidebar-scroll no-scrollbar snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-none motion-safe:scroll-smooth"
             )}
           >
-            {titleBar && (
-              <div className="flex flex-col gap-space-2 pb-space-2">
-                <ReviewTabs keepSelection />
-                <OpenPullRequestInput className="w-full" />
-              </div>
-            )}
-            {children(selectPr)}
-          </div>
-          {pr && (
             <div
-              inert={!navigatorShown}
-              aria-hidden={!navigatorShown}
+              inert={!listShown}
+              aria-hidden={!listShown}
               className={cn(
-                "col-start-1 min-h-0 min-w-0 motion-safe:transition-[opacity,visibility] motion-safe:duration-normal",
-                titleBar ? "row-start-2" : "row-start-1",
-                !navigatorShown && "invisible opacity-0"
+                "flex min-h-0 w-full min-w-0 shrink-0 snap-start flex-col",
+                pr != null && "px-space-3 pb-space-3"
               )}
             >
-              <Suspense fallback={<Skeleton className="m-space-3 h-56" />}>
-                <Navigator key={prKey} pr={pr} orderTabs={!titleBar} />
-              </Suspense>
+              {pr != null && (
+                <OpenPullRequestInput
+                  className="w-full pb-space-2"
+                  onSelect={selectPr}
+                />
+              )}
+              {children(selectPr)}
             </div>
-          )}
+            {pr && (
+              <div
+                inert={!navigatorShown}
+                aria-hidden={!navigatorShown}
+                className="min-h-0 w-full min-w-0 shrink-0 snap-start"
+              >
+                <Suspense fallback={<Skeleton className="m-space-3 h-56" />}>
+                  <Navigator key={prKey} pr={pr} />
+                </Suspense>
+              </div>
+            )}
+          </div>
         </div>
         {pr && (
           <section
@@ -194,7 +198,7 @@ export function PullRequestWorkspace({
             )}
           >
             <Suspense fallback={<Skeleton className="m-space-3 h-56" />}>
-              <ReviewPage key={prKey} pr={pr} header={!titleBar} />
+              <ReviewPage key={prKey} pr={pr} />
             </Suspense>
           </section>
         )}
@@ -203,7 +207,7 @@ export function PullRequestWorkspace({
   )
 }
 
-function TitleBarNavigation({
+function SidebarNavigation({
   sidebarShown,
   onToggleSidebar,
 }: {
@@ -216,6 +220,7 @@ function TitleBarNavigation({
       <IconButton
         icon={SidebarSimpleIcon}
         label={sidebarShown ? "Hide sidebar" : "Show sidebar"}
+        aria-expanded={sidebarShown}
         size="sm"
         color="secondary"
         variant="plain"

@@ -6,7 +6,13 @@ import { cn } from "@/lib/utils"
 import { parsePullRequestReference } from "@/features/reviews/search"
 
 /** Jumps to the review of a pasted GitHub pull request link. */
-export function OpenPullRequestInput({ className }: { className?: string }) {
+export function OpenPullRequestInput({
+  className,
+  onSelect,
+}: {
+  className?: string
+  onSelect?: () => void
+}) {
   const navigate = useNavigate({ from: "/agents/reviews/" })
   const [value, setValue] = useState("")
   const [invalid, setInvalid] = useState(false)
@@ -29,6 +35,7 @@ export function OpenPullRequestInput({ className }: { className?: string }) {
         at: undefined,
       }),
     })
+    onSelect?.()
   }
 
   return (

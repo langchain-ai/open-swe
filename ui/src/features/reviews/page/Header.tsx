@@ -1,6 +1,6 @@
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
 import { CircularProgress } from "@langchain/macaw-components/CircularProgress"
-import { ArrowUpIcon } from "@langchain/macaw-components/icons"
+import { ArrowUpIcon, XIcon } from "@langchain/macaw-components/icons"
 import { Badge, type BadgeProps } from "@langchain/macaw-components/Badge"
 import { Button } from "@langchain/macaw-components/Button"
 import {
@@ -69,16 +69,14 @@ function pillState(
 /** Two lines that never scroll away: what this PR is, and what you can do with it. */
 export function Header({
   pr,
-  leftInset,
-  titleBar = false,
+  onCloseDetails,
+  titleBar,
   leading,
-  trailing,
 }: {
   pr: PullRequestRef
-  leftInset: string
-  titleBar?: boolean
-  leading?: ReactNode
-  trailing?: ReactNode
+  onCloseDetails: () => void
+  titleBar: boolean
+  leading: ReactNode
 }) {
   const refresh = useRefreshPullRequest(pr)
   const detailQuery = useQuery(reviewQueries.detail(pr))
@@ -97,9 +95,10 @@ export function Header({
   const jumpTo = useReviewPage((state) => state.jumpTo)
   const jumpToUnviewed = useReviewPage((state) => state.jumpToUnviewed)
   const setNavigatorOpen = useReviewPage((state) => state.setNavigatorOpen)
-  // Below the inline breakpoint the desktop sidebar covers the PR, so actions that show PR content dismiss it.
+
+  // On narrow screens the sidebar covers the changes these actions jump to.
   const revealPullRequest = () => {
-    if (titleBar && !window.matchMedia?.(INLINE_NAVIGATOR_QUERY)?.matches)
+    if (!window.matchMedia?.(INLINE_NAVIGATOR_QUERY)?.matches)
       setNavigatorOpen(false)
   }
   const { openShortcutReference } = useAppCommandControls()
@@ -121,22 +120,20 @@ export function Header({
 
   return (
     <header
-      data-desktop-drag-region=""
+      data-desktop-drag-region={titleBar ? "" : undefined}
       className={cn(
-        "flex shrink-0 bg-surface-level-1 pr-space-3",
+        "flex h-11 shrink-0 items-center gap-space-2 overflow-hidden border-b border-muted bg-surface-level-1 pr-space-2",
         titleBar
-          ? "h-11 items-center gap-space-2 overflow-hidden border-b border-muted"
-          : // Top-aligned at 8px so the first row lines up with the app's floating sidebar button.
-            "flex-wrap items-start gap-space-3 border-b border-default pt-space-2 pb-space-2",
-        leftInset
+          ? "pl-20 in-[.desktop-fullscreen]:pl-space-3 in-[.version-mismatch]:pl-space-3"
+          : "pl-space-3 max-sm:h-auto max-sm:min-h-11 max-sm:flex-wrap max-sm:gap-y-space-1 max-sm:py-space-1"
       )}
     >
       {leading}
-      <div className="min-w-0 flex-1">
+      <div className={cn("min-w-0 flex-1", !titleBar && "max-sm:basis-32")}>
         <div
           className={cn(
-            "flex min-w-0 items-center gap-space-2",
-            titleBar ? "h-5" : "min-h-7"
+            "flex h-5 min-w-0 items-center gap-space-2",
+            !titleBar && "max-sm:h-auto max-sm:min-h-8"
           )}
         >
           {/* An open PR shows where it stands, in the PR list's own pills; GitHub's lifecycle only once it's settled. */}
@@ -164,12 +161,7 @@ export function Header({
               <Skeleton className="h-5 w-14 shrink-0 rounded-full" />
             )
           )}
-          <div
-            className={cn(
-              "flex min-w-0 flex-1 items-center gap-space-1 text-sm font-semibold tracking-[-0.01em] max-sm:text-sm max-sm:leading-5",
-              titleBar ? "leading-5" : "leading-6"
-            )}
-          >
+          <div className="flex min-w-0 flex-1 items-center gap-space-1 text-sm leading-5 font-semibold tracking-[-0.01em]">
             <a
               href={githubUrl}
               target="_blank"
@@ -183,16 +175,20 @@ export function Header({
               key={`${pr.owner}/${pr.repo}/${pr.number}`}
               pr={pr}
             />
+            <IconButton
+              icon={XIcon}
+              label="Close PR details"
+              size="sm"
+              color="secondary"
+              variant="plain"
+              className="shrink-0"
+              onClick={onCloseDetails}
+            />
           </div>
         </div>
         {detail ? (
           // The meta line and the status sentence share one slot and cross-fade.
-          <div
-            className={cn(
-              "grid min-w-0 max-sm:hidden",
-              titleBar ? "h-[18px] [&_p>*]:py-0!" : "mt-0.5"
-            )}
-          >
+          <div className="grid h-4.5 min-w-0 max-sm:hidden [&_p>*]:py-0!">
             <p
               inert={carrying}
               className={cn(
@@ -299,7 +295,10 @@ export function Header({
                 aria-label={`${current.standing.headline}. Back to top`}
                 type="button"
                 inert={!carrying}
-                onClick={() => jumpTo({ kind: "top" })}
+                onClick={() => {
+                  revealPullRequest()
+                  jumpTo({ kind: "top" })
+                }}
                 className={cn(
                   "h-auto justify-start border-0 px-0",
                   "group col-start-1 row-start-1 min-w-0 gap-space-2 justify-self-start px-0.5 text-left transition-[opacity,translate] ease-out hover:bg-surface-level-1-hover motion-reduce:transition-none",
@@ -326,8 +325,8 @@ export function Header({
       </div>
       <div
         className={cn(
-          "flex min-h-7 shrink-0 items-center",
-          titleBar ? "gap-space-2" : "max-w-full flex-wrap gap-space-3"
+          "flex min-h-7 shrink-0 items-center gap-space-2",
+          !titleBar && "max-sm:ml-auto max-sm:max-w-full max-sm:flex-wrap"
         )}
       >
         {carrying && current?.status && (
@@ -463,7 +462,6 @@ export function Header({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {trailing}
       </div>
     </header>
   )

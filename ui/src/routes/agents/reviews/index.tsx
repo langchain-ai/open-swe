@@ -131,24 +131,15 @@ function ReviewsPage() {
       <OpenPullRequestInput className="min-w-24 shrink" />
     </div>
   ) : (
-    <div
-      className={cn(
-        "flex flex-wrap items-center gap-space-3",
-        selection && "border-b border-muted px-space-3 py-space-2"
-      )}
-    >
+    <div className="flex flex-wrap items-center gap-space-3">
       {back}
       {heading}
       <ReviewTabs />
       <OpenPullRequestInput />
-      {!selection && (
-        <>
-          <ReviewBookmarklet />
-          <span className="hidden text-xs text-secondary lg:inline">
-            Drag to your bookmarks bar
-          </span>
-        </>
-      )}
+      <ReviewBookmarklet />
+      <span className="hidden text-xs text-secondary lg:inline">
+        Drag to your bookmarks bar
+      </span>
     </div>
   )
 
@@ -167,7 +158,7 @@ function ReviewsPage() {
             !selection && "max-w-6xl"
           )}
         >
-          {!isDesktop && header}
+          {!isDesktop && !selection && header}
 
           {session.data && (
             <PullRequestWorkspace

@@ -216,7 +216,11 @@ test.describe("my pull requests", () => {
     const navigator = page.getByRole("navigation", {
       name: "Files & Walkthrough",
     });
-    const prList = page.getByRole("button", { name: "PR list", exact: true });
+    const sidebarView = page.getByRole("group", { name: "Sidebar view" });
+    const prList = sidebarView.getByRole("button", {
+      name: "Pull request list, Mine",
+      exact: true,
+    });
     const rail = page.getByRole("complementary", {
       name: "Chat and discussion",
     });
@@ -242,7 +246,7 @@ test.describe("my pull requests", () => {
       })
       .click();
     await expect(
-      workspace.getByRole("heading", { name: /Another authored change/ }),
+      page.getByRole("heading", { name: /Another authored change/ }),
     ).toBeVisible();
     await expect(rail).toBeHidden();
     await expect(navigator).toContainText("another.py");
@@ -267,7 +271,7 @@ test.describe("my pull requests", () => {
       `/agents/reviews/fakeorg/demo/${theirs.number}?q=no-matches#discussion`,
     );
     await expect(
-      workspace.getByRole("heading", { name: /Someone else's change/ }),
+      page.getByRole("heading", { name: /Someone else's change/ }),
     ).toBeVisible();
     await expect(page).toHaveURL(
       (url) =>
@@ -279,17 +283,26 @@ test.describe("my pull requests", () => {
     await page.setViewportSize({ width: 640, height: 900 });
     await expect(workspace).toBeVisible();
     await expect(navigator).toBeHidden();
+    await page
+      .getByRole("button", { name: "Show sidebar", exact: true })
+      .click();
+    await expect(navigator).toContainText("other.py");
     await prList.click();
     await expect(workspace).toBeHidden();
-    await page
-      .getByRole("button", { name: "Files & Walkthrough", exact: true })
+    await expect(navigator).toBeHidden();
+    await sidebarView
+      .getByRole("button", {
+        name: `PR #${theirs.number} files and walkthrough`,
+        exact: true,
+      })
       .click();
     await expect(navigator).toContainText("other.py");
     await expect(
       page.getByRole("dialog", { name: "Files & Walkthrough" }),
     ).toHaveCount(0);
-    await page.getByRole("button", { name: "Review", exact: true }).click();
+    await navigator.getByRole("button", { name: /^other\.py,/ }).click();
     await expect(workspace).toBeVisible();
+    await expect(navigator).toBeHidden();
     await page
       .getByRole("button", { name: "Close PR details", exact: true })
       .click();

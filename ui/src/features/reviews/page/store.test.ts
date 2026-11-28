@@ -71,6 +71,7 @@ describe("reading a walkthrough", () => {
       collapsed: new Set(),
       entryOrder: entries,
       activeEntry: null,
+      fileFilter: "",
     })
   })
 
@@ -99,6 +100,63 @@ describe("reading a walkthrough", () => {
     expect(viewed.has(split.path)).toBe(false)
     expect(isRead(viewed, first)).toBe(false)
     expect(isRead(viewed, second)).toBe(true)
+  })
+
+  it("marks walkthrough slices and the whole file while the diff is in file order", () => {
+    const files = buildEntries([split], walkthrough, "files")
+    const file = files[0]!
+    const { setEntryOrder, markStepRead } = useReviewPage.getState()
+    setEntryOrder(files)
+
+    markStepRead(1, entries)
+    const { viewed: partial } = useReviewPage.getState()
+    expect(isRead(partial, first)).toBe(true)
+    expect(isRead(partial, second)).toBe(false)
+    expect(isRead(partial, file)).toBe(false)
+
+    markStepRead(2, entries)
+    expect(isRead(useReviewPage.getState().viewed, file)).toBe(true)
+
+    markStepRead(1, entries)
+    const { viewed: unmarked } = useReviewPage.getState()
+    expect(isRead(unmarked, first)).toBe(false)
+    expect(isRead(unmarked, second)).toBe(true)
+    expect(isRead(unmarked, file)).toBe(false)
+  })
+
+  it("can unread a step with a file that was already viewed in file order", () => {
+    const notes: ReviewDiffFile = {
+      ...split,
+      path: "notes.txt",
+      patch: null,
+      unrenderable: true,
+    }
+    const firstStep = walkthrough.steps[0]!
+    const guideWithNotes = {
+      ...walkthrough,
+      steps: [
+        {
+          ...firstStep,
+          files: [
+            ...firstStep.files,
+            { path: notes.path, added: [], deleted: [] },
+          ],
+        },
+        ...walkthrough.steps.slice(1),
+      ],
+    }
+    const guide = buildEntries([split, notes], guideWithNotes, "guide")
+    const { setEntryOrder, markViewed, markStepRead } = useReviewPage.getState()
+    setEntryOrder(buildEntries([split, notes], walkthrough, "files"))
+    markViewed(split.path)
+
+    markStepRead(1, guide)
+    markStepRead(1, guide)
+
+    const { viewed } = useReviewPage.getState()
+    expect(isRead(viewed, first)).toBe(false)
+    expect(isRead(viewed, second)).toBe(true)
+    expect(viewed.has(notes.path)).toBe(false)
   })
 })
 

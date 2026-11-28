@@ -14,14 +14,18 @@ import {
   writePreference,
 } from "@/features/reviews/lib/preferences"
 import type { PullRequestRef } from "@/features/reviews/lib/reviewKeys"
-import { findEntry, isRenderable, type DiffEntry } from "./diffEntries"
+import {
+  filterEntries,
+  findEntry,
+  isRenderable,
+  type DiffEntry,
+} from "./diffEntries"
 
 export const INLINE_NAVIGATOR_QUERY = "(min-width: 1000px)"
 export const INLINE_CHAT_QUERY = "(min-width: 1360px)"
 
 export type RailTab = "chat" | "discussion"
 export type DiffOrder = "files" | "guide"
-export type NavigatorLayout = "tabs" | "stacked"
 
 export type DiffTarget =
   | { kind: "top" }
@@ -48,8 +52,6 @@ export type PageEvent = "showFindings" | "showOpenConversations"
 
 /** The viewer's settings; they carry across pull requests, and some across reloads. */
 interface Preferences {
-  /** Whether the file list shows the walkthrough or the tree behind tabs, or both stacked. */
-  navigatorLayout: NavigatorLayout
   order: DiffOrder
   diffStyle: DiffStyle
 }
@@ -137,7 +139,6 @@ interface ReviewPageActions {
   setNavigatorOpen: (open: boolean) => void
   isNavigatorOpen: (inline?: boolean) => boolean
   setPrListOpen: (open: boolean) => void
-  toggleNavigatorLayout: () => void
   openReview: (verdict?: PullRequestReviewEvent) => void
   setReviewOpen: (open: boolean) => void
   setOrder: (order: DiffOrder) => void
@@ -185,15 +186,14 @@ interface ReviewPageActions {
   setStandingInView: (inView: boolean) => void
   /** Marks an entry viewed (or not); from the file being read, moves on to the next unread one. */
   markViewed: (id: string) => void
-  /** Marks every entry of a walkthrough step read, or all unread when they already are. */
-  markStepRead: (index: number) => void
+  /** Toggles a step's visible entries. The sidebar supplies the guide in either diff order. */
+  markStepRead: (index: number, guideEntries?: ReadonlyArray<DiffEntry>) => void
   /** The next file not yet viewed, in reading order, after the one being read. */
   jumpToUnviewed: () => void
 }
 
 const ORDER_KEY = "open-swe.review.view"
 const DIFF_STYLE_KEY = "open-swe.review.diffStyle"
-const NAVIGATOR_LAYOUT_KEY = "open-swe.review.navigatorLayout"
 
 function viewedKey(pr: PullRequestRef, headSha: string | null): string {
   return `open-swe.review.viewed.${pr.owner}/${pr.repo}/${pr.number}.${headSha ?? ""}`
@@ -271,8 +271,6 @@ export function isPassed(
 
 function storedPreferences(): Preferences {
   return {
-    navigatorLayout:
-      readPreference(NAVIGATOR_LAYOUT_KEY) === "stacked" ? "stacked" : "tabs",
     // A walkthrough, when one exists, is the default reading order.
     order: readPreference(ORDER_KEY) === "files" ? "files" : "guide",
     diffStyle: readPreference(DIFF_STYLE_KEY) === "split" ? "split" : "unified",
@@ -350,12 +348,16 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
   get
 ) => {
   // A file split across steps is viewed once every slice is; until then each slice is read alone.
-  const setRead = (targets: ReadonlyArray<DiffEntry>, read: boolean) => {
-    const { pr, viewed, viewedSha, collapsed, entryOrder } = get()
+  const setRead = (
+    targets: ReadonlyArray<DiffEntry>,
+    read: boolean,
+    siblingEntries = get().entryOrder
+  ) => {
+    const { pr, viewed, viewedSha, collapsed } = get()
     const next = new Set(viewed)
     const flips = new Set(collapsed)
     const slicesOf = new Map<string, Array<DiffEntry>>()
-    for (const other of entryOrder) {
+    for (const other of siblingEntries) {
       if (other.readKey === other.file.path) continue
       const slices = slicesOf.get(other.file.path) ?? []
       slices.push(other)
@@ -366,16 +368,17 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       const slices = slicesOf.get(path) ?? []
       flips.delete(entry.readKey)
       if (read) {
+        if (next.has(path)) continue
         next.add(entry.readKey)
         if (slices.every((slice) => next.has(slice.readKey))) {
           next.add(path)
           for (const slice of slices) next.delete(slice.readKey)
         }
-      } else if (next.has(path)) {
-        next.delete(path)
-        for (const slice of slices)
-          if (slice.readKey !== entry.readKey) next.add(slice.readKey)
       } else {
+        if (next.delete(path)) {
+          for (const slice of slices)
+            if (slice.readKey !== entry.readKey) next.add(slice.readKey)
+        }
         next.delete(entry.readKey)
       }
     }
@@ -387,7 +390,6 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
     set({ events: new Set(get().events).add(event) })
 
   return {
-    navigatorLayout: "tabs",
     order: "files",
     diffStyle: "unified",
     railOpen: true,
@@ -438,12 +440,6 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
       !get().prListOpen &&
       (inline ? get().navigatorOpen : get().narrowNavigatorOpen),
     setPrListOpen: (prListOpen) => set({ prListOpen }),
-    toggleNavigatorLayout: () => {
-      const navigatorLayout =
-        get().navigatorLayout === "stacked" ? "tabs" : "stacked"
-      writePreference(NAVIGATOR_LAYOUT_KEY, navigatorLayout)
-      set({ navigatorLayout })
-    },
     openReview: (verdict = "COMMENT") =>
       set({ reviewOpen: true, reviewVerdict: verdict }),
     setReviewOpen: (reviewOpen) => set({ reviewOpen }),
@@ -600,10 +596,18 @@ export const useReviewPage = create<ReviewPageState & ReviewPageActions>()((
         .find((candidate) => !isRead(viewed, candidate))
       if (next) jumpTo({ kind: "entry", id: next.id })
     },
-    markStepRead: (index) => {
-      const { entryOrder, viewed } = get()
-      const entries = entryOrder.filter((entry) => entry.step?.index === index)
-      setRead(entries, !entries.every((entry) => isRead(viewed, entry)))
+    markStepRead: (index, guideEntries) => {
+      const { entryOrder, fileFilter, viewed } = get()
+      const step = (guideEntries ?? entryOrder).filter(
+        (entry) => entry.step?.index === index
+      )
+      const entries = filterEntries(step, fileFilter)
+      if (entries.length === 0) return
+      setRead(
+        entries,
+        !entries.every((entry) => isRead(viewed, entry)),
+        guideEntries
+      )
     },
     jumpToUnviewed: () => {
       const { entryOrder, activeEntry, viewed, jumpTo } = get()

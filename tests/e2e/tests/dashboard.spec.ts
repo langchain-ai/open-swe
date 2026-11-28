@@ -168,8 +168,13 @@ test.describe("Slack → web handoff (real dashboard UI)", () => {
     expect(scrollTop).toBeGreaterThan(0);
     await pullRequestLink.click();
     await expect(
-      page.getByRole("heading", { name: "Pull Requests" }),
+      page
+        .getByRole("region", { name: "Selected pull request" })
+        .getByRole("heading", { name: "Changes", exact: true }),
     ).toBeVisible();
+    await expect(page).toHaveURL(
+      (url) => url.searchParams.get("pr") === "fakeorg/demo#1",
+    );
     await page
       .getByRole("button", { name: "Back to thread", exact: true })
       .click();

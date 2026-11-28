@@ -2,12 +2,11 @@ import { Checkbox } from "@langchain/macaw-components/Checkbox"
 import { Button } from "@langchain/macaw-components/Button"
 import {
   CaretDownIcon,
+  CaretRightIcon,
   CheckIcon,
   MagnifyingGlassRegularIcon,
 } from "@langchain/macaw-components/icons"
-import { IconButton } from "@langchain/macaw-components/IconButton"
 import { Input } from "@langchain/macaw-components/Input"
-import { ProgressBar } from "@langchain/macaw-components/ProgressBar"
 import { Skeleton } from "@/components/Skeleton"
 import { useQuery } from "@tanstack/react-query"
 import {
@@ -21,7 +20,6 @@ import {
 } from "react"
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/ssr/ChatCircle"
 import { FolderSimpleIcon } from "@phosphor-icons/react/dist/ssr/FolderSimple"
-import { SquareSplitVerticalIcon } from "@phosphor-icons/react/dist/ssr/SquareSplitVertical"
 
 import type { ReviewDiffFile, ReviewWalkthrough } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -41,10 +39,10 @@ import {
   type FileMarkers,
   type PullRequestRef,
 } from "./queries"
-import { ReadingOrderTabs } from "./ReadingOrderTabs"
 import { activeStep, isPassed, isRead, useReviewPage } from "./store"
 import { StepBadge } from "./StepSection"
 import { plural, splitPath } from "./text"
+import { Icon } from "@langchain/macaw-components"
 
 interface FolderNode {
   kind: "folder"
@@ -112,75 +110,20 @@ function buildTree(files: ReadonlyArray<ReviewDiffFile>): Array<TreeNode> {
   return compacted.name ? [compacted] : compacted.children
 }
 
-/** The left rail: the walkthrough's steps and every file with what's been read and what needs attention, behind tabs or stacked. */
-export function Navigator({
-  pr,
-  orderTabs = true,
-}: {
-  pr: PullRequestRef
-  orderTabs?: boolean
-}) {
+/** The walkthrough and file tree, with reading progress and findings. */
+export function Navigator({ pr }: { pr: PullRequestRef }) {
   const files = useQuery(reviewQueries.diff(pr)).data?.files
   const walkthrough = useQuery(reviewQueries.detail(pr)).data?.walkthrough
-  const order = useReviewPage((state) => state.order)
-  const stacked = useReviewPage((state) => state.navigatorLayout === "stacked")
-  const toggleLayout = useReviewPage((state) => state.toggleNavigatorLayout)
-  const viewedCount = useReviewPage(
-    (state) => files?.filter((file) => state.viewed.has(file.path)).length ?? 0
-  )
   const markers = useFileMarkers(pr)
   const steps = walkthrough?.steps.length ?? 0
+  const [walkthroughOpen, setWalkthroughOpen] = useState(true)
+  const [filesOpen, setFilesOpen] = useState(true)
 
   return (
     <nav
       aria-label="Files & Walkthrough"
       className="flex h-full min-h-0 flex-col"
     >
-      <div className="flex flex-col gap-space-2 px-space-3 pt-space-3 pb-space-2">
-        {orderTabs && steps > 0 && (
-          <div className="flex items-center gap-space-2">
-            {stacked ? (
-              <span className="flex-1 text-xs text-secondary">
-                Walkthrough and files
-              </span>
-            ) : (
-              <ReadingOrderTabs
-                steps={steps}
-                files={files?.length}
-                className="flex-1 [&>*]:flex-1 [&>*]:whitespace-nowrap"
-              />
-            )}
-            <IconButton
-              icon={SquareSplitVerticalIcon}
-              label={
-                stacked
-                  ? "Show the walkthrough and files as tabs"
-                  : "Show the walkthrough and files together"
-              }
-              aria-pressed={stacked}
-              size="sm"
-              variant={stacked ? "outlined" : "plain"}
-              color={stacked ? "primary" : "secondary"}
-              onClick={toggleLayout}
-            />
-          </div>
-        )}
-        {files && (
-          <>
-            <div className="flex items-center gap-space-2 text-xxs text-secondary tabular-nums">
-              <ProgressBar
-                aria-label="Files viewed"
-                size="sm"
-                value={viewedCount}
-                max={Math.max(files.length, 1)}
-                className="flex-1"
-              />
-              {viewedCount}/{files.length} viewed
-            </div>
-            <FileFilter />
-          </>
-        )}
-      </div>
       {!files ? (
         <div className="flex flex-col gap-space-2 px-space-3">
           {Array.from({ length: 8 }, (_, i) => (
@@ -191,27 +134,32 @@ export function Navigator({
             />
           ))}
         </div>
-      ) : walkthrough && steps > 0 && stacked ? (
+      ) : (
         <>
-          <NavigatorSection
-            title="Walkthrough"
-            count={steps}
-            className="max-h-1/2"
-          >
-            <StepList files={files} walkthrough={walkthrough} />
-          </NavigatorSection>
+          {walkthrough && steps > 0 ? (
+            <NavigatorSection
+              title="Walkthrough"
+              count={steps}
+              open={walkthroughOpen}
+              onToggle={() => setWalkthroughOpen((open) => !open)}
+              className={filesOpen ? "max-h-1/2" : "flex-1"}
+            >
+              <StepList files={files} walkthrough={walkthrough} />
+            </NavigatorSection>
+          ) : null}
           <NavigatorSection
             title="Files changed"
             count={files.length}
+            open={filesOpen}
+            onToggle={() => setFilesOpen((open) => !open)}
             className="flex-1"
           >
+            <div className="px-space-3 pb-space-1">
+              <FileFilter />
+            </div>
             <FileTree files={files} markers={markers} />
           </NavigatorSection>
         </>
-      ) : order === "guide" && walkthrough && steps > 0 ? (
-        <StepList files={files} walkthrough={walkthrough} />
-      ) : (
-        <FileTree files={files} markers={markers} />
       )}
     </nav>
   )
@@ -220,24 +168,44 @@ export function Navigator({
 function NavigatorSection({
   title,
   count,
+  open,
+  onToggle,
   className,
   children,
 }: {
   title: string
   count: number
+  open: boolean
+  onToggle: () => void
   className: string
   children: ReactNode
 }) {
   return (
     <section
       aria-label={title}
-      className={cn("flex min-h-0 flex-col border-t border-default", className)}
+      className={cn(
+        "flex min-h-0 flex-col border-t border-secondary",
+        open ? className : "shrink-0"
+      )}
     >
-      <h3 className="flex items-center px-space-4 py-space-1 text-xxs font-medium text-tertiary uppercase">
-        {title}
-        <span className="ml-auto tabular-nums">{count}</span>
+      <h3 aria-label={title} className="shrink-0">
+        <Button
+          color="secondary"
+          variant="plain"
+          size="xs"
+          aria-label={`${title}, ${count}`}
+          aria-expanded={open}
+          onClick={onToggle}
+          className="h-auto min-h-10 w-full justify-between border-0 px-space-4 py-space-2 font-medium text-tertiary focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none focus-visible:ring-inset"
+        >
+          <span className="flex items-center gap-space-1">
+            {title}
+            <Icon icon={open ? CaretDownIcon : CaretRightIcon} aria-hidden />
+          </span>
+          <span className="tabular-nums">{count}</span>
+        </Button>
       </h3>
-      {children}
+      {open ? children : null}
     </section>
   )
 }
@@ -266,14 +234,12 @@ function StepList({
   const current = useReviewPage(activeStep)
   const viewed = useReviewPage((state) => state.viewed)
   const fileFilter = useReviewPage((state) => state.fileFilter)
-  // A filter keeps only the steps that touch a matching file, each with just those files.
-  const groups = useMemo(
-    () =>
-      groupSteps(
-        filterEntries(buildEntries(files, walkthrough, "guide"), fileFilter)
-      ),
-    [files, walkthrough, fileFilter]
+  const guideEntries = useMemo(
+    () => buildEntries(files, walkthrough, "guide"),
+    [files, walkthrough]
   )
+  // A filter keeps only the steps that touch a matching file, each with just those files.
+  const groups = groupSteps(filterEntries(guideEntries, fileFilter))
   const passed = useReviewPage((state) =>
     groups
       .filter((group) => isPassed(state, group.step))
@@ -287,7 +253,7 @@ function StepList({
       </p>
     )
   return (
-    <ol className="min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-4">
+    <ol className="scroll-mask-t scroll-mask-b min-h-0 flex-1 overflow-y-auto px-space-2 pb-space-3">
       {groups.map(({ step, entries }) => {
         const active = step.index === current
         const read = entries.every((entry) => isRead(viewed, entry))
@@ -305,9 +271,19 @@ function StepList({
         return (
           <li
             key={step.index}
+            onPointerLeave={(event) => {
+              if (event.pointerType !== "mouse") return
+              event.currentTarget
+                .querySelector<HTMLButtonElement>(
+                  "[data-step-read-toggle]:focus:not(:focus-visible)"
+                )
+                ?.blur()
+            }}
             className={cn(
-              "group/step flex items-start rounded-md hover:bg-surface-level-1-hover",
-              active && "bg-selected"
+              "group/step relative flex items-start rounded-md",
+              active
+                ? "bg-selected hover:bg-selected-hover"
+                : "hover:bg-surface-level-1-hover"
             )}
           >
             <Button
@@ -325,13 +301,17 @@ function StepList({
                     : { kind: "file", path: entries[0]!.file.path }
                 )
               }
-              className="h-auto min-w-0 flex-1 items-start justify-start gap-space-2 px-space-2 py-space-1 text-left leading-5 whitespace-normal focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+              className="h-auto min-w-0 flex-1 items-start justify-start gap-space-2 border-0 px-space-2 pt-space-2 pb-1.5 text-left leading-5 whitespace-normal hover:bg-transparent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-transparent"
             >
               <StepBadge
                 index={step.index}
                 read={read}
                 active={active}
-                className="mt-0.5 size-4"
+                className={cn(
+                  "size-4 group-hover/step:opacity-0 group-has-[[data-step-read-toggle]:is(:focus,:active)]/step:opacity-0 motion-safe:transition-opacity",
+                  read && "rounded-[3px]",
+                  offered && "opacity-0"
+                )}
               />
               <span
                 className={cn(
@@ -340,8 +320,8 @@ function StepList({
                   read && !active && "text-tertiary"
                 )}
               >
-                <InlineCode text={step.title} />
-                <span className="flex flex-wrap gap-x-space-2 text-xxs text-secondary tabular-nums">
+                <InlineCode text={step.title} className="leading-none" />
+                <span className="mt-space-1 flex flex-wrap items-baseline gap-x-space-2 text-xs text-quaternary tabular-nums">
                   {progress}
                   <span className="font-mono">
                     {additions > 0 && (
@@ -356,15 +336,17 @@ function StepList({
                 </span>
               </span>
             </Button>
-            <span className="relative mt-1.5 mr-space-2 flex shrink-0">
+            <div className="absolute top-2 left-2">
               <Checkbox
                 checked={read}
+                data-step-read-toggle
                 aria-label={`Mark step ${step.index} read`}
                 title={read ? "Mark step unread" : "Mark step read"}
-                onCheckedChange={() => markStepRead(step.index)}
+                onCheckedChange={() => markStepRead(step.index, guideEntries)}
                 size="sm"
+                containerClassName="peer/step-read"
                 className={cn(
-                  "peer transition-opacity focus-visible:opacity-100",
+                  "focus:opacity-100 active:opacity-100 motion-safe:transition-opacity",
                   offered
                     ? "border-brand opacity-70 hover:opacity-100"
                     : "opacity-0 group-hover/step:opacity-100"
@@ -375,10 +357,10 @@ function StepList({
                 <CheckIcon
                   aria-hidden="true"
                   weight="bold"
-                  className="pointer-events-none absolute inset-0 m-auto size-3 text-brand-primary opacity-70 peer-hover:opacity-100"
+                  className="pointer-events-none absolute inset-0 m-auto size-3 text-brand-primary opacity-70 peer-focus-within/step-read:opacity-100 peer-hover/step-read:opacity-100"
                 />
               )}
-            </span>
+            </div>
           </li>
         )
       })}

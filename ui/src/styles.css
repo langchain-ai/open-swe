@@ -52,11 +52,44 @@
 .scroll-mask-t { --scroll-mask-fade-from-t: calc(100% - 0.5rem); }
 .scroll-mask-b { --scroll-mask-fade-from-b: calc(100% - 0.5rem); }
 
+@keyframes review-sidebar-highlight {
+    from { background-color: var(--bg-selected); }
+    to { background-color: var(--review-sidebar-pill-background, transparent); }
+}
+
+@supports (timeline-scope: --review-sidebar-scroll) and (scroll-timeline: --review-sidebar-scroll inline) {
+    @media (prefers-reduced-motion: no-preference) {
+        .review-sidebar { timeline-scope: --review-sidebar-scroll; }
+        .review-sidebar-scroll { scroll-timeline: --review-sidebar-scroll inline; }
+
+        .review-sidebar-list-pill,
+        .review-sidebar-pr-pill {
+            animation: review-sidebar-highlight auto linear both;
+            animation-timeline: --review-sidebar-scroll;
+        }
+
+        .review-sidebar-pr-pill { animation-direction: reverse; }
+
+        .review-sidebar-list-pill:hover,
+        .review-sidebar-pr-pill:hover {
+            --review-sidebar-pill-background: var(--bg-surface-level-1-hover);
+        }
+    }
+}
+
 /* A passage being replied to keeps its selection look after focus moves to the
    reply field (SelectionReply). */
 ::highlight(selection-reply) {
     background-color: Highlight;
     color: HighlightText;
+}
+
+.no-scrollbar {
+    scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
 }
 
 /* A class, not `body:has(.version-mismatch-banner)`: Chrome restyles the whole
