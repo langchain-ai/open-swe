@@ -192,13 +192,13 @@ export function ReviewButton({
       {nextLabel &&
         onNext &&
         (approved || (isAuthor && !status.data?.draft)) && (
-          <Button size="sm" onClick={onNext}>
+          <Button size="xs" onClick={onNext}>
             {nextLabel}
           </Button>
         )}
       {isAuthor ? (
         status.data?.draft ? (
-          <ButtonGroup size="sm" color="primary" variant="normal">
+          <ButtonGroup size="xs" color="primary" variant="normal">
             <MarkReadyButton
               pr={status.data}
               onReady={() => refresh.status()}
@@ -215,9 +215,9 @@ export function ReviewButton({
         ) : (
           <PopoverTrigger asChild>
             <Button
-              size="sm"
+              size="xs"
               color="secondary"
-              variant="plain"
+              variant="outlined"
               tagText={pendingTag}
               aria-label={`Comment${pendingLabel}`}
             >
@@ -226,7 +226,7 @@ export function ReviewButton({
           </PopoverTrigger>
         )
       ) : (
-        <ButtonGroup size="sm" color="primary" variant="normal">
+        <ButtonGroup size="xs" color="primary" variant="normal">
           <Button
             leftDecorator={approved ? CheckIcon : undefined}
             tagText={approved ? undefined : pendingTag}
@@ -426,7 +426,7 @@ function MarkReadyButton({
   })
   return (
     <Button
-      size="sm"
+      size="xs"
       disabled={ready.isPending || ready.isSuccess}
       aria-live="polite"
       onClick={() => ready.mutate()}

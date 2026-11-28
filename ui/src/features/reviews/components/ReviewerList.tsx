@@ -74,7 +74,7 @@ export function ReviewerList({
       {rows.map((row) => {
         const state = STATES[row.state]
         return (
-          <li key={row.login} className="flex items-center gap-space-2">
+          <li key={row.login} className="flex min-h-7 items-center gap-space-2">
             <span
               title={state.label}
               className={cn("flex shrink-0", state.className)}

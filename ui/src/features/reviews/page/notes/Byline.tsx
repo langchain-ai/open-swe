@@ -29,7 +29,11 @@ export function ProfileLink({
       href={githubUrls.profile(author)}
       target="_blank"
       rel="noreferrer"
-      className={cn(INHERITED_LINK, "hover:underline", className)}
+      className={cn(
+        INHERITED_LINK,
+        "decoration-(--link-underline-color)",
+        className
+      )}
     >
       {displayName(author)}
     </MacawLink>

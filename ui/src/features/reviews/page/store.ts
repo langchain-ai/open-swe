@@ -111,7 +111,7 @@ interface VisitState {
   findQuery: string
   /** The hit the find bar is on, in reading order. */
   findIndex: number
-  /** Whether the status card is on screen; when it isn't, the header carries its sentence. */
+  /** Whether the standing row is on screen; when it isn't, the header carries its sentence. */
   standingInView: boolean
   /** The finding or thread n/p last landed on, so they move on from it even after the list changes. */
   lastStop: string | null

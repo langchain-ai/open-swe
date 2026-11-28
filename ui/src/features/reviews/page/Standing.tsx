@@ -1,5 +1,4 @@
 import { Link as MacawLink } from "@langchain/macaw-components/Link"
-import { IconButton } from "@langchain/macaw-components/IconButton"
 import {
   CaretRightIcon,
   CheckCircleFillIcon,
@@ -14,7 +13,6 @@ import type { ReactNode } from "react"
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/ssr/ArrowClockwise"
 import { ChatCircleTextIcon } from "@phosphor-icons/react/dist/ssr/ChatCircleText"
 import { CircleDashedIcon } from "@phosphor-icons/react/dist/ssr/CircleDashed"
-import { GitMergeIcon } from "@phosphor-icons/react/dist/ssr/GitMerge"
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/ssr/WarningCircle"
 import { XCircleIcon } from "@phosphor-icons/react/dist/ssr/XCircle"
 
@@ -31,6 +29,7 @@ import { cn, INHERITED_LINK } from "@/lib/utils"
 import { githubUrls } from "@/features/reviews/lib/githubUrls"
 import { subtleLink } from "@/features/reviews/lib/styles"
 import { Markdown } from "@/features/agents/components/chat/Markdown"
+import { ClosePullRequest } from "@/features/reviews/components/ClosePullRequest"
 import { MarkPullRequestReady } from "@/features/reviews/components/MarkPullRequestReady"
 import { MergePullRequest } from "@/features/reviews/components/MergePullRequest"
 import { PullRequestThreadAction } from "@/features/reviews/components/PullRequestThreadAction"
@@ -127,16 +126,16 @@ export function StandingDot({
   )
 }
 
-/** Where the PR stands, in one sentence, with the single next step beside it. */
+/** Where the PR stands and the actions available to the reviewer. */
 export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   const current = usePullRequestStanding(pr)
+  const refresh = useRefreshPullRequest(pr)
   const showFindings = useReviewPage((state) => state.showFindings)
   const showOpenConversations = useReviewPage(
     (state) => state.showOpenConversations
   )
   const setStandingInView = useReviewPage((state) => state.setStandingInView)
-  // Watching the card itself, so the header knows when to carry its sentence.
-  const ref = useRef<HTMLElement>(null)
+  const ref = useRef<HTMLDivElement>(null)
   const ready = current !== null
   useEffect(() => {
     const node = ref.current
@@ -153,22 +152,37 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
   if (!current) return null
   const { detail, status, login, standing } = current
   const open = isLive(detail)
+  const mergeAvailable = open && status != null && canAttemptMerge(status)
 
   return (
     <section
-      ref={ref}
       aria-label="Pull request status"
-      className="overflow-hidden rounded-xl border border-default bg-surface-level-1"
+      className="-mx-space-4 border-b border-secondary px-space-4 pb-space-2"
     >
-      <div className="flex flex-wrap items-center gap-x-space-4 gap-y-space-2 px-space-4 py-space-4">
-        <div className="flex min-w-0 flex-1 items-start gap-space-3">
-          <StandingDot tone={standing.tone} className="mt-[7px]" />
-          <div className="min-w-0">
-            <p className="text-lg leading-6 font-semibold tracking-[-0.015em] text-primary">
-              {standing.headline}
-            </p>
-            {standing.details.length > 0 && (
-              <p className="mt-0.5 flex flex-wrap gap-x-space-3 text-xxs leading-5">
+      <div
+        ref={ref}
+        className="flex flex-wrap items-center gap-x-space-4 gap-y-space-2"
+      >
+        <div className="flex min-w-0 flex-auto items-center gap-space-3 pb-space-2">
+          <div className="flex size-4 shrink-0 items-center justify-center">
+            <StandingDot tone={standing.tone} className="size-3.25" />
+          </div>
+          <p className="min-w-0 text-lg leading-6 font-semibold tracking-[-0.015em] text-primary">
+            {standing.headline}
+          </p>
+        </div>
+        {(standing.details.length > 0 || (open && status)) && (
+          <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-space-2">
+            {(standing.details.length > 0 || mergeAvailable) && (
+              <p className="flex min-w-0 flex-wrap items-center justify-end gap-x-space-3 text-right text-xxs leading-5">
+                {mergeAvailable && (
+                  <span className="text-secondary">
+                    Merge into{" "}
+                    <BranchLink pr={pr} branch={detail.pr.base_ref} />
+                    {status.mergeState === "unstable" &&
+                      ", though some checks aren't passing"}
+                  </span>
+                )}
                 {standing.details.map((fact) => (
                   <Button
                     color="secondary"
@@ -193,25 +207,30 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
                 ))}
               </p>
             )}
+            {open && status && (
+              <>
+                {needsFixUp(status) && (
+                  <PullRequestThreadAction pr={status} login={login} />
+                )}
+                {mergeAvailable && (
+                  <MergePullRequest pr={status} onMerged={refresh.merged} />
+                )}
+                <ClosePullRequest pr={status} onClosed={refresh.merged} />
+              </>
+            )}
           </div>
-        </div>
-        {open && status && needsFixUp(status) && (
-          <PullRequestThreadAction pr={status} login={login} />
         )}
       </div>
       {open && status && (
-        <div className="divide-y border-t border-default">
+        <>
           <ChecksRow pr={pr} status={status} />
           <ReviewsRow pr={pr} detail={detail} status={status} />
           <BranchRow pr={pr} detail={detail} status={status} />
           <OpenSweRow pr={pr} detail={detail} />
-          {canAttemptMerge(status) && (
-            <MergeRow pr={pr} status={status} baseRef={detail.pr.base_ref} />
-          )}
-        </div>
+        </>
       )}
       {(!open || !status) && (
-        <div className="divide-y border-t border-default">
+        <>
           {detail.pr.merged_at && <ApprovalsRow status={status} />}
           {open &&
             status === undefined &&
@@ -227,7 +246,7 @@ export function StandingPanel({ pr }: { pr: PullRequestRef }) {
               </Row>
             ))}
           <OpenSweRow pr={pr} detail={detail} />
-        </div>
+        </>
       )}
     </section>
   )
@@ -294,9 +313,18 @@ function Row({
       </span>
       <span
         id={labelId}
-        className="w-[5.5rem] shrink-0 text-xs font-medium text-primary"
+        className="flex w-22 shrink-0 items-center gap-space-1 text-xs font-medium text-primary"
       >
         {label}
+        {expandable && (
+          <CaretRightIcon
+            aria-hidden
+            className={cn(
+              "size-3 shrink-0 text-icon-secondary motion-safe:transition-transform",
+              expanded && "rotate-90"
+            )}
+          />
+        )}
       </span>
       <span
         id={summaryId}
@@ -316,7 +344,7 @@ function Row({
       aria-expanded={expanded}
       onClick={onToggle}
       className={cn(
-        "-my-space-1 h-auto min-w-0 justify-start gap-space-3 self-stretch px-0 py-space-1 text-left whitespace-normal hover:bg-transparent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-transparent",
+        "h-auto min-w-0 justify-start gap-space-3 self-stretch border-none px-0 py-space-1 text-left whitespace-normal hover:bg-transparent focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none dark:hover:bg-transparent",
         !summaryAction && "flex-1"
       )}
     >
@@ -333,7 +361,7 @@ function Row({
     </div>
   )
   return (
-    <div className="flex min-h-10 items-center gap-space-3 px-space-4 py-space-1">
+    <div className="flex min-h-10 items-center gap-space-3 py-space-1">
       {summaryAction ? (
         <div className="flex min-w-0 flex-1 items-center gap-space-1">
           {main}
@@ -346,23 +374,6 @@ function Row({
         <div className="flex shrink-0 items-center gap-space-2 empty:hidden">
           {action}
         </div>
-      )}
-      {expandable && (
-        <IconButton
-          color="secondary"
-          variant="plain"
-          size="xs"
-          icon={CaretRightIcon}
-          iconWeight="regular"
-          label="Toggle review status"
-          tooltipProps={{ disabled: true }}
-          className="-my-space-1 h-auto self-stretch py-space-1"
-          iconClassName={cn("transition-transform", expanded && "rotate-90")}
-          type="button"
-          tabIndex={-1}
-          aria-hidden
-          onClick={onToggle}
-        />
       )}
     </div>
   )
@@ -458,11 +469,11 @@ function ChecksRow({
         {loading ? <Skeleton className="h-3 w-40" /> : summary}
       </Row>
       {expanded && (
-        <ul className="max-h-64 overflow-y-auto pr-space-4 pb-space-2 pl-space-7">
+        <ul className="scroll-mask-t scroll-mask-b max-h-[calc(16rem-0.5lh)] overflow-y-auto pr-space-4 pb-space-2 pl-5">
           {sorted.map(({ check, state }) => (
             <li
               key={check.name}
-              className="group flex h-7 items-center gap-space-2 rounded-md text-xs focus-within:bg-surface-level-1-hover hover:bg-surface-level-1-hover"
+              className="group flex h-7 items-center gap-space-2 rounded-md px-space-2 text-xs focus-within:bg-surface-level-1-hover hover:bg-surface-level-1-hover"
             >
               {state === "fail" ? (
                 <XCircleIcon
@@ -494,7 +505,7 @@ function ChecksRow({
                   rel="noreferrer"
                   className={cn(
                     INHERITED_LINK,
-                    "min-w-0 truncate text-primary hover:underline [&>span]:truncate"
+                    "min-w-0 truncate text-primary [&>span]:truncate"
                   )}
                 >
                   {check.name}
@@ -597,10 +608,7 @@ function ReviewsRow({
         {decision}
       </Row>
       {expanded && (
-        <ReviewerList
-          rows={reviewers}
-          className="pr-space-4 pb-space-3 pl-space-7"
-        />
+        <ReviewerList rows={reviewers} className="pr-space-4 pb-space-2 pl-7" />
       )}
     </div>
   )
@@ -686,47 +694,6 @@ function BranchRow({
         </Row>
       )}
     </>
-  )
-}
-
-function MergeRow({
-  pr,
-  status,
-  baseRef,
-}: {
-  pr: PullRequestRef
-  status: OpenPullRequest
-  baseRef: string
-}) {
-  const refresh = useRefreshPullRequest(pr)
-  const [merged, setMerged] = useState(false)
-  return (
-    <Row
-      icon={
-        <GitMergeIcon size={16} weight="bold" className="text-icon-success" />
-      }
-      label="Merge"
-      action={
-        <MergePullRequest
-          pr={status}
-          apply={() => {
-            setMerged(true)
-            return () => setMerged(false)
-          }}
-          onMerged={refresh.merged}
-        />
-      }
-    >
-      {merged ? (
-        "Merging…"
-      ) : (
-        <>
-          Into <BranchLink pr={pr} branch={baseRef} />
-          {status.mergeState === "unstable" &&
-            ", though some checks aren't passing"}
-        </>
-      )}
-    </Row>
   )
 }
 
@@ -845,6 +812,7 @@ function OpenSweRow({
                 color="secondary"
                 variant="plain"
                 leftDecorator={ArrowClockwiseIcon}
+                className="border-0 bg-transparent px-0 hover:bg-transparent enabled:hover:text-primary dark:bg-transparent dark:hover:bg-transparent"
                 disabled={running}
                 onClick={() => reReview.mutate()}
               >
@@ -861,7 +829,7 @@ function OpenSweRow({
           // Remounting replays the flash each time something asks for the findings.
           key={flashes}
           className={cn(
-            "pr-space-4 pb-space-3 pl-space-7",
+            "pb-space-2 pl-7",
             flashes > 0 && "motion-safe:animate-attention-flash"
           )}
         >
@@ -914,12 +882,12 @@ function FindingQueue({ findings }: { findings: Array<ReviewFinding> }) {
                 type="button"
                 aria-expanded={open}
                 onClick={() => setOpenId(open ? null : finding.id)}
-                className="h-auto min-w-[16ch] flex-1 items-start justify-start gap-space-1 text-left leading-5 whitespace-normal text-primary hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                className="h-auto min-w-[16ch] flex-1 translate-y-[1.5px] items-start justify-start gap-space-1 border-none text-left leading-5 whitespace-normal text-primary decoration-(--link-underline-color) hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
               >
                 <CaretRightIcon
                   aria-hidden
                   className={cn(
-                    "mt-space-1 size-3 shrink-0 text-icon-secondary motion-safe:transition-transform",
+                    "mt-[1.5px] size-3 shrink-0 text-icon-secondary motion-safe:transition-transform",
                     open && "rotate-90"
                   )}
                 />

@@ -66,7 +66,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
     return (
       <div
         aria-hidden
-        className="flex w-full flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6"
+        className="flex w-full flex-col gap-space-4 px-space-4 pt-space-4 pb-space-3"
       >
         <Skeleton className="h-[236px] rounded-xl" />
         <Skeleton className="h-4 w-48" />
@@ -82,7 +82,7 @@ export function Overview({ pr }: { pr: PullRequestRef }) {
       </div>
     )
   return (
-    <div className="flex w-full flex-col gap-space-4 px-space-4 pt-space-4 pb-space-6">
+    <div className="flex w-full flex-col gap-space-4 px-space-4 pt-space-4 pb-space-3">
       <StandingPanel pr={pr} />
       <CommentFacts pr={pr} />
       {detail.walkthrough?.human_input && (
@@ -312,7 +312,7 @@ function Description({
           <p className="text-secondary italic">No description.</p>
         )}
         {clamped && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-background to-transparent" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-linear-to-t from-surface-level-1 to-transparent" />
         )}
       </div>
       {overflows && draft === null && (

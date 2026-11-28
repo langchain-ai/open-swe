@@ -1,4 +1,5 @@
 import { Button } from "@langchain/macaw-components/Button"
+import { useIsMutating } from "@tanstack/react-query"
 import type { OpenPullRequest } from "@/lib/api"
 import { actionLabel, githubActions } from "../lib/githubActions"
 import { pullRequestKey } from "../lib/status"
@@ -14,9 +15,12 @@ export function ClosePullRequest({
   apply?: () => () => void
   onClosed?: () => void
 }) {
+  const mutationKey = ["pull-request-close", pr.repo.toLowerCase(), pr.number]
+  const isPending = useIsMutating({ mutationKey }) > 0
   const close = usePullRequestAction({
     pr,
     action: "close",
+    mutationKey,
     apply,
     onDone: onClosed,
   })
@@ -28,10 +32,10 @@ export function ClosePullRequest({
             size="xs"
             color="secondary"
             variant="outlined"
-            disabled={close.isPending || close.isSuccess}
+            disabled={isPending || close.isSuccess}
             aria-live="polite"
           >
-            {actionLabel(githubActions.close.labels, close)}
+            {actionLabel(githubActions.close.labels, { ...close, isPending })}
           </Button>
         }
         title={`Close ${pullRequestKey(pr)}?`}

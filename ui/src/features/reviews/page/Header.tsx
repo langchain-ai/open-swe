@@ -329,16 +329,6 @@ export function Header({
           !titleBar && "max-sm:ml-auto max-sm:max-w-full max-sm:flex-wrap"
         )}
       >
-        {carrying && current?.status && (
-          <div className="max-lg:hidden">
-            <NextStepAction
-              pr={pr}
-              standing={current.standing}
-              status={current.status}
-              login={current.login}
-            />
-          </div>
-        )}
         {files.length > 0 && (
           <Button
             color="secondary"
@@ -362,6 +352,19 @@ export function Header({
             />
             {viewedCount}/{files.length} viewed
           </Button>
+        )}
+        {carrying && live && current?.status && (
+          <div className="flex items-center gap-space-2">
+            <div className="hidden lg:contents">
+              <NextStepAction
+                pr={pr}
+                standing={current.standing}
+                status={current.status}
+                login={current.login}
+              />
+            </div>
+            <ClosePullRequest pr={current.status} onClosed={refresh.merged} />
+          </div>
         )}
         {queue && <ReviewQueueControls queue={queue} />}
         <Button
@@ -402,9 +405,6 @@ export function Header({
             nextLabel={queue ? (queue.next ? "Next" : "Finish") : undefined}
             onNext={queue?.advance}
           />
-        )}
-        {live && status && (
-          <ClosePullRequest pr={status} onClosed={refresh.merged} />
         )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
